@@ -1,11 +1,13 @@
 ---
 title: A forged xref offset lets the PDF parser recurse through bytes the nesting preflight never scanned
-status: open
+status: done
 type: bug
 priority: 2
 labels: [security]
 plan: 2026-11-11 - 00 - pdf-parser-fork-and-defects-plan
 created: 2026-11-11T05:56:07Z
+closed: 2026-11-11T10:11:34Z
+reason: "Resolved by item 2: pdfparse refuses recursion past MaxDepth, so a forged xref offset into a nested-[ stream body is refused as pdfNestingCause; ExtractPDF doc reworded (plan '2026-11-11 - 00 - pdf-parser-fork-and-defects-plan', archived at 87846d40)"
 ---
 
 The nesting guard added for pdf-parser-unbounded-nesting holds only for the preflight lexer's tokenisation from the start of each span it scans (`refuseDeepNesting`, `internal/doctext/pdf.go`; the limit is stated in ExtractPDF's doc, `pdf.go:194-197`). A forged xref or startxref offset sends the parser's `resolve` → `readObject` into bytes the preflight read differently or not at all:

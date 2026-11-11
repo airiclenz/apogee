@@ -1,11 +1,13 @@
 ---
 title: A preregistered MCP client secret goes to whatever authorization server the MCP server names
-status: open
+status: done
 type: bug
 priority: 3
 labels: [security]
 plan: 2026-11-11 - 00 - pdf-parser-fork-and-defects-plan
 created: 2026-11-10T19:34:27Z
+closed: 2026-11-11T10:11:35Z
+reason: "Resolved by items 10-13: issuer: key pins the authorization server, secret refused without it, docs and ADR 0095/0104 amended (plan '2026-11-11 - 00 - pdf-parser-fork-and-defects-plan', archived at 87846d40)"
 ---
 
 Source: docs/reviews/code-audit-2026-11-10.md (Medium, "A hostile MCP server can receive the preregistered client secret"). Verified PARTLY 2026-11-10 at a5c4f2db: mechanism confirmed, severity lowered to Low-Medium by the trust model.

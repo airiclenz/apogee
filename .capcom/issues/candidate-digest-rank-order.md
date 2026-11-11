@@ -1,10 +1,12 @@
 ---
 title: The probe's candidate-token digest hashes rank order although it is documented as a set
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-11-11 - 00 - pdf-parser-fork-and-defects-plan
 created: 2026-11-10T19:36:31Z
+closed: 2026-11-11T10:11:35Z
+reason: "Resolved by item 6: candidate digest hashes a sorted copy, BatteryVersion bumped so old records are stale, not changed (plan '2026-11-11 - 00 - pdf-parser-fork-and-defects-plan', archived at 87846d40)"
 ---
 
 Source: docs/reviews/code-audit-2026-11-10.md ("The model fingerprint digest changes when near-tied tokens swap rank"). Verified VALID 2026-11-10 at a5c4f2db.

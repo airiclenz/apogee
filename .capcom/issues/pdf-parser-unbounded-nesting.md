@@ -1,11 +1,13 @@
 ---
 title: A deeply nested PDF overflows the goroutine stack and kills the process
-status: open
+status: done
 type: bug
 priority: 1
 labels: [security]
 plan: 2026-11-11 - 00 - pdf-parser-fork-and-defects-plan
 created: 2026-11-10T19:37:31Z
+closed: 2026-11-11T10:11:34Z
+reason: "Resolved: in-tree pdfparse bounds recursion at MaxDepth (item 2) and ends every read loop at end of input (item 3), completing the depth refusal landed earlier (plan '2026-11-11 - 00 - pdf-parser-fork-and-defects-plan', archived at 87846d40)"
 ---
 
 Source: docs/reviews/code-audit-2026-11-10.md (High, "A hostile PDF can crash the whole process with a stack overflow"). Verified VALID 2026-11-10 at a5c4f2db.

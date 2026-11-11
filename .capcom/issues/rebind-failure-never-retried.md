@@ -1,11 +1,13 @@
 ---
 title: A failed heartbeat rebind is never retried until the upstream changes again
-status: open
+status: done
 type: bug
 priority: 3
 labels: [tui]
 plan: 2026-11-11 - 00 - pdf-parser-fork-and-defects-plan
 created: 2026-11-10T19:36:31Z
+closed: 2026-11-11T10:11:35Z
+reason: "Resolved by item 8: a failed rebind is retried on a later beat, refusal note still once per target (plan '2026-11-11 - 00 - pdf-parser-fork-and-defects-plan', archived at 87846d40)"
 ---
 
 Source: docs/reviews/code-audit-2026-11-10.md ("A failed rebind is never retried, leaving the session on a stale model"). Verified PARTLY 2026-11-10 at a5c4f2db.

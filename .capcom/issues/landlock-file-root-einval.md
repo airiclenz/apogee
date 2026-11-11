@@ -1,10 +1,12 @@
 ---
 title: A non-directory writable root makes landlock_add_rule fail and takes down every confined call
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-11-11 - 00 - pdf-parser-fork-and-defects-plan
 created: 2026-11-10T19:37:31Z
+closed: 2026-11-11T10:11:35Z
+reason: "Resolved by item 7: landlock grants a non-directory writable root file-applicable rights only, pinned by TestLandlockFileRootIsWritableInPlace (plan '2026-11-11 - 00 - pdf-parser-fork-and-defects-plan', archived at 87846d40)"
 ---
 
 Source: docs/reviews/code-audit-2026-11-10.md (Medium, "A file in `confine-writable-paths` breaks every confined call on the landlock backend"). Verified PARTLY (real but latent) 2026-11-10 at a5c4f2db.

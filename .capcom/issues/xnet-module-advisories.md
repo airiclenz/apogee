@@ -1,11 +1,13 @@
 ---
 title: govulncheck lists x/net advisories GO-2026-6866 and GO-2026-6860 against the pinned golang.org/x/net v0.60.0
-status: open
+status: done
 type: task
 priority: 3
 labels: [security]
 plan: 2026-11-11 - 00 - pdf-parser-fork-and-defects-plan
 created: 2026-11-11T06:13:59Z
+closed: 2026-11-11T10:11:35Z
+reason: "Resolved by item 14: go.mod requires golang.org/x/net v0.62.0, clearing GO-2026-6866 and GO-2026-6860 (plan '2026-11-11 - 00 - pdf-parser-fork-and-defects-plan', archived at 87846d40)"
 ---
 
 `govulncheck` (the `make check` step, Makefile:307) reports golang.org/x/net advisories GO-2026-6866 and GO-2026-6860 as module-level findings that apogee's code does not call, against `golang.org/x/net v0.60.0` (go.mod:33). Both are fixed in golang.org/x/net v0.62.0. Because no call path reaches them the gate passes, but the dependency still ships a vulnerable version. Observed during the audit-defects run's closeout (docs/plans/archived/2026-11-10 - 02 - audit-defects-plan.md); pre-existing, not introduced by it.

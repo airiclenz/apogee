@@ -1,10 +1,12 @@
 ---
 title: Nothing ties the loading notice's "10m" to the provider's loadingBackstop
-status: open
+status: done
 type: task
 priority: 3
 plan: 2026-11-11 - 00 - pdf-parser-fork-and-defects-plan
 created: 2026-11-11T05:56:07Z
+closed: 2026-11-11T10:11:35Z
+reason: "Resolved by item 5: exported provider.LoadingBackstop and domain.UpstreamLoadingBound, tied by a test in internal/agent (plan '2026-11-11 - 00 - pdf-parser-fork-and-defects-plan', archived at 87846d40)"
 ---
 
 `domain.UpstreamLoadingEvent.Notice()` says `waiting up to 10m` from the string constant `upstreamLoadingBound` (`internal/domain/events.go:905-907`), which restates the provider's unexported `loadingBackstop = 10 * time.Minute` (`internal/provider/client.go:85`). No test ties the two, so a change to the backstop leaves every Driver's notice naming the wrong wait, silently. Found by the audit-defects run, item 8 (docs/plans/archived/2026-11-10 - 02 - audit-defects-plan.md).
