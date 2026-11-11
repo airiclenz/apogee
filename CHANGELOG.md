@@ -11,6 +11,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.35.0] — 2026-11-11
+
 - **A settings save no longer fails under a Windows junction.** When the config home is reached through an NTFS junction, a save failed with `resolve config` although the file existed; a config that exists but that Go's link resolver cannot resolve is now written through, following only the file's own links by hand, so the save lands on the junction's target and the junction stays a junction.
 - **Side panel:** a file the agent deletes with `delete_file` drops out of the changed-files list at every scope; writing it again lists it afresh, counting only the new writes.
 - A resumed session's side panel no longer lists a file the session deleted with `delete_file`: the stored card is replayed as a removal of the file's changed-file row, so the resumed panel matches the live one.
