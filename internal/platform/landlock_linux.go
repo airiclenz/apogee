@@ -361,9 +361,9 @@ func applyLandlock(box domain.ConfinementBox) error {
 	// kernel (Ubuntu 22.04, Debian 12, RHEL 9) that Capabilities still advertises as FSWrite.
 	access := accessMaskForABI(abi)
 
-	attr := unix.LandlockRulesetAttr{Access_fs: access}
+	attr := unix.LandlockRulesetAttr{Handled_access_fs: access}
 	if handleNet {
-		attr.Access_net = unix.LANDLOCK_ACCESS_NET_CONNECT_TCP
+		attr.Handled_access_net = unix.LANDLOCK_ACCESS_NET_CONNECT_TCP
 	}
 
 	rulesetFD, _, errno := unix.Syscall(

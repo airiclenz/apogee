@@ -316,7 +316,9 @@ Depends on item 12.
 **Closes:** oauth-secret-unpinned-issuer
 **Commit:** `docs(mcp): document issuer: and amend ADR 0095 and ADR 0104`
 
-## 14. Require an x/net release that clears GO-2026-6866 and GO-2026-6860
+## 14. Require an x/net release that clears GO-2026-6866 and GO-2026-6860 — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): re-derived from the assumption that the x/* bump touches only go.mod and go.sum — golang.org/x/net v0.62.0 requires golang.org/x/sys v0.49.0, which renames `unix.LandlockRulesetAttr`'s `Access_fs`/`Access_net` to `Handled_access_fs`/`Handled_access_net` and appends `Quiet_access_fs`, `Quiet_access_net` and `Quiet_scoped`; `applyLandlock` in internal/platform/landlock_linux.go now sets the renamed fields. The struct it hands `landlock_create_ruleset` grows from 24 to 48 bytes with a zero tail, which the kernel's `copy_struct_from_user` accepts on every Landlock ABI; the Landlock tests in internal/platform pass on this 6.18 kernel.
 
 Depends on item 1 (both edit `go.mod`).
 
