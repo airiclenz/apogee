@@ -157,6 +157,11 @@ func TestCapabilityLine(t *testing.T) {
 		{"the UDP and AF_UNIX residuals", "landlock", domain.ConfinementCaps{FSWrite: true, NetworkEgress: true,
 			Residuals: []string{domain.ResidualUDPEgress, domain.ResidualUnixEgress}},
 			"landlock (fs-write: available · network: available · unfenced: connect(2) UDP, connect(2) AF_UNIX)"},
+		// landlock ABI 10 and above: a deny box handles UDP, so the backend drops the UDP token and
+		// the line names the write-class AF_UNIX connect alone.
+		{"the AF_UNIX residual without UDP", "landlock", domain.ConfinementCaps{FSWrite: true, NetworkEgress: true,
+			Residuals: []string{domain.ResidualUnixEgress}},
+			"landlock (fs-write: available · network: available · unfenced: connect(2) AF_UNIX)"},
 		// Both disclosures at once: the residual is named first, the reason last.
 		{"residual and a reason", "landlock", domain.ConfinementCaps{Residuals: []string{"truncate(2)"}, Unavailable: "ENOSYS"},
 			"landlock (fs-write: unavailable · network: unavailable · unfenced: truncate(2) · why: ENOSYS)"},
@@ -273,7 +278,7 @@ func holdsWriteClassToken(residuals []string) bool {
 }
 
 // The network-egress residual is disclosure for the capability line, never a startup banner: a
-// landlock host at ABI 4+ discloses the UDP egress its deny box cannot fence, and that host must
+// landlock host at ABI 4–9 discloses the UDP egress its deny box cannot fence, and that host must
 // enter auto exactly as quietly as it did before it started saying so. connect(2) AF_UNIX is NOT
 // network-class (ADR 0112): a same-user service that spawns is a write outside the box, so it
 // speaks — alone, beside UDP, and beside truncate(2) — and UDP is never in the sentence. Asserted

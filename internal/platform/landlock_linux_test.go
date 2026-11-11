@@ -92,8 +92,8 @@ func TestLandlockProbeNetwork(t *testing.T) {
 // tests actually run on: below ABI 3 landlock has no LANDLOCK_ACCESS_FS_TRUNCATE bit and must say
 // so; at ABI 3 and above truncate is fenced and must not be named (C-06, live-reproduced
 // 2026-08-25). Together the two make the truncate residual un-fakeable in either direction, the
-// network half is pinned the same way from ABI 4 up, and the write-class AF_UNIX connect is
-// pinned at every ABI that fences at all (ADR 0112).
+// network half is pinned the same way from ABI 4 up — UDP disclosed below ABI 10 and closed from
+// it — and the write-class AF_UNIX connect is pinned at every ABI that fences at all (ADR 0112).
 func TestLandlockResidualsMatchHostABI(t *testing.T) {
 	t.Parallel()
 	c := NewLandlockConfiner()
@@ -105,10 +105,11 @@ func TestLandlockResidualsMatchHostABI(t *testing.T) {
 	if c.abi < landlockABITruncate {
 		wantResiduals = append(wantResiduals, "truncate(2)")
 	}
-	// The same un-fakeability, applied to the network half: a kernel that can deny TCP at all
-	// must say that the deny box still passes UDP, and one that cannot deny the network must
-	// not claim a gap in a fence it never offers.
-	if c.abi >= landlockABINetwork {
+	// The same un-fakeability, applied to the network half: a kernel that can deny TCP but has
+	// no UDP rights (ABI 4–9) must say that the deny box still passes UDP; one at ABI 10 or
+	// above handles UDP in a deny box and must not claim the gap; and one that cannot deny the
+	// network must not claim a gap in a fence it never offers.
+	if c.abi >= landlockABINetwork && c.abi < landlockABIUDP {
 		wantResiduals = append(wantResiduals, domain.ResidualUDPEgress)
 	}
 	// AF_UNIX connect is write-class and open at every ABI that fences at all (ADR 0112): a
@@ -124,9 +125,10 @@ func TestLandlockResidualsMatchHostABI(t *testing.T) {
 func TestLandlockCapabilitiesHonest(t *testing.T) {
 	t.Parallel()
 
-	// The standing gap in landlock's network fence: the ABI has TCP bind and connect rights and
-	// nothing more, so every kernel that can deny the network at all leaves UDP out — and the
-	// write-class AF_UNIX connect, open at every ABI (ADR 0112), follows it.
+	// The gap in landlock's network fence below ABI 10: ABI 4–9 has TCP bind and connect rights
+	// and nothing more, so a kernel there that can deny the network leaves UDP out — and the
+	// write-class AF_UNIX connect, open at every ABI (ADR 0112), follows it. From ABI 10 the
+	// UDP rights exist and a deny box handles them, so only the AF_UNIX token remains.
 	networkResiduals := []string{domain.ResidualUDPEgress, domain.ResidualUnixEgress}
 
 	tests := []struct {
@@ -136,7 +138,7 @@ func TestLandlockCapabilitiesHonest(t *testing.T) {
 		wantNetwork      bool
 		wantAutoEligible bool
 		wantAccess       uint64   // mask applyLandlock would request; asserted only when wantFSWrite
-		wantResiduals    []string // accesses this ABI leaves unfenced: write-class while FSWrite is true, UDP egress while NetworkEgress is
+		wantResiduals    []string // accesses this ABI leaves unfenced: write-class while FSWrite is true, UDP egress while NetworkEgress is and the ABI is below 10
 		probeErrno       syscall.Errno
 		wantUnavailable  string // the WHY behind FSWrite=false; "" on every fenceable row
 	}{
@@ -155,7 +157,7 @@ func TestLandlockCapabilitiesHonest(t *testing.T) {
 		// still fs-only, still Auto-eligible; TRUNCATE is finally requestable, so truncate(2)
 		// leaves the list — and AF_UNIX connect, which no write right fences, stays on it.
 		{"abi3_kernel_6_2", 3, true, false, true, fullFSWriteAccess, []string{domain.ResidualUnixEgress}, 0, ""},
-		// Network egress is now enforceable — and the enforcement is TCP-only, so the same
+		// Network egress is now enforceable — and below ABI 10 the enforcement is TCP-only, so the same
 		// honesty that discloses truncate(2) below ABI 3 discloses the UDP a deny box still
 		// passes, ahead of the AF_UNIX token every fencing ABI carries. UDP is disjoint from
 		// truncate(2) by construction: truncate(2) stops at ABI 2 and the network rights start
@@ -166,6 +168,10 @@ func TestLandlockCapabilitiesHonest(t *testing.T) {
 		// sockets (ADR 0112) — but only those, so AF_UNIX connect stays disclosed. No abstract
 		// scoping either: there is no ABI-6 scope row because the backend never scopes.
 		{"abi9_resolve_unix", 9, true, true, true, fullFSWriteAccess | unix.LANDLOCK_ACCESS_FS_RESOLVE_UNIX, networkResiduals, 0, ""},
+		// The UDP bind and connect/send rights exist from here and a deny box handles both, so
+		// the datagram egress is closed and connect(2) UDP leaves the list; the fs mask is
+		// ABI 9's (no new fs right), and AF_UNIX connect stays disclosed.
+		{"abi10_udp", 10, true, true, true, fullFSWriteAccess | unix.LANDLOCK_ACCESS_FS_RESOLVE_UNIX, []string{domain.ResidualUnixEgress}, 0, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -193,7 +199,7 @@ func TestLandlockCapabilitiesHonest(t *testing.T) {
 			}
 			// Capability honesty's second half (contract §5): a fence that leaves an access open
 			// must SAY which one. Disclosing it is what keeps FSWrite=true honest at ABI 1–2 and
-			// NetworkEgress=true honest from ABI 4 — and a backend that grows a residual without
+			// NetworkEgress=true honest from ABI 4 to 9 — and a backend that grows a residual without
 			// disclosing it, or keeps disclosing one it has since closed, fails here.
 			if !slices.Equal(caps.Residuals, tt.wantResiduals) {
 				t.Errorf("abi %d: Residuals = %v, want %v (an unfenced access must be disclosed)",
@@ -668,9 +674,12 @@ func TestNetworkDenyDecision(t *testing.T) {
 		// Network open (empty NetworkAllow): never restricts, never fails, any ABI.
 		{"open_abi1", openBox, 1, false, false},
 		{"open_abi4", openBox, 4, false, false},
-		// Network deny + enforceable (ABI >= 4): restrict TCP connect.
+		// Network deny + enforceable (ABI >= 4): restrict the network (TCP connect; from ABI 10
+		// UDP too — netAccessMaskForABI pins the rights).
 		{"deny_abi4", denyBox, 4, true, false},
 		{"deny_abi6", denyBox, 6, true, false},
+		{"deny_abi9", denyBox, 9, true, false},
+		{"deny_abi10", denyBox, 10, true, false},
 		// Network deny but NOT enforceable (ABI < 4): FAIL CLOSED rather than running open.
 		{"deny_abi1_failclosed", denyBox, 1, false, true},
 		{"deny_abi3_failclosed", denyBox, 3, false, true},
@@ -694,6 +703,57 @@ func TestNetworkDenyDecision(t *testing.T) {
 			}
 			if handleNet != tt.wantHandleNet {
 				t.Errorf("abi %d: handleNet = %v, want %v", tt.abi, handleNet, tt.wantHandleNet)
+			}
+		})
+	}
+}
+
+// TestNetAccessMaskForABI pins the network rights applyLandlock hands the ruleset on both sides
+// of ABI 10: a deny box handles TCP connect alone below it and adds the UDP bind and
+// connect/send rights from it, an open box handles nothing at either, and a deny box below
+// ABI 4 fails closed. A handled network right with no rule is refused outright, so the ABI-10
+// mask is what closes a deny box's datagram egress — and what makes Capabilities stop
+// disclosing connect(2) UDP there. TCP bind is never handled.
+func TestNetAccessMaskForABI(t *testing.T) {
+	t.Parallel()
+
+	denyBox := domain.ConfinementBox{WorkspaceRoot: "/ws", NetworkAllow: []string{"example.com:443"}}
+	openBox := domain.ConfinementBox{WorkspaceRoot: "/ws"}
+	const tcpOnly = uint64(unix.LANDLOCK_ACCESS_NET_CONNECT_TCP)
+	const tcpAndUDP = tcpOnly | unix.LANDLOCK_ACCESS_NET_BIND_UDP | unix.LANDLOCK_ACCESS_NET_CONNECT_SEND_UDP
+
+	tests := []struct {
+		name     string
+		box      domain.ConfinementBox
+		abi      int
+		wantMask uint64
+		wantErr  bool // expect ErrConfinementUnavailable (fail-closed)
+	}{
+		{"open_abi9", openBox, 9, 0, false},
+		{"open_abi10", openBox, 10, 0, false},
+		{"deny_abi9_tcp_only", denyBox, 9, tcpOnly, false},
+		{"deny_abi10_tcp_and_udp", denyBox, 10, tcpAndUDP, false},
+		{"deny_abi3_failclosed", denyBox, 3, 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			mask, err := netAccessMaskForABI(tt.box, tt.abi)
+			if tt.wantErr {
+				if !errors.Is(err, domain.ErrConfinementUnavailable) {
+					t.Fatalf("abi %d, deny box: err = %v, want ErrConfinementUnavailable (network-deny unenforceable must not run open)", tt.abi, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("abi %d: unexpected err: %v", tt.abi, err)
+			}
+			if mask != tt.wantMask {
+				t.Errorf("abi %d: netAccessMaskForABI = %#x, want %#x", tt.abi, mask, tt.wantMask)
+			}
+			if mask&unix.LANDLOCK_ACCESS_NET_BIND_TCP != 0 {
+				t.Errorf("abi %d: mask %#x handles TCP bind, which the ruleset leaves unhandled", tt.abi, mask)
 			}
 		})
 	}

@@ -42,8 +42,8 @@ func TestSelectLinuxConfiner(t *testing.T) {
 			newNS:       fenceableNamespace,
 			wantBackend: "landlock",
 			wantNSCalls: 0,
-			// ABI 4 can deny TCP, and TCP is all landlock's network rights cover, so the
-			// selected backend's caps carry the UDP a deny box still passes, then the
+			// ABI 4 can deny TCP, and below ABI 10 TCP is all landlock's network rights cover,
+			// so the selected backend's caps carry the UDP a deny box still passes, then the
 			// write-class AF_UNIX connect every landlock ABI leaves open (ADR 0112) — and the
 			// line the user reads names both.
 			wantCaps: domain.ConfinementCaps{
@@ -52,6 +52,21 @@ func TestSelectLinuxConfiner(t *testing.T) {
 				Residuals:     []string{domain.ResidualUDPEgress, domain.ResidualUnixEgress},
 			},
 			wantLine: "landlock (fs-write: available · network: available · unfenced: connect(2) UDP, connect(2) AF_UNIX)",
+		},
+		// The other side of ABI 10: a deny box handles UDP bind and connect/send too, so the
+		// selected backend no longer discloses connect(2) UDP and the line names AF_UNIX alone.
+		{
+			name:        "landlock_abi10_closes_udp",
+			landlock:    &landlockConfiner{abi: 10},
+			newNS:       fenceableNamespace,
+			wantBackend: "landlock",
+			wantNSCalls: 0,
+			wantCaps: domain.ConfinementCaps{
+				FSWrite:       true,
+				NetworkEgress: true,
+				Residuals:     []string{domain.ResidualUnixEgress},
+			},
+			wantLine: "landlock (fs-write: available · network: available · unfenced: connect(2) AF_UNIX)",
 		},
 		// No landlock, bwrap works: the second rung is the backend, its caps untouched — and
 		// those caps carry the one access `--unshare-net` cannot cut, a connect to a pathname

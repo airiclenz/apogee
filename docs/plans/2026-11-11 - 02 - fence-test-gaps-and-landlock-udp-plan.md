@@ -82,7 +82,10 @@ No production logic changes.
 - `go test -count=1 -run '^$' -bench 'BenchmarkPlanResolveUnixRules' -benchtime 3x ./internal/platform/` reports a result
 **Commit:** `test(platform): pin the RESOLVE_UNIX rule count on a busy /tmp`
 
-## 4. landlock ABI ≥ 10 closes UDP egress in a network-deny box
+## 4. landlock ABI ≥ 10 closes UDP egress in a network-deny box — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): beyond the plan's named tests, TestNetworkDenyDecision gained deny_abi9/deny_abi10 rows, TestSelectLinuxConfiner a landlock_abi10_closes_udp row, and TestCapabilityLine an AF_UNIX-without-UDP case, so every test pinning the UDP token or the capability line covers both sides of ABI 10.
+NOTES (2026-11-11): internal/domain/confinement.go's ResidualUDPEgress comment ("no UDP right exists in the ABI") and the public docs are now stale; they belong to item 5 (not yet done) and were left for it.
 
 **What:**
 **Goal:** At landlock ABI ≥ 10, a box whose network is denied handles `LANDLOCK_ACCESS_NET_BIND_UDP` and `LANDLOCK_ACCESS_NET_CONNECT_SEND_UDP`, and `Capabilities` no longer lists `domain.ResidualUDPEgress`. Below ABI 10 both behave exactly as before. Every test that pins the residual tokens or the capability line covers both sides of ABI 10.

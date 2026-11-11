@@ -80,12 +80,15 @@ type landlockConfiner struct {
 //   - ABI >= 3 (kernel >= 6.2)  => LANDLOCK_ACCESS_FS_TRUNCATE exists.
 //   - ABI >= 4 (kernel >= 6.7)  => TCP-connect (network-egress) restriction is enforceable.
 //   - ABI >= 9                  => LANDLOCK_ACCESS_FS_RESOLVE_UNIX exists (pathname AF_UNIX connect).
+//   - ABI >= 10                 => LANDLOCK_ACCESS_NET_BIND_UDP and LANDLOCK_ACCESS_NET_CONNECT_SEND_UDP
+//     exist (UDP bind and connect/send).
 const (
 	landlockABIFSWrite     = 1
 	landlockABIRefer       = 2
 	landlockABITruncate    = 3
 	landlockABINetwork     = 4
 	landlockABIResolveUnix = 9
+	landlockABIUDP         = 10
 )
 
 // landlockFSWriteAccessABI1 is the ABI-1 baseline of filesystem accesses the ruleset HANDLES
@@ -268,14 +271,17 @@ func (c *landlockConfiner) unavailableCause() domain.ConfinementCause {
 // asks, so the access is write-class (ADR 0112): it rides in Residuals wherever landlock fences
 // writes, beside truncate(2), and probe.ResidualNotice words it at Auto start.
 //
-// NetworkEgress is disclosed the same way, and for a gap that no kernel closes: landlock's
-// network rights are LANDLOCK_ACCESS_NET_BIND_TCP and LANDLOCK_ACCESS_NET_CONNECT_TCP and
-// nothing else, so a box that opts into network-deny still lets UDP datagrams out. That is a
-// standing fact about the backend, not a per-box answer, so the token is disclosed wherever
-// NetworkEgress is true — a deny box is what makes it matter, and the caps are read before
-// any box exists. Only probe.CapabilityLine words it: it is network-egress-class, not
-// write-class, so probe.ResidualNotice filters it out and no host gains a startup banner for
-// it.
+// NetworkEgress is disclosed the same way below ABI 10: from ABI 4 to ABI 9 landlock's network
+// rights are LANDLOCK_ACCESS_NET_BIND_TCP and LANDLOCK_ACCESS_NET_CONNECT_TCP and nothing else,
+// so a box that opts into network-deny still lets UDP datagrams out. That is a fact about the
+// kernel, not a per-box answer, so the token is disclosed wherever NetworkEgress is true below
+// ABI 10 — a deny box is what makes it matter, and the caps are read before any box exists.
+// From ABI 10 a deny box also handles LANDLOCK_ACCESS_NET_BIND_UDP and
+// LANDLOCK_ACCESS_NET_CONNECT_SEND_UDP with no rule granting either (netAccessMaskForABI), so a
+// confined datagram can neither be sent nor bound — a UDP bind, explicit or the autobind a
+// connect makes, is refused too — and the token is no longer disclosed. Only
+// probe.CapabilityLine words it: it is network-egress-class, not write-class, so
+// probe.ResidualNotice filters it out and no host gains a startup banner for it.
 func (c *landlockConfiner) Capabilities() domain.ConfinementCaps {
 	caps := domain.ConfinementCaps{
 		FSWrite:       c.abi >= landlockABIFSWrite,
@@ -286,7 +292,7 @@ func (c *landlockConfiner) Capabilities() domain.ConfinementCaps {
 	if c.abi >= landlockABIFSWrite && c.abi < landlockABITruncate {
 		caps.Residuals = append(caps.Residuals, "truncate(2)")
 	}
-	if caps.NetworkEgress {
+	if caps.NetworkEgress && c.abi < landlockABIUDP {
 		caps.Residuals = append(caps.Residuals, domain.ResidualUDPEgress)
 	}
 	if c.abi >= landlockABIFSWrite {
@@ -377,7 +383,8 @@ func ApplyLandlockAndExec(box domain.ConfinementBox, argv []string) error {
 }
 
 // applyLandlock creates the ruleset for box, adds the path-beneath allow rules for each
-// writable root (and a TCP-connect handler when the box opts into network-deny; from ABI 9 the
+// writable root (and, when the box opts into network-deny, a TCP-connect handler — from ABI 10 a
+// UDP bind and connect/send handler too, so a deny box also refuses a UDP bind; from ABI 9 the
 // socket rules planResolveUnixRules derives from box.UnixSockets), then
 // calls landlock_restrict_self with NO_NEW_PRIVS set. Both bind to the calling OS thread only:
 // after it returns nil that thread is confined for the remainder of its life and across an
@@ -389,7 +396,7 @@ func applyLandlock(box domain.ConfinementBox) error {
 			domain.ErrConfinementUnavailable, abi, errno)
 	}
 
-	handleNet, err := networkDenyDecision(box, abi)
+	netAccess, err := netAccessMaskForABI(box, abi)
 	if err != nil {
 		return err
 	}
@@ -399,10 +406,7 @@ func applyLandlock(box domain.ConfinementBox) error {
 	// kernel (Ubuntu 22.04, Debian 12, RHEL 9) that Capabilities still advertises as FSWrite.
 	access := accessMaskForABI(abi)
 
-	attr := unix.LandlockRulesetAttr{Handled_access_fs: access}
-	if handleNet {
-		attr.Handled_access_net = unix.LANDLOCK_ACCESS_NET_CONNECT_TCP
-	}
+	attr := unix.LandlockRulesetAttr{Handled_access_fs: access, Handled_access_net: netAccess}
 
 	rulesetFD, _, errno := unix.Syscall(
 		unix.SYS_LANDLOCK_CREATE_RULESET,
@@ -478,6 +482,24 @@ func networkDenyDecision(box domain.ConfinementBox, abi int) (handleNet bool, er
 			domain.ErrConfinementUnavailable, landlockABINetwork, abi)
 	}
 	return true, nil
+}
+
+// netAccessMaskForABI is the network mask applyLandlock hands the ruleset for box at the given
+// landlock ABI, as a pure function over networkDenyDecision so the handled rights are testable
+// without a kernel. A network-open box handles nothing (0). A deny box handles TCP connect, and
+// from ABI 10 the UDP bind and connect/send rights as well; no rule ever grants a handled network
+// right, so each is refused outright. TCP bind stays unhandled. Below ABI 4 a deny box fails
+// closed with networkDenyDecision's error.
+func netAccessMaskForABI(box domain.ConfinementBox, abi int) (uint64, error) {
+	handleNet, err := networkDenyDecision(box, abi)
+	if err != nil || !handleNet {
+		return 0, err
+	}
+	mask := uint64(unix.LANDLOCK_ACCESS_NET_CONNECT_TCP)
+	if abi >= landlockABIUDP {
+		mask |= unix.LANDLOCK_ACCESS_NET_BIND_UDP | unix.LANDLOCK_ACCESS_NET_CONNECT_SEND_UDP
+	}
+	return mask, nil
 }
 
 // allowWriteBeneath adds a path-beneath rule granting writes under root, on a kernel reporting
