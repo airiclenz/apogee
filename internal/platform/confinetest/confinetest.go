@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // Shell is the platform shell surface the battery drives its probes through:
@@ -349,8 +350,8 @@ func mergedClobberLine(sh Shell, outside string) (string, bool) {
 // unixProbeWait bounds row #15's accept. The helper's connect has completed (or been refused)
 // by the time the confined run returns, so a connect that got through is already queued on the
 // listener and the wait only covers kernel scheduling — and it is the exact cost of the negative
-// case, where it always expires in full.
-const unixProbeWait = 2 * time.Second
+// case, where it always expires in full, so it is a fixed window, never scaled.
+var unixProbeWait = testtime.Fixed(2 * time.Second)
 
 // HelperTestName is the test every binary that calls Probe must define, with one call to
 // RunHelper as its body: row #15 re-runs the binary inside the box, selecting this test alone.
@@ -416,8 +417,8 @@ func runUnixConnectHelper(t *testing.T, c domain.Confiner, box domain.Confinemen
 // udpProbeWait bounds row #13's listener read. A datagram that escapes at all is already on
 // the loopback by the time the confined child has returned, so the wait only has to cover
 // kernel scheduling — and it is also the exact cost of the negative case, where it always
-// expires in full.
-const udpProbeWait = 2 * time.Second
+// expires in full, so it is a fixed window, never scaled.
+var udpProbeWait = testtime.Fixed(2 * time.Second)
 
 // ProbeNetwork runs the network arm (confinement-execution-contract §6.2 rows #7–#8 and #13). It
 // is split from Probe so the fs battery runs on every fs-capable host while the net arm
@@ -646,7 +647,7 @@ func runChainedClobber(
 	killer := newKiller(&output, cancel)
 	cmd.Stdout = &stdout
 	cmd.Stderr = killer
-	cmd.WaitDelay = time.Second
+	cmd.WaitDelay = testtime.Budget(time.Second)
 	setRawCommandLine(cmd, sh.CommandLine(line))
 	if err := c.Confine(ctx, box, cmd); err != nil {
 		t.Fatalf("Confine(%v): %v", argv, err)
@@ -682,7 +683,7 @@ func runMergedClobber(
 	stdoutKiller := newMergedKiller(&output, cancel)
 	cmd.Stdout = stdoutKiller
 	cmd.Stderr = newKiller(&output, cancel)
-	cmd.WaitDelay = time.Second
+	cmd.WaitDelay = testtime.Budget(time.Second)
 	setRawCommandLine(cmd, sh.CommandLine(line))
 	if err := c.Confine(ctx, box, cmd); err != nil {
 		t.Fatalf("Confine(%v): %v", argv, err)

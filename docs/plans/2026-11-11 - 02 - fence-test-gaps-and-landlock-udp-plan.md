@@ -21,7 +21,7 @@
   - 5: guard folded (decision: `-run` pattern; TCP-only sites, `namespace_linux.go` and an ADR 0081 amendment added)
 - **Out of scope:** extending `TestNoFixedTimingInTests` to kit files or to `SetDeadline` calls; landlock `NET_BIND_TCP` handling (the `Capabilities` comment names it, but the ruleset handles only `CONNECT_TCP`); a rule-count cap; the other ready issues (`served-pdf-csp-sandbox`, `windows-token-spawner-posture`, `context-fill-bench-arm`, `lsp-symbol-navigation`, `serve-http-driver`, `user-view-reaction-cell`).
 
-## 1. confinetest probe windows go through testtime
+## 1. confinetest probe windows go through testtime — ✅ DONE (2026-11-11)
 
 **What:**
 **Goal:** Every probe window in `internal/platform/confinetest/confinetest.go` is a `testtime` duration. The UDP and unix "nothing arrives within" windows use `testtime.Fixed`, and no raw `time.Duration` literal bounds a deadline in that file.
