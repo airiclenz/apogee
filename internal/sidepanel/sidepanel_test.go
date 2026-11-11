@@ -496,6 +496,98 @@ func TestChangedFiles(t *testing.T) {
 			}
 		})
 	}
+
+	// remove is a delete_file result for path; every fixture names the tool explicitly, since the
+	// tool name is what tells a removal from a write.
+	remove := func(base domain.EventBase, path string, isError bool) domain.ToolResultEvent {
+		return domain.ToolResultEvent{
+			EventBase:   base,
+			Tool:        "delete_file",
+			WriteTarget: path,
+			Result:      domain.ToolResult{IsError: isError},
+		}
+	}
+	write := func(base domain.EventBase, path string) domain.ToolResultEvent {
+		return domain.ToolResultEvent{EventBase: base, Tool: "write_file", WriteTarget: path}
+	}
+	inRun := sidepanel.RunOf(child("r.1"))
+	removals := []struct {
+		name   string
+		events []domain.Event
+		scope  sidepanel.RunKey
+		want   []sidepanel.FileRow
+	}{
+		{
+			name: "delete removes the row at the top level",
+			events: []domain.Event{
+				write(domain.EventBase{}, "/w/a.go"),
+				write(domain.EventBase{}, "/w/b.go"),
+				remove(domain.EventBase{}, "/w/a.go", false),
+			},
+			want: []sidepanel.FileRow{{Path: "/w/b.go"}},
+		},
+		{
+			name: "delete removes the row inside its run",
+			events: []domain.Event{
+				write(child("r.1"), "/w/a.go"),
+				write(child("r.1"), "/w/c.go"),
+				remove(child("r.1"), "/w/a.go", false),
+			},
+			scope: inRun,
+			want:  []sidepanel.FileRow{{Path: "/w/c.go", IsDelegated: true, Run: inRun}},
+		},
+		{
+			name: "a sub-agent delete removes a top-level write",
+			events: []domain.Event{
+				write(domain.EventBase{}, "/w/a.go"),
+				remove(child("r.1"), "/w/a.go", false),
+			},
+		},
+		{
+			name: "a write after the delete re-lists the path with its new stat",
+			events: []domain.Event{
+				edit(domain.EventBase{}, "/w/a.go", false, regions),
+				write(domain.EventBase{}, "/w/b.go"),
+				remove(domain.EventBase{}, "/w/a.go", false),
+				edit(domain.EventBase{}, "/w/a.go", false, regions),
+			},
+			want: []sidepanel.FileRow{
+				{Path: "/w/b.go"},
+				{Path: "/w/a.go", Stat: domain.DiffStat{Added: 2, Removed: 1}, HasStat: true},
+			},
+		},
+		{
+			name: "a failed delete leaves the row",
+			events: []domain.Event{
+				write(domain.EventBase{}, "/w/a.go"),
+				remove(domain.EventBase{}, "/w/a.go", true),
+			},
+			want: []sidepanel.FileRow{{Path: "/w/a.go"}},
+		},
+		{
+			name:   "a delete-only path lists no row",
+			events: []domain.Event{remove(domain.EventBase{}, "/w/a.go", false)},
+		},
+	}
+	for _, tc := range removals {
+		t.Run(tc.name, func(t *testing.T) {
+			state, _ := newState(t)
+			for _, event := range tc.events {
+				state.Fold(event)
+			}
+
+			view := state.ChangedFiles(tc.scope)
+
+			if view.IsLive != (len(tc.want) > 0) || len(view.Rows) != len(tc.want) {
+				t.Fatalf("view = %+v, want %d rows, live only with a row", view, len(tc.want))
+			}
+			for i, row := range view.Rows {
+				if row != tc.want[i] {
+					t.Errorf("row %d = %+v, want %+v", i, row, tc.want[i])
+				}
+			}
+		})
+	}
 }
 
 func TestChangedFiles_NotLiveWithoutAWrite(t *testing.T) {
@@ -716,6 +808,21 @@ func TestClone_WritesToTheCloneLeaveTheOriginal(t *testing.T) {
 	}
 	if got := len(clone.SubAgents().Rows); got != 2 {
 		t.Errorf("clone lists %d sub-agents, want 2", got)
+	}
+}
+
+func TestClone_RemovalOnTheCloneLeavesTheOriginal(t *testing.T) {
+	original, _ := newState(t)
+	original.Fold(domain.ToolResultEvent{Tool: "write_file", WriteTarget: "/w/a.go"})
+
+	clone := original.Clone()
+	clone.Fold(domain.ToolResultEvent{Tool: "delete_file", WriteTarget: "/w/a.go"})
+
+	if got := len(original.ChangedFiles(sidepanel.RunKey{}).Rows); got != 1 {
+		t.Errorf("original lists %d changed files after the clone's removal, want 1", got)
+	}
+	if got := len(clone.ChangedFiles(sidepanel.RunKey{}).Rows); got != 0 {
+		t.Errorf("clone lists %d changed files after its removal, want 0", got)
 	}
 }
 

@@ -25,6 +25,9 @@ const (
 	// profile folds into the system channel); every other row is standing system content.
 	toolMenuRow         = "tool menu"
 	toolInstructionsRow = "tool instructions"
+	// deleteFileTool is the registered name of the tool whose landed result removes its target
+	// (internal/tools/delete_file.go): its WriteTarget is a file that is gone, not one more write.
+	deleteFileTool = "delete_file"
 )
 
 // RunKey names the run an Event came from, by the same identity the TUI's runRef uses: the
@@ -162,7 +165,7 @@ type State struct {
 	fallbackWindow int
 	runs           map[RunKey]*runState
 	delegations    []RunKey // delegated runs in the order they first appeared
-	writes         []write  // landed writes in arrival order, every depth
+	writes         []write  // landed writes and removals in arrival order, every depth
 }
 
 // runState is everything folded for one run.
@@ -186,13 +189,15 @@ type runState struct {
 	usageLatest     domain.Usage // the latest live Cumulative reading
 }
 
-// write is one landed file write.
+// write is one landed file write, or — isRemoval — the marker that path was deleted: every write
+// to path before the marker stops counting, at every scope.
 type write struct {
-	run    RunKey
-	depth  int
-	callID string
-	path   string
-	stat   *domain.DiffStat
+	run       RunKey
+	depth     int
+	callID    string
+	path      string
+	stat      *domain.DiffStat
+	isRemoval bool
 }
 
 // New returns an empty State reading the time from now — injected so elapsed time and the
@@ -294,6 +299,13 @@ func (s *State) AddWrite(run RunKey, depth int, callID, path string, stat *domai
 	s.writes = append(s.writes, write{run: run, depth: depth, callID: callID, path: path, stat: stat})
 }
 
+// RemoveWrite records that path was deleted: the changed-files section drops its row at every
+// scope, whoever wrote it, and a later AddWrite lists it again counting only the writes after
+// this removal.
+func (s *State) RemoveWrite(path string) {
+	s.writes = append(s.writes, write{path: path, isRemoval: true})
+}
+
 // SetUsage seeds run's accounting from a stored record: totals is what the record had spent, kept
 // under every later live reading (the engine restarts its count at zero on resume), and used is
 // the context fill it last observed.
@@ -335,8 +347,9 @@ func (s *State) foldPhase(e domain.SubAgentPhaseEvent) {
 	}
 }
 
-// foldToolResult closes a delegation no phase ever reached and records a landed write. A refused
-// or failed write still names its target (domain.ToolResultEvent), so only !IsError counts.
+// foldToolResult closes a delegation no phase ever reached and records a landed write — or, for a
+// landed delete_file, the removal of its target. A refused or failed write still names its target
+// (domain.ToolResultEvent), so only !IsError counts.
 func (s *State) foldToolResult(e domain.ToolResultEvent) {
 	if e.SpawnRunID != "" {
 		child := domain.EventBase{Depth: e.Depth + 1, CallID: e.Result.CallID, RunID: e.SpawnRunID}
@@ -346,6 +359,10 @@ func (s *State) foldToolResult(e domain.ToolResultEvent) {
 		}
 	}
 	if e.WriteTarget == "" || e.Result.IsError {
+		return
+	}
+	if e.Tool == deleteFileTool {
+		s.RemoveWrite(e.WriteTarget)
 		return
 	}
 	var stat *domain.DiffStat
@@ -579,14 +596,25 @@ func (s *State) Tasks(scope RunKey) View[TaskRow] {
 
 // ChangedFiles answers the changed-files section: at the top level every write the session
 // landed at any depth, inside a run that run's own writes — one row per path in first-write
-// order. It is live once a write landed.
+// order. A removal (RemoveWrite) drops its path at every scope: only the writes after a path's
+// last removal count, so a path written again lists in the order of that next write. It is live
+// while at least one row remains.
 func (s *State) ChangedFiles(scope RunKey) View[FileRow] {
 	if s == nil {
 		return View[FileRow]{}
 	}
+	lastRemoval := map[string]int{}
+	for at, w := range s.writes {
+		if w.isRemoval {
+			lastRemoval[w.path] = at
+		}
+	}
 	view := View[FileRow]{}
 	index := map[string]int{}
-	for _, w := range s.writes {
+	for at, w := range s.writes {
+		if removedAt, ok := lastRemoval[w.path]; ok && at <= removedAt {
+			continue
+		}
 		if scope != (RunKey{}) && w.run != scope {
 			continue
 		}

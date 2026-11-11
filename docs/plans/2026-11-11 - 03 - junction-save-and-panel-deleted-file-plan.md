@@ -67,7 +67,7 @@ internal/config/configedit_test.go — onlyFileIn; internal/config/configwrite_s
 - `go test -count=1 -run 'TestWriteConfigAtomically|TestSaveSidePanel' ./internal/config/`
 **Commit:** `fix(config): write a config through a Windows junction when EvalSymlinks fails`
 
-## 2. Fold a delete_file result as a row removal
+## 2. Fold a delete_file result as a row removal — ✅ DONE (2026-11-11)
 
 **What:** Part of `panel-deleted-file-entry`: today a successful `delete_file` is folded as one more write.
 **Regression guard.** test fixtures for the delete_file removal set ToolResultEvent.Tool explicitly (no existing TUI/sidepanel fixture sets it), and item 3's resume test does the same for its live half
