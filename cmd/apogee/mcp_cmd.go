@@ -103,6 +103,7 @@ func loginMCPServer(ctx context.Context, deps mcpLoginDeps, target mcpLoginTarge
 		AuthClient:     deps.newAuthClient(target.guard, host.Proxy),
 		ClientID:       server.ClientID,
 		ClientSecret:   secret,
+		Issuer:         server.Issuer,
 		RedirectURL:    redirectURL,
 		FetchCode:      fetch,
 	})

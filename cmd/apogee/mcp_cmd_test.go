@@ -257,7 +257,8 @@ func (w *syncWriter) Write(p []byte) (int, error) {
 }
 
 // writeMCPConfig writes a config.yaml under home whose `mcp-servers:` block is servers, beside the
-// one LLM server entry every config needs.
+// one LLM server entry every config needs. Each OAuth key — `auth:`, `client-id:`,
+// `client-secret-env:` and `issuer:` — is written only when the server sets it.
 func writeMCPConfig(t *testing.T, home string, servers ...mcp.ServerConfig) {
 	t.Helper()
 	var body strings.Builder
@@ -265,8 +266,15 @@ func writeMCPConfig(t *testing.T, home string, servers ...mcp.ServerConfig) {
 	body.WriteString("mcp-servers:\n")
 	for _, server := range servers {
 		fmt.Fprintf(&body, "  - name: %s\n    transport: %s\n    endpoint: %s\n", server.Name, server.Transport, server.Endpoint)
-		if server.Auth != "" {
-			fmt.Fprintf(&body, "    auth: %s\n", server.Auth)
+		for _, key := range []struct{ name, value string }{
+			{"auth", server.Auth},
+			{"client-id", server.ClientID},
+			{"client-secret-env", server.ClientSecretEnv},
+			{"issuer", server.Issuer},
+		} {
+			if key.value != "" {
+				fmt.Fprintf(&body, "    %s: %s\n", key.name, key.value)
+			}
 		}
 	}
 	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(body.String()), 0o600); err != nil {
@@ -392,6 +400,52 @@ func TestMCPCmdLoginHonoursTheAPOGEE_CONFIGHome(t *testing.T) {
 		t.Fatalf("mcp login: %v", err)
 	}
 	requireStored(t, home, "remote", fake.endpoint(), true)
+}
+
+// A login whose `issuer:` is the authorization server the endpoint names logs in as before: the
+// pin admits the issuer it names.
+func TestMCPCmdLoginWithTheEndpointsIssuerSavesTheRecord(t *testing.T) {
+	t.Parallel()
+	fake := newFakeOAuthMCP(t, &atomic.Int64{})
+	home := t.TempDir()
+	server := fake.serverConfig("remote")
+	server.Issuer = fake.authSrv.URL
+	writeMCPConfig(t, home, server)
+	input := &scriptedInput{scripts: [][]string{{""}}}
+
+	_, err := runMCPCommand(t, testMCPLoginDeps(t, input, &bytes.Buffer{}, true), "login", "remote", "--config", home)
+
+	if err != nil {
+		t.Fatalf("mcp login: %v", err)
+	}
+	requireStored(t, home, "remote", fake.endpoint(), true)
+}
+
+// A login whose `issuer:` is not the authorization server the endpoint names fails as an issuer
+// mismatch before any token request, so the preregistered client's secret never leaves — which
+// proves `issuer:` reaches the login: unpinned, the same login exchanges the code. Not parallel:
+// it sets the secret's environment variable.
+func TestMCPCmdLoginRefusesAnotherIssuer(t *testing.T) {
+	const secretEnv = "APOGEE_TEST_MCP_CLIENT_SECRET"
+	fake := newFakeOAuthMCP(t, &atomic.Int64{})
+	home := t.TempDir()
+	server := fake.serverConfig("remote")
+	server.ClientID = "apogee-client"
+	server.ClientSecretEnv = secretEnv
+	server.Issuer = "https://issuer.example.com"
+	writeMCPConfig(t, home, server)
+	t.Setenv(secretEnv, "client-secret")
+	input := &scriptedInput{scripts: [][]string{{""}}}
+
+	_, err := runMCPCommand(t, testMCPLoginDeps(t, input, &bytes.Buffer{}, true), "login", "remote", "--config", home)
+
+	if _, isMismatch := errors.AsType[*mcpauth.IssuerMismatchError](err); !isMismatch {
+		t.Fatalf("mcp login error = %v; want an issuer mismatch", err)
+	}
+	if n := fake.exchanges.Load(); n != 0 {
+		t.Errorf("the token endpoint exchanged %d code(s); want none", n)
+	}
+	requireStored(t, home, "remote", fake.endpoint(), false)
 }
 
 // The registration seam carries `mcp` with both verbs.

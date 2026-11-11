@@ -33,7 +33,7 @@ const pinFilesKey = "files"
 // reaction's after, since the two sets never meet in one text. A field outside it follows, sorted.
 var pinFieldOrder = []string{
 	"name", "transport", "command", "args", "endpoint", "env", "env-allowlist", "headers",
-	"headers-env", "auth", "client-id", "client-secret-env",
+	"headers-env", "auth", "client-id", "client-secret-env", "issuer",
 	"id", "run", "advise", "gate",
 }
 
@@ -86,6 +86,7 @@ func (m mcpServerConfig) execPin(projectRoot string) (adoption.Entry, error) {
 	putText(fields, "auth", m.Auth)
 	putText(fields, "client-id", m.ClientID)
 	putText(fields, "client-secret-env", m.ClientSecretEnv)
+	putText(fields, "issuer", m.Issuer)
 	return pinEntry(MCPServerAdoptionKind, m.Name, projectRoot, fields)
 }
 

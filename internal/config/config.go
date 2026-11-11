@@ -530,8 +530,8 @@ func fileUnconfinedHosts(o *Options, fc fileConfig) error {
 // an entry whose `headers:` / `headers-env:` could not be sent as written is a startup
 // refusal (mcp.ServerConfig.ValidateHeaders owns the rule), so a reserved or malformed header is
 // never a request that fails later, per connect, with nothing in the config pointing at it. So is
-// an `auth:` / `client-id:` / `client-secret-env:` combination that could not do what it says
-// (mcp.ServerConfig.ValidateAuth) — including `auth: oauth` on a stdio or sse server, which is
+// an `auth:` / `client-id:` / `client-secret-env:` / `issuer:` combination that could not do what
+// it says (mcp.ServerConfig.ValidateAuth) — including `auth: oauth` on a stdio or sse server, which is
 // refused rather than noticed like the other transport-mismatched keys below: ignored, it would
 // leave the server connecting unauthenticated while the user believes it authorised.
 func fileMCPServers(o *Options, fc fileConfig) error {
@@ -3360,10 +3360,12 @@ type mcpServerConfig struct {
 	HeadersEnv map[string]string `yaml:"headers-env"`
 	// Auth, ClientID and ClientSecretEnv are a streamable-http server's OAuth opt-in (`auth:
 	// oauth`) and its optional preregistered client — the client id, and the NAME of the
-	// environment variable holding its secret. mcp.ServerConfig.ValidateAuth owns their rules.
+	// environment variable holding its secret. Issuer optionally pins the authorization server
+	// the login and every refresh may use. mcp.ServerConfig.ValidateAuth owns their rules.
 	Auth            string `yaml:"auth"`
 	ClientID        string `yaml:"client-id"`
 	ClientSecretEnv string `yaml:"client-secret-env"`
+	Issuer          string `yaml:"issuer"`
 }
 
 // toServerConfig maps the on-disk MCP server schema onto the mcp.ServerConfig value the client
@@ -3382,6 +3384,7 @@ func (m mcpServerConfig) toServerConfig() mcp.ServerConfig {
 		Auth:            m.Auth,
 		ClientID:        m.ClientID,
 		ClientSecretEnv: m.ClientSecretEnv,
+		Issuer:          m.Issuer,
 	}
 }
 

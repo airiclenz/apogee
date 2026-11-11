@@ -242,7 +242,11 @@ NOTES (2026-11-11): beyond the plan's test list, added a row where the issuer pi
 **Acceptance:** `go test -race -count=1 ./internal/mcpauth/`
 **Commit:** `fix(mcpauth): send a client secret only to the configured issuer`
 
-## 11. `issuer:` is a server config key that pins the authorization server
+## 11. `issuer:` is a server config key that pins the authorization server — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): the issuer value is validated after trimming surrounding space (as mcpauth compares it), so an `issuer:` of space alone is refused as not a URL rather than read as no pin; the stored value is never normalised.
+NOTES (2026-11-11): `internal/config/execpin_test.go` needed no edit: `TestServerExecPinCoversEveryField` reflects over the schema and turns green once `issuer` is in `execPin` and `pinFieldOrder`; the parsed-key test is a new subtest of `TestApplyConfigMCPServerAuth` (the existing accepted-shape fixture is unchanged), plus two refusal rows (issuer without auth; issuer with user info, never echoed).
+NOTES (2026-11-11): beyond the plan's test list, `TestMCPCmdLoginWithTheEndpointsIssuerSavesTheRecord` shows a matching `issuer:` still logs in; both wiring tests (`TestMCPCmdLoginRefusesAnotherIssuer`, the `TestConnect_OAuthServerRefusals` other-issuer row) were checked red with the wiring line removed.
 
 Depends on item 10.
 

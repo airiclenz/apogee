@@ -1176,6 +1176,17 @@ func TestServerConfigValidateAuth(t *testing.T) {
 				Headers: map[string]string{"X-Tenant": "acme"}},
 		},
 		{
+			name: "oauth pinned to an issuer",
+			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
+				Auth: AuthOAuth, ClientID: "apogee-client", ClientSecretEnv: "DOCS_CLIENT_SECRET",
+				Issuer: "https://auth.example.com/realms/a"},
+		},
+		{
+			name: "oauth pinned to an http issuer",
+			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
+				Auth: AuthOAuth, Issuer: "http://127.0.0.1:8080"},
+		},
+		{
 			name: "an auth value other than oauth",
 			cfg:  ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint, Auth: "basic"},
 			want: `auth: "basic" is not a recognised value — the only one is oauth`,
@@ -1214,6 +1225,54 @@ func TestServerConfigValidateAuth(t *testing.T) {
 				"ahead of time, and client-id: names that client",
 		},
 		{
+			name: "issuer without auth",
+			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
+				Issuer: "https://auth.example.com/realms/a"},
+			want: "issuer: is read only with auth: oauth — set auth: oauth or drop the key",
+		},
+		{
+			name: "an issuer that is no URL",
+			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
+				Auth: AuthOAuth, Issuer: "auth.example.com/realms/a"},
+			want: issuerNotAURL,
+		},
+		{
+			name: "an issuer of another scheme",
+			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
+				Auth: AuthOAuth, Issuer: "ftp://auth.example.com/realms/a"},
+			want: issuerNotAURL,
+		},
+		{
+			name: "an issuer without a host",
+			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
+				Auth: AuthOAuth, Issuer: "https:///realms/a"},
+			want: issuerNotAURL,
+		},
+		{
+			name: "an issuer of space alone",
+			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
+				Auth: AuthOAuth, Issuer: "   "},
+			want: issuerNotAURL,
+		},
+		{
+			name: "an issuer with a query",
+			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
+				Auth: AuthOAuth, Issuer: "https://auth.example.com/realms/a?tenant=acme"},
+			want: "issuer: carries a query or fragment — an issuer URL has neither",
+		},
+		{
+			name: "an issuer with a fragment",
+			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
+				Auth: AuthOAuth, Issuer: "https://auth.example.com/realms/a#acme"},
+			want: "issuer: carries a query or fragment — an issuer URL has neither",
+		},
+		{
+			name: "an issuer with user info",
+			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
+				Auth: AuthOAuth, Issuer: "https://user:secret-value@auth.example.com/realms/a"},
+			want: "issuer: carries user info — an issuer URL names no user or password",
+		},
+		{
 			name: "an Authorization header beside oauth",
 			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
 				Auth: AuthOAuth, Headers: map[string]string{"Authorization": "Bearer secret-value"}},
@@ -1247,9 +1306,16 @@ func TestServerConfigValidateAuth(t *testing.T) {
 			if strings.Contains(err.Error(), "secret-value") {
 				t.Errorf("ValidateAuth = %q; it must never echo a header value", err)
 			}
+			if issuer := strings.TrimSpace(tc.cfg.Issuer); issuer != "" && strings.Contains(err.Error(), issuer) {
+				t.Errorf("ValidateAuth = %q; it must never echo the issuer", err)
+			}
 		})
 	}
 }
+
+// issuerNotAURL is ValidateAuth's refusal of an `issuer:` that is not an absolute http(s) URL.
+const issuerNotAURL = "issuer: is not an absolute http or https URL with a host — it names the " +
+	"authorization server as its metadata's issuer does"
 
 // oauthServer is an MCP server that answers only requests carrying its current bearer token,
 // beside an authorization server's token endpoint on another origin that mints that token.
@@ -1397,28 +1463,54 @@ func TestConnect_OAuthServerRidesTheStoredBearer(t *testing.T) {
 	}
 }
 
-// TestConnect_OAuthServerRefusals pins the two ways an `auth: oauth` server fails its connect
-// before a request leaves: a host with no token store names the server, and a server never logged
-// in is mcpauth.ErrLoginRequired naming the login command.
+// TestConnect_OAuthServerRefusals pins the ways an `auth: oauth` server fails its connect before a
+// request leaves: a host with no token store names the server; a server never logged in is
+// mcpauth.ErrLoginRequired naming the login command; and so is one whose stored token another
+// authorization server than its `issuer:` minted, which proves the configured issuer reaches the
+// connection's handler — unpinned, that token would be sent and accepted.
 func TestConnect_OAuthServerRefusals(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name      string
-		host      Host
+		hasStore  bool
+		seed      *mcpauth.Record // saved for the server before the connect, when set
+		issuer    string
 		wantLogin bool
 		wantText  string
 	}{
-		{name: "no token store", host: Host{}, wantText: `server "remote"`},
-		{name: "no stored record", host: oauthHost(mcpauth.NewStore(t.TempDir())), wantLogin: true,
-			wantText: "apogee mcp login remote"},
+		{name: "no token store", wantText: `server "remote"`},
+		{name: "no stored record", hasStore: true, wantLogin: true, wantText: "apogee mcp login remote"},
+		{name: "a stored record of another issuer", hasStore: true, wantLogin: true,
+			seed: &mcpauth.Record{
+				AccessToken:   "access-old",
+				TokenType:     "Bearer",
+				Expiry:        time.Now().Add(time.Hour),
+				Issuer:        "https://other.example.com",
+				TokenEndpoint: "https://other.example.com/token",
+				Client:        mcpauth.Client{ID: "client-1", TokenEndpointAuthMethod: "none"},
+			},
+			issuer: "https://auth.example.com", wantText: "not issued by the configured issuer"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			o := newOAuthServer(t, "access-old")
+			host := Host{}
+			if tt.hasStore {
+				store := mcpauth.NewStore(t.TempDir())
+				if tt.seed != nil {
+					record := *tt.seed
+					record.Resource = o.endpoint()
+					if err := store.Save("remote", o.endpoint(), record); err != nil {
+						t.Fatalf("Save: %v", err)
+					}
+				}
+				host = oauthHost(store)
+			}
+			cfg := oauthServerConfig(o.endpoint())
+			cfg.Issuer = tt.issuer
 
-			_, err := ConnectWith(context.Background(), tt.host, []ServerConfig{oauthServerConfig(o.endpoint())},
-				security.URLGuard{}, t.TempDir())
+			_, err := ConnectWith(context.Background(), host, []ServerConfig{cfg}, security.URLGuard{}, t.TempDir())
 
 			if err == nil || !strings.Contains(err.Error(), tt.wantText) {
 				t.Fatalf("ConnectWith error = %v; want one naming %q", err, tt.wantText)
@@ -1451,6 +1543,7 @@ func TestServerConfigEqual(t *testing.T) {
 		Auth:            AuthOAuth,
 		ClientID:        "client",
 		ClientSecretEnv: "SECRET_VAR",
+		Issuer:          "https://auth.example.com",
 		Project:         true,
 		Pin:             fakeProjectPin{root: "/repo", programs: []string{"/repo/bin/a"}},
 	}
@@ -1479,6 +1572,7 @@ func TestServerConfigEqual(t *testing.T) {
 		{name: "the auth", change: func(_, c *ServerConfig) { c.Auth = "" }},
 		{name: "the ClientID", change: func(_, c *ServerConfig) { c.ClientID = "other" }},
 		{name: "the ClientSecretEnv", change: func(_, c *ServerConfig) { c.ClientSecretEnv = "OTHER_VAR" }},
+		{name: "the Issuer", change: func(_, c *ServerConfig) { c.Issuer = "https://auth.example.com/other" }},
 		{name: "the Project flag", change: func(_, c *ServerConfig) { c.Project = false }},
 		{name: "a pin with different files", change: func(_, c *ServerConfig) {
 			c.Pin = fakeProjectPin{root: "/repo", programs: []string{"/repo/bin/b"}}
@@ -1504,7 +1598,7 @@ func TestServerConfigEqual(t *testing.T) {
 // TestServerConfigEqual_CoversEveryField fails when ServerConfig gains a field, so Equal (and the
 // table above) are revisited rather than silently ignoring what a new field changes about a dial.
 func TestServerConfigEqual_CoversEveryField(t *testing.T) {
-	const comparedFields = 14
+	const comparedFields = 15
 
 	got := reflect.TypeOf(ServerConfig{}).NumField()
 

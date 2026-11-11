@@ -125,6 +125,12 @@ type ServerConfig struct {
 	// AuthOAuth, and ClientSecretEnv needs ClientID.
 	ClientID        string
 	ClientSecretEnv string
+	// Issuer optionally pins the authorization server: when set, a login uses that issuer only if
+	// the endpoint names it, and a stored token another issuer minted is no token at all
+	// (mcpauth.LoginConfig.Issuer, mcpauth.HandlerConfig.Issuer). Empty means no pin. It needs Auth
+	// set to AuthOAuth and is an absolute http(s) URL with a host and no user info, query or
+	// fragment, taken as written (ValidateAuth).
+	Issuer string
 
 	// Project marks a server the Project config defined and the user adopted (ADR 0104), as against
 	// one from the user's own global config. Only the config layer sets it; the fences and the Allow
@@ -174,6 +180,7 @@ func (c ServerConfig) Equal(other ServerConfig) bool {
 		c.Auth == other.Auth &&
 		c.ClientID == other.ClientID &&
 		c.ClientSecretEnv == other.ClientSecretEnv &&
+		c.Issuer == other.Issuer &&
 		c.Project == other.Project &&
 		reflect.DeepEqual(c.Pin, other.Pin)
 }
@@ -261,11 +268,12 @@ func (cfg ServerConfig) ValidateHeaders() error {
 	return nil
 }
 
-// ValidateAuth refuses an `auth:` / `client-id:` / `client-secret-env:` combination that could not
-// do what it says: an Auth value other than AuthOAuth; AuthOAuth on any transport but
-// streamable-http; a ClientID or ClientSecretEnv without AuthOAuth; a ClientSecretEnv without the
-// ClientID it is the secret of; and an Authorization header — in Headers or HeadersEnv, any case —
-// beside AuthOAuth, which would fight the bearer token apogee sends itself.
+// ValidateAuth refuses an `auth:` / `client-id:` / `client-secret-env:` / `issuer:` combination
+// that could not do what it says: an Auth value other than AuthOAuth; AuthOAuth on any transport
+// but streamable-http; a ClientID, ClientSecretEnv or Issuer without AuthOAuth; a ClientSecretEnv
+// without the ClientID it is the secret of; an Issuer that is not an issuer URL (validateIssuer);
+// and an Authorization header — in Headers or HeadersEnv, any case — beside AuthOAuth, which would
+// fight the bearer token apogee sends itself.
 //
 // AuthOAuth on stdio or sse is a refusal, not the notice a transport-mismatched key earns
 // elsewhere (internal/config's mcpEnvAllowlistNotices): an ignored `auth:` would leave the server
@@ -292,11 +300,20 @@ func (cfg ServerConfig) ValidateAuth() error {
 			return fmt.Errorf("client-secret-env: is read only with auth: %s — set auth: %s or drop the key",
 				AuthOAuth, AuthOAuth)
 		}
+		if cfg.Issuer != "" {
+			return fmt.Errorf("issuer: is read only with auth: %s — set auth: %s or drop the key",
+				AuthOAuth, AuthOAuth)
+		}
 		return nil
 	}
 	if cfg.ClientSecretEnv != "" && cfg.ClientID == "" {
 		return errors.New("client-secret-env: needs client-id: — the secret belongs to a client " +
 			"registered ahead of time, and client-id: names that client")
+	}
+	if cfg.Issuer != "" {
+		if err := validateIssuer(cfg.Issuer); err != nil {
+			return err
+		}
 	}
 	for _, key := range []struct {
 		name    string
@@ -308,6 +325,26 @@ func (cfg ServerConfig) ValidateAuth() error {
 					"bearer token itself", key.name, name, AuthOAuth)
 			}
 		}
+	}
+	return nil
+}
+
+// validateIssuer refuses an `issuer:` value that cannot be an OAuth issuer (RFC 8414 §2): not an
+// absolute http or https URL with a host, or one carrying user info, a query or a fragment. It is
+// judged after trimming surrounding space, as mcpauth compares it, and never normalised: the pin
+// is the exact string the authorization server's metadata names. The error names the key, never
+// the value, which may carry credentials in its user info.
+func validateIssuer(issuer string) error {
+	parsed, err := url.Parse(strings.TrimSpace(issuer))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return errors.New("issuer: is not an absolute http or https URL with a host — it names the " +
+			"authorization server as its metadata's issuer does")
+	}
+	if parsed.User != nil {
+		return errors.New("issuer: carries user info — an issuer URL names no user or password")
+	}
+	if strings.ContainsAny(strings.TrimSpace(issuer), "?#") {
+		return errors.New("issuer: carries a query or fragment — an issuer URL has neither")
 	}
 	return nil
 }
@@ -653,6 +690,7 @@ func newOAuthHandler(
 		AuthClient:     newClient(guard, host.Proxy),
 		ClientID:       cfg.ClientID,
 		ClientSecret:   secret,
+		Issuer:         cfg.Issuer,
 	})
 }
 

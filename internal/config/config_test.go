@@ -3765,6 +3765,31 @@ func TestApplyConfigMCPServerAuth(t *testing.T) {
 		}
 	})
 
+	t.Run("an issuer is parsed as written", func(t *testing.T) {
+		t.Parallel()
+		home := testConfigHome(t, "")
+		writeConfigHome(t, home, "mcp-servers:\n  - name: docs\n    transport: streamable-http\n"+
+			"    endpoint: https://mcp.example.com/\n    auth: oauth\n    issuer: https://auth.example.com/realms/a\n")
+		opts := Options{ConfigDir: home}
+
+		err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+			os.ReadFile, noNotify)
+
+		if err != nil {
+			t.Fatalf("ApplyConfig: %v", err)
+		}
+		want := []mcp.ServerConfig{{
+			Name:      "docs",
+			Transport: mcp.TransportStreamableHTTP,
+			Endpoint:  "https://mcp.example.com/",
+			Auth:      mcp.AuthOAuth,
+			Issuer:    "https://auth.example.com/realms/a",
+		}}
+		if !reflect.DeepEqual(opts.MCPServers, want) {
+			t.Errorf("mcpServers = %+v; want %+v", opts.MCPServers, want)
+		}
+	})
+
 	cases := []struct {
 		name      string
 		entryYAML string
@@ -3809,6 +3834,18 @@ func TestApplyConfigMCPServerAuth(t *testing.T) {
 			entryYAML: "    transport: streamable-http\n    endpoint: https://mcp.example.com/\n    auth: oauth\n" +
 				"    client-secret-env: DOCS_CLIENT_SECRET\n",
 			want: "apogee: mcp-servers.docs: client-secret-env: needs client-id:",
+		},
+		{
+			name: "issuer without auth",
+			entryYAML: "    transport: streamable-http\n    endpoint: https://mcp.example.com/\n" +
+				"    issuer: https://auth.example.com/\n",
+			want: "apogee: mcp-servers.docs: issuer: is read only with auth: oauth — set auth: oauth or drop the key",
+		},
+		{
+			name: "an issuer with user info",
+			entryYAML: "    transport: streamable-http\n    endpoint: https://mcp.example.com/\n    auth: oauth\n" +
+				"    issuer: https://user:secret-value@auth.example.com/\n",
+			want: "apogee: mcp-servers.docs: issuer: carries user info",
 		},
 		{
 			name: "an Authorization header beside auth",
