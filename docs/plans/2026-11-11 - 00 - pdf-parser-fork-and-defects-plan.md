@@ -151,7 +151,12 @@ NOTES (2026-11-11): the formatter noticeDuration drops a trailing zero unit off 
 **Closes:** loading-notice-bound-unpinned
 **Commit:** `refactor(domain): derive the loading notice's bound from a duration tied to the provider backstop`
 
-## 6. The probe's candidate digest ignores rank order
+## 6. The probe's candidate digest ignores rank order — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): re-derived from the assumed test file internal/probe/modelfingerprint_test.go, which does not exist; the signature tests live in internal/probe/battery_test.go, where the new rank-order test (TestBehaviorSignatureIgnoresCandidateRankOrder) was added beside TestBatteryWithoutLogprobs and TestFingerprintIsStableAcrossRuns.
+NOTES (2026-11-11): consequential edit — internal/probe/proberecord_test.go: made necessary by the BatteryVersion bump (its fixture Behavior carried the `probe:1:` version segment the plan's grep names).
+NOTES (2026-11-11): BatteryVersion's doc now names a change to how BehaviorSignature composes the observation as a bump trigger, beside a prompt or pass rule.
+NOTES (2026-11-11): bite-checked — with modelfingerprint.go and battery.go reverted to HEAD, TestBehaviorSignatureIgnoresCandidateRankOrder and TestProbeModelSkipsARecordOfThePreviousBattery both fail ("changed" line printed, no stale warning).
 
 **What:**
 **Goal:** `BehaviorSignature` is identical for two batteries whose `Candidates` hold the same tokens in different orders; the first `apogee probe model` after this change reports no changed model against a record the previous battery wrote.

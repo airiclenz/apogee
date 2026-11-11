@@ -160,7 +160,7 @@ func TestProbeModelRunsTheBatteryAndRecords(t *testing.T) {
 		"apogee probe — model battery",
 		"native-tool-call",
 		"battery-model — unchanged; the probe raises its confidence, it does not rename it",
-		"probe:1:tools+json+chain:lp-",
+		"probe:2:tools+json+chain:lp-",
 		"medium — a dated behavioral claim",
 		"suggested model profile",
 		"    tool-call-format: native",
@@ -175,7 +175,7 @@ func TestProbeModelRunsTheBatteryAndRecords(t *testing.T) {
 	if !ok {
 		t.Fatalf("no probe record was written (warning=%q)", warning)
 	}
-	if !strings.HasPrefix(rec.Behavior, "probe:1:tools+json+chain") {
+	if !strings.HasPrefix(rec.Behavior, "probe:2:tools+json+chain") {
 		t.Errorf("recorded behavior = %q; want the observed signature", rec.Behavior)
 	}
 	if rec.ModelLabel != "battery-model" {
@@ -304,7 +304,7 @@ func TestProbeModelNoSaveWritesNothing(t *testing.T) {
 	if !strings.Contains(report, "NO — --no-save was given") {
 		t.Errorf("the report must say the record was not written:\n%s", report)
 	}
-	if !strings.Contains(report, "probe:1:tools+json+chain") {
+	if !strings.Contains(report, "probe:2:tools+json+chain") {
 		t.Errorf("--no-save still runs the full battery and prints the identity:\n%s", report)
 	}
 	assertHomeHoldsOnlyConfig(t, configHome, "--no-save")
@@ -329,7 +329,7 @@ func TestProbeModelNoSaveNamesTheSurvivingRecord(t *testing.T) {
 		Endpoint:   srv.URL,
 		ModelLabel: "battery-model",
 		ProbedAt:   probedAt,
-		Behavior:   "probe:1:tools+json+chain",
+		Behavior:   "probe:2:tools+json+chain",
 	}); err != nil {
 		t.Fatalf("seed previous record: %v", err)
 	}
@@ -445,7 +445,7 @@ func TestProbeModelReportsAChangedModelBehindTheLabel(t *testing.T) {
 		Endpoint:   srv.URL,
 		ModelLabel: "battery-model",
 		ProbedAt:   probedAt,
-		Behavior:   "probe:1:tools",
+		Behavior:   "probe:2:tools",
 	}); err != nil {
 		t.Fatalf("seed previous record: %v", err)
 	}
@@ -456,6 +456,52 @@ func TestProbeModelReportsAChangedModelBehindTheLabel(t *testing.T) {
 	}
 	if foreign := probedAt.Format(time.RFC3339); strings.Contains(report, foreign) {
 		t.Errorf("the changed line carries the stored zone's spelling %q:\n%s", foreign, report)
+	}
+}
+
+// A record the previous capability battery wrote is stale, never compared: its signature was
+// composed differently (the candidate digest then hashed rank order), so a mismatch against it
+// says nothing about the model. The run warns on stderr, prints no "changed" line, and records
+// afresh. The record is seeded as raw JSON with the literal battery version — SaveProbeRecord
+// would restamp the current one and the record would load as comparable.
+func TestProbeModelSkipsARecordOfThePreviousBattery(t *testing.T) {
+	t.Parallel()
+	srv := modelUpstream(t)
+	configHome := upstreamHome(t, srv.URL)
+	dir := probe.ProbeDir(configHome)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir probe dir: %v", err)
+	}
+	stale := `{"version":2,"battery-version":1,"endpoint":"` + srv.URL +
+		`","model-label":"battery-model","probed-at":"2026-01-02T03:04:05Z",` +
+		`"behavior":"probe:1:tools+json+chain:lp-00000000"}`
+	if err := os.WriteFile(probe.ProbeRecordPath(dir, srv.URL, "battery-model"), []byte(stale), 0o600); err != nil {
+		t.Fatalf("write previous-battery record: %v", err)
+	}
+
+	cmd := newProbeCommand()
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetArgs([]string{"model", "--config", configHome})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("probe model: %v\n%s%s", err, out.String(), errOut.String())
+	}
+
+	for _, want := range []string{
+		"skipping probe record",
+		"capability battery v1",
+		"re-run `apogee probe model`",
+	} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("stderr does not carry the stale-battery warning (%q missing):\n%s", want, errOut.String())
+		}
+	}
+	if strings.Contains(out.String(), "the model behind this label changed") {
+		t.Errorf("a record of another battery version was compared and reported as a changed model:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "yes — delete the file above to undo") {
+		t.Errorf("the fresh record must still be written:\n%s", out.String())
 	}
 }
 

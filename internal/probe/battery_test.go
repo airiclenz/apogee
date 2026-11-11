@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -276,7 +277,7 @@ func TestBatteryAllPass(t *testing.T) {
 		t.Errorf("label = %q; want the advertised label unchanged — the battery raises the tier, "+
 			"it does not rename the model (ADR 0021, Amendment 2026-07-22)", fp.Label)
 	}
-	if sig := BehaviorSignature(b); !strings.HasPrefix(sig, "probe:1:tools+json+chain:lp-") {
+	if sig := BehaviorSignature(b); !strings.HasPrefix(sig, "probe:2:tools+json+chain:lp-") {
 		t.Errorf("signature = %q; want the battery/features/logprob-digest form", sig)
 	}
 }
@@ -564,7 +565,7 @@ func TestBatteryWithoutLogprobs(t *testing.T) {
 	if len(b.Candidates) != 0 {
 		t.Errorf("candidates = %v; want none from a server that exposes no distribution", b.Candidates)
 	}
-	if sig := BehaviorSignature(b); sig != "probe:1:tools+json+chain" {
+	if sig := BehaviorSignature(b); sig != "probe:2:tools+json+chain" {
 		t.Errorf("signature = %q; want the feature-only form with no logprob digest", sig)
 	}
 }
@@ -579,6 +580,33 @@ func TestFingerprintIsStableAcrossRuns(t *testing.T) {
 
 	if first != second {
 		t.Errorf("two runs of one model disagreed: %q vs %q", first, second)
+	}
+}
+
+// The candidate digest is over the token SET: two near-tied candidates trade places from run to
+// run, so a reordered top-k must sign identically, while a token entering or leaving it must not.
+// The battery's own slice keeps the server's order — the digest sorts a copy.
+func TestBehaviorSignatureIgnoresCandidateRankOrder(t *testing.T) {
+	t.Parallel()
+	b := runBattery(t, script{nativeTools: true, structured: true, chain: true, logprobs: true})
+	withCandidates := func(tokens ...string) Battery {
+		c := b
+		c.Candidates = tokens
+		return c
+	}
+
+	ranked := withCandidates(" Paris", " the", " a")
+	reranked := withCandidates(" a", " Paris", " the")
+	if first, second := BehaviorSignature(ranked), BehaviorSignature(reranked); first != second {
+		t.Errorf("one candidate set in two rank orders signed differently: %q vs %q", first, second)
+	}
+	if got := reranked.Candidates; !slices.Equal(got, []string{" a", " Paris", " the"}) {
+		t.Errorf("candidates = %q after signing; the battery must keep the server's order", got)
+	}
+
+	swapped := withCandidates(" Paris", " the", " an")
+	if BehaviorSignature(ranked) == BehaviorSignature(swapped) {
+		t.Errorf("a token swapped out of the top-k left the signature at %q; the set changed", BehaviorSignature(ranked))
 	}
 }
 

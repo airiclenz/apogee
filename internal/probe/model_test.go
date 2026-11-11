@@ -34,14 +34,14 @@ func TestModelReportStatesTheFindings(t *testing.T) {
 
 	for _, want := range []string{
 		"apogee probe — model battery",
-		"capability battery v1",
+		"capability battery v2",
 		"native-tool-call",
 		"structured-json",
 		"multi-step-chain",
 		"exposed — 3 candidate tokens",
 		"full — a reported signal only; nothing in apogee adapts to it",
 		"fake-model — unchanged; the probe raises its confidence, it does not rename it",
-		"probe:1:tools+json+chain:lp-",
+		"probe:2:tools+json+chain:lp-",
 		"medium — a dated behavioral claim",
 		"suggested model profile",
 		"  model-profiles:",

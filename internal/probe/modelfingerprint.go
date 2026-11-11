@@ -3,6 +3,7 @@ package probe
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -111,14 +112,18 @@ func featureSet(b Battery) string {
 
 // candidateDigest folds the candidate-token SET into a short digest. The tokens'
 // probabilities are deliberately excluded: they drift with temperature and server build, while
-// which tokens were in contention is the stable shape of the distribution. No candidates (the
-// server exposed no logprobs) yields "", and the signature simply carries no distribution
-// component — the feature match still stands, one notch less discriminating.
+// which tokens were in contention is the stable shape of the distribution. Their rank order is
+// excluded for the same reason — two near-tied candidates swap places from run to run — so the
+// tokens are hashed sorted, and the digest moves only when a token enters or leaves the top-k.
+// It sorts a copy: the battery's own slice keeps the server's order. No candidates (the server
+// exposed no logprobs) yields "", and the signature simply carries no distribution component —
+// the feature match still stands, one notch less discriminating.
 func candidateDigest(candidates []string) string {
 	if len(candidates) == 0 {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(strings.Join(candidates, "\x00")))
+	sorted := slices.Sorted(slices.Values(candidates))
+	sum := sha256.Sum256([]byte(strings.Join(sorted, "\x00")))
 	return hex.EncodeToString(sum[:4])
 }
 

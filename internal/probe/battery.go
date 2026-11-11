@@ -15,11 +15,12 @@ import (
 
 // BatteryVersion is the version of the capability suite below. It stamps every recorded
 // fingerprint, because a label derived by one battery is not comparable to a label derived by
-// another — change a prompt or a pass rule and every stored claim must be re-earned. It is the
+// another — change a prompt, a pass rule or how BehaviorSignature composes what was observed,
+// and every stored claim must be re-earned. It is the
 // one constant: SaveProbeRecord stamps it into every record and LoadProbeRecord compares a
 // stored record's stamp against it (proberecord.go), so bumping it here retires every
 // incomparable record.
-const BatteryVersion = 1
+const BatteryVersion = 2
 
 // Capability names one thing the battery asks the model to do. The values are stable slugs:
 // they are reported to the user AND folded into the behavioral fingerprint, so renaming one

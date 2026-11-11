@@ -16,7 +16,7 @@ func sampleRecord() ProbeRecord {
 		Endpoint:       "http://127.0.0.1:8080",
 		ModelLabel:     "qwen2.5-coder-7b",
 		ProbedAt:       time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC),
-		Behavior:       "probe:1:tools+json+chain",
+		Behavior:       "probe:2:tools+json+chain",
 		Features:       []string{"tools", "json", "chain"},
 		CapabilityTier: "full",
 	}
