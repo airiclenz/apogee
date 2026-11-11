@@ -79,8 +79,10 @@ type heartbeatState struct {
 	// nil ⇒ nothing is deferred. A pointer into a value-copied Model is safe because it is only
 	// ever replaced, never written through (the pendingSave posture, ADR 0011).
 	pendingRebind *rebindIntent
-	// lastRebindFailed is the model id whose rebind last failed, so a refusal is noted once per
-	// distinct target instead of once every Interval. "" once a rebind succeeds.
+	// lastRebindFailed is the model id whose rebind last failed. While it is set every landed beat
+	// retries the rebind, even one identical to the last observation ([Model.observeBinding]), and
+	// the refusal is noted once per distinct target instead of once every Interval. Only
+	// [Model.applyRebind] sets it; "" once a rebind succeeds.
 	lastRebindFailed string
 }
 
@@ -305,15 +307,25 @@ func (m Model) reportUpstream(offline bool, failure string) {
 }
 
 // observeBinding measures a landed beat against the last observation that mattered and, when the
-// upstream has moved, binds the new reality — now if the engine is quiescent, or stashed for the
-// exchange-terminal boundary when a worker owns it. It reports whether the view changed.
+// upstream has moved — or the last rebind failed — binds the new reality: now if the engine is
+// quiescent, or stashed for the exchange-terminal boundary when a worker owns it. It reports whether
+// the view changed.
 //
 // The comparison is against what was last OBSERVED, not against what is bound, and the observation
 // is recorded the moment the intent is captured (before the seam even answers). That one choice is
-// what keeps a `context-window:` pin quiet: the server keeps reporting its own window every ten
-// seconds, the pin keeps outranking it, and the difference between the two is never mistaken for a
-// fresh change — so the TUI needs no knowledge of the pin at all. A beat that reports no window
-// (0) is not evidence the window changed, only that this beat could not name it.
+// what keeps a `context-window:` pin quiet: the server keeps reporting its own window every
+// heartbeat.Interval, the pin keeps outranking it, and the difference between the two is never
+// mistaken for a fresh change — so the TUI needs no knowledge of the pin at all. A beat that reports
+// no window (0) is not evidence the window changed, only that this beat could not name it.
+//
+// A failed rebind is the one exception to "only a change binds": while
+// heartbeatState.lastRebindFailed is set, every beat asks the seam again, so a refusal that was
+// transient (a model still loading, a prompt file being edited) heals on a later identical beat
+// without the human doing anything. No
+// backoff — the beat is already heartbeat.Interval apart and the seam reads local files — and no
+// extra words: [Model.applyRebind] still notes the refusal once per distinct target. A retry whose
+// beat names no window carries the last observed one, because a windowless beat names nothing and a
+// successful retry must not bind — and announce — an unknown window.
 //
 // firstContact is the pre-fold evidence its caller captured (see [Model.foldBeat]); it is stamped
 // into the intent rather than re-derived here, so the deferred path words itself exactly like the
@@ -322,16 +334,20 @@ func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bo
 	if !m.appliesRebinds() {
 		return m, false // a display-frozen heartbeat: nothing to apply a change through
 	}
-	changed := beat.ActiveModel != m.hb.observedModel ||
-		(beat.ContextWindow > 0 && beat.ContextWindow != m.hb.observedWindow)
-	if !changed {
+	modelMoved := beat.ActiveModel != m.hb.observedModel
+	changed := modelMoved || (beat.ContextWindow > 0 && beat.ContextWindow != m.hb.observedWindow)
+	if !changed && m.hb.lastRebindFailed == "" {
 		return m, false
 	}
-	m.hb.observedModel, m.hb.observedWindow = beat.ActiveModel, beat.ContextWindow
+	window := beat.ContextWindow
+	if window == 0 && !modelMoved {
+		window = m.hb.observedWindow // a retry on a windowless beat keeps the last window it knew
+	}
+	m.hb.observedModel, m.hb.observedWindow = beat.ActiveModel, window
 	m.hb.observedDialect = beat.EffortSupport.Dialect
 	intent := rebindIntent{
 		model:  beat.ActiveModel,
-		window: beat.ContextWindow,
+		window: window,
 		// The dialect the beat reported for this server, carried whole with the rest of the
 		// observation. It is deliberately NOT part of the changed test above: the dial is a fact
 		// about the server, so it moves when the model or the window does and never on its own.
@@ -371,9 +387,11 @@ func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bo
 // and ctxUsed keeps its last measured fill (an over-window conversation renders clamped at 100%
 // until the next usage event or a compaction re-measures it).
 //
-// A failure leaves every binding exactly where it was and says so ONCE per distinct target: the
-// monitor beats every heartbeat.Interval, and a transcript repeating the same refusal at that rate would
-// bury the conversation it is meant to annotate (the saveFailing fail-once posture).
+// A failure leaves every binding exactly where it was, sets heartbeatState.lastRebindFailed — this is
+// the one place that sets it, for every caller — and says so ONCE per distinct target: the marker
+// makes [Model.observeBinding] retry on every later beat, and a transcript repeating the same refusal
+// at that rate would bury the conversation it is meant to annotate (the saveFailing fail-once
+// posture). The success that finally lands clears the marker and writes the ordinary note.
 func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	if !m.appliesRebinds() {
 		return m, false

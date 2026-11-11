@@ -672,7 +672,9 @@
 // window pin and the compaction budget, then driving Agent.Rebind. This package decides only WHEN. [Model.observeBinding] measures each landed beat
 // against the last OBSERVATION rather than against the binding — which is what lets a
 // `context-window:` pin outrank the server's window forever without the renderer knowing a pin
-// exists — and a change is applied at once when the engine is idle, or stashed as a latest-wins
+// exists — and while the last rebind FAILED it treats every beat as a change, so a transient
+// refusal is retried on the next beat (no backoff; a retry on a windowless beat keeps the last
+// known window) and a failed first bind recovers without user action. A change is applied at once when the engine is idle, or stashed as a latest-wins
 // pendingRebind and applied at the next quiescent boundary when something else owns the engine:
 // finishWorker when a worker does (the boundary SettleExchange and the idle save use), and the
 // actuation completion fold while a launcher verb owns the server the session talks to, since that
@@ -685,7 +687,8 @@
 // (never merely what was observed), restates the start-up box in place (transcript.refreshStartup —
 // its facts were frozen when it was seeded, and a late-bound session would otherwise keep a
 // "connecting" box at the top of its scrollback), and words the change once: connected / model
-// changed / context window changed, a refusal noted once per distinct target, and nothing at all
+// changed / context window changed, a refusal noted once per distinct target however many beats
+// retry it, and nothing at all
 // when a pin means nothing visible moved or when the session's FIRST beat lands clean (the restated
 // box is already saying it). A host that cannot rebind is a display-frozen heartbeat — the offline state and the
 // model list still live, no binding ever does.

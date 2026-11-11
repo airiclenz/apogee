@@ -192,7 +192,10 @@ NOTES (2026-11-11): the contract's /dev/null paragraph carries the change as an 
 **Closes:** landlock-file-root-einval
 **Commit:** `fix(platform): give a non-directory landlock root file-applicable rights`
 
-## 8. A failed heartbeat rebind is retried on the next beat
+## 8. A failed heartbeat rebind is retried on the next beat — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): added a fourth new test, `TestRebindRetryOnWindowlessBeatKeepsKnownWindow`, for the plan's "fail, then a window-0 beat" case (the Tests line names the case but not the test).
+NOTES (2026-11-11): the glossary `heartbeat` Note and the picker.go comments matched by the prose-rule grep describe a successful `/model` pick ("the next beat measures it as nothing new") and the once-per-target note, both still true, so they were left as they are.
 
 **What:**
 **Goal:** a rebind that fails once and succeeds on a later identical beat ends bound to the new model; a permanently failing rebind writes its refusal note exactly once per target; a failed first-contact bind recovers on a later beat without user action.

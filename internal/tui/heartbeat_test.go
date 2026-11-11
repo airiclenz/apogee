@@ -1184,8 +1184,8 @@ func TestPinnedWindowResultSticks(t *testing.T) {
 }
 
 // A rebind that cannot be resolved leaves every binding where it was and says so — once per target.
-// The monitor beats every heartbeat.Interval; repeating one refusal at that rate would bury the
-// conversation it annotates.
+// The monitor beats every heartbeat.Interval and retries a failed rebind on each one; repeating one
+// refusal at that rate would bury the conversation it annotates.
 func TestRebindFailureNotedOnce(t *testing.T) {
 	t.Parallel()
 
@@ -1205,15 +1205,16 @@ func TestRebindFailureNotedOnce(t *testing.T) {
 		t.Errorf("the refusal does not say what apogee is still talking to; notes = %q", noteTexts(m))
 	}
 
-	// An identical beat is not a change at all: nothing is asked, nothing is said.
+	// An identical beat retries the failed rebind — and stays quiet, having already spoken.
 	m = foldBeatMsg(t, m, upBeat("model-a", 32768))
-	if len(rb.calls) != 1 || len(noteTexts(m)) != 1 {
-		t.Errorf("an identical beat re-ran the failed rebind (calls %+v, notes %q)", rb.calls, noteTexts(m))
+	if len(rb.calls) != 2 || len(noteTexts(m)) != 1 {
+		t.Errorf("an identical beat after a failure: calls %+v, notes %q; want the seam asked again and one note",
+			rb.calls, noteTexts(m))
 	}
 
-	// The same target seen in a new window IS asked again — and stays quiet, having already spoken.
+	// The same target seen in a new window is asked again too — still without a second note.
 	m = foldBeatMsg(t, m, upBeat("model-a", 16384))
-	if len(rb.calls) != 2 {
+	if len(rb.calls) != 3 {
 		t.Errorf("rebind calls = %+v, want the retry a genuinely new observation triggers", rb.calls)
 	}
 	if n := len(noteTexts(m)); n != 1 {
@@ -1224,6 +1225,121 @@ func TestRebindFailureNotedOnce(t *testing.T) {
 	m = foldBeatMsg(t, m, upBeat("model-b", 16384))
 	if n := countNotes(m, "→ model-b) but rebind failed"); n != 1 {
 		t.Errorf("a new target's refusal was swallowed; notes = %q", noteTexts(m))
+	}
+}
+
+// A refusal can be transient — a model still loading, a prompt file mid-edit — so a failed rebind is
+// retried on the next beat even when that beat is identical to the one that failed. The retry that
+// lands binds the new model, says what moved once, and leaves the marker clear, so the beat after it
+// is an ordinary nothing-new beat again.
+func TestRebindRetriesAfterFailure(t *testing.T) {
+	t.Parallel()
+
+	failing := true
+	rb := &fakeRebind{answer: func(model string, window int) (RebindResult, error) {
+		if failing {
+			return RebindResult{}, errors.New("no validated set for " + model)
+		}
+		return RebindResult{Model: model, ContextWindow: window}, nil
+	}}
+	m := wireRebind(t, testOpts, &fakeHeartbeat{}, rb)
+
+	m = foldBeatMsg(t, m, upBeat("model-a", 16384))
+	if m.opts.Model != "test-model" {
+		t.Fatalf("bound model = %q, want the failed rebind to leave test-model bound", m.opts.Model)
+	}
+
+	failing = false
+	m = foldBeatMsg(t, m, upBeat("model-a", 16384))
+
+	if len(rb.calls) != 2 || rb.calls[1] != (rebindCall{model: "model-a", window: 16384}) {
+		t.Fatalf("rebind calls = %+v, want the identical beat to retry model-a/16384", rb.calls)
+	}
+	if m.opts.Model != "model-a" || m.opts.ContextWindow != 16384 {
+		t.Errorf("bound display = %q/%d, want the retry to bind model-a/16384", m.opts.Model, m.opts.ContextWindow)
+	}
+	if n := countNotes(m, "model changed: test-model → model-a, context 32k → 16k"); n != 1 {
+		t.Errorf("change notes = %d, want exactly 1; notes = %q", n, noteTexts(m))
+	}
+	if m.hb.lastRebindFailed != "" {
+		t.Errorf("lastRebindFailed = %q, want it cleared by the successful retry", m.hb.lastRebindFailed)
+	}
+
+	m = foldBeatMsg(t, m, upBeat("model-a", 16384))
+	if len(rb.calls) != 2 {
+		t.Errorf("rebind calls = %+v, want a bound session's identical beat to ask for nothing", rb.calls)
+	}
+}
+
+// A retry that fires only because the last rebind failed, on a beat that names no window, asks the
+// seam for the last window it KNEW: a windowless beat names nothing, and a successful retry that
+// bound 0 would announce an unknown window the server never reported.
+func TestRebindRetryOnWindowlessBeatKeepsKnownWindow(t *testing.T) {
+	t.Parallel()
+
+	failing := true
+	rb := &fakeRebind{answer: func(model string, window int) (RebindResult, error) {
+		if failing {
+			return RebindResult{}, errors.New("no validated set for " + model)
+		}
+		return RebindResult{Model: model, ContextWindow: window}, nil
+	}}
+	m := wireRebind(t, testOpts, &fakeHeartbeat{}, rb)
+
+	m = foldBeatMsg(t, m, upBeat("model-a", 16384))
+	failing = false
+	m = foldBeatMsg(t, m, heartbeat.Beat{Reachable: true, ActiveModel: "model-a"})
+
+	if len(rb.calls) != 2 || rb.calls[1] != (rebindCall{model: "model-a", window: 16384}) {
+		t.Fatalf("rebind calls = %+v, want the windowless retry to ask for the last known 16384", rb.calls)
+	}
+	if m.hb.observedWindow != 16384 {
+		t.Errorf("observedWindow = %d, want the last known 16384 kept", m.hb.observedWindow)
+	}
+	if m.opts.ContextWindow != 16384 {
+		t.Errorf("bound window = %d, want 16384", m.opts.ContextWindow)
+	}
+	if n := countNotes(m, unknownWindowNote); n != 0 {
+		t.Errorf("the retry announced an unknown window; notes = %q", noteTexts(m))
+	}
+}
+
+// A cold start whose very first bind is refused recovers on a later beat with no user action: the
+// retry binds the model, the start-up box stops saying "connecting", and — because a failed seed is
+// not a quiet first contact — the ordinary "connected:" line says so.
+func TestRebindFirstContactFailureRecovers(t *testing.T) {
+	t.Parallel()
+
+	failing := true
+	rb := &fakeRebind{answer: func(model string, window int) (RebindResult, error) {
+		if failing {
+			return RebindResult{}, errors.New("no validated set for " + model)
+		}
+		return RebindResult{Model: model, ContextWindow: window}, nil
+	}}
+	m := wireRebind(t, unbound(testOpts), &fakeHeartbeat{}, rb)
+
+	m = foldBeatMsg(t, m, upBeat("served-model", 32768))
+	if m.opts.Model != "" {
+		t.Fatalf("bound model = %q, want nothing bound after a refused first bind", m.opts.Model)
+	}
+	if n := countNotes(m, "could not bind served-model"); n != 1 {
+		t.Fatalf("seed refusal notes = %d, want exactly 1; notes = %q", n, noteTexts(m))
+	}
+
+	m = foldBeatMsg(t, m, upBeat("served-model", 32768)) // still refused: asked, but not re-said
+	if len(rb.calls) != 2 || countNotes(m, "could not bind served-model") != 1 {
+		t.Fatalf("a still-failing retry: calls %+v, notes %q; want 2 calls and one refusal", rb.calls, noteTexts(m))
+	}
+
+	failing = false
+	m = foldBeatMsg(t, m, upBeat("served-model", 32768))
+
+	if m.opts.Model != "served-model" || m.opts.ContextWindow != 32768 {
+		t.Errorf("bound display = %q/%d, want the recovered served-model/32768", m.opts.Model, m.opts.ContextWindow)
+	}
+	if n := countNotes(m, "connected: served-model, context 32k"); n != 1 {
+		t.Errorf("connected notes = %d, want exactly 1; notes = %q", n, noteTexts(m))
 	}
 }
 

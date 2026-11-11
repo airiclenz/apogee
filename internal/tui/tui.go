@@ -660,7 +660,9 @@ type ServerHost interface {
 	Beat(ctx context.Context) heartbeat.Beat
 
 	// Rebind re-resolves and applies the per-model bindings after the heartbeat observed the
-	// upstream serving a different model — or the same model in a different window. The binary owns
+	// upstream serving a different model — or the same model in a different window — and again on
+	// every later beat while the last call failed, so a transient refusal heals without the human
+	// (Model.observeBinding). The binary owns
 	// the resolution (the per-model system prompt, ADR 0023; the window pin and the compaction
 	// budget) and the engine mutators; the TUI owns only
 	// WHEN, which is the whole of its half: at idle the moment the beat lands, or deferred to the
