@@ -101,3 +101,51 @@ func TestBufferReadObject_EndOfInput_ClosesOpenSyntax(t *testing.T) {
 		})
 	}
 }
+
+func TestBufferReadObject_OddDigitHexString_ReadsFinalZero(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		source string
+		want   object
+	}{
+		{name: "three digits", source: "<414>", want: "A@"},
+		{name: "one digit", source: "<4>", want: "@"},
+		{name: "three digits with a space between pairs", source: "<41 4>", want: "A@"},
+		{name: "two digits split by a space", source: "<4 1>", want: "A"},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			buffer := programBuffer(testCase.source)
+
+			result, recovered := readWithin(t, func() object { return buffer.readObject() })
+
+			if recovered != nil {
+				t.Fatalf("readObject panicked with %v, want the final digit read as if a 0 followed it", recovered)
+			}
+			if !reflect.DeepEqual(result, testCase.want) {
+				t.Fatalf("readObject = %#v, want %#v", result, testCase.want)
+			}
+			if next := buffer.readToken(); next != io.EOF {
+				t.Errorf("token after the read = %#v, want io.EOF so the closer was consumed", next)
+			}
+		})
+	}
+}
+
+func TestBufferReadObject_NonHexDigit_ReportsMalformedHexString(t *testing.T) {
+	t.Parallel()
+
+	buffer := programBuffer("<4G>")
+
+	_, recovered := readWithin(t, func() object { return buffer.readObject() })
+
+	err, isError := recovered.(error)
+	if !isError || !strings.Contains(err.Error(), "malformed hex string") {
+		t.Fatalf("readObject recovered %#v, want a malformed hex string error", recovered)
+	}
+}

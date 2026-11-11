@@ -233,12 +233,22 @@ func (b *buffer) readHexString() token {
 		if isSpace(c2) {
 			goto Loop2
 		}
-		x := unhex(c)<<4 | unhex(c2)
+		// A closer in a pair's low place ends a string of an odd digit count, and the PDF
+		// reference reads that final digit as if a 0 followed it.
+		isClosed := c2 == '>'
+		low := 0
+		if !isClosed {
+			low = unhex(c2)
+		}
+		x := unhex(c)<<4 | low
 		if x < 0 {
 			b.errorf("malformed hex string %c %c %s", c, c2, b.buf[b.pos:])
 			break
 		}
 		tmp = append(tmp, byte(x))
+		if isClosed {
+			break
+		}
 	}
 	b.tmp = tmp
 	return string(tmp)

@@ -36,4 +36,8 @@
 //     of an object stream in Reader.resolve stops there whatever its /N claims. Beside them,
 //     buffer.readLiteralString no longer keeps that stand-in space as the last byte of an
 //     unterminated string.
+//   - Odd-digit hex string (lex.go): buffer.readHexString reads a closed hex string with an odd
+//     number of digits as if a final 0 followed its last digit (`<414>` reads "A@"), as the PDF
+//     reference specifies, where it took the closing `>` as a digit and panicked with a
+//     malformed hex string; a digit that is not hex still does.
 package pdfparse

@@ -52,7 +52,10 @@ NOTES (2026-11-11): no CHANGELOG entry — the classifier narrowing and the Wind
 - `capcom check`
 **Commit:** `chore(issues): record the Windows RemoveJournal CI evidence`
 
-## 2. Read a closed odd-digit hex string with a final zero
+## 2. Read a closed odd-digit hex string with a final zero — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): consequential edit — internal/doctext/pdfparse/doc.go: made necessary by the readHexString patch in lex.go (the package comment's "Local patches" list names every change to the copied files); added an "Odd-digit hex string" entry, the "End of input" bullet unchanged
+NOTES (2026-11-11): the error case is its own test, TestBufferReadObject_NonHexDigit_ReportsMalformedHexString, beside the table test TestBufferReadObject_OddDigitHexString_ReadsFinalZero; the table test was confirmed to fail against lex.go at HEAD
 
 **What:**
 **Goal:** a closed hex string with an odd number of digits reads as if a final `0` followed its last digit (`<414>` → `"A@"`, `<4>` → `"@"`), without a panic; a non-hex digit still reports a malformed hex string.
