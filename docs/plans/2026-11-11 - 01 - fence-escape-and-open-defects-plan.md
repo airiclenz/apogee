@@ -125,7 +125,11 @@ NOTES (2026-11-11): the backends still emit `connect(2) AF_UNIX` only where they
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestHeadlessAutoDisclosesTheFenceResidual' ./cmd/apogee/`
 **Commit:** `fix(probe): disclose connect(2) AF_UNIX as a write-class residual at Auto start`
 
-## 6. Disclose AF_UNIX on every landlock ABI and AF_UNIX plus mach-lookup on seatbelt
+## 6. Disclose AF_UNIX on every landlock ABI and AF_UNIX plus mach-lookup on seatbelt — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): landlock's Capabilities appends the tokens in the order truncate(2) (ABI 1–2), connect(2) UDP (ABI ≥ 4), connect(2) AF_UNIX (ABI ≥ 1), so ABI ≥ 4 keeps its existing "UDP, AF_UNIX" order and TestSelectLinuxConfiner's wantLine strings needed no change — only their comments followed.
+NOTES (2026-11-11): the ci.yml step "probe discloses no write-class residual on a modern kernel" is renamed "probe discloses no truncate(2) residual on a modern kernel": AF_UNIX is now write-class and disclosed there, so the old name stated the opposite of a correct tree; its grep is unchanged.
+NOTES (2026-11-11): TestSeatbeltCapabilitiesHonest gains a wantResiduals column; seatbelt was checked with GOOS=darwin go vet ./internal/platform/ only (no macOS host here).
 
 **What:**
 **Goal:** landlock's `Capabilities` lists `connect(2) AF_UNIX` at every available ABI ≥ 1, 9 included (beside `truncate(2)` at 1–2 and `connect(2) UDP` at ≥ 4); seatbelt's present-backend caps list `connect(2) AF_UNIX` and `mach-lookup`; `apogee probe`'s `unfenced:` field shows them.

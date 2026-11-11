@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -210,12 +211,18 @@ func TestSeatbeltCapabilitiesHonest(t *testing.T) {
 		wantFSWrite      bool
 		wantNetwork      bool
 		wantAutoEligible bool
+		wantResiduals    []string
 	}{
 		// sandbox-exec absent => deny-all caps => fs-confinement unavailable => the
-		// disposition gates the subprocess surface (Auto not refused, ADR 0012).
-		{"sandbox_exec_absent", false, false, false, false},
-		// sandbox-exec present => one profile enforces both fs-write and network egress.
-		{"sandbox_exec_present", true, true, true, true},
+		// disposition gates the subprocess surface (Auto not refused, ADR 0012). Nothing is
+		// fenced, so nothing is residual either.
+		{"sandbox_exec_absent", false, false, false, false, nil},
+		// sandbox-exec present => one profile enforces both fs-write and network egress — and
+		// its allow-default profile leaves AF_UNIX connect and Mach service lookup open, the
+		// two write-class ways to a same-user service that runs commands outside the fence
+		// (ADR 0112), so both are disclosed.
+		{"sandbox_exec_present", true, true, true, true,
+			[]string{domain.ResidualUnixEgress, domain.ResidualMachLookup}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -233,6 +240,10 @@ func TestSeatbeltCapabilitiesHonest(t *testing.T) {
 			// absent sandbox-exec must not make Auto eligible (it gates instead).
 			if got := caps.FSWrite; got != tt.wantAutoEligible {
 				t.Errorf("present=%v: fs-confinement availability = %v, want %v (Auto needs fs only, ADR 0012)", tt.present, got, tt.wantAutoEligible)
+			}
+			if !slices.Equal(caps.Residuals, tt.wantResiduals) {
+				t.Errorf("present=%v: Residuals = %v, want %v (an unfenced write-class access must be disclosed, ADR 0112)",
+					tt.present, caps.Residuals, tt.wantResiduals)
 			}
 		})
 	}

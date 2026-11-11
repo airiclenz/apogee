@@ -43,8 +43,9 @@ func TestSelectLinuxConfiner(t *testing.T) {
 			wantBackend: "landlock",
 			wantNSCalls: 0,
 			// ABI 4 can deny TCP, and TCP is all landlock's network rights cover, so the
-			// selected backend's caps carry the two egress classes a deny box still passes —
-			// and the line the user reads names them.
+			// selected backend's caps carry the UDP a deny box still passes, then the
+			// write-class AF_UNIX connect every landlock ABI leaves open (ADR 0112) — and the
+			// line the user reads names both.
 			wantCaps: domain.ConfinementCaps{
 				FSWrite:       true,
 				NetworkEgress: true,
@@ -53,8 +54,9 @@ func TestSelectLinuxConfiner(t *testing.T) {
 			wantLine: "landlock (fs-write: available · network: available · unfenced: connect(2) UDP, connect(2) AF_UNIX)",
 		},
 		// No landlock, bwrap works: the second rung is the backend, its caps untouched — and
-		// those caps carry the one egress class `--unshare-net` cannot reach, a pathname
-		// AF_UNIX socket the read-only root binds into the box, so the line names it too.
+		// those caps carry the one access `--unshare-net` cannot cut, a connect to a pathname
+		// AF_UNIX socket the read-only root binds into the box (write-class, ADR 0112), so the
+		// line names it too.
 		{
 			name:        "namespace_when_landlock_cannot_fence",
 			landlock:    &landlockConfiner{abi: -1, probeErrno: unix.ENOSYS},

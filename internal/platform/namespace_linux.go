@@ -280,9 +280,10 @@ func lastNonEmptyLine(s string) string {
 // per-box answer — a deny box is what makes it matter, and the caps are read before any box
 // exists — so the token rides in Residuals wherever NetworkEgress is true, spelled once in
 // internal/domain and shared with landlock, which leaks the same access for its own reason.
-// Only probe.CapabilityLine words it: it is not write-class, so probe.ResidualNotice
-// filters it out and no host gains a startup banner for it. Without bwrap the backend
-// fences nothing and discloses no residual — that path is wholly Unavailable.
+// A same-user service listening on such a socket runs commands outside the fence for
+// whoever asks, so the access is write-class (ADR 0112): probe.CapabilityLine names it and
+// probe.ResidualNotice words it at Auto start. Without bwrap the backend fences nothing and
+// discloses no residual — that path is wholly Unavailable.
 func (c *namespaceConfiner) Capabilities() domain.ConfinementCaps {
 	if c.bwrapPath == "" {
 		return domain.ConfinementCaps{Unavailable: c.unavailable, Cause: c.cause}

@@ -88,9 +88,10 @@ func TestLandlockProbeNetwork(t *testing.T) {
 // The battery's row #12 branches on the backend's OWN disclosure, so on its own it cannot catch a
 // backend that discloses the wrong thing consistently. This pins the disclosure to the kernel the
 // tests actually run on: below ABI 3 landlock has no LANDLOCK_ACCESS_FS_TRUNCATE bit and must say
-// so; at ABI 3 and above the fence is complete and must say nothing (C-06, live-reproduced
-// 2026-08-25). Together the two make the truncate residual un-fakeable in either direction, and
-// the network half is pinned the same way from ABI 4 up.
+// so; at ABI 3 and above truncate is fenced and must not be named (C-06, live-reproduced
+// 2026-08-25). Together the two make the truncate residual un-fakeable in either direction, the
+// network half is pinned the same way from ABI 4 up, and the write-class AF_UNIX connect is
+// pinned at every ABI that fences at all (ADR 0112).
 func TestLandlockResidualsMatchHostABI(t *testing.T) {
 	t.Parallel()
 	c := NewLandlockConfiner()
@@ -103,11 +104,14 @@ func TestLandlockResidualsMatchHostABI(t *testing.T) {
 		wantResiduals = append(wantResiduals, "truncate(2)")
 	}
 	// The same un-fakeability, applied to the network half: a kernel that can deny TCP at all
-	// must say that the deny box still passes UDP and pathname AF_UNIX, and one that cannot deny
-	// the network must not claim a gap in a fence it never offers.
+	// must say that the deny box still passes UDP, and one that cannot deny the network must
+	// not claim a gap in a fence it never offers.
 	if c.abi >= landlockABINetwork {
-		wantResiduals = append(wantResiduals, domain.ResidualUDPEgress, domain.ResidualUnixEgress)
+		wantResiduals = append(wantResiduals, domain.ResidualUDPEgress)
 	}
+	// AF_UNIX connect is write-class and open at every ABI that fences at all (ADR 0112): a
+	// host on ABI 1–3 that omits it hides the spawn-elsewhere escape from Auto's start notice.
+	wantResiduals = append(wantResiduals, domain.ResidualUnixEgress)
 	if !slices.Equal(caps.Residuals, wantResiduals) {
 		t.Errorf("host landlock ABI %d discloses Residuals = %v, want %v", c.abi, caps.Residuals, wantResiduals)
 	}
@@ -117,7 +121,8 @@ func TestLandlockCapabilitiesHonest(t *testing.T) {
 	t.Parallel()
 
 	// The standing gap in landlock's network fence: the ABI has TCP bind and connect rights and
-	// nothing more, so every kernel that can deny the network at all leaves these two classes out.
+	// nothing more, so every kernel that can deny the network at all leaves UDP out — and the
+	// write-class AF_UNIX connect, open at every ABI (ADR 0112), follows it.
 	networkResiduals := []string{domain.ResidualUDPEgress, domain.ResidualUnixEgress}
 
 	tests := []struct {
@@ -127,7 +132,7 @@ func TestLandlockCapabilitiesHonest(t *testing.T) {
 		wantNetwork      bool
 		wantAutoEligible bool
 		wantAccess       uint64   // mask applyLandlock would request; asserted only when wantFSWrite
-		wantResiduals    []string // accesses this ABI leaves unfenced: write-class while FSWrite is true, egress-class while NetworkEgress is
+		wantResiduals    []string // accesses this ABI leaves unfenced: write-class while FSWrite is true, UDP egress while NetworkEgress is
 		probeErrno       syscall.Errno
 		wantUnavailable  string // the WHY behind FSWrite=false; "" on every fenceable row
 	}{
@@ -136,18 +141,21 @@ func TestLandlockCapabilitiesHonest(t *testing.T) {
 		// fs-only; AutoEligible on fs alone (ADR 0012). Its mask must stay at the ABI-1
 		// baseline: asking for TRUNCATE (ABI 3) here was EINVAL on every create_ruleset — so
 		// the access goes unfenced and is DISCLOSED instead (C-06, live-reproduced 2026-08-25).
-		{"abi1_kernel_5_13", 1, true, false, true, baselineFSWriteAccess, []string{"truncate(2)"}, 0, ""},
+		// AF_UNIX connect is open at every fencing ABI and write-class (ADR 0112), so it rides
+		// beside truncate(2) here and on every row below.
+		{"abi1_kernel_5_13", 1, true, false, true, baselineFSWriteAccess, []string{"truncate(2)", domain.ResidualUnixEgress}, 0, ""},
 		// Debian 12 (6.1). REFER exists from here, and must be handled or the kernel denies
 		// cross-directory rename/link outright — including inside the workspace. TRUNCATE still
 		// does not, so the residual still stands.
-		{"abi2_kernel_5_19", 2, true, false, true, baselineFSWriteAccess | unix.LANDLOCK_ACCESS_FS_REFER, []string{"truncate(2)"}, 0, ""},
-		// still fs-only, still Auto-eligible; TRUNCATE is finally requestable, so the fence is
-		// complete and nothing is disclosed.
-		{"abi3_kernel_6_2", 3, true, false, true, fullFSWriteAccess, nil, 0, ""},
+		{"abi2_kernel_5_19", 2, true, false, true, baselineFSWriteAccess | unix.LANDLOCK_ACCESS_FS_REFER, []string{"truncate(2)", domain.ResidualUnixEgress}, 0, ""},
+		// still fs-only, still Auto-eligible; TRUNCATE is finally requestable, so truncate(2)
+		// leaves the list — and AF_UNIX connect, which no write right fences, stays on it.
+		{"abi3_kernel_6_2", 3, true, false, true, fullFSWriteAccess, []string{domain.ResidualUnixEgress}, 0, ""},
 		// Network egress is now enforceable — and the enforcement is TCP-only, so the same
-		// honesty that discloses truncate(2) below ABI 3 discloses the two egress classes a
-		// deny box still passes. They are disjoint from the write-class residual by
-		// construction: truncate(2) stops at ABI 2 and the network rights start at ABI 4.
+		// honesty that discloses truncate(2) below ABI 3 discloses the UDP a deny box still
+		// passes, ahead of the AF_UNIX token every fencing ABI carries. UDP is disjoint from
+		// truncate(2) by construction: truncate(2) stops at ABI 2 and the network rights start
+		// at ABI 4.
 		{"abi4_kernel_6_7", 4, true, true, true, fullFSWriteAccess, networkResiduals, 0, ""},
 		{"abi6_newer", 6, true, true, true, fullFSWriteAccess, networkResiduals, 0, ""},
 	}

@@ -240,15 +240,22 @@ func (c *landlockConfiner) unavailableCause() domain.ConfinementCause {
 // rides in Residuals, named by its syscall, and every surface that words the caps says
 // so (internal/probe's CapabilityLine and ResidualNotice).
 //
+// The fence also leaves AF_UNIX connect(2) open, at every ABI: connecting to a pathname
+// socket is no write right the box handles, and an abstract socket has no path to fence at
+// all — LANDLOCK_ACCESS_FS_RESOLVE_UNIX (ABI 9), the one right that reaches a pathname
+// socket, never reaches an abstract one, so the disclosure holds at ABI 9 too. A same-user service listening on one — tmux, the user
+// bus's systemd-run, docker — runs commands outside the fence for whoever asks, so the access
+// is write-class (ADR 0112): it rides in Residuals wherever landlock fences writes, beside
+// truncate(2), and probe.ResidualNotice words it at Auto start.
+//
 // NetworkEgress is disclosed the same way, and for a gap that no kernel closes: landlock's
 // network rights are LANDLOCK_ACCESS_NET_BIND_TCP and LANDLOCK_ACCESS_NET_CONNECT_TCP and
-// nothing else, so a box that opts into network-deny still lets UDP datagrams out and still
-// lets a command connect to a pathname AF_UNIX socket it can reach through the path fence.
-// That is a standing fact about the backend, not a per-box answer, so the two tokens are
-// disclosed wherever NetworkEgress is true — a deny box is what makes them matter, and the
-// caps are read before any box exists. Only probe.CapabilityLine words them: they are not
-// write-class, so probe.ResidualNotice filters them out and no host gains a startup banner
-// for them.
+// nothing else, so a box that opts into network-deny still lets UDP datagrams out. That is a
+// standing fact about the backend, not a per-box answer, so the token is disclosed wherever
+// NetworkEgress is true — a deny box is what makes it matter, and the caps are read before
+// any box exists. Only probe.CapabilityLine words it: it is network-egress-class, not
+// write-class, so probe.ResidualNotice filters it out and no host gains a startup banner for
+// it.
 func (c *landlockConfiner) Capabilities() domain.ConfinementCaps {
 	caps := domain.ConfinementCaps{
 		FSWrite:       c.abi >= landlockABIFSWrite,
@@ -260,7 +267,10 @@ func (c *landlockConfiner) Capabilities() domain.ConfinementCaps {
 		caps.Residuals = append(caps.Residuals, "truncate(2)")
 	}
 	if caps.NetworkEgress {
-		caps.Residuals = append(caps.Residuals, domain.ResidualUDPEgress, domain.ResidualUnixEgress)
+		caps.Residuals = append(caps.Residuals, domain.ResidualUDPEgress)
+	}
+	if c.abi >= landlockABIFSWrite {
+		caps.Residuals = append(caps.Residuals, domain.ResidualUnixEgress)
 	}
 	return caps
 }

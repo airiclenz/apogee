@@ -79,6 +79,14 @@ func newSeatbeltConfiner(present bool) *seatbeltConfiner {
 // returns caps it cannot fence with. Presence is the whole of what this backend probes — it
 // launches nothing at construction — so it has no refusal and no timeout to report, and one
 // cause covers it.
+//
+// The fence is a file-write fence over an allow-default profile, so two ways of reaching a
+// same-user service outside it stay open: connect(2) to an AF_UNIX socket (the network is
+// open by default, ADR 0012) and the launchd/Mach service lookup (`launchctl submit`,
+// `osascript`). Each such service runs commands for whoever asks, so both are write-class
+// residuals (ADR 0112), disclosed wherever the backend fences at all — probe.CapabilityLine
+// names them and probe.ResidualNotice words them at Auto start. The profile is unchanged;
+// the gap is disclosed, not closed. An absent sandbox-exec fences nothing and admits no gap.
 func (c *seatbeltConfiner) Capabilities() domain.ConfinementCaps {
 	if !c.present {
 		return domain.ConfinementCaps{Cause: domain.CauseBackendAbsent}
@@ -86,6 +94,7 @@ func (c *seatbeltConfiner) Capabilities() domain.ConfinementCaps {
 	return domain.ConfinementCaps{
 		FSWrite:       true,
 		NetworkEgress: true,
+		Residuals:     []string{domain.ResidualUnixEgress, domain.ResidualMachLookup},
 	}
 }
 
