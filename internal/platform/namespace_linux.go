@@ -87,11 +87,12 @@ import (
 // Network follows landlock's semantics (ADR 0012): open by default, and a non-empty
 // NetworkAllow opts the box into deny-all via `--unshare-net` — an empty network
 // namespace with only a loopback, the same coarse tightening landlock ABI 4 enforces.
-// Tighter than landlock's in one direction (an empty namespace also cuts UDP and abstract
-// AF_UNIX sockets, which landlock's TCP-only rights do not) and no tighter in another: a
-// pathname AF_UNIX socket is reached through the filesystem, which the read-only root
-// carries in, so a deny box is not a total egress fence and Capabilities discloses the
-// residual rather than claiming one.
+// Tighter than landlock's in one direction (an empty namespace also cuts abstract AF_UNIX
+// sockets, which landlock's network rights do not, and UDP, which they do only from ABI 10,
+// where a deny box also refuses a UDP bind) and no tighter in another: a pathname AF_UNIX
+// socket is reached through the filesystem, which the read-only root carries in, so a deny
+// box is not a total egress fence and Capabilities discloses the residual rather than
+// claiming one.
 
 // namespaceConfiner is the bwrap-launched Linux Confiner backend. bwrapPath is the launcher
 // Confine execs, resolved once at construction; "" means the backend cannot fence on this

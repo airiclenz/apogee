@@ -38,9 +38,10 @@ commands for it outside the box, so both are write-class and Auto names them at 
 ([ADR 0112](../../.capcom/knowledge/decisions/adr-0112.md)). bwrap, and landlock from ABI 9,
 close the user runtime directory and the docker and podman sockets, but other unix sockets stay
 reachable, so the token stays; [Auto mode's blast radius](configuration.md#auto-modes-blast-radius)
-says what each backend closes. One more belongs to network **deny**: a landlock backend that
-can claim it still discloses `connect(2) UDP` — datagram egress no kernel closes, so it is named
-rather than implied away.
+says what each backend closes. One more belongs to network **deny**: a landlock backend below
+ABI 10 that can claim it still discloses `connect(2) UDP` — datagram egress its network rights
+leave open, so it is named rather than implied away. From ABI 10 a deny box refuses UDP sends
+and binds as well, and the token is gone.
 Auto stays eligible; the field exists so the report never claims a fence it does not have.
 Where fs-write is `unavailable`, a backend that knows why appends a ` · why: <reason>` field
 instead — `namespace (fs-write: unavailable · network: unavailable · why: bwrap not found in /usr/bin, /bin, /usr/local/bin or /run/current-system/sw/bin)` —

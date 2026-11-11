@@ -25,3 +25,9 @@ title: ADR 0112 consequences
 - **Two questions are filed, not decided:** `landlock-udp-abi10` (landlock ABI 10 handles UDP, so the
   "no kernel closes" claims about `connect(2) UDP` stop being true there) and
   `windows-token-spawner-posture` (decision 8).
+
+  > **Amended 2026-11-11 (`docs/plans/2026-11-11 - 02 - fence-test-gaps-and-landlock-udp-plan.md`).**
+  > `landlock-udp-abi10` is decided: from landlock ABI 10 a network-deny box handles the UDP bind
+  > and connect/send rights, so it refuses UDP egress and UDP bind and no longer discloses
+  > `connect(2) UDP`; below ABI 10 the token stays. Every claim that UDP egress cannot be closed now
+  > says "below ABI 10".

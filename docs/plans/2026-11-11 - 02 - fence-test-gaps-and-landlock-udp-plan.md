@@ -108,7 +108,14 @@ internal/platform/confiner_linux_test.go — TestSelectLinuxConfiner; internal/p
 - `go test -race -count=1 -run 'TestCapabilityLine|TestResidualNotice' ./internal/probe/` and `go test -race -count=1 -run 'TestNetworkOnlyResidualsLeaveCapsAutoEligible|TestConfinementNetworkResidualTokensAreNamedBySyscall' ./internal/domain/`
 **Commit:** `feat(platform): close UDP egress under landlock ABI 10 in a network-deny box`
 
-## 5. Docs and comments stop claiming no kernel closes UDP
+## 5. Docs and comments stop claiming no kernel closes UDP — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): the Acceptance grep `grep -rn -i 'no kernel closes' ...` still prints one line, `.capcom/knowledge/decisions/adr-0112/adr-0112-consequences.md:26`: a Consequences bullet that QUOTES the claim to say it stops being true at ABI 10 (it never makes it). Per AGENTS.md a decision record is amended, not rewritten, so the bullet stays and a dated `> **Amended 2026-11-11**` note under it (named on ADR 0112's Status line) records the question as decided.
+NOTES (2026-11-11): consequential edit — .capcom/knowledge/decisions/adr-0112/adr-0112-consequences.md: made necessary by item 4 deciding the `landlock-udp-abi10` question the bullet files as open; amended with a dated blockquote, not rewritten.
+NOTES (2026-11-11): consequential edit — .capcom/knowledge/decisions/adr-0112.md: Status line names the new dated note, as AGENTS.md requires for any amendment.
+NOTES (2026-11-11): the regression-guard sweep also folded the contract's §3 `ApplyLandlockAndExec` line ("a TCP-connect restriction added only when the box opts into network-deny"), which now names the ABI 10 UDP restriction, and §6.2 row #13's 2026-09-22 note, which gains a dated note that the positive arm runs at ABI 4–9 and the negative arm from ABI 10.
+NOTES (2026-11-11): internal/domain/confinement.go's type comment said a deny box fences "TCP connect and bind"; reworded to "TCP connect" since the landlock ruleset handles only CONNECT_TCP (item 4's changelog says the same). seatbelt.go's "landlock's deny-all-TCP" remarks are true at every ABI and stay.
+NOTES (2026-11-11): consequential edit — internal/domain/confinement_test.go: made necessary by the reworded no-kernel-closes-UDP claims; the TestNetworkOnlyResidualsLeaveCapsAutoEligible comment said a landlock host "at ABI 4+" discloses UDP egress "its deny box cannot fence", now "at ABI 4–9 … leaves open".
 
 Depends on item 4.
 

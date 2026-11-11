@@ -3408,11 +3408,12 @@ design: the network is open in Auto (ADR 0012), so a same-user service listening
 `unfenced:` field; it is named here, in SECURITY.md and in ADR 0112.
 
 Network **deny** carries a gap of its own, which the same `unfenced:` field lists. Where landlock
-can claim network deny at all it still lets UDP datagrams out, so it discloses
-`connect(2) UDP`; the namespace (bwrap) backend's network namespace cuts datagrams with the rest
-of IP. No kernel closes UDP egress under landlock, so unlike truncation it is not waiting on a
-newer box. It is **not** write-class: it stays off Auto's startup notice and lives on the
-backend line, where the full list is comma-separated.
+can claim network deny at all but is below ABI 10 (ABI 4 to 9), it still lets UDP datagrams out,
+so it discloses `connect(2) UDP`; the namespace (bwrap) backend's network namespace cuts datagrams
+with the rest of IP. Like truncation, the gap closes on a newer kernel: from landlock ABI 10 a deny
+box refuses UDP sends and UDP binds too, and the token is no longer listed. It is **not**
+write-class: it stays off Auto's startup notice and lives on the backend line, where the full list
+is comma-separated.
 
 **On Windows the fence is a token, and the box is a mark on your disk.** No Windows
 facility takes "these paths are writable" as an argument, so the command runs under a

@@ -122,16 +122,18 @@ const (
 
 // The residual tokens internal/platform discloses and internal/probe words and filters,
 // spelled once here so the two name ONE definition rather than two that drift apart. They
-// fall in two classes (ADR 0112). ResidualUDPEgress is NETWORK-EGRESS-class: a network-deny
-// box fences TCP connect and bind and nothing else, so a box asked to deny the network says
-// it still lets datagrams through (confinement-execution-contract §5). ResidualUnixEgress and
-// ResidualMachLookup are WRITE-class: each reaches a same-user service that runs code for
-// whoever asks it, which is a write outside the box however the request travels, so they are
-// disclosed beside truncate(2) rather than beside the network token.
+// fall in two classes (ADR 0112). ResidualUDPEgress is NETWORK-EGRESS-class: below landlock
+// ABI 10 a landlock network-deny box fences TCP connect and nothing else, so a box asked to
+// deny the network says it still lets datagrams through (confinement-execution-contract §5).
+// ResidualUnixEgress and ResidualMachLookup are WRITE-class: each reaches a same-user service
+// that runs code for whoever asks it, which is a write outside the box however the request
+// travels, so they are disclosed beside truncate(2) rather than beside the network token.
 const (
-	// ResidualUDPEgress is the datagram egress a network-deny box cannot fence: landlock's
-	// network rights cover TCP only (no UDP right exists in the ABI), and bwrap's unshared
-	// net namespace is a total cut rather than a per-protocol one.
+	// ResidualUDPEgress is the datagram egress a network-deny box leaves open where landlock
+	// is below ABI 10: from ABI 4 to ABI 9 landlock's network rights cover TCP only. From ABI
+	// 10 a network-deny box handles the UDP bind and connect/send rights too, so it refuses a
+	// confined datagram and a UDP bind alike and the token is not disclosed. bwrap's unshared
+	// net namespace is a total cut rather than a per-protocol one, so it never discloses it.
 	ResidualUDPEgress = "connect(2) UDP"
 
 	// ResidualUnixEgress is the AF_UNIX connect the fence leaves open: a pathname socket the

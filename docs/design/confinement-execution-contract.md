@@ -188,8 +188,8 @@ func ApplyLandlockAndExec(box domain.ConfinementBox, argv []string) error
 ```
 
 which first calls `runtime.LockOSThread()` (never undone), then builds the ruleset from `box`
-(workspace-write + `WritablePaths`; a TCP-connect restriction added only when the box opts into
-network-deny), sets `PR_SET_NO_NEW_PRIVS`, calls `landlock_restrict_self`, then `syscall.Exec(argv[0],
+(workspace-write + `WritablePaths`; a TCP-connect restriction — from landlock ABI 10 a UDP
+bind and connect/send restriction too — added only when the box opts into network-deny), sets `PR_SET_NO_NEW_PRIVS`, calls `landlock_restrict_self`, then `syscall.Exec(argv[0],
 argv, os.Environ())`. The lock comes first because `PR_SET_NO_NEW_PRIVS` and `landlock_restrict_self`
 bind to the calling OS thread only: without it the Go scheduler may move the goroutine between the
 restriction and the exec, and the exec'ing thread would be an unrestricted one.
@@ -983,9 +983,12 @@ never optimistic:
   abstract one stays reachable *(amended 2026-11-11,
   [ADR 0112](../../.capcom/knowledge/decisions/adr-0112.md), items 6 and 9 of plan
   `2026-11-11 - 01`; it was disclosed only where `NetworkEgress` is true)*. ABI ≥ 4 (kernel ≥ 6.7)
-  ⇒ `NetworkEgress = true` **with `Residuals` also naming `connect(2) UDP`** — the ABI's network
-  rights cover TCP `connect`/`bind` alone, so a deny box says it still lets datagrams through
-  *(amended 2026-09-22, item 6 of plan `2026-09-22 - 00`)*. A kernel without landlock ⇒ `{false, false}`. **ABI 1–2 ⇒ `FSWrite = true` with
+  ⇒ `NetworkEgress = true` **with `Residuals` also naming `connect(2) UDP` below ABI 10** — from
+  ABI 4 to ABI 9 the network rights cover TCP `connect`/`bind` alone, so a deny box says it still
+  lets datagrams through *(amended 2026-09-22, item 6 of plan `2026-09-22 - 00`)*. From ABI 10 a
+  deny box also handles `LANDLOCK_ACCESS_NET_BIND_UDP` and `LANDLOCK_ACCESS_NET_CONNECT_SEND_UDP`
+  with no rule granting either, so it refuses a confined datagram and a UDP bind alike, and the
+  token is not disclosed *(amended 2026-11-11, items 4 and 5 of plan `2026-11-11 - 02`)*. A kernel without landlock ⇒ `{false, false}`. **ABI 1–2 ⇒ `FSWrite = true` with
   `Residuals` also naming `truncate(2)`** (the ruleset cannot handle `LANDLOCK_ACCESS_FS_TRUNCATE` before
   ABI 3): the fence is real but a confined command can still *empty* an existing file outside the
   box, and a kernel ≥ 6.2 closes it. A kernel without landlock says why in `Unavailable`
@@ -1065,8 +1068,10 @@ prose rather than as a token. The one **network-egress-class** residual is open 
 network-**deny** box while `NetworkEgress` is true: `connect(2) UDP` (`domain.ResidualUDPEgress`).
 The tokens are spelled once in `internal/domain` so the backends that disclose them and the probe
 surfaces that word them cannot drift apart. The UDP token is a standing fact about the backend,
-not a per-box answer, so it is disclosed wherever `NetworkEgress` is true — a deny box is only
-what makes it matter, and the caps are read before any box exists. The split has one visible
+not a per-box answer, so it is disclosed wherever `NetworkEgress` is true on landlock below ABI 10
+— a deny box is only what makes it matter, and the caps are read before any box exists. From
+ABI 10 landlock closes UDP egress in a deny box and the token is gone *(amended 2026-11-11, plan
+`2026-11-11 - 02`)*. The split has one visible
 consequence: `probe.CapabilityLine` words **every** token, while `probe.ResidualNotice` is
 write-class only and filters the UDP one out, so no host gains a startup banner about egress a box
 it never asked to tighten leaves open — and every Linux and macOS host running Auto confined gains
@@ -1222,6 +1227,9 @@ wrapper; #7/#8 encode ADR 0012's network-open default with deny as a tightening.
 > is absent. Against the **namespace** backend the negative arm runs for real (it discloses
 > `connect(2) AF_UNIX` only); against **landlock** ABI 4+ the positive arm asserts the delivery its
 > `connect(2) UDP` disclosure promises, and rows #7/#8/#13 all skip on Windows with `NetworkEgress`.
+> *(Amended 2026-11-11, plan `2026-11-11 - 02`: landlock discloses the token only below ABI 10, so
+> the positive arm runs at ABI 4–9 and the negative arm — no datagram reaches the listener — from
+> ABI 10.)*
 
 > **Amended 2026-09-26 (code audit, ADR 0056 D2).** Row **#14** (`merged_stream_clobber_denied`)
 > closes the gap row #11 cannot see: since 2026-09-16 the kill-on-denial watch reads **stderr alone**,

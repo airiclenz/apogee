@@ -330,8 +330,8 @@ func TestConfigConfinementBoxNeverMutatesTheConfiguredPaths(t *testing.T) {
 }
 
 // A residual must not become a back-door Auto gate. ADR 0012 put Auto behind filesystem-write
-// confinement alone, and the residual set is disclosure: a landlock host at ABI 4+ discloses the
-// UDP egress its deny box cannot fence, a backend discloses the same-user spawning services a
+// confinement alone, and the residual set is disclosure: a landlock host at ABI 4–9 discloses the
+// UDP egress its deny box leaves open, a backend discloses the same-user spawning services a
 // confined command can still reach (AF_UNIX, mach-lookup — write-class, ADR 0112), and that host
 // is exactly as Auto-eligible as it was before it started saying so. Pinned at the domain level so
 // the property holds for any backend that grows a residual, not just the one that has it.
