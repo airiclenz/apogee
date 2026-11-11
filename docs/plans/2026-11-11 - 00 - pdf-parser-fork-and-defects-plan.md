@@ -116,7 +116,7 @@ Depends on item 2.
 **Closes:** pdf-unclosed-array-hang
 **Commit:** `fix(doctext): end the PDF parser's read loops at end of input`
 
-## 4. A git failure names its subcommand, not a leading option
+## 4. A git failure names its subcommand, not a leading option — ✅ DONE (2026-11-11)
 
 **What:**
 **Goal:** a git call whose arguments lead with global options reports its subcommand: the snapshot store's `-c core.excludesFile=<path> add …` that times out reads `git add: timed out after …`, and the same holds for the drain-wedged, output-exceeded and exit messages.

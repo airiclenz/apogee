@@ -462,17 +462,36 @@ func (h Host) queryDiagnosed(ctx context.Context, gitPath, dir string, env []str
 	}
 	switch {
 	case res.TimedOut:
-		return "", res.CombinedOutput, incompleteError{text: fmt.Sprintf("git %s: timed out after %s", args[0], timeout)}
+		return "", res.CombinedOutput, incompleteError{text: fmt.Sprintf("git %s: timed out after %s", subcommand(args), timeout)}
 	case res.DrainWedged:
-		return "", res.CombinedOutput, incompleteError{text: fmt.Sprintf("git %s: output drain wedged", args[0])}
+		return "", res.CombinedOutput, incompleteError{text: fmt.Sprintf("git %s: output drain wedged", subcommand(args))}
 	case res.ExitCode != 0:
-		return "", res.CombinedOutput, fmt.Errorf("git %s: exit %d: %s", args[0], res.ExitCode, strings.TrimSpace(res.CombinedOutput))
+		return "", res.CombinedOutput, fmt.Errorf("git %s: exit %d: %s", subcommand(args), res.ExitCode, strings.TrimSpace(res.CombinedOutput))
 	case res.Truncated:
 		return "", res.CombinedOutput, incompleteError{text: fmt.Sprintf(
-			"git %s: output exceeded %d bytes", args[0], subprocess.MaxSubprocessOutputBytes,
+			"git %s: output exceeded %d bytes", subcommand(args), subprocess.MaxSubprocessOutputBytes,
 		)}
 	}
 	return res.Stdout, res.CombinedOutput, nil
+}
+
+// subcommand names the git subcommand an argument list runs, for a failure message: the first
+// argument that is not a leading global option. `-c` and `-C` take their value as the next
+// argument and are skipped with it; any other argument starting with `-` (`--literal-pathspecs`,
+// `--git-dir=<path>`) is skipped alone. A list of options only falls back to its first argument,
+// so the message still names what was run. args must not be empty.
+func subcommand(args []string) string {
+	for i := 0; i < len(args); i++ {
+		argument := args[i]
+		if argument == "-c" || argument == "-C" {
+			i++
+			continue
+		}
+		if !strings.HasPrefix(argument, "-") {
+			return argument
+		}
+	}
+	return args[0]
 }
 
 // CommandConfigName matches every config name whose VALUE is a program git executes — an

@@ -664,6 +664,39 @@ func TestHost_RunReportsANonZeroExitOverATruncatedStdout(t *testing.T) {
 	}
 }
 
+// TestHost_RunNamesTheSubcommandPastLeadingOptions pins that every failure message names the
+// subcommand, not a global option before it: each outcome is driven with the snapshot store's own
+// staging spelling, whose leading `-c core.excludesFile=` once put `-c` in the message.
+func TestHost_RunNamesTheSubcommandPastLeadingOptions(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		result     subprocess.SubprocessResult
+		wantPrefix string
+	}{
+		{name: "TimedOut", result: subprocess.SubprocessResult{TimedOut: true, ExitCode: -1}, wantPrefix: "git add: timed out after"},
+		{name: "DrainWedged", result: subprocess.SubprocessResult{DrainWedged: true, ExitCode: -1}, wantPrefix: "git add: output drain wedged"},
+		{name: "ExitCode", result: subprocess.SubprocessResult{ExitCode: 128, CombinedOutput: "fatal: bad"}, wantPrefix: "git add: exit 128"},
+		{name: "Truncated", result: subprocess.SubprocessResult{Truncated: true}, wantPrefix: "git add: output exceeded"},
+	}
+	for _, tc := range cases {
+		name, result, wantPrefix := tc.name, tc.result, tc.wantPrefix
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			host, _ := fakeHost(outsideGit(t), cleanRepository(func(string) subprocess.SubprocessResult {
+				return result
+			}))
+
+			_, err := host.Run(context.Background(), t.TempDir(), nil, testTimeout,
+				"-c", "core.excludesFile=", "add", "-A", "--ignore-errors")
+
+			if err == nil || !strings.HasPrefix(err.Error(), wantPrefix) {
+				t.Errorf("Run err = %v, want a message beginning %q", err, wantPrefix)
+			}
+		})
+	}
+}
+
 // TestHost_CaptureRefusesARepositoryWhoseConfigNamesAProgram pins that the probe spawns through
 // the Host too: a scripted --local listing carrying a filter driver refuses the call, and the
 // command itself is never launched.
