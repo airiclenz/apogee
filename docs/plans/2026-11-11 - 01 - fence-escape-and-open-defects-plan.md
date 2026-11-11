@@ -144,7 +144,11 @@ NOTES (2026-11-11): TestSeatbeltCapabilitiesHonest gains a wantResiduals column;
 - `go run ./cmd/apogee probe --endpoint http://127.0.0.1:9 | grep 'unfenced:.*connect(2) AF_UNIX'`
 **Commit:** `fix(platform): disclose AF_UNIX on every landlock ABI and AF_UNIX and mach-lookup on seatbelt`
 
-## 7. confinetest row: a confined connect to a unix socket outside the box
+## 7. confinetest row: a confined connect to a unix socket outside the box — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): carried note from item 6's verifier folded in — row #12's prose in confinetest.go no longer calls truncate(2) "the ONE write-class access" or reads "Residuals empty" (now "Residuals silent on truncate(2)", pointing at row #15), and its no-disclosure failure message names the missing truncate(2) residual instead of "NO residual"; the contract's §6.2 row #12 cell gets the same "silent on `truncate(2)`" wording, and the new 2026-11-11 amendment records why. The dated 2026-08-26 amendment's "the one write-class access" stays as a point-in-time record.
+NOTES (2026-11-11): the Windows skip is keyed on runtime.GOOS == "windows" (the token backend is the only Windows Probe caller); §9.3 gains item 6 for the row's Windows column, and §8's battery count reads 15. No CHANGELOG entry: the item adds a test row and a design-doc amendment, no user-facing change.
+NOTES (2026-11-11): pre-existing, not touched — TestNamespaceProbe's doc comment in internal/platform/namespace_linux_test.go lists "rows #1–#6, #11, #12" and already omitted #14 before this item; it now omits #15 too. Verified on this Pi: TestLandlockProbe and TestNamespaceProbe both pass unix_connect_outside_box on the disclosed (accept) arm; seatbelt and Windows checked by GOOS=darwin / GOOS=windows go vet only.
 
 **What:**
 **Goal:** `confinetest.Probe` runs a row that listens on a pathname unix socket outside the box and connects to it from inside: the connect must fail unless the backend discloses `connect(2) AF_UNIX`, in which case the row logs the residual; the contract's §6.2 table lists it as row #15 (subtest `unix_connect_outside_box`).

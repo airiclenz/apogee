@@ -1091,9 +1091,10 @@ harness asserts on exit status / error.
 | 9 | after teardown, the box roots' mandatory labels | **back to their prior state** — the disk mutation is reverted | **Windows** |
 | 10 | `Confine` a box with a non-empty `NetworkAllow` | **`ErrConfinementUnavailable`** — a requested tightening is never a silent no-op | **Windows** |
 | 11 | multi-command script: a denied `mkdir … && cd … && cat > …` heredoc chain, then an unguarded **relative** write — fail-fast preamble and kill-on-denial watch wired exactly as the terminal tool composes them | **stopped** — the watch matched the streamed denial; non-zero exit; the workspace file absent | POSIX (skips under `cmd.exe`) |
-| 12 | the parent seeds `<sibling-temp>/truncate.txt`, then the confined child runs `truncate -s 0 <path>` | keyed on the backend's own disclosure: `Residuals` empty ⇒ **denied** and the bytes intact; `Residuals` names `truncate(2)` ⇒ **succeeds** and the file is empty | POSIX with coreutils `truncate` (skips on macOS / `cmd.exe`) |
+| 12 | the parent seeds `<sibling-temp>/truncate.txt`, then the confined child runs `truncate -s 0 <path>` | keyed on the backend's own disclosure: `Residuals` silent on `truncate(2)` ⇒ **denied** and the bytes intact; `Residuals` names `truncate(2)` ⇒ **succeeds** and the file is empty | POSIX with coreutils `truncate` (skips on macOS / `cmd.exe`) |
 | 13 | (net) the parent opens a loopback `net.ListenPacket`, then the confined child sends one datagram to it from a network-**deny** box (`exec 3<>/dev/udp/<host>/<port>; printf x >&3`) | keyed on the backend's own disclosure: `Residuals` silent on `connect(2) UDP` ⇒ **the datagram does not reach the listener** (the parent's read hits its deadline); `Residuals` names it ⇒ **the datagram is delivered** | net-capable POSIX with `bash` (skips under `cmd.exe`) |
 | 14 | row #11's denied `mkdir … && cd …` chain with the mkdir's stderr merged into stdout (`2>&1`), then an unguarded **relative** write — both watches wired as the terminal tool arms them for a chained stream-merging line (stderr watch, plus the anchored-only watch on stdout) | **stopped** — the **stdout** watch matched the merged denial; non-zero exit; the workspace file absent | POSIX (skips under `cmd.exe`) |
+| 15 | the parent listens on a pathname unix socket in a fresh directory beside the box, then the confined child — the test binary re-run as `TestConfinetestHelper` — connects to it (subtest `unix_connect_outside_box`) | keyed on the backend's own disclosure: `Residuals` names `connect(2) AF_UNIX` ⇒ **the listener accepts the connect** and the row logs the residual; `Residuals` silent on it ⇒ **no connect reaches the listener** (the parent's accept hits its deadline) | POSIX (skips on the Windows token backend — issue `windows-token-spawner-posture`) |
 
 #3/#4 are the core "escape is OS-blocked" proof; #5 is the "no per-thread landlock, parent untouched"
 proof; #6 is the "after fork, before execve, inherited across exec" proof specific to the re-exec
@@ -1177,6 +1178,26 @@ wrapper; #7/#8 encode ADR 0012's network-open default with deny as a tightening.
 > command's data. The row wires both watches exactly so and asserts the **stdout** one matched. The
 > battery drivers hand `Probe` a second `DenialKillerFactory` for it
 > (`platform.NewAnchoredDenialKillWriter`), for the same import-cycle reason as row #11's.
+
+> **Amended 2026-11-11 (ADR 0112, plan `2026-11-11 - 01` item 7).** Row **#15**
+> (`unix_connect_outside_box`) probes the write-class residual ADR 0112 names: a same-user service
+> listening on a pathname unix socket outside the box (tmux, the user bus's `systemd-run`, `dockerd`)
+> runs commands for whoever connects, so a confined `connect(2)` to one is a write outside the box by
+> another route. Like rows #12 and #13 it keys the assertion on the backend's own `Residuals`, and
+> like row #13 its witness is the **parent's listener**, never the client's exit status: disclosed
+> `connect(2) AF_UNIX` ⇒ the listener accepts the connect; silent ⇒ no connect reaches it within the
+> wait. Row #12 is therefore no longer the only write-class row, and its assertion reads "silent on
+> `truncate(2)`" rather than "`Residuals` empty" — a backend can disclose `connect(2) AF_UNIX` and
+> still close truncation. The in-box client is the **test binary itself**, re-run with an argv the
+> harness builds (`-test.run=^TestConfinetestHelper$` only, never copied from `os.Args`) and told its
+> role and socket through the environment, which every backend passes through untouched; the calling
+> package defines `TestConfinetestHelper` as one call to `confinetest.RunHelper`, so the row needs no
+> host tool (`socat`, `nc`, `python`). The socket sits in a fresh directory beside the box rather than
+> under a subtest `t.TempDir()`, whose test-named path can outgrow macOS's 104-byte `sun_path`. At
+> this amendment every POSIX backend discloses `connect(2) AF_UNIX` (landlock at every ABI, namespace,
+> seatbelt), so the positive arm runs on each; the Windows token backend skips the row until issue
+> `windows-token-spawner-posture` settles its posture (§9.3). `Probe` now runs #1–#6, #11, #12, #14
+> and #15.
 
 ### 6.3 Per-backend acceptance checklists (now mechanical)
 
@@ -1284,7 +1305,7 @@ handed.
 | ADR 0012 accepted + ADR 0004 amended/cross-referenced | ✅ committed (`54b363c`); this doc adds the implementation-contract pointer |
 | `Confine(fn)` signature settled | §2 — prepare-in-place `*exec.Cmd`; closure form deleted with reasoning |
 | `workspaceScopedWriter` marker specified | §3 — unexported method in `internal/tools`, `workspaceWriteTarget` seam, survives `Subset` |
-| shared confinement-probe contract specified (signatures, escape attempts) | §6 — `confinetest.Probe`/`ProbeNetwork`, the escape battery (8 rows at P3.1, 14 since the §6.2 amendments), per-backend checklists |
+| shared confinement-probe contract specified (signatures, escape attempts) | §6 — `confinetest.Probe`/`ProbeNetwork`, the escape battery (8 rows at P3.1, 15 since the §6.2 amendments), per-backend checklists |
 | per-call disposition pinned | §4 — the full table, dangerous-action guard runs first |
 | capability honesty pinned | §5 — startup probe, `AutoEligible()` → `FSWrite`-only |
 | **no production code in P3.1** | ✅ — this is a design document only |
@@ -1388,6 +1409,10 @@ verbatim below the floor — no new wording, no new surface.
    box refused.
 5. `t.TempDir()` cleanup survives the labelling — the test process is Medium and writing *down* is
    permitted.
+6. **Row #15 skips** on the token backend (amended 2026-11-11, ADR 0112): it discloses no
+   `connect(2) AF_UNIX`, and whether its Low-integrity child can reach a same-user socket, named pipe
+   or COM server that spawns processes is open (issue `windows-token-spawner-posture`); the row's
+   Windows column turns into an assertion once that issue settles it.
 
 ### 9.4 Acceptance checklist (the Windows counterpart of §6.3)
 

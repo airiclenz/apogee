@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -56,8 +57,8 @@ type DenialKiller interface {
 type DenialKillerFactory func(next io.Writer, kill func()) DenialKiller
 
 // Probe drives c through the filesystem escape battery (confinement-execution-contract
-// §6.2 rows #1–#6 plus the chained-script and merged-stream clobber probes and the
-// truncate-residual probe)
+// §6.2 rows #1–#6 plus the chained-script and merged-stream clobber probes, the
+// truncate-residual probe and the unix-socket connect probe)
 // under a box rooted at fresh temp dirs. The caller passes the OS-specific backend (any
 // domain.Confiner), the platform shell (platform.Current()), and the two pieces of the
 // terminal tool's own hardening the clobber probes reproduce exactly as that tool
@@ -67,6 +68,10 @@ type DenialKillerFactory func(next io.Writer, kill func()) DenialKiller
 // same import-cycle reason Shell is redeclared above. The battery and
 // its assertions are identical across backends, so "confined" means the same thing on
 // landlock, namespace, seatbelt and the Windows token backend.
+//
+// The calling test binary must define a test named HelperTestName whose body is one call to
+// RunHelper: row #15 re-runs that binary inside the box as its socket client, so the probe
+// needs no host tool (socat, nc, python) to connect from inside.
 //
 // When c reports FSWrite==false (e.g. a kernel built without landlock) enforcement cannot be
 // exercised on this host, so Probe skips — the backend is still constructed and Capabilities
@@ -156,14 +161,15 @@ func Probe(
 	})
 
 	t.Run("truncate_outside_box", func(t *testing.T) {
-		// Row #12: the ONE write-class access a backend may knowingly leave open while
-		// reporting FSWrite — landlock cannot handle LANDLOCK_ACCESS_FS_TRUNCATE before ABI 3
-		// (kernel 6.2), so on Ubuntu 22.04, Debian 12 and RHEL 9 a confined command can still
-		// empty an existing file outside the box. The assertion is keyed on the backend's OWN
-		// disclosure rather than on a hard-coded expectation: caps.Residuals empty means the
-		// fence is claimed complete and the truncate must be DENIED with the bytes intact;
-		// caps.Residuals naming truncate(2) means the gap is admitted and the truncate must
-		// SUCCEED. Asserting behaviour and disclosure together is what stops either drifting
+		// Row #12: a write-class access a backend may knowingly leave open while reporting
+		// FSWrite — landlock cannot handle LANDLOCK_ACCESS_FS_TRUNCATE before ABI 3 (kernel
+		// 6.2), so on Ubuntu 22.04, Debian 12 and RHEL 9 a confined command can still empty an
+		// existing file outside the box. (It is not the only one: connect(2) AF_UNIX is
+		// write-class too and row #15 probes it — ADR 0112.) The assertion is keyed on the
+		// backend's OWN disclosure rather than on a hard-coded expectation: caps.Residuals
+		// silent on truncate(2) means that gap is claimed closed and the truncate must be
+		// DENIED with the bytes intact; caps.Residuals naming truncate(2) means the gap is
+		// admitted and the truncate must SUCCEED. Asserting behaviour and disclosure together is what stops either drifting
 		// silently — a backend that closes the gap without clearing Residuals fails here, and
 		// so does one that opens a gap without disclosing it.
 		//
@@ -191,8 +197,8 @@ func Probe(
 			return
 		}
 		if err == nil {
-			t.Fatalf("confined `truncate` of %q succeeded although the backend discloses NO residual; "+
-				"an unfenced write-class access must be disclosed in Capabilities().Residuals", target)
+			t.Fatalf("confined `truncate` of %q succeeded although the backend discloses no %q residual; "+
+				"an unfenced write-class access must be disclosed in Capabilities().Residuals", target, "truncate(2)")
 		}
 		if size == 0 {
 			t.Fatalf("confined `truncate` emptied %q despite error %v; the fence did not hold and nothing "+
@@ -266,6 +272,64 @@ func Probe(
 			t.Fatalf("stat %q: %v", clobber, statErr)
 		}
 	})
+
+	t.Run("unix_connect_outside_box", func(t *testing.T) {
+		// Row #15: a same-user service listening on a pathname unix socket outside the box
+		// (tmux, the user bus's systemd-run, dockerd) runs commands for whoever connects, so
+		// connect(2) AF_UNIX is a write outside the box by another route and write-class
+		// (ADR 0112). The assertion is keyed on the backend's OWN disclosure exactly as rows
+		// #12 and #13 are: Residuals naming connect(2) AF_UNIX means the gap is admitted and
+		// the parent's listener must ACCEPT the confined connect; Residuals silent on it means
+		// the fence is claimed to close that socket and no connect may reach the listener.
+		//
+		// The observable is the parent's LISTENER, as in row #13, never the helper's exit
+		// status. The client is this test binary re-run inside the box (HelperTestName), so the
+		// row needs no host tool. The socket sits in a fresh directory beside the box rather
+		// than under a subtest t.TempDir(), whose test-named path can outgrow macOS's 104-byte
+		// sun_path.
+		if runtime.GOOS == "windows" {
+			t.Skip("confinetest: the token backend's posture on same-user sockets, named pipes and COM " +
+				"servers is not yet established (issue windows-token-spawner-posture); unix-connect row is skipped")
+		}
+		dir, err := os.MkdirTemp("", "ct")
+		if err != nil {
+			t.Fatalf("socket dir: %v", err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		sock := filepath.Join(dir, "s")
+		ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: sock, Net: "unix"})
+		if err != nil {
+			t.Fatalf("listen unix %q: %v", sock, err)
+		}
+		defer func() { _ = ln.Close() }()
+
+		output, runErr := runUnixConnectHelper(t, c, box, sock)
+		if err := ln.SetDeadline(time.Now().Add(unixProbeWait)); err != nil {
+			t.Fatalf("set accept deadline: %v", err)
+		}
+		conn, acceptErr := ln.Accept()
+		accepted := acceptErr == nil
+		if accepted {
+			_ = conn.Close()
+		}
+		if discloses(c.Capabilities().Residuals, domain.ResidualUnixEgress) {
+			if !accepted {
+				t.Fatalf("no connect reached %s (accept: %v; helper: %v, output:\n%s) although the backend "+
+					"discloses %q as unfenced; the disclosure and the behaviour disagree",
+					sock, acceptErr, runErr, output, domain.ResidualUnixEgress)
+			}
+			t.Logf("confined connect reached %s; the backend discloses the residual %q", sock, domain.ResidualUnixEgress)
+			return
+		}
+		if accepted {
+			t.Fatalf("a confined connect reached %s although the backend discloses no %q residual; "+
+				"an unfenced write-class access must be disclosed in Capabilities().Residuals",
+				sock, domain.ResidualUnixEgress)
+		}
+		if !errors.Is(acceptErr, os.ErrDeadlineExceeded) {
+			t.Fatalf("accepting on %s: %v; want the accept deadline to expire with no connect", sock, acceptErr)
+		}
+	})
 }
 
 // mergedClobberLine returns the merged-stream clobber script: the chained probe's
@@ -280,6 +344,62 @@ func mergedClobberLine(sh Shell, outside string) (string, bool) {
 	return "mkdir -p " + dir + " 2>&1 && cd " + dir + " && touch clobber\n" +
 		"sleep 2\n" +
 		"echo clobbered > merged.txt\n", true
+}
+
+// unixProbeWait bounds row #15's accept. The helper's connect has completed (or been refused)
+// by the time the confined run returns, so a connect that got through is already queued on the
+// listener and the wait only covers kernel scheduling — and it is the exact cost of the negative
+// case, where it always expires in full.
+const unixProbeWait = 2 * time.Second
+
+// HelperTestName is the test every binary that calls Probe must define, with one call to
+// RunHelper as its body: row #15 re-runs the binary inside the box, selecting this test alone.
+const HelperTestName = "TestConfinetestHelper"
+
+// The environment a re-run test binary reads to learn it is row #15's in-box client: helperEnv
+// names the role and unixSocketEnv the socket to connect to. The environment, not the argv,
+// carries them because every backend passes it through to the confined child untouched, while
+// the argv is the test binary's own flag set.
+const (
+	helperEnv        = "APOGEE_CONFINETEST_HELPER"
+	helperUnixClient = "unix-connect"
+	unixSocketEnv    = "APOGEE_CONFINETEST_UNIX_SOCKET"
+)
+
+// RunHelper is the body of the caller's HelperTestName test. In an ordinary test run it does
+// nothing; re-run by row #15 inside the box, it connects to the named unix socket and fails the
+// test, exiting non-zero, when the connect is refused. The row never asserts on that exit
+// status — the parent's listener is its witness — so the failure is diagnostic output only.
+func RunHelper(t *testing.T) {
+	if os.Getenv(helperEnv) != helperUnixClient {
+		return
+	}
+	sock := os.Getenv(unixSocketEnv)
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatalf("confined connect to %q: %v", sock, err)
+	}
+	_ = conn.Close()
+}
+
+// runUnixConnectHelper re-runs this test binary confined to box as row #15's socket client and
+// returns its combined output and run error, both for diagnostics. The argv is built here — the
+// binary and a -test.run selecting HelperTestName alone — never copied from os.Args, which
+// carries the outer run's own selection and flags.
+func runUnixConnectHelper(t *testing.T, c domain.Confiner, box domain.ConfinementBox, sock string) (string, error) {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locate the test binary: %v", err)
+	}
+	ctx := context.Background()
+	cmd := exec.CommandContext(ctx, exe, "-test.run=^"+HelperTestName+"$")
+	cmd.Env = append(os.Environ(), helperEnv+"="+helperUnixClient, unixSocketEnv+"="+sock)
+	if err := c.Confine(ctx, box, cmd); err != nil {
+		t.Fatalf("Confine(%s -test.run=%s): %v", exe, HelperTestName, err)
+	}
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
 
 // udpProbeWait bounds row #13's listener read. A datagram that escapes at all is already on
