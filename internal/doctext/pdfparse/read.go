@@ -761,8 +761,14 @@ func (r *Reader) resolve(parent objptr, x interface{}) Value {
 				b := newBuffer(strm.Reader(), 0)
 				b.allowEOF = true
 				for i := 0; i < n; i++ {
-					id, _ := b.readToken().(int64)
-					off, _ := b.readToken().(int64)
+					// End of input ends the header however large /N claims it is: past it every
+					// read is io.EOF, so a loop counted out to /N made no progress for billions of turns.
+					idToken, offToken := b.readToken(), b.readToken()
+					if idToken == io.EOF || offToken == io.EOF {
+						break
+					}
+					id, _ := idToken.(int64)
+					off, _ := offToken.(int64)
 					if uint32(id) == ptr.id {
 						b.seekForward(first + off)
 						x = b.readObject()

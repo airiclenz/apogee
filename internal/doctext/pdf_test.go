@@ -1763,8 +1763,9 @@ func TestExtractPDF_RefusesDeepNestingBeforeTheParserRecurses(t *testing.T) {
 				plainStream("9 0 "+deepArrays, "/Type /ObjStm /N 1 /First 4 /Filter 7 0 R"), "null")
 		}},
 		{name: "a ToUnicode CMap behind a PNG Up predictor", data: func(t *testing.T) []byte {
-			// Balanced, so a broken guard fails this case instead of hanging the parser: an array
-			// left open at the end of an interpreted stream loops the parser at end-of-file.
+			// Balanced, so the case measures the nesting guard alone: an array left open at the end
+			// of an interpreted stream is closed there by the parser, which
+			// TestExtractPDF_EndsAtTheEndOfATruncatedStream pins.
 			rows := pngUpRows([]byte(strings.Repeat("[", 1<<12)+strings.Repeat("]", 1<<12)), 4)
 			return nestingPDF(t, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >>",
 				contentStream("Shallow page"),
@@ -1874,6 +1875,135 @@ func TestExtractPDF_ReadsBracketsThatAreNotDeepSyntax(t *testing.T) {
 			}
 			if pages != 1 || !strings.Contains(text, pageText) {
 				t.Errorf("text = %q, pages = %d, want the page's own text", text, pages)
+			}
+		})
+	}
+}
+
+// truncatedStreamDeadline bounds one ExtractPDF call on a truncated fixture. It is fixed, not
+// scaled by the slow-box factor: the parser reads these tiny documents in milliseconds on any
+// box, while a read loop that never ends allocates on every turn, so a longer wait only lets a
+// regression eat more memory before it fails.
+var truncatedStreamDeadline = testtime.Fixed(5 * time.Second)
+
+// extractWithin runs ExtractPDF on data on a goroutine of its own and returns its result. When
+// the call has not returned by truncatedStreamDeadline it panics, never t.Fatal: nothing stops
+// the parsing goroutine, and only ending the test binary keeps a loop that never ends from
+// allocating while the rest of the package runs.
+func extractWithin(t *testing.T, data []byte) (text string, pages int, failMessage string) {
+	t.Helper()
+
+	type extraction struct {
+		text        string
+		pages       int
+		failMessage string
+	}
+	done := make(chan extraction, 1)
+	go func() {
+		var finished extraction
+		finished.text, finished.pages, finished.failMessage = ExtractPDF(context.Background(), data, 0)
+		done <- finished
+	}()
+
+	select {
+	case finished := <-done:
+		return finished.text, finished.pages, finished.failMessage
+	case <-time.After(truncatedStreamDeadline):
+		panic(fmt.Sprintf("%s: ExtractPDF did not return within %v", t.Name(), truncatedStreamDeadline))
+	}
+}
+
+// identityCMap is a /ToUnicode CMap body mapping every one-byte code to the Unicode code point
+// of the same number, so a page shown through it reads as its own text.
+const identityCMap = "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n" +
+	"1 begincodespacerange\n<00> <FF>\nendcodespacerange\n" +
+	"1 beginbfrange\n<00> <FF> <0000>\nendbfrange\n"
+
+// truncatedTails are the shapes a stream can end inside, each left open at end of input.
+var truncatedTails = []struct {
+	name string
+	tail string
+}{
+	{name: "an unclosed array", tail: "[ 1 2"},
+	{name: "a dictionary inside an unclosed array", tail: "[ << /A 1"},
+	{name: "an array inside an unclosed dictionary", tail: "<< /K [ 1"},
+	{name: "an unterminated hex string", tail: "<41"},
+	{name: "a literal string inside an unclosed array", tail: "[ (abc"},
+}
+
+// TestExtractPDF_EndsAtTheEndOfATruncatedStream pins that every read loop of the parser ends at
+// the end of its input: a page content stream or a /ToUnicode CMap that ends inside open syntax
+// still yields the page's text, and an object stream whose /N claims more entries than its body
+// holds ends its header search there: the font it was searched for is not in it, so the page
+// fails and the document is refused as holding no text — each promptly, through extractWithin.
+func TestExtractPDF_EndsAtTheEndOfATruncatedStream(t *testing.T) {
+	t.Parallel()
+
+	const pageText = "Before the cut"
+	type truncatedCase struct {
+		name            string
+		data            func(t *testing.T) []byte
+		wantFailMessage string
+	}
+	var cases []truncatedCase
+	for _, truncated := range truncatedTails {
+		program := contentBody(pageText) + "\n" + truncated.tail
+		cases = append(cases,
+			truncatedCase{
+				name: "a page content stream ending inside " + truncated.name,
+				data: func(t *testing.T) []byte {
+					return nestingPDF(t, plainFont, plainStream(program))
+				},
+			},
+			truncatedCase{
+				name: "a deflated page content stream ending inside " + truncated.name,
+				data: func(t *testing.T) []byte {
+					return nestingPDF(t, plainFont, deflatedStream(t, program))
+				},
+			},
+			truncatedCase{
+				name: "a ToUnicode CMap ending inside " + truncated.name,
+				data: func(t *testing.T) []byte {
+					return nestingPDF(t, fontWithToUnicode, contentStream(pageText),
+						plainStream(identityCMap+truncated.tail))
+				},
+			},
+		)
+	}
+	const endlessHeader = "/Type /ObjStm /N 1000000000000 /First 4"
+	cases = append(cases,
+		truncatedCase{
+			name:            "an object stream whose /N exceeds its body",
+			wantFailMessage: pdfNoTextMessage,
+			data: func(t *testing.T) []byte {
+				return compressedFontPDF(t, plainStream("9 0 "+plainFont, endlessHeader))
+			},
+		},
+		truncatedCase{
+			name:            "a deflated object stream whose /N exceeds its body",
+			wantFailMessage: pdfNoTextMessage,
+			data: func(t *testing.T) []byte {
+				return compressedFontPDF(t, deflatedStream(t, "9 0 "+plainFont, endlessHeader))
+			},
+		},
+	)
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			data := testCase.data(t)
+
+			text, pages, failMessage := extractWithin(t, data)
+
+			if failMessage != testCase.wantFailMessage {
+				t.Fatalf("failMessage = %q, want %q", failMessage, testCase.wantFailMessage)
+			}
+			if testCase.wantFailMessage != "" {
+				return
+			}
+			if pages != 1 || !strings.Contains(text, pageText) {
+				t.Errorf("text = %q, pages = %d, want the page's text read before the cut", text, pages)
 			}
 		})
 	}

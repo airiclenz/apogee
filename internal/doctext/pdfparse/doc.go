@@ -28,4 +28,12 @@
 //     re-panic ErrTooDeep instead of returning it as the page's error, so it fails the document,
 //     and Reader.GetPlainText panics with it where it returned a page error. The per-Reader count
 //     makes a Reader unsafe for concurrent use.
+//   - End of input (lex.go, read.go): every read loop ends at the end of its input. Where
+//     allowEOF lets a content stream, CMap or object stream end, readToken returns io.EOF and
+//     readByte a space on every later call, so a loop waiting for its closer never ended:
+//     buffer.readArray now closes an unclosed array there, as readDict already closed a
+//     dictionary, buffer.readHexString closes an unterminated hex string, and the header loop
+//     of an object stream in Reader.resolve stops there whatever its /N claims. Beside them,
+//     buffer.readLiteralString no longer keeps that stand-in space as the last byte of an
+//     unterminated string.
 package pdfparse

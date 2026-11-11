@@ -94,7 +94,12 @@ Depends on item 1.
 **Closes:** pdf-forged-offset-nesting; pdf-indirect-predictor-unscanned
 **Commit:** `fix(doctext): bound the PDF parser's recursion depth`
 
-## 3. Every parser read loop ends at end of input
+## 3. Every parser read loop ends at end of input — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): beyond the item's three loops, buffer.readLiteralString now also stops at end of input before appending readByte's stand-in '\n', so an unterminated `(abc` reads as "abc", not "abc\n". The `[ (abc` unit row exposed this. It is listed in pdfparse/doc.go's end-of-input patch entry.
+NOTES (2026-11-11): the ObjStm rows end in pdfNoTextMessage, not the "could not extract text" wording: the font the page needs is not in the stream's header, so the page fails and the document holds no text. The rows pin that exact message.
+NOTES (2026-11-11): the `pdfNestingProgram` comment in pdf.go is unchanged. Its "abandons" sentence is about where the lexer panics, not about the end-of-input loops, so the regression guard's reword rule does not reach it. `budgetedReaderAt` gains a sentence saying a loop that makes no read is beyond the read budget and ends in the parser itself.
+NOTES (2026-11-11): bite checks against the pre-fix code. The pdfparse hex row, the doctext CMap hex row (lex.go reverted) and the ObjStm row (read.go reverted) each panicked at the 5 s deadline. The allocating unclosed-array rows were not run against the pre-fix lexer, to keep memory safe on this box.
 
 Depends on item 2.
 

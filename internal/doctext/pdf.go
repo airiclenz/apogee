@@ -435,7 +435,9 @@ var errExtractionBudget = errors.New("pdf extraction budget exhausted")
 // caller's context. It is the bound on the parser's WALK, which no page-level cap can be: the
 // walk is driven by the document's own references, a /Kids array pointing at its own node loops
 // without ever returning a page, and the parser keeps no value cache, so each turn of that loop
-// is a fresh read. Bounding the reads makes the loop finite from outside the parser.
+// is a fresh read. Bounding the reads makes the loop finite from outside the parser. A loop that
+// makes no read is beyond it: the lexer's read loops, which turn at the end of a stream without
+// reading, end there by themselves (pdfparse's end-of-input patch).
 //
 // It is not safe for concurrent use and does not need to be: one ExtractPDF call drives one
 // parser on one goroutine.

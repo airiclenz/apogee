@@ -211,12 +211,15 @@ func (b *buffer) readToken() token {
 	}
 }
 
+// readHexString reads a hex string after its opening '<'. End of input closes an unterminated
+// one, keeping the bytes read so far and dropping a lone final digit: at end of input readByte
+// returns a space forever, so a loop that skipped spaces without checking b.eof never ended.
 func (b *buffer) readHexString() token {
 	tmp := b.tmp[:0]
 	for {
 	Loop:
 		c := b.readByte()
-		if c == '>' {
+		if c == '>' || b.eof {
 			break
 		}
 		if isSpace(c) {
@@ -224,6 +227,9 @@ func (b *buffer) readHexString() token {
 		}
 	Loop2:
 		c2 := b.readByte()
+		if b.eof {
+			break
+		}
 		if isSpace(c2) {
 			goto Loop2
 		}
@@ -256,6 +262,10 @@ func (b *buffer) readLiteralString() token {
 Loop:
 	for !b.eof {
 		c := b.readByte()
+		if b.eof {
+			// readByte's stand-in space at end of input, not a byte of the string.
+			break
+		}
 		switch c {
 		default:
 			tmp = append(tmp, c)
@@ -494,13 +504,16 @@ func (b *buffer) readObject() object {
 	return tok
 }
 
+// readArray reads an array after its opening '['. End of input closes an unclosed one, as it
+// closes a dictionary in readDict: readToken returns io.EOF there on every call, so an array that
+// read it as one more element grew forever.
 func (b *buffer) readArray() object {
 	b.descend()
 	defer b.ascend()
 	var x array
 	for {
 		tok := b.readToken()
-		if tok == nil || tok == keyword("]") {
+		if tok == nil || tok == keyword("]") || tok == io.EOF {
 			break
 		}
 		b.unreadToken(tok)
