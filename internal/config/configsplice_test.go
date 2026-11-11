@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -110,5 +111,68 @@ func TestWriteConfigAtomicallyRefusesALinkIntoAReadOnlyDirectory(t *testing.T) {
 	}
 	if string(got) != "old: true\n" {
 		t.Errorf("the link's target holds %q after a refused save, want it untouched", got)
+	}
+}
+
+// forceResolveFailure makes every evalSymlinks call fail, as filepath.EvalSymlinks does for a path
+// under a Windows junction, until the test ends. A test that calls it must not run in parallel:
+// the package's parallel tests reach writeConfigAtomically through editHeld.
+func forceResolveFailure(t *testing.T) {
+	t.Helper()
+	previous := evalSymlinks
+	evalSymlinks = func(string) (string, error) {
+		return "", errors.New("forced resolve failure")
+	}
+	t.Cleanup(func() { evalSymlinks = previous })
+}
+
+// A config the resolver cannot resolve although it exists is still saved through its link: the
+// link is followed by hand, its target takes the new bytes, and no temp file is left behind.
+func TestWriteConfigAtomicallyFallsBackWhenResolveFails(t *testing.T) {
+	link, target := symlinkConfigOrSkip(t, "old: true\n")
+	forceResolveFailure(t)
+
+	if err := writeConfigAtomically(link, []byte("new: true\n")); err != nil {
+		t.Fatalf("writeConfigAtomically with the resolver failing: %v", err)
+	}
+
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the config link was replaced by a %v file", info.Mode().Type())
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "new: true\n" {
+		t.Errorf("the link's target holds %q, want the new bytes", got)
+	}
+	if names := onlyFileIn(t, filepath.Dir(target)); len(names) != 1 {
+		t.Errorf("the target's directory holds %v, want only the config", names)
+	}
+	if names := onlyFileIn(t, filepath.Dir(link)); len(names) != 1 {
+		t.Errorf("the link's directory holds %v, want only the link", names)
+	}
+}
+
+// A path that is missing as well as unresolvable is refused with the resolver's error, as it was
+// before the fallback existed: there is nothing to write through.
+func TestWriteConfigAtomicallyKeepsTheResolveErrorForAMissingPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "absent", "config.yaml")
+	forceResolveFailure(t)
+
+	err := writeConfigAtomically(path, []byte("new: true\n"))
+
+	if err == nil {
+		t.Fatal("writeConfigAtomically saved to a missing path, want a refusal")
+	}
+	if !strings.Contains(err.Error(), "resolve config") || !strings.Contains(err.Error(), "forced resolve failure") {
+		t.Errorf("the refusal %q is not the resolve error", err)
+	}
+	if _, statErr := os.Stat(filepath.Dir(path)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("the refused save left %q behind (stat: %v)", filepath.Dir(path), statErr)
 	}
 }

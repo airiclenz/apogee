@@ -209,14 +209,16 @@ func fieldByYAMLTag(v reflect.Value, tag string) (reflect.Value, bool) {
 // resolved first, and the temp file, the rename and the carried-over mode all belong to the file it
 // points at, so the link stays a link and its target takes the new bytes atomically. Renaming onto
 // the link itself would swap it for a regular file and quietly detach the config from the copy the
-// user manages.
+// user manages. A path that exists but that filepath.EvalSymlinks cannot resolve — one reached
+// through a Windows NTFS junction (golang/go#82447, golang/go#63703) — is still written: see
+// resolveWriteTarget.
 //
 // Errors: a wrapped error naming the path when it cannot be resolved or stat'd; a wrapped error
 // naming the RESOLVED target when the temp file cannot be made beside it — a link into a read-only
 // directory (a /nix/store target, say) is refused there and never falls back to replacing the link
 // with a regular file; a wrapped error when the write, the mode or the rename fails.
 func writeConfigAtomically(path string, data []byte) error {
-	target, err := filepath.EvalSymlinks(path)
+	target, err := resolveWriteTarget(path)
 	if err != nil {
 		return fmt.Errorf("apogee: resolve config %q: %w", path, err)
 	}
@@ -245,6 +247,71 @@ func writeConfigAtomically(path string, data []byte) error {
 		return fmt.Errorf("apogee: replace %q: %w", target, err)
 	}
 	return nil
+}
+
+// evalSymlinks is the resolver resolveWriteTarget tries first. It is a variable so a test can force
+// the failure a Windows junction produces on any platform; nothing else assigns it.
+var evalSymlinks = filepath.EvalSymlinks
+
+// maxLinkHops bounds the by-hand walk of a config path's final-component links, so a link cycle
+// is refused rather than followed forever. It matches Linux's own MAXSYMLINKS.
+const maxLinkHops = 40
+
+// resolveWriteTarget names the file a write to path must replace: path with every link resolved.
+// It tries evalSymlinks first. When that fails on a path that exists — filepath.EvalSymlinks
+// reports an error for a path that passes under a Windows NTFS junction (golang/go#82447,
+// golang/go#63703) although the file is there — it follows only the final component's own links
+// by hand and leaves the directories above as written: the temp file and the rename then happen
+// beside the file under the junction, which is the same directory on disk.
+//
+// Errors: evalSymlinks' own error, unchanged, when path does not exist either; a wrapped error
+// when a link on the by-hand walk cannot be read or the walk passes maxLinkHops links.
+func resolveWriteTarget(path string) (string, error) {
+	target, resolveErr := evalSymlinks(path)
+	if resolveErr == nil {
+		return target, nil
+	}
+	if _, err := os.Lstat(path); err != nil {
+		return "", resolveErr
+	}
+	followed, err := followFinalLinks(path)
+	if err != nil {
+		return "", err
+	}
+	// The walk only resolved the final component; a full resolve of its result is the better
+	// target when it works, and the walk's result is a correct one when it does not.
+	if resolved, err := evalSymlinks(followed); err == nil {
+		return resolved, nil
+	}
+	return followed, nil
+}
+
+// followFinalLinks follows path's final component while it is a symbolic link, joining a relative
+// link target to the link's own directory, and returns the first path that is not a link. A path
+// whose final component is not a link resolves to itself.
+//
+// Errors: a wrapped error when a path on the walk cannot be stat'd or read as a link, or when the
+// walk passes maxLinkHops links (a cycle).
+func followFinalLinks(path string) (string, error) {
+	current := path
+	for range maxLinkHops {
+		info, err := os.Lstat(current)
+		if err != nil {
+			return "", fmt.Errorf("stat %q: %w", current, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return current, nil
+		}
+		dest, err := os.Readlink(current)
+		if err != nil {
+			return "", fmt.Errorf("read the link %q: %w", current, err)
+		}
+		if !filepath.IsAbs(dest) {
+			dest = filepath.Join(filepath.Dir(current), dest)
+		}
+		current = dest
+	}
+	return "", fmt.Errorf("%q passes more than %d links", path, maxLinkHops)
 }
 
 // linkedFrom is the clause an error about a resolved config target adds when the configured path is

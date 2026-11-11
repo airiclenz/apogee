@@ -35,7 +35,10 @@
 - Showing terminal-tool writes as changes (ADR 0110 d13 stands for additions).
 - A workspace file watcher.
 
-## 1. Write a config through a Windows junction
+## 1. Write a config through a Windows junction — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): on this windows/arm64 box symlinks are unavailable, so TestWriteConfigAtomicallyWritesThroughASymlink, ...RefusesALinkIntoAReadOnlyDirectory and the new ...FallsBackWhenResolveFails skip here (they run on Linux/macOS CI); the two junction tests and ...KeepsTheResolveErrorForAMissingPath pass.
+NOTES (2026-11-11): a whole-package `go test ./internal/config/` on this checkout fails 20 tests, 14 identical at HEAD in a fresh worktree; the other 6 (TestSaveServer*, TestSpliceScalarSettingGoldenOps) fail on golden-file comparisons because this working tree holds CRLF copies of eol=lf files (`git ls-files --eol`) — environment, not this item.
 
 **What:** Fixes `evalsymlink-junction-save`: `writeConfigAtomically` refuses a save when `filepath.EvalSymlinks` fails under a junction although the file exists.
 **Regression guard.** Name the two unnamed tests `TestWriteConfigAtomicallyKeepsTheResolveErrorForAMissingPath` (configsplice_test.go) and `TestWriteConfigAtomicallySavesASidePanelSettingThroughAJunction` (configsplice_windows_test.go), so the Acceptance `-run` reaches them — no `TestSaveSidePanel*` exists at the base.
