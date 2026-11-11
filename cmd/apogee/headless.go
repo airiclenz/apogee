@@ -937,9 +937,10 @@ func runHeadlessBody(
 		//
 		// probe.ResidualNotice IS printed, for the opposite reason: its cell is a backend that
 		// fences — so the run is never refused — which knowingly leaves a write-class access open
-		// (landlock ABI 1–2 and truncate(2)). An unattended run is exactly where that goes
-		// unnoticed otherwise, and it names no slash command. It is disclosure on stderr, never a
-		// blocker: the answer on stdout is untouched.
+		// (truncate(2) at landlock ABI 1–2; connect(2) AF_UNIX or mach-lookup, a same-user service
+		// that can run commands outside the fence — ADR 0112). An unattended run is exactly where
+		// that goes unnoticed otherwise, and it names no slash command. It is disclosure on
+		// stderr, never a blocker: the answer on stdout is untouched.
 		if notice := probe.ResidualNotice(
 			probe.BackendName(confiner), confiner.Capabilities(), mode, opts.ConfineToWorkspace); notice != "" {
 			cmd.PrintErrln(notice)

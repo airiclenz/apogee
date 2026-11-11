@@ -407,9 +407,10 @@ func TestDaemonRefusesWhenNoStartupServerIsResolved(t *testing.T) {
 }
 
 // The daemon's ONE confinement sentence: the residual disclosure — a backend that fences, on a
-// kernel where it knowingly leaves one write-class access open (landlock ABI 1–2 cannot fence
-// truncate(2)). It is said once at startup, on stderr, where a supervisor journals it; the degraded
-// cell has nothing to print here because it is REFUSED instead, by the verdict daemonHost hands
+// host where it knowingly leaves a write-class access open (landlock ABI 1–2 cannot fence
+// truncate(2); connect(2) AF_UNIX and mach-lookup reach same-user spawning services, ADR 0112).
+// It is said once at startup, on stderr, where a supervisor journals it; the degraded cell has
+// nothing to print here because it is REFUSED instead, by the verdict daemonHost hands
 // internal/daemon (TestDaemonHostRefusesAutoOnAHostThatCannotFence above).
 //
 // Both directions are driven through the confiner seam rather than read off this machine's kernel,

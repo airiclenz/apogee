@@ -115,10 +115,12 @@ func DegradedNotice(backendName string, caps domain.ConfinementCaps, mode domain
 
 // ResidualNotice returns the notice for Auto entered with confinement asked for, on a backend
 // that CAN fence the filesystem but discloses a write-class access it cannot cover (caps.Residuals
-// — landlock ABI 1–2, where truncate(2) has no bit; contract §5).
-// It is write-class ONLY: the network-egress-class tokens are filtered out (writeClassResiduals),
-// so a backend that discloses nothing but the egress a deny box leaves open says nothing here and
-// no host gains a startup banner for a fence it never asked for. CapabilityLine still names them.
+// — truncate(2) at landlock ABI 1–2, where it has no bit; connect(2) AF_UNIX and mach-lookup,
+// which reach a same-user service that can run commands outside the fence; contract §5, ADR 0112).
+// It is write-class ONLY: the network-egress-class token connect(2) UDP is filtered out
+// (writeClassResiduals), so a backend that discloses nothing but the datagram egress a deny box
+// leaves open says nothing here and no host gains a startup banner for a fence it never asked
+// for. CapabilityLine still names it.
 // The fence is doing its job and Auto is not degraded, so nothing is refused and nothing is
 // loosened: the operator is simply told what the fence does not stop.
 //
@@ -150,40 +152,54 @@ func ResidualNotice(backendName string, caps domain.ConfinementCaps, mode domain
 		backendName, strings.Join(clauses, "\n"))
 }
 
-// residualTruncate is the one residual token this package has consequence wording for. It is the
-// spelling internal/platform's landlock backend emits; the two are not a shared constant because a
-// drift here is HARMLESS by construction — an unrecognised token falls to the neutral clause below,
-// which is true of every residual, where sharing a constant with the backend that discovers the gap
-// would invert the dependency for no honesty gained.
+// residualTruncate is the one worded residual token spelled here rather than in internal/domain.
+// It is the spelling internal/platform's landlock backend emits; the two are not a shared constant
+// because a drift here is HARMLESS by construction — an unrecognised token falls to the neutral
+// clause below, which is true of every residual. The spawning-service tokens are worded off the
+// domain constants instead, because the backends that disclose them already spell them there.
 const residualTruncate = "truncate(2)"
 
 // residualConsequence words ONE residual token: what a confined command can still do with the
 // access this backend leaves open, in the operator's terms. A token it knows gets the specific
-// consequence and the kernel that closes it; a token it does not gets the NEUTRAL clause — the one
-// thing true of every residual by definition (contract §5: an access the backend knowingly cannot
-// fence) — never truncate(2)'s consequence borrowed for it. Silence is not an option either: a
-// backend that grows a new unfenced write-class access must still reach the operator, so the
-// default arm says what it can rather than dropping the token.
+// consequence: truncate(2) names the kernel that closes it, and the two spawning-service tokens
+// (ADR 0112) name the escape — a same-user service that runs commands outside the fence — in
+// words that hold on every backend that discloses them, since which sockets a backend masks
+// differs by backend. A token it does not know gets the NEUTRAL clause — the one thing true of
+// every residual by definition (contract §5: an access the backend knowingly cannot fence) —
+// never another token's consequence borrowed for it. Silence is not an option either: a backend
+// that grows a new unfenced write-class access must still reach the operator, so the default arm
+// says what it can rather than dropping the token.
 func residualConsequence(residual string) string {
-	if residual == residualTruncate {
+	switch residual {
+	case residualTruncate:
 		return "a confined command can still empty an existing file outside the workspace\n" +
 			"    (landlock ABI 1–2, kernel < 6.2). A kernel ≥ 6.2 closes it; until then treat auto's\n" +
 			"    fence as create-and-write only."
+	case domain.ResidualUnixEgress:
+		return "a same-user service listening on a unix socket the box can still reach\n" +
+			"    (such as tmux, or the user bus's systemd-run and docker where this backend does not\n" +
+			"    mask them) can run commands outside the fence for a confined command."
+	case domain.ResidualMachLookup:
+		return "a same-user launchd or Mach service that runs code for its caller\n" +
+			"    (such as launchctl submit, or osascript) can run commands outside the fence for a\n" +
+			"    confined command."
 	}
 	return "the backend discloses this access rather than fencing it, so a\n" +
 		"    confined command can still perform it outside the workspace."
 }
 
-// writeClassResiduals drops the network-egress-class tokens from a residual set, leaving the
-// write-class ones ResidualNotice speaks for. It is a DENY-list on the two domain.Residual*
-// network tokens rather than an allow-list of known write-class names: a backend that grows a
+// writeClassResiduals drops the network-egress-class token from a residual set, leaving the
+// write-class ones ResidualNotice speaks for. It is a DENY-list on domain.ResidualUDPEgress, the
+// one network token, rather than an allow-list of known write-class names: a backend that grows a
 // NEW unfenced write-class access must still reach the notice, and silence is the one failure
-// mode capability honesty cannot tolerate. CapabilityLine reads the unfiltered set — the whole
-// disclosure belongs on the honesty surface; only the auto-mode banner is write-class.
+// mode capability honesty cannot tolerate. connect(2) AF_UNIX is NOT dropped: reaching a same-user
+// service that spawns is a write outside the box (ADR 0112). CapabilityLine reads the unfiltered
+// set — the whole disclosure belongs on the honesty surface; only the auto-mode banner is
+// write-class.
 func writeClassResiduals(residuals []string) []string {
 	writeClass := make([]string, 0, len(residuals))
 	for _, residual := range residuals {
-		if residual == domain.ResidualUDPEgress || residual == domain.ResidualUnixEgress {
+		if residual == domain.ResidualUDPEgress {
 			continue
 		}
 		writeClass = append(writeClass, residual)

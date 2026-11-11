@@ -329,11 +329,12 @@ func TestConfigConfinementBoxNeverMutatesTheConfiguredPaths(t *testing.T) {
 	}
 }
 
-// A NETWORK-egress residual must not become a back-door Auto gate. ADR 0012 put Auto behind
-// filesystem-write confinement alone, and the residual set is disclosure: a landlock host at ABI
-// 4+ discloses the UDP and pathname-AF_UNIX egress its deny box cannot fence, and that host is
-// exactly as Auto-eligible as it was before it started saying so. Pinned at the domain level so
-// the property holds for any backend that grows a network residual, not just the one that has it.
+// A residual must not become a back-door Auto gate. ADR 0012 put Auto behind filesystem-write
+// confinement alone, and the residual set is disclosure: a landlock host at ABI 4+ discloses the
+// UDP egress its deny box cannot fence, a backend discloses the same-user spawning services a
+// confined command can still reach (AF_UNIX, mach-lookup — write-class, ADR 0112), and that host
+// is exactly as Auto-eligible as it was before it started saying so. Pinned at the domain level so
+// the property holds for any backend that grows a residual, not just the one that has it.
 func TestNetworkOnlyResidualsLeaveCapsAutoEligible(t *testing.T) {
 	t.Parallel()
 
@@ -344,8 +345,14 @@ func TestNetworkOnlyResidualsLeaveCapsAutoEligible(t *testing.T) {
 		wantCount int
 	}{
 		{
-			name:      "network_only_residuals_on_a_fencing_host",
-			caps:      ConfinementCaps{FSWrite: true, NetworkEgress: true, Residuals: []string{ResidualUDPEgress, ResidualUnixEgress}},
+			name:      "the_network_residual_on_a_fencing_host",
+			caps:      ConfinementCaps{FSWrite: true, NetworkEgress: true, Residuals: []string{ResidualUDPEgress}},
+			wantAuto:  true,
+			wantCount: 1,
+		},
+		{
+			name:      "spawning_service_residuals_on_a_fencing_host",
+			caps:      ConfinementCaps{FSWrite: true, Residuals: []string{ResidualUnixEgress, ResidualMachLookup}},
 			wantAuto:  true,
 			wantCount: 2,
 		},
@@ -356,7 +363,7 @@ func TestNetworkOnlyResidualsLeaveCapsAutoEligible(t *testing.T) {
 			wantCount: 3,
 		},
 		{
-			name:      "network_residuals_never_rescue_a_host_that_cannot_fence_writes",
+			name:      "residuals_never_rescue_a_host_that_cannot_fence_writes",
 			caps:      ConfinementCaps{NetworkEgress: true, Residuals: []string{ResidualUDPEgress, ResidualUnixEgress}},
 			wantAuto:  false,
 			wantCount: 2,
@@ -378,20 +385,31 @@ func TestNetworkOnlyResidualsLeaveCapsAutoEligible(t *testing.T) {
 	}
 }
 
-// The two network tokens are the ONE spelling internal/platform discloses and internal/probe
-// filters on; a silent re-wording here would leave the filter matching nothing and put a network
-// residual back into the auto-mode banner it must never reach.
+// The shared residual tokens are the ONE spelling internal/platform discloses and internal/probe
+// words and filters on; a silent re-wording here would leave the filter matching nothing and put
+// the network residual back into the auto-mode banner it must never reach, or hand a write-class
+// token the neutral clause in place of its own.
 func TestConfinementNetworkResidualTokensAreNamedBySyscall(t *testing.T) {
 	t.Parallel()
 
-	if ResidualUDPEgress != "connect(2) UDP" {
-		t.Errorf("ResidualUDPEgress = %q, want %q", ResidualUDPEgress, "connect(2) UDP")
+	tokens := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"ResidualUDPEgress", ResidualUDPEgress, "connect(2) UDP"},
+		{"ResidualUnixEgress", ResidualUnixEgress, "connect(2) AF_UNIX"},
+		{"ResidualMachLookup", ResidualMachLookup, "mach-lookup"},
 	}
-	if ResidualUnixEgress != "connect(2) AF_UNIX" {
-		t.Errorf("ResidualUnixEgress = %q, want %q", ResidualUnixEgress, "connect(2) AF_UNIX")
-	}
-	if ResidualUDPEgress == ResidualUnixEgress {
-		t.Error("the two network residual tokens are identical; they name two different egress classes")
+	seen := make(map[string]string, len(tokens))
+	for _, token := range tokens {
+		if token.got != token.want {
+			t.Errorf("%s = %q, want %q", token.name, token.got, token.want)
+		}
+		if other, ok := seen[token.got]; ok {
+			t.Errorf("%s and %s are both %q; each names a different access", other, token.name, token.got)
+		}
+		seen[token.got] = token.name
 	}
 }
 

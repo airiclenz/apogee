@@ -368,9 +368,10 @@ func (w *rootWiring) announceConfinement() {
 
 	// The third cell, and the sibling of the branch above rather than a third exclusive one: a
 	// backend that DOES fence, on a host where it knowingly leaves a write-class access open
-	// (landlock ABI 1–2 cannot fence truncate(2)). Auto is not degraded and nothing is refused —
-	// the operator is told the one thing the fence does not stop, once, at the same moment the
-	// posture is announced. It cannot fire together with the degradation notice: that one needs
+	// (landlock ABI 1–2 cannot fence truncate(2); a reachable unix socket or Mach service lets a
+	// same-user service run commands outside the fence — ADR 0112). Auto is not degraded and
+	// nothing is refused — the operator is told what the fence does not stop, once, at the same
+	// moment the posture is announced. It cannot fire together with the degradation notice: that one needs
 	// FSWrite false, this one needs it true.
 	if notice := probe.ResidualNotice(probe.BackendName(w.confiner), w.confiner.Capabilities(), w.mode, w.opts.ConfineToWorkspace); notice != "" {
 		w.announce(notice)

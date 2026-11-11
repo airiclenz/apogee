@@ -471,8 +471,9 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 // The three Auto startup lines are branches at the same site, and the first two never both fire:
 // confine=false is the blanket-loosen WARNING, confine=true on an unfenceable backend is the
 // degradation notice. The third is the residual disclosure — confine=true on a backend that CAN
-// fence but leaves a write-class access open (landlock ABI 1–2 and truncate(2)) — which is the
-// degradation notice's mirror in FSWrite and so can never accompany it.
+// fence but leaves a write-class access open (truncate(2) at landlock ABI 1–2, or connect(2)
+// AF_UNIX and mach-lookup, ADR 0112) — which is the degradation notice's mirror in FSWrite and
+// so can never accompany it.
 //
 // Every cell is dictated through the boot's confiner dependency (rootDeps) rather than read off
 // this machine's real backend: what a kernel can fence decides which branch speaks, so a

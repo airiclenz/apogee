@@ -487,10 +487,12 @@ func TestHeadlessAutoDegradedCellIsARefusalNotANotice(t *testing.T) {
 }
 
 // The residual cell is the degraded cell's mirror in FSWrite, and the opposite decision: a backend
-// that DOES fence — so the run is never refused — on a kernel where it knowingly leaves one
-// write-class access open (landlock ABI 1–2 cannot fence truncate(2)). Nothing is gated and nothing
-// falls back to approval, so there is nothing to refuse; the one thing the fence does not stop is
-// disclosed instead, on stderr, where it cannot contaminate the answer a pipeline reads off stdout.
+// that DOES fence — so the run is never refused — on a host where it knowingly leaves a write-class
+// access open (truncate(2) at landlock ABI 1–2; connect(2) AF_UNIX, a same-user spawning service
+// the box can still reach — ADR 0112). Nothing is gated and nothing falls back to approval, so
+// there is nothing to refuse; what the fence does not stop is disclosed instead, on stderr, where
+// it cannot contaminate the answer a pipeline reads off stdout. Each row names the exact clause its
+// token must be worded with, so a row can never pass on another token's sentence.
 //
 // Both directions are driven through the confiner seam rather than read off this machine's kernel,
 // because the silent half is the half a real host almost always lands in: a suite that only ever
@@ -502,11 +504,28 @@ func TestHeadlessAutoDisclosesTheFenceResidual(t *testing.T) {
 		name string
 		caps apogee.ConfinementCaps
 		want bool
+		// wantClause is the token's line exactly as the notice words it; "" on a silent row.
+		wantClause string
 	}{
 		{
 			name: "a fence with a known hole in it discloses the hole",
 			caps: apogee.ConfinementCaps{FSWrite: true, Residuals: []string{"truncate(2)"}},
 			want: true,
+			wantClause: "  truncate(2) — a confined command can still empty an existing file outside the workspace\n" +
+				"    (landlock ABI 1–2, kernel < 6.2). A kernel ≥ 6.2 closes it; until then treat auto's\n" +
+				"    fence as create-and-write only.",
+		},
+		{
+			name: "a reachable unix socket discloses the spawn-elsewhere escape",
+			caps: apogee.ConfinementCaps{FSWrite: true, Residuals: []string{domain.ResidualUnixEgress}},
+			want: true,
+			wantClause: "  connect(2) AF_UNIX — a same-user service listening on a unix socket the box can still reach\n" +
+				"    (such as tmux, or the user bus's systemd-run and docker where this backend does not\n" +
+				"    mask them) can run commands outside the fence for a confined command.",
+		},
+		{
+			name: "the network-class udp residual alone says nothing",
+			caps: apogee.ConfinementCaps{FSWrite: true, NetworkEgress: true, Residuals: []string{domain.ResidualUDPEgress}},
 		},
 		{
 			name: "a fence with no known hole says nothing",
@@ -527,8 +546,8 @@ func TestHeadlessAutoDisclosesTheFenceResidual(t *testing.T) {
 			if got := strings.Contains(errOut, disclosure); got != tc.want {
 				t.Errorf("residual disclosure on stderr = %v; want %v (stderr = %q)", got, tc.want, errOut)
 			}
-			if tc.want && !strings.Contains(errOut, "truncate(2)") {
-				t.Errorf("the disclosure does not name the access it is about: %q", errOut)
+			if tc.want && !strings.Contains(errOut, tc.wantClause) {
+				t.Errorf("the disclosure does not word its access as\n%s\n(stderr = %q)", tc.wantClause, errOut)
 			}
 			if strings.Contains(out, disclosure) {
 				t.Errorf("the disclosure reached stdout, where a pipeline would read it as the answer: %q", out)

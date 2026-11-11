@@ -61,13 +61,14 @@ type ConfinementCaps struct {
 	// Residuals names the accesses this backend knowingly cannot fence on this host while
 	// the matching enforcement bit is true, each named by its syscall; empty when both
 	// fences are complete. Two classes ride here: WRITE-class residuals, open while FSWrite
-	// is true (landlock ABI 1-2 and truncate(2)), and NETWORK-EGRESS-class residuals, open
-	// inside a network-deny box while NetworkEgress is true (ResidualUDPEgress and
-	// ResidualUnixEgress below). Capability honesty (confinement-execution-contract §5): a
+	// is true — truncate(2) at landlock ABI 1-2, and the same-user spawning services a confined
+	// command can still reach (ResidualUnixEgress, ResidualMachLookup below; ADR 0112) — and
+	// the NETWORK-EGRESS-class residual, open inside a network-deny box while NetworkEgress is
+	// true (ResidualUDPEgress below). Capability honesty (confinement-execution-contract §5): a
 	// backend that leaves an access open says so rather than reporting a fence it does not
 	// have. It is disclosure only — AutoEligible reads FSWrite alone, so a residual of
 	// either class never blocks Auto, it only gets said. probe.CapabilityLine words every
-	// token; probe.ResidualNotice is write-class only and filters the network ones out.
+	// token; probe.ResidualNotice is write-class only and filters the network one out.
 	Residuals []string
 
 	// Unavailable is the PROSE disclosure of WHY FSWrite is false — one short sentence naming
@@ -119,22 +120,30 @@ const (
 	CauseLaunchRefused ConfinementCause = "launch-refused"
 )
 
-// The network-egress-class residual tokens, spelled once here so internal/platform (which
-// discloses them) and internal/probe (which words and filters them) name ONE definition
-// rather than two that drift apart. A network-deny box fences TCP connect and bind and
-// nothing else: the kernel and userspace fences apogee has both leave datagram egress and
-// pathname AF_UNIX egress open, so a box asked to deny the network says which two classes
-// it still lets through (confinement-execution-contract §5).
+// The residual tokens internal/platform discloses and internal/probe words and filters,
+// spelled once here so the two name ONE definition rather than two that drift apart. They
+// fall in two classes (ADR 0112). ResidualUDPEgress is NETWORK-EGRESS-class: a network-deny
+// box fences TCP connect and bind and nothing else, so a box asked to deny the network says
+// it still lets datagrams through (confinement-execution-contract §5). ResidualUnixEgress and
+// ResidualMachLookup are WRITE-class: each reaches a same-user service that runs code for
+// whoever asks it, which is a write outside the box however the request travels, so they are
+// disclosed beside truncate(2) rather than beside the network token.
 const (
 	// ResidualUDPEgress is the datagram egress a network-deny box cannot fence: landlock's
 	// network rights cover TCP only (no UDP right exists in the ABI), and bwrap's unshared
 	// net namespace is a total cut rather than a per-protocol one.
 	ResidualUDPEgress = "connect(2) UDP"
 
-	// ResidualUnixEgress is the pathname AF_UNIX egress a network-deny box cannot fence:
-	// a filesystem-addressed socket is reached through the path fence, not the net fence,
-	// so a deny box leaves an already-reachable socket path connectable.
+	// ResidualUnixEgress is the AF_UNIX connect the fence leaves open: a pathname socket the
+	// box can still reach, or an abstract one, is connectable whatever the network setting,
+	// and a same-user service listening on one (tmux, the user bus's systemd-run, docker)
+	// can run a command outside the fence on the caller's behalf. Write-class (ADR 0112).
 	ResidualUnixEgress = "connect(2) AF_UNIX"
+
+	// ResidualMachLookup is the launchd/Mach service lookup seatbelt leaves open: a confined
+	// command can still reach a same-user Mach service that runs code for its caller
+	// (`launchctl submit`, `osascript`), outside the fence. Write-class (ADR 0112).
+	ResidualMachLookup = "mach-lookup"
 )
 
 // AutoEligible reports whether these capabilities can fence Auto's subprocess surface. Under

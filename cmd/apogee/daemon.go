@@ -243,7 +243,9 @@ func runDaemonWith(ctx context.Context, opts *config.Options, changed func(strin
 	}()
 	// The confinement posture a Firing will run under, said once at startup where a supervisor
 	// journals it. Only the residual cell speaks here: a backend that fences but knowingly leaves
-	// a write-class access open (landlock ABI 1–2 and truncate(2)) — disclosure, never a blocker.
+	// a write-class access open (truncate(2) at landlock ABI 1–2; connect(2) AF_UNIX or
+	// mach-lookup, a same-user service that can run commands outside the fence — ADR 0112) —
+	// disclosure, never a blocker.
 	// The degraded cell has no notice to print because it is REFUSED instead, at validation: the
 	// confinement facts daemonHost hands internal/daemon below are what it asks probe with. The
 	// mode is fixed to Auto because that is the only mode the disclosure is about, and an auto

@@ -105,7 +105,11 @@ NOTES (2026-11-11): ADR 0112's consequences name, beside the plan's collateral (
 - `capcom show landlock-udp-abi10 && capcom show windows-token-spawner-posture`; `capcom check`
 **Commit:** `docs(adr): record ADR 0112, Auto's fence and same-user spawning services`
 
-## 5. Class `connect(2) AF_UNIX` as write-class and word it at Auto start
+## 5. Class `connect(2) AF_UNIX` as write-class and word it at Auto start — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): consequential edit — cmd/apogee/wire_boot_test.go: made necessary by reclassing AF_UNIX write-class (its TestRunRootConfinementStartupNotices comment described the residual cell as "landlock ABI 1–2 and truncate(2)" only; the regression guard's enumerated sites are a floor).
+NOTES (2026-11-11): TestNetworkOnlyResidualsLeaveCapsAutoEligible keeps its name; its network-only row now holds UDP alone and a new row pins that the AF_UNIX and mach-lookup write-class residuals leave a fencing host Auto-eligible. TestConfinementNetworkResidualTokensAreNamedBySyscall also pins `mach-lookup`'s spelling.
+NOTES (2026-11-11): the backends still emit `connect(2) AF_UNIX` only where they did (landlock ABI 4+ with NetworkEgress, bwrap); widening it to every ABI and adding `mach-lookup` on seatbelt is item 6's, and the internal/platform comments calling AF_UNIX "not write-class" are left for it. Until item 6 lands, a landlock ABI 4+ or bwrap host now shows the AF_UNIX clause at Auto start (the ADR 0112 behaviour); the full cmd/apogee and internal/tui suites were not run on this box.
 
 **What:**
 **Goal:** `ResidualNotice` speaks for `connect(2) AF_UNIX` with a specific clause naming the spawn-elsewhere escape (worded to hold on every backend that discloses the token — see the regression guard); `connect(2) UDP` alone stays silent; a new domain token `mach-lookup` exists, is write-class, and has its own clause (launchd/Mach services such as `launchctl submit`, `osascript`).
