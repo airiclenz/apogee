@@ -1,11 +1,13 @@
 ---
 title: "Settings save refused: EvalSymlinks fails through a Windows junction"
-status: open
+status: done
 type: bug
 priority: 2
 labels: [windows]
 plan: 2026-11-11 - 03 - junction-save-and-panel-deleted-file-plan
 created: 2026-11-11T20:06:01Z
+closed: 2026-11-11T21:28:35Z
+reason: "Resolved by plan '2026-11-11 - 03 - junction-save-and-panel-deleted-file-plan' item 1 (archived at d3b7806a): writeConfigAtomically falls back when EvalSymlinks fails under a junction."
 ---
 
 Saving a setting (e.g. `side-panel.width` from the settings panel) fails with:

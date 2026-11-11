@@ -1,10 +1,12 @@
 ---
 title: Side panel keeps listing a file after it is deleted
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-11-11 - 03 - junction-save-and-panel-deleted-file-plan
 created: 2026-11-11T20:07:12Z
+closed: 2026-11-11T21:28:36Z
+reason: "Resolved by plan '2026-11-11 - 03 - junction-save-and-panel-deleted-file-plan' items 2-4 (archived at d3b7806a): delete_file folds and replays as a row removal, and rows whose file is gone from disk are hidden."
 ---
 
 When a file tracked in the side panel's changed-files list is deleted from the
