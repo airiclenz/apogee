@@ -499,7 +499,8 @@ func probeNetwork(t *testing.T, c domain.Confiner, sh Shell, required bool) {
 
 	t.Run("udp_egress_under_network_deny", func(t *testing.T) {
 		// Row #13: the network-class counterpart of row #12. A network-deny box fences TCP
-		// connect and bind; whether it also fences DATAGRAM egress is backend-specific, so the
+		// connect (bwrap's unshared namespace fences bind too; landlock leaves TCP bind
+		// unhandled); whether it also fences DATAGRAM egress is backend-specific, so the
 		// assertion is keyed on the backend's OWN disclosure exactly as #12's is —
 		// Residuals naming connect(2) UDP means the gap is admitted and the datagram must be
 		// DELIVERED; Residuals silent on it means the fence is claimed complete and the
