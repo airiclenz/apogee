@@ -41,6 +41,12 @@ title: ADR 0112 decision
    and no network namespace is added for it: scoping breaks X11's abstract socket, which `xclip`,
    `xdg-open` and headed browser tests need. The `connect(2) AF_UNIX` disclosure covers them.
 
+   > **Amended 2026-11-11 (closeout of `docs/plans/archived/2026-11-11 - 01 - fence-escape-and-open-defects-plan.md`).**
+   > "Both Linux rungs" holds for Auto's default open network only. A bwrap box that opts into
+   > network-deny runs under `--unshare-net`, and that fresh network namespace cuts abstract AF_UNIX
+   > sockets along with TCP (ADR 0081, 2026-09-22 note). This record adds no namespace of its own;
+   > the open-network box keeps abstract sockets reachable.
+
 7. **Seatbelt discloses only.** Its residuals gain `connect(2) AF_UNIX` and `mach-lookup`, both
    write-class; the profile is unchanged.
 

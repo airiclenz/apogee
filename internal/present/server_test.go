@@ -265,10 +265,9 @@ func TestDocServerServesEveryDocumentUnderARestrictivePolicy(t *testing.T) {
 }
 
 // A PDF is the one served type that does NOT carry the bare-sandbox policy (ADR 0019, amendment
-// 2026-11-11): Chromium has rendered PDFs blank under a CSP `sandbox`, and a PDF can carry neither
-// the script `default-src 'none'` refuses nor the meta refresh `sandbox` stops. The exact policy
-// is pinned so that re-adding either directive — or dropping one of the three that remain — is a
-// deliberate change with a failing test.
+// 2026-11-11): Chromium has rendered PDFs blank under a CSP `sandbox`, and a PDF cannot carry the
+// meta refresh `sandbox` stops. The exact policy is pinned so that re-adding either directive — or
+// dropping one of the three that remain — is a deliberate change with a failing test.
 func TestDocServerServesAPDFWithoutTheBareSandbox(t *testing.T) {
 	t.Parallel()
 

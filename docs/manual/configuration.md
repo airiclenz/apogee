@@ -3249,7 +3249,7 @@ devbox, a VM, a container — browser-renderable documents (`.html`, `.htm`, `.s
 so one cmd+click opens the document in the browser on *your* machine; that rung keeps the
 web formats precisely because a served response *can* carry a policy, and every document
 it serves is answered with `nosniff` and, except a `.pdf`, under `default-src 'none'` and
-a bare `sandbox`; a PDF, which can carry neither script nor a meta refresh, gets only
+a bare `sandbox`; a PDF, which cannot carry the meta refresh a sandbox stops, gets only
 `frame-ancestors 'none'; form-action 'none'; base-uri 'none'`, because browsers' built-in PDF
 viewers have rendered blank under a sandbox. Apogee never auto-opens
 on the remote box: there is no display there to open into. If a rung fails, the
