@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ledongthuc/pdf"
+	pdf "github.com/airiclenz/apogee/internal/doctext/pdfparse"
 )
 
 // PDF text extraction. Everything a caller needs to know about the format lives behind the
@@ -22,8 +22,8 @@ import (
 // every failure, and the header annotation — so a caller decides nothing about PDFs beyond "is
 // this one", "what came out" and "how do I say so".
 //
-// The parser is github.com/ledongthuc/pdf, a fork of rsc.io/pdf whose ancestor PANICS on
-// malformed input rather than returning an error. A tool that crashes the agent on a corrupt
+// The parser is internal/doctext/pdfparse, an in-tree copy of github.com/ledongthuc/pdf — a fork
+// of rsc.io/pdf whose ancestor PANICS on malformed input rather than returning an error. A tool that crashes the agent on a corrupt
 // download is not an option, and neither is one that lets a document size the agent's memory or
 // its walk, so the whole parse-and-walk runs behind a recover, behind bounds the DOCUMENT cannot
 // raise, and a recovered panic reads to the model exactly like any other unreadable file
@@ -434,7 +434,7 @@ var errExtractionBudget = errors.New("pdf extraction budget exhausted")
 // caller's context. It is the bound on the parser's WALK, which no page-level cap can be: the
 // walk is driven by the document's own references, a /Kids array pointing at its own node loops
 // without ever returning a page, and the parser keeps no value cache, so each turn of that loop
-// is a fresh read. Bounding the reads makes the loop finite without forking the parser.
+// is a fresh read. Bounding the reads makes the loop finite from outside the parser.
 //
 // It is not safe for concurrent use and does not need to be: one ExtractPDF call drives one
 // parser on one goroutine.

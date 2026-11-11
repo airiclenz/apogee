@@ -28,6 +28,9 @@
 // wording for a scanned-image or unreadable document, and the header annotation both consumers
 // stamp on what they extracted (PDFAnnotation).
 //
+// pdfparse/ is the PDF parser itself: an in-tree copy of github.com/ledongthuc/pdf, kept here so
+// it can be fixed at the root. Its doc.go names the copied version and lists every local patch.
+//
 // A second format is a sibling file with the same three-function shape, not a new abstraction:
 // nothing here is generalised over formats until a second one exists to generalise from.
 package doctext

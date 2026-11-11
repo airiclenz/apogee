@@ -52,7 +52,9 @@
 - `context-fill-bench-arm`, `lsp-symbol-navigation`, `serve-http-driver`, `user-view-reaction-cell`.
 - Removing or simplifying the PDF preflight; upstreaming the parser patches.
 
-## 1. Bring the PDF parser in-tree as `internal/doctext/pdfparse`
+## 1. Bring the PDF parser in-tree as `internal/doctext/pdfparse` — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): gofmt over the copy realigned the `nameToRune` map in name.go and, in read.go, turned the `Overview` doc line into a `# Overview` heading, dropped a trailing `//` before the package clause and replaced two ``…'' quote pairs with “…”; go vet raised nothing, so doc.go lists no local patches. read.go keeps upstream's `Package pdf implements…` comment verbatim beside doc.go's own package comment.
 
 **What:**
 **Goal:** `internal/doctext` imports the parser from `internal/doctext/pdfparse`; `go.mod` no longer requires `github.com/ledongthuc/pdf`; extraction behaviour is unchanged.

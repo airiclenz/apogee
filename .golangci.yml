@@ -20,6 +20,12 @@ linters:
         - -ST1021
         - -ST1022
         - -QF*
+  exclusions:
+    paths:
+      # The in-tree copy of the upstream PDF parser stays diffable against
+      # upstream, so it is not restyled to this gate; gofmt and go vet still
+      # hold over it, and its local patches are listed in its doc.go.
+      - internal/doctext/pdfparse/
 
 issues:
   # golangci-lint caps its own output by default (50 per linter, 3 per message).

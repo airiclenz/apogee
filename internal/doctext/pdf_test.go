@@ -20,8 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledongthuc/pdf"
-
+	pdf "github.com/airiclenz/apogee/internal/doctext/pdfparse"
 	"github.com/airiclenz/apogee/internal/testtime"
 )
 
