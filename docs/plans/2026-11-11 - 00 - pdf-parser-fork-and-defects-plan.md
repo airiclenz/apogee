@@ -212,7 +212,7 @@ NOTES (2026-11-11): the glossary `heartbeat` Note and the picker.go comments mat
 **Closes:** rebind-failure-never-retried
 **Commit:** `fix(tui): retry a failed heartbeat rebind on the next beat`
 
-## 9. A Windows test pins the narrowed remove classifier
+## 9. A Windows test pins the narrowed remove classifier — ✅ DONE (2026-11-11)
 
 **What:** test-only. Add `TestWindowsRemoveSharingErrorClassifier` to `internal/session/journal_windows_test.go`: a table over bare and `*os.PathError`-wrapped errnos asserting `isRemoveSharingError` is true for `windows.ERROR_SHARING_VIOLATION` and false for `windows.ERROR_ACCESS_DENIED` and for nil. The name must start with `TestWindows`: the Windows CI job selects tests by `-run 'TestWindows|TestAtomicWriteRetries'`.
 **Files:** internal/session/journal_windows_test.go

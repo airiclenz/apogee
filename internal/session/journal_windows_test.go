@@ -100,3 +100,36 @@ func TestWindowsRemoveJournalOfAReadOnlyJournal(t *testing.T) {
 		t.Error("RemoveJournal left the read-only journal behind")
 	}
 }
+
+// isRemoveSharingError accepts ERROR_SHARING_VIOLATION alone — the one error DeleteFile gives
+// while a watcher holds the journal open — bare or wrapped in the *os.PathError os.Remove returns.
+// ERROR_ACCESS_DENIED, which isRenameSharingError does accept, is a real refusal on a removal and
+// must surface, not be counted as success.
+func TestWindowsRemoveSharingErrorClassifier(t *testing.T) {
+	t.Parallel()
+	wrap := func(errno error) error {
+		return &os.PathError{Op: "remove", Path: `C:\journal`, Err: errno}
+	}
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "bare sharing violation", err: windows.ERROR_SHARING_VIOLATION, want: true},
+		{name: "wrapped sharing violation", err: wrap(windows.ERROR_SHARING_VIOLATION), want: true},
+		{name: "bare access denied", err: windows.ERROR_ACCESS_DENIED, want: false},
+		{name: "wrapped access denied", err: wrap(windows.ERROR_ACCESS_DENIED), want: false},
+		{name: "nil", err: nil, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := isRemoveSharingError(tt.err)
+
+			if got != tt.want {
+				t.Errorf("isRemoveSharingError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
