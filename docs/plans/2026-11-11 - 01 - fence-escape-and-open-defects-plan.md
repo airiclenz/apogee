@@ -35,7 +35,9 @@
   - 8 (re-check): guard folded, with owner decision (item 8's helper also returns the container-socket list; hermetic row for it)
   - 9 (re-check): guard folded, with owner decision (live witness's listener bound by the unconfined parent; a socket file may be the RESOLVE_UNIX `parent_fd`), plus the re-check report's three guards: (a) the sibling grant recurses down masked paths' ancestors, never granting an ancestor; (b) one pure rule planner the hermetic test drives; (c) planner inputs computed in the parent and carried in the encoded box, never read from the child's scratch `TMPDIR` env
 
-## 1. Record the Windows RemoveJournal CI evidence
+## 1. Record the Windows RemoveJournal CI evidence — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): no CHANGELOG entry — the classifier narrowing and the Windows test already have one under [Unreleased] ("Windows: a session journal an ACL refuses to remove is reported…"); this item only records evidence.
 
 **What:**
 **Goal:** `windows-journal-remove-check` carries a log line with the CI evidence (run 42825516741, commit a5c4f2db, `errno 32`) and is ready to close.
