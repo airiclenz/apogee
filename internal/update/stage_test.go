@@ -381,11 +381,12 @@ func TestStage_InvalidArguments_ReturnsErrorWithoutRequest(t *testing.T) {
 }
 
 // trickleChunkCount is how many separately flushed chunks the trickling server sends: enough that
-// the whole body takes several stall bounds while no single gap comes near one.
-const trickleChunkCount = 16
+// the whole body takes more than three stall bounds while no single gap comes near one.
+const trickleChunkCount = 32
 
-// trickleGapsPerStallBound is how many inter-chunk gaps fit in one stall bound.
-const trickleGapsPerStallBound = 5
+// trickleGapsPerStallBound is how many inter-chunk gaps fit in one stall bound: wide enough that a
+// loaded box can stall the trickling server for most of a bound without the download failing.
+const trickleGapsPerStallBound = 10
 
 func TestNewDownloadClient_BoundsStallsNotTotalTime(t *testing.T) {
 	t.Parallel()
@@ -412,8 +413,10 @@ func TestNewDownloadClient_BoundsStallsNotTotalTime(t *testing.T) {
 
 func TestDownload_BodyTrickledOverSeveralStallBounds_Completes(t *testing.T) {
 	t.Parallel()
-	stallBound := testtime.Budget(400 * time.Millisecond)
-	gap := stallBound / trickleGapsPerStallBound
+	stallBound := testtime.Budget(600 * time.Millisecond)
+	// The gap is pacing, a fixed fraction of the already-scaled bound, so the ratio — the claim —
+	// holds at every time scale.
+	gap := testtime.Fixed(stallBound / trickleGapsPerStallBound)
 	var want bytes.Buffer
 	for chunk := range trickleChunkCount {
 		want.WriteString("chunk-" + strings.Repeat("x", chunk) + "\n")

@@ -249,6 +249,8 @@ Depends on item 9.
 
 NOTES (2026-11-10): the stall bound is a `download` parameter (`stallTimeout`), not a package knob, so the trickle/stall tests stay `t.Parallel`; `Stage` passes `downloadStallTimeout` (60 s), which also bounds the dial, TLS handshake and response headers in `newDownloadClient`. `ForceAttemptHTTP2: true` keeps HTTP/2 on, since a custom `DialContext` would otherwise disable it.
 NOTES (2026-11-10): added `TestDownload_CallerCancelsMidBody_IsNotReportedAsStall` beyond the listed tests, so a cancelled `apogee update` is not mislabelled as a stall.
+NOTES (2026-11-11): closeout fix for e3a885e2 — the trickle test's `time.Sleep(gap)` failed TestNoFixedTimingInTests (gap = stallBound / literal 5); gap is now `testtime.Fixed(stallBound / trickleGapsPerStallBound)`, pacing derived from the already-Budget-scaled bound so the gap-to-bound ratio holds at every APOGEE_TEST_TIME_SCALE.
+NOTES (2026-11-11): widened the slow-box margin — stall bound Budget(400ms) -> Budget(600ms), gaps per bound 5 -> 10, chunks 16 -> 32 (gap 60 ms, a 540 ms scheduling hiccup tolerated vs 320 ms before; body still spans 3.2 bounds against the 3-bound floor). Test takes ~1.9 s at scale 1, ~3.9 s at scale 2.
 
 **What:**
 **Goal:** a release archive download that keeps moving completes however long it takes; one that stops sending for 60 s fails with an error naming the stall; size ceilings and the SHA256SUMS check are unchanged.
