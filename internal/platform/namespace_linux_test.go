@@ -488,6 +488,52 @@ func TestNamespaceMasksRuntimeDirSockets(t *testing.T) {
 	}
 }
 
+// TestNamespaceMasksContainerSockets pins the container-socket mask from inside the box (ADR
+// 0112): a confined connect to a container socket the plan covers reaches no listener, while the
+// same connect from a box that does not cover that path is accepted. The production candidates
+// (/run/docker.sock, /run/podman/podman.sock) are not the test's to bind, so the masked arm's
+// confiner plans from a host whose only candidate is a listener this unconfined test owns; the
+// control arm keeps the production candidates, which leave that listener reachable.
+func TestNamespaceMasksContainerSockets(t *testing.T) {
+	// Not parallel: the confined clients are real subprocesses.
+	control := fencingNamespaceConfiner(t)
+
+	// os.MkdirTemp, not t.TempDir(): a test-named path can outgrow sun_path's 108 bytes.
+	dir, err := os.MkdirTemp("", "cs")
+	if err != nil {
+		t.Fatalf("socket dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "docker.sock")
+	ln := listenUnix(t, sock)
+	box := domain.ConfinementBox{WorkspaceRoot: t.TempDir()}
+
+	masked := *control
+	masked.socketHost = func() unixSocketHost {
+		host := currentUnixSocketHost()
+		host.containerSockets = []string{sock}
+		return host
+	}
+	output, runErr := confinetest.UnixConnectFromBox(t, &masked, box, sock)
+	if acceptedWithin(t, ln) {
+		t.Errorf("a confined connect reached the container socket %s (client: %v, output:\n%s); "+
+			"a container socket the plan covers must be masked", sock, runErr, output)
+	}
+	// The mask binds /dev/null over the socket, and connect(2) to a path that is not a socket
+	// is refused: the refusal shows the client ran in the box and met the mask, so a box that
+	// failed to launch cannot pass for one that masked.
+	if !strings.Contains(output, "connection refused") {
+		t.Errorf("the confined client was not refused at the masked container socket %s (client: %v, output:\n%s)",
+			sock, runErr, output)
+	}
+
+	output, runErr = confinetest.UnixConnectFromBox(t, control, box, sock)
+	if !acceptedWithin(t, ln) {
+		t.Errorf("no confined connect reached %s from a box that does not cover it (client: %v, output:\n%s); "+
+			"the control arm must reach the listener the masked arm does not", sock, runErr, output)
+	}
+}
+
 // TestNamespaceResolvesSymlinkedAgentSocket pins the runtime-dir mask's agent re-exposure for a
 // $SSH_AUTH_SOCK that names a symlink beneath the masked dir, as a keyring daemon sets it: the
 // path the environment names must resolve inside the box, not only its canonical target, or a

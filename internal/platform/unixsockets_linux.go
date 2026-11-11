@@ -28,7 +28,9 @@ import (
 
 // containerSocketCandidates are the system container sockets a confined command must not reach:
 // docker's and rootful podman's, at their canonical /run paths (/var/run resolves there).
-// Rootless podman listens under the user runtime dir, which the runtime-dir mask covers.
+// Rootless podman listens under the user runtime dir, which the runtime-dir mask covers. It is
+// the default every unixSocketHost carries in its containerSockets field and is never mutated:
+// a test that needs other candidates sets that field on its own host instead.
 var containerSocketCandidates = []string{"/run/docker.sock", "/run/podman/podman.sock"}
 
 // unixSocketHost is the host state planUnixSockets reads, injected so the plan is a pure
@@ -45,6 +47,9 @@ type unixSocketHost struct {
 	ownerMode func(p string) (int, fs.FileMode, bool)
 	// readlink returns the target of the symlink at p, unfollowed, and true when p is a symlink.
 	readlink func(p string) (string, bool)
+	// containerSockets are the container socket paths the plan covers when they exist;
+	// containerSocketCandidates on every production host.
+	containerSockets []string
 }
 
 // unixSocketPlan is what a backend closes and re-opens, every path canonical and existing at
@@ -71,19 +76,20 @@ type unixSocketLink struct {
 
 // currentUnixSocketHost reads this process's host state for planUnixSockets: its uid, its
 // environment, its home and temp directories, and the filesystem through os.Stat and
-// filepath.EvalSymlinks. It is read at Confine time, so the box sees the environment the
-// confined command is launched from.
+// filepath.EvalSymlinks, with the production containerSocketCandidates. It is read at Confine
+// time, so the box sees the environment the confined command is launched from.
 func currentUnixSocketHost() unixSocketHost {
 	// A home directory apogee cannot name protects nothing and is skipped by the plan.
 	home, _ := os.UserHomeDir()
 	return unixSocketHost{
-		uid:       os.Getuid(),
-		getenv:    os.Getenv,
-		home:      home,
-		tempDir:   os.TempDir(),
-		resolve:   resolveExisting,
-		ownerMode: statOwnerMode,
-		readlink:  readSymlink,
+		uid:              os.Getuid(),
+		getenv:           os.Getenv,
+		home:             home,
+		tempDir:          os.TempDir(),
+		resolve:          resolveExisting,
+		ownerMode:        statOwnerMode,
+		readlink:         readSymlink,
+		containerSockets: containerSocketCandidates,
 	}
 }
 
@@ -131,7 +137,7 @@ func statOwnerMode(p string) (int, fs.FileMode, bool) {
 // existing agent path resolves through beneath a masked runtime dir are kept as AgentLinks, so
 // the path the environment names resolves in the box, not only its canonical form — except a
 // link inside a re-exposed agent directory, which that directory's own re-exposure carries. A
-// container socket is kept only when it exists.
+// container socket — one of host.containerSockets — is kept only when it exists.
 func planUnixSockets(host unixSocketHost, roots []string) unixSocketPlan {
 	protected := make([]string, 0, 2+len(roots))
 	for _, p := range append([]string{host.tempDir, host.home}, roots...) {
@@ -157,7 +163,7 @@ func planUnixSockets(host unixSocketHost, roots []string) unixSocketPlan {
 		plan.RuntimeDirs = append(plan.RuntimeDirs, dir)
 	}
 
-	for _, candidate := range containerSocketCandidates {
+	for _, candidate := range host.containerSockets {
 		if sock, ok := host.resolve(candidate); ok && !slices.Contains(plan.ContainerSockets, sock) {
 			plan.ContainerSockets = append(plan.ContainerSockets, sock)
 		}

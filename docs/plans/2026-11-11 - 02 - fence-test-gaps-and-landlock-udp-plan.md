@@ -38,7 +38,10 @@
 - `grep -n 'Wait = ' internal/platform/confinetest/confinetest.go` shows only `testtime.` initialisers
 **Commit:** `test(confinetest): route the unix and UDP probe windows through testtime.Fixed`
 
-## 2. Live bwrap test for the container-socket mask
+## 2. Live bwrap test for the container-socket mask — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): the masked arm also asserts the in-box client reports `connection refused` (connect(2) to the /dev/null bind), so a box that failed to launch cannot pass as one that masked; a mutation run (masked arm driven with the unmasked confiner) fails both masked-arm assertions.
+NOTES (2026-11-11): the override is `namespaceConfiner.socketHost func() unixSocketHost` (nil in production), so the host state is still read at Confine time; `containerSocketCandidates` stays as the never-mutated default both `currentUnixSocketHost()` and `fakeUnixSocketHost` read. landlock_linux.go untouched.
 
 **What:**
 **Goal:** A live test runs a bwrap box whose container-socket candidate is a temp listener and shows that a confined connect to it reaches no listener. A control arm without the mask shows the same probe is accepted. The test skips where bwrap cannot fence. Production masks the same `/run/docker.sock` and `/run/podman/podman.sock` set as before.

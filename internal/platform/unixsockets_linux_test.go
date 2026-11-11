@@ -28,7 +28,8 @@ var runtimeDir = fakePath{uid: fakeHostUID, mode: fs.ModeDir | 0o700}
 var socketFile = fakePath{uid: fakeHostUID, mode: fs.ModeSocket | 0o600}
 
 // fakeUnixSocketHost returns a unix-socket host running as fakeHostUID with env as its
-// environment, home and tmp as its home and temp dirs, and exactly paths on its filesystem.
+// environment, home and tmp as its home and temp dirs, exactly paths on its filesystem, and the
+// production container socket candidates.
 func fakeUnixSocketHost(env map[string]string, home, tmp string, paths map[string]fakePath) unixSocketHost {
 	return unixSocketHost{
 		uid:     fakeHostUID,
@@ -53,6 +54,7 @@ func fakeUnixSocketHost(env map[string]string, home, tmp string, paths map[strin
 			f, ok := paths[p]
 			return f.link, ok && f.link != ""
 		},
+		containerSockets: containerSocketCandidates,
 	}
 }
 

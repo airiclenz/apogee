@@ -103,6 +103,10 @@ type namespaceConfiner struct {
 	// of time from a bwrap that is not installed without reading the sentence; "" when
 	// bwrapPath is set.
 	cause domain.ConfinementCause
+	// socketHost, when set, supplies the unix-socket host state Confine plans its masks from in
+	// place of currentUnixSocketHost — a test's seam for pointing a container-socket candidate
+	// at a listener it owns. nil in production.
+	socketHost func() unixSocketHost
 }
 
 // newNamespaceConfiner builds the backend from an explicit probe result. It is the shared
@@ -324,7 +328,11 @@ func (c *namespaceConfiner) Confine(_ context.Context, box domain.ConfinementBox
 	// Launch the original command under bwrap; argv after "--" is the original command, run
 	// inside the namespaces bwrap sets up from the flags. The wrap carries the resolved
 	// program path and the process-group rule for every POSIX backend (confine_posix.go).
-	flags := append(namespaceArgv(box, pathExists, currentUnixSocketHost()), "--")
+	sockets := currentUnixSocketHost
+	if c.socketHost != nil {
+		sockets = c.socketHost
+	}
+	flags := append(namespaceArgv(box, pathExists, sockets()), "--")
 	if err := wrapArgvUnderLauncher(cmd, c.bwrapPath, flags...); err != nil {
 		return err
 	}
