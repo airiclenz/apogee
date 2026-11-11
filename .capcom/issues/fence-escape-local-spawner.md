@@ -1,10 +1,12 @@
 ---
 title: Auto's write fence is escapable through a same-user service that spawns processes (user systemd, dockerd, launchd)
-status: open
+status: done
 type: bug
 priority: 1
 labels: [security]
 created: 2026-11-10T19:37:31Z
+closed: 2026-11-11T14:27:07Z
+reason: "Resolved by plan '2026-11-11 - 01 - fence-escape-and-open-defects-plan' items 4-10 (archived at d2bc5fcb): ADR 0112 posture; AF_UNIX write-class at Auto start on every landlock ABI, seatbelt AF_UNIX+mach-lookup disclosed; bwrap and landlock ABI>=9 mask runtime dir and container sockets; confinetest unix-connect row; docs and SECURITY.md disclose. Landlock RESOLVE_UNIX live path is exercised only on an ABI>=9 CI kernel (confinetest row #15)."
 ---
 
 Source: docs/reviews/code-audit-2026-11-10.md (Medium, "The Auto write fence is escapable through reachable local services"). Verified VALID, severity raised to High under SECURITY.md's posture, 2026-11-10 at a5c4f2db.

@@ -1,10 +1,12 @@
 ---
 title: Check on Windows that RemoveJournal tolerates a watcher's open journal
-status: open
+status: done
 type: task
 priority: 3
 plan: 2026-11-09 - 02 - windows-journal-remove-check-plan
 created: 2026-10-18T05:31:31Z
+closed: 2026-11-11T14:27:07Z
+reason: "Resolved by plan '2026-11-11 - 01 - fence-escape-and-open-defects-plan' item 1 (archived at d2bc5fcb): CI evidence recorded (run 42825516741, errno 32 = ERROR_SHARING_VIOLATION only); classifier already accepts just that error, no code change needed."
 ---
 
 `Store.RemoveJournal` (`internal/session/store.go`) ignores a Windows removal error when a watcher has the Event journal open. Go opens files without FILE_SHARE_DELETE, so the owner's `os.Remove` fails while a watcher is following the journal. `isRemoveSharingError` (`internal/session/rename_windows.go`) treats ERROR_SHARING_VIOLATION **and** ERROR_ACCESS_DENIED as "a watcher holds it". The leftover journal then has a free lock, so `Live` skips it and the next startup sweep (`SweepJournals`) collects it.
