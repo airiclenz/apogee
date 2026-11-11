@@ -143,7 +143,12 @@ internal/tui/gitstatus.go — refreshGit; internal/tui/sessionview.go — sessio
 **Commit:** `fix(tui): hide changed-file rows whose file no longer exists`
 **Closes:** panel-deleted-file-entry
 
-## 5. Document deleted-file rows
+## 5. Document deleted-file rows — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): the plan's note that docs/manual/configuration.md carries unrelated uncommitted edits did not hold — the tree was clean at dispatch, so the whole file's diff is this item's.
+NOTES (2026-11-11): added the optional pointer blockquotes under ADR 0110 decisions 4, 10 and 13 in adr-0110-decision.md; the Decision text itself is unchanged.
+NOTES (2026-11-11): on this windows/arm64 box the five Acceptance packages fail many unrelated tests whole-package (the known Windows-cannot-run-full-suite posture); every doc-reading drift test passes (TestManual*/TestDocsEnv* in cmd/apogee, TestShippedDangerousRuleIDsAreDocumented and TestManualStatesTheFloorGuardCount in internal/config, TestManualListsEveryKnownToolName in internal/tools, internal/processing ok), and TestSidePanel* fails only the two pre-existing `/w` cases items 3 and 4 recorded.
+NOTES (2026-11-11): retry — restored the `adr-0110-amend-1110` parenthetical on ADR 0110's Status line that the first attempt dropped; the new `adr-0110-amend-1111` clause follows it unchanged.
 
 **What:** Recast at the regression check (2026-11-11). Depends on items 2–4. Owns every prose site that says a deletion counts as a change, that the list only grows, that it keeps first-write order, that the changed-files section goes live once the session has written a file, or that the panel renders from Events alone. Find them with `grep -rn "deletion included\|has written a file\|changed this session\|first-write order\|folds from \*\*Events\|renders from engine Events\|from engine Events" docs/ layout.md .capcom/knowledge/`.
 **Regression guard.** Both of the check's guards fold: `adr-0110-amend-1111` amends ADR 0110 d10 as well as d4 and d13, and ADR 0110's Status line names all three; the prose rule and grep cover every sentence giving the changed-files live rule, row order, or that the panel renders from Events alone.

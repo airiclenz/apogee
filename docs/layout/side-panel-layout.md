@@ -147,7 +147,7 @@ section out gets it appended in `auto`, so a list saved before `mcp` existed sho
 |---|---|---|
 | `sub-agents` | any run is queued or running, and for 30 s after the last one ends | phase glyph, Delegation name, phase word, elapsed, context fill |
 | `tasks` | the list has an unfinished task | status glyph and task text; the first unfinished task marked `▸` |
-| `changed-files` | the session (any depth) has written a file | `↳` (`»` under `ui.glyphs: safe`) in the lead when a sub-agent wrote it (blank otherwise), path trimmed from the left, `+N −M` from Edit regions where present, right-aligned in the `tool-marker` role |
+| `changed-files` | a row remains: a file written at any depth, not since removed by `delete_file`, and not found gone from disk | `↳` (`»` under `ui.glyphs: safe`) in the lead when a sub-agent wrote it (blank otherwise), path trimmed from the left, `+N −M` from Edit regions where present, right-aligned in the `tool-marker` role |
 | `usage` | context fill ≥ 50% | the fill as the status-line gauge reads it, `used/window N% bar` (`~` before an estimate, the percent clamped at 100), the bar in the gauge colour on no background — a column too narrow for the whole bar keeps the figures alone; `sys · tools · hist` split (history = estimate − standing rows); `prompt · completion` tokens; `cached N%` (the cached share of the prompt); `cost`. The words are `/usage`'s, and as there a zero count is left out rather than printed as `0`, a row with every count zero not drawn |
 | `mcp` | any MCP server is `dialling`, `failed` or `disconnected` | the name, then `state · N tools` right-aligned, one row per server in first-reported order |
 
@@ -212,11 +212,19 @@ fold's `▼`, the `│` separator, navigation mode's `▌` cursor and the usage 
 `▸` (`>` under `ui.glyphs: safe`) in the current-task style; any other open task is `○`. The task list stores only done / not
 done, so there is no separate in-progress state.
 
-**Changed-file rows.** One row per path, in first-write order; several writes to one path merge
-into its row. A path inside the workspace is shown relative to it, one outside it absolute, then
-trimmed from the left a whole component at a time behind `…/`. Only apogee's file tools count —
-the ones that name the file they write, a deletion included — and a failed write is not counted. A
-file changed through the `terminal` tool is not shown (ADR 0110 decision 13).
+**Changed-file rows.** One row per path, ordered by the path's first write since it was last
+deleted; several writes to one path merge into its row. A path inside the workspace is shown
+relative to it, one outside it absolute, then trimmed from the left a whole component at a time
+behind `…/`. Only apogee's file tools count — the ones that name the file they write — and a failed
+write is not counted. A successful `delete_file` removes the path's row at every scope, the top
+level and Run view alike, whoever wrote it; a later write lists it again, its `+N −M` counted from
+that write on, and a resumed session replays the removal from its stored record. A listed file gone
+from disk any other way — a `terminal` `rm`, a `move_file` source, `/undo` — is hidden until it
+exists again: the TUI stats the listed paths off the Update goroutine at each Turn's end and on the
+git-status cadence, never at paint, and only a stat that reports the file missing hides its row. A
+hidden row is left out of the painted rows, the header count, the navigation stops and the click
+targets, and a section whose every row is hidden is not live. A file changed through the
+`terminal` tool is still not shown (ADR 0110 decision 13, as `adr-0110-amend-1111` amends it).
 
 **Header row:** `<pin> <Title> (<summary>) ⋯ ▼`. The pin glyph leads it, on the content's first
 cell — `○` while the section is `auto`, `●` (`•` under `ui.glyphs: safe`) while it is `pinned` — and a dotted leader in the

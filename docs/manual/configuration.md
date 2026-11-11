@@ -1435,7 +1435,7 @@ fold indicator at the right edge, as a tool block's header does: `▼` open, `�
 |---|---|---|
 | `sub-agents` | a delegation is queued or running, and for 30 s after the last one ends | the status line's spinner while it runs, `○` queued, `◷` `waiting` while an approval it asked for is showing or queued, `✓` done, `✗` failed; its name, phase, elapsed time and context fill |
 | `tasks` | the task list has an unfinished task | `✓` done, `▸` the current task (the first unfinished one), `○` still open |
-| `changed-files` | the session has written a file, at any depth | `↳` before the path when a sub-agent wrote it; the path, trimmed from the left to fit; `+N −M` lines where the edit reports them |
+| `changed-files` | a file written at any depth is still listed: not deleted since, and still on disk | `↳` before the path when a sub-agent wrote it; the path, trimmed from the left to fit; `+N −M` lines where the edit reports them |
 | `usage` | the context is at least 50% full | the fill as the status line's gauge shows it (`20k/32k 62%` then the bar), the system / tools / history split, the `prompt` and `completion` tokens, the `cached` share of the prompt and the `cost` — in `/usage`'s words, a zero left out rather than shown as `0` |
 | `mcp` | an MCP server is dialling, failed or disconnected | the server's name, then its state and its tool count at the right edge (`docs` … `connected · 12 tools`); the count is left off while no connection serves, and kept while a failed reconnect's previous connection still does |
 
@@ -1450,7 +1450,10 @@ tool block's counts wear, a finished sub-agent's `done` green, and every failure
 The `mcp` section's header counts the servers that are not connected, by state (`○ MCP (1 failed)`,
 `2 dialling · 1 failed`), and the section hides again once every server is connected. Its server
 names are shown with terminal escapes stripped. Only apogee's own file tools count as changes: **a file changed through the `terminal` tool is not
-shown**, and neither is a write that failed. Under `ui.glyphs: safe` the done mark is `√`, the failed one `x`, the waiting one `?`, a pinned
+shown**, and neither is a write that failed. A file `delete_file` removes drops out of the list, and
+so does a listed file that is gone from disk any other way (a `terminal` `rm`, a `move_file`
+source, `/undo`): apogee looks for the listed files again at the end of each turn and between
+turns, and shows a file again once it exists. Under `ui.glyphs: safe` the done mark is `√`, the failed one `x`, the waiting one `?`, a pinned
 section's `●` is `•`, the current task's `▸` is `>` and a sub-agent write's `↳` is `»`; `○` stays.
 
 A blank row parts each section from the one above it, and every section's rows are indented under

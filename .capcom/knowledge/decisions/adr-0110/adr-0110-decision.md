@@ -34,6 +34,11 @@ and every section folds from engine Events.**
    estimate minus those rows. This is stricter than ADR 0031 requires,
    deliberately: watch mode and a resumed session rebuild the panel from the Event journal, and a
    future Driver can show it.
+
+   > **Amended 2026-11-11 (`adr-0110-amend-1111`).** The changed-files rows are folded from Events
+   > as before, a successful `delete_file` folding as a removal; the TUI then hides a listed file a
+   > disk re-check finds gone, a filter over the fold rather than a fold of Events.
+
 5. **Placement: right side, transcript-slot height.** The column runs beside the transcript slot,
    over every row above the session-name rule. The session-name rule, status line, prompt box and
    footer keep the full width. Panes that sit in the transcript slot (`/settings`, approvals, report panes, Run view)
@@ -65,6 +70,10 @@ and every section folds from engine Events.**
     - changed files: once the session has written a file;
     - usage: once context fill passes a threshold (about 50%).
     The exact linger and threshold go in the layout spec.
+
+    > **Amended 2026-11-11 (`adr-0110-amend-1111`).** Changed files is live while at least one row
+    > remains, after deleted files are removed and files gone from disk are hidden.
+
 11. **Overflow folds, never scrolls.** When the shown sections need more rows than the slot has,
     pinned sections get rows first, then auto sections in list order. A squeezed section folds to a
     one-line summary (`Tasks 3/7`). The panel does not scroll in v1.
@@ -80,6 +89,11 @@ and every section folds from engine Events.**
     - Changed-file row: the path trimmed from the left, +/- line counts where the Tool summary's
       Edit regions carry them, and a marker when a sub-agent wrote it. Only apogee's file tools
       count; a write through `terminal` is not seen, and the manual says so.
+
+      > **Amended 2026-11-11 (`adr-0110-amend-1111`).** A successful `delete_file` removes the
+      > row instead of counting as a change, and a listed file gone from disk is hidden until it
+      > exists again; a write through `terminal` is still not seen.
+
     - Usage: the context-fill bar and what fills it (system, tools, history), tokens in/out, cache
       hit % and spend.
 14. **Replay.** Watch mode shows the panel by folding the Event journal. A resumed session has no
