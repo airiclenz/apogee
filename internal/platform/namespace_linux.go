@@ -231,7 +231,7 @@ func probeNamespace(bwrapPath string) (string, domain.ConfinementCause) {
 	ctx, cancel := context.WithTimeout(context.Background(), namespaceProbeTimeout)
 	defer cancel()
 
-	argv := append(namespaceArgv(domain.ConfinementBox{WorkspaceRoot: os.TempDir()}, pathExists), "--")
+	argv := append(namespaceArgv(domain.ConfinementBox{WorkspaceRoot: os.TempDir()}, pathExists, currentUnixSocketHost()), "--")
 	argv = append(argv, Current().Command(":")...)
 	cmd := exec.CommandContext(ctx, bwrapPath, argv...)
 	var stderr bytes.Buffer
@@ -275,8 +275,10 @@ func lastNonEmptyLine(s string) string {
 // ADR 0081 §4, dated note in place). `--unshare-net` gives the box an empty network
 // namespace, which cuts UDP and abstract AF_UNIX sockets along with TCP — but a PATHNAME
 // AF_UNIX socket is a filesystem object, not a network-namespace one, so the `--ro-bind / /`
-// root carries /var/run/docker.sock and /run/user/<uid>/bus into the box and a confined
-// command can still connect(2) to them. That is a standing fact about the backend, not a
+// root carries every pathname socket into the box. namespaceArgv masks the user runtime dir
+// (the session bus) and the system container sockets (ADR 0112), but a socket anywhere else —
+// a tmux server under /tmp — stays reachable and a confined command can still connect(2) to
+// it. That is a standing fact about the backend, not a
 // per-box answer — a deny box is what makes it matter, and the caps are read before any box
 // exists — so the token rides in Residuals wherever NetworkEgress is true, spelled once in
 // internal/domain and shared with landlock, which leaks the same access for its own reason.
@@ -322,7 +324,7 @@ func (c *namespaceConfiner) Confine(_ context.Context, box domain.ConfinementBox
 	// Launch the original command under bwrap; argv after "--" is the original command, run
 	// inside the namespaces bwrap sets up from the flags. The wrap carries the resolved
 	// program path and the process-group rule for every POSIX backend (confine_posix.go).
-	flags := append(namespaceArgv(box, pathExists), "--")
+	flags := append(namespaceArgv(box, pathExists, currentUnixSocketHost()), "--")
 	if err := wrapArgvUnderLauncher(cmd, c.bwrapPath, flags...); err != nil {
 		return err
 	}
@@ -331,8 +333,9 @@ func (c *namespaceConfiner) Confine(_ context.Context, box domain.ConfinementBox
 }
 
 // namespaceArgv builds bwrap's flags for box (confinement-execution-contract §2.3). It is a
-// pure function of the box and the injected exists predicate — no process, no host state —
-// so it is unit-tested hermetically. The flags, in this order:
+// pure function of the box, the injected exists predicate and the injected unix-socket host
+// state — no process, no host state of its own — so it is unit-tested hermetically. The
+// flags, in this order:
 //
 //   - `--ro-bind / /` — the whole filesystem, read-only: deny-default for writes, reads and
 //     exec stay open (the box bounds where a child may WRITE, like the other backends);
@@ -351,10 +354,22 @@ func (c *namespaceConfiner) Confine(_ context.Context, box domain.ConfinementBox
 //     child's writes resolve to. Empty entries are skipped, and so is a root exists reports
 //     absent — bwrap refuses to bind a source that does not exist, and the box should not
 //     have to exist in full for the writable roots that do exist to be honoured (the
-//     ENOENT rule of landlock's allowWriteBeneath).
+//     ENOENT rule of landlock's allowWriteBeneath);
+//   - `--tmpfs <dir>` for each user runtime dir planUnixSockets lets mask (ADR 0112): an
+//     empty tmpfs over $XDG_RUNTIME_DIR and /run/user/<uid>, so the session bus, rootless
+//     podman and the keyring's sockets are not in the box;
+//   - `--ro-bind /dev/null <sock>` for each existing system container socket, so a connect
+//     to /run/docker.sock or /run/podman/podman.sock reaches no daemon;
+//   - `--ro-bind <p> <p>` for each agent socket beneath a masked runtime dir — ssh-agent's
+//     and gpg-agent's — so a confined `git push` or signed commit still reaches its agent.
+//
+// The masks come after the writable binds, so a writable root that contains a runtime dir or
+// a container socket cannot bind it back over its mask; planUnixSockets never masks a
+// runtime dir that is or contains a box root, so no writable root is hidden by one. The agent
+// re-binds come last, on top of the masks they punch through.
 //
 // Never `--new-session` (see the file header for why).
-func namespaceArgv(box domain.ConfinementBox, exists func(string) bool) []string {
+func namespaceArgv(box domain.ConfinementBox, exists func(string) bool, sockets unixSocketHost) []string {
 	roots := make([]string, 0, 1+len(box.WritablePaths))
 	roots = append(roots, box.WorkspaceRoot)
 	roots = append(roots, box.WritablePaths...)
@@ -378,6 +393,17 @@ func namespaceArgv(box domain.ConfinementBox, exists func(string) bool) []string
 			continue
 		}
 		argv = append(argv, "--bind", canonical, canonical)
+	}
+
+	plan := planUnixSockets(sockets, roots)
+	for _, dir := range plan.RuntimeDirs {
+		argv = append(argv, "--tmpfs", dir)
+	}
+	for _, sock := range plan.ContainerSockets {
+		argv = append(argv, "--ro-bind", "/dev/null", sock)
+	}
+	for _, agent := range plan.AgentSockets {
+		argv = append(argv, "--ro-bind", agent, agent)
 	}
 	return argv
 }

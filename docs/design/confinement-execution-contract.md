@@ -219,6 +219,9 @@ cmd.Args = [bwrap, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "-
             "--unshare-pid",
             ("--unshare-net" iff box.NetworkAllow is non-empty),
             "--bind", <root>, <root> (for WorkspaceRoot and each existing WritablePaths entry, canonicalised),
+            "--tmpfs", <dir> (for each maskable user runtime dir),
+            "--ro-bind", "/dev/null", <sock> (for each existing system container socket),
+            "--ro-bind", <agent>, <agent> (for each agent socket beneath a masked runtime dir),
             "--", <original cmd.Path>, <original cmd.Args[1:]...>]
 ```
 
@@ -242,6 +245,20 @@ controlling terminal to inject keystrokes into with `TIOCSTI` — while on the C
 would detach the child from the terminal the tool drives. The parent process is
 never restricted; a backend whose construction probe failed (§5) answers every `Confine` with
 `ErrConfinementUnavailable` carrying the reason — never an unfenced run.
+
+> **Amended 2026-11-11 (ADR 0112, plan `2026-11-11 - 01` item 8).** The flag line now closes the
+> pathname unix sockets of the same-user spawning services ADR 0112 names, planned once by
+> `planUnixSockets` (`internal/platform/unixsockets_linux.go`) from the host as `Confine` finds it.
+> An empty `--tmpfs` masks the user runtime dir — `$XDG_RUNTIME_DIR` when absolute, and
+> `/run/user/<uid>` — but only one that exists, is a directory owned by the uid with mode 0700, and
+> neither is nor contains `/`, the temp dir, the home dir or a box root (a stray
+> `XDG_RUNTIME_DIR=/tmp` masks nothing). `/dev/null` is bound read-only over `/run/docker.sock` and
+> `/run/podman/podman.sock` where they exist. The agent sockets beneath a masked dir —
+> `$SSH_AUTH_SOCK`, `<runtime dir>/gnupg`, `$GNUPGHOME` or `~/.gnupg` — are bound back read-only.
+> The masks follow the writable binds, so a writable root that contains a masked path cannot bind it
+> back, and the agent re-binds come last. The construction probe carries the same masks. A socket
+> anywhere else (a tmux server under `/tmp`) stays reachable, so the backend still discloses
+> `connect(2) AF_UNIX`.
 
 **The `/dev/null` device exemption (amendment, 2026-08-13).** Both path-policy POSIX backends (landlock,
 seatbelt) allow writes to the literal device file `/dev/null`, *in addition to* the box's writable roots. Without it the POSIX shell

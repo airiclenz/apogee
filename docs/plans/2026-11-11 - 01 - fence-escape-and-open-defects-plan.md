@@ -163,7 +163,16 @@ NOTES (2026-11-11): pre-existing, not touched — TestNamespaceProbe's doc comme
 - `go vet ./internal/platform/...`
 **Commit:** `test(confinetest): probe a confined connect to a unix socket outside the box`
 
-## 8. bwrap: mask the user runtime dir and the system container sockets
+## 8. bwrap: mask the user runtime dir and the system container sockets — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): re-derived from the assumption that item 7's in-box socket client is reachable from the platform package — `runUnixConnectHelper` is unexported, so `internal/platform/confinetest/confinetest.go` gains an exported wrapper `UnixConnectFromBox` the live test calls.
+NOTES (2026-11-11): the masks are emitted AFTER the writable root binds, not before as the assumed approach had it: a writable root that contains a runtime dir or container socket (`/`, `/run`) would otherwise bind it back over the mask; the regression guard already refuses to mask a runtime dir that is or contains a box root, so no root is hidden by a later mask. Agent re-binds still come last. `namespaceArgv` takes the injected `unixSocketHost` (production: `currentUnixSocketHost()`, read at Confine and probe time) and calls `planUnixSockets` itself, so `TestNamespaceArgv` covers mask, re-bind and missing-path skip.
+NOTES (2026-11-11): the runtime-dir guard is slightly broader than the plan's list — a runtime dir that CONTAINS the temp dir or `$HOME` is refused too (not only one equal to them), so `XDG_RUNTIME_DIR=/home` or a TMPDIR under the runtime dir cannot mask the home or temp dir.
+NOTES (2026-11-11): the agent allowlist is filtered inside `planUnixSockets` (only canonical, existing paths strictly beneath a masked runtime dir are returned as `AgentSockets`), so item 9 reads the re-grant list ready-made; container sockets are canonicalised and kept only when they exist.
+NOTES (2026-11-11): carried note — corrected the stale row list in `TestNamespaceProbe`'s comment (internal/platform/namespace_linux_test.go) to rows #1–#6, #11, #12, #14 and #15.
+NOTES (2026-11-11): consequential edit — internal/platform/doc.go: made necessary by the new file internal/platform/unixsockets_linux.go (TestDocMapNamesEveryFile requires every file in the map).
+NOTES (2026-11-11): consequential edit — docs/design/confinement-execution-contract.md: made necessary by the new bwrap flags (the namespace argv block now lists the masks, with a dated amendment under it).
+NOTES (2026-11-11): the live test was mutation-checked — with the `--tmpfs` emission removed, `TestNamespaceMasksRuntimeDirSockets` fails on the bus socket.
 
 **What:**
 **Goal:** under the bwrap rung a confined command cannot connect to a socket under the user runtime dir (`$XDG_RUNTIME_DIR`, `/run/user/<uid>`) or to `/run/docker.sock` / `/run/podman/podman.sock`, while `$SSH_AUTH_SOCK` and the gpg-agent sockets stay reachable; bwrap still discloses `connect(2) AF_UNIX`.

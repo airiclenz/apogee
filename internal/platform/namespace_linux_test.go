@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,48 +41,102 @@ func TestNamespaceArgv(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name   string
-		box    domain.ConfinementBox
-		exists func(string) bool
-		want   []string
+		name    string
+		box     domain.ConfinementBox
+		exists  func(string) bool
+		sockets unixSocketHost
+		want    []string
 	}{
 		{
-			name:   "default_box_binds_workspace_and_writable_paths",
-			box:    domain.ConfinementBox{WorkspaceRoot: "/ws", WritablePaths: []string{"/ws/.cache"}},
-			exists: existsIn("/ws", "/ws/.cache"),
+			name:    "default_box_binds_workspace_and_writable_paths",
+			box:     domain.ConfinementBox{WorkspaceRoot: "/ws", WritablePaths: []string{"/ws/.cache"}},
+			exists:  existsIn("/ws", "/ws/.cache"),
+			sockets: noUnixSockets,
 			want: append(slices.Clone(namespaceBaseFlags),
 				"--bind", "/ws", "/ws", "--bind", "/ws/.cache", "/ws/.cache"),
 		},
 		{
 			// Network is open by default (ADR 0012); a non-empty NetworkAllow opts the box into
 			// deny-all, and the flag sits between the fixed prefix and the binds.
-			name:   "network_allow_unshares_net_before_binds",
-			box:    domain.ConfinementBox{WorkspaceRoot: "/ws", NetworkAllow: []string{"example.com"}},
-			exists: existsIn("/ws"),
-			want:   append(slices.Clone(namespaceBaseFlags), "--unshare-net", "--bind", "/ws", "/ws"),
+			name:    "network_allow_unshares_net_before_binds",
+			box:     domain.ConfinementBox{WorkspaceRoot: "/ws", NetworkAllow: []string{"example.com"}},
+			exists:  existsIn("/ws"),
+			sockets: noUnixSockets,
+			want:    append(slices.Clone(namespaceBaseFlags), "--unshare-net", "--bind", "/ws", "/ws"),
 		},
 		{
 			// A writable path that does not exist yet is skipped rather than failing the launch —
 			// bwrap refuses to bind an absent source (the ENOENT rule of allowWriteBeneath).
-			name:   "missing_writable_path_is_skipped",
-			box:    domain.ConfinementBox{WorkspaceRoot: "/ws", WritablePaths: []string{"/missing", "/ws/.cache"}},
-			exists: existsIn("/ws", "/ws/.cache"),
+			name:    "missing_writable_path_is_skipped",
+			box:     domain.ConfinementBox{WorkspaceRoot: "/ws", WritablePaths: []string{"/missing", "/ws/.cache"}},
+			exists:  existsIn("/ws", "/ws/.cache"),
+			sockets: noUnixSockets,
 			want: append(slices.Clone(namespaceBaseFlags),
 				"--bind", "/ws", "/ws", "--bind", "/ws/.cache", "/ws/.cache"),
 		},
 		{
 			// An empty WorkspaceRoot (and an empty WritablePaths entry) yields no bind at all.
-			name:   "empty_workspace_root_yields_no_bind",
-			box:    domain.ConfinementBox{WorkspaceRoot: "", WritablePaths: []string{"", "/ws/.cache"}},
-			exists: func(string) bool { return true },
-			want:   append(slices.Clone(namespaceBaseFlags), "--bind", "/ws/.cache", "/ws/.cache"),
+			name:    "empty_workspace_root_yields_no_bind",
+			box:     domain.ConfinementBox{WorkspaceRoot: "", WritablePaths: []string{"", "/ws/.cache"}},
+			exists:  func(string) bool { return true },
+			sockets: noUnixSockets,
+			want:    append(slices.Clone(namespaceBaseFlags), "--bind", "/ws/.cache", "/ws/.cache"),
+		},
+		{
+			// The user runtime dir is masked with an empty tmpfs AFTER the writable binds (ADR
+			// 0112), so no writable root can bind it back over the mask.
+			name:   "runtime_dir_is_masked_after_the_binds",
+			box:    domain.ConfinementBox{WorkspaceRoot: "/ws"},
+			exists: existsIn("/ws"),
+			sockets: fakeUnixSocketHost(nil, "/home/u", "/tmp",
+				map[string]fakePath{"/run/user/1000": runtimeDir}),
+			want: append(slices.Clone(namespaceBaseFlags),
+				"--bind", "/ws", "/ws", "--tmpfs", "/run/user/1000"),
+		},
+		{
+			// A writable root that CONTAINS the runtime dir and the docker socket still leaves
+			// both masked: the masks come after its bind. The agent sockets beneath the mask are
+			// bound back last, on top of it.
+			name:   "container_sockets_covered_and_agents_rebound_over_the_mask",
+			box:    domain.ConfinementBox{WorkspaceRoot: "/ws", WritablePaths: []string{"/run"}},
+			exists: existsIn("/ws", "/run"),
+			sockets: fakeUnixSocketHost(map[string]string{"SSH_AUTH_SOCK": "/run/user/1000/keyring/ssh"}, "/home/u", "/tmp",
+				map[string]fakePath{
+					"/run/user/1000":             runtimeDir,
+					"/run/user/1000/keyring/ssh": socketFile,
+					"/run/user/1000/gnupg":       runtimeDir,
+					"/run/docker.sock":           socketFile,
+				}),
+			want: append(slices.Clone(namespaceBaseFlags),
+				"--bind", "/ws", "/ws", "--bind", "/run", "/run",
+				"--tmpfs", "/run/user/1000",
+				"--ro-bind", "/dev/null", "/run/docker.sock",
+				"--ro-bind", "/run/user/1000/keyring/ssh", "/run/user/1000/keyring/ssh",
+				"--ro-bind", "/run/user/1000/gnupg", "/run/user/1000/gnupg"),
+		},
+		{
+			// A socket path that does not exist yields no flag: bwrap refuses to bind an absent
+			// source, and an absent socket needs no cover. Here podman, the agent socket and the
+			// gnupg dir are all missing; only the docker socket exists.
+			name:   "missing_socket_paths_are_skipped",
+			box:    domain.ConfinementBox{WorkspaceRoot: "/ws"},
+			exists: existsIn("/ws"),
+			sockets: fakeUnixSocketHost(map[string]string{"SSH_AUTH_SOCK": "/run/user/1000/gone"}, "/home/u", "/tmp",
+				map[string]fakePath{
+					"/run/user/1000":   runtimeDir,
+					"/run/docker.sock": socketFile,
+				}),
+			want: append(slices.Clone(namespaceBaseFlags),
+				"--bind", "/ws", "/ws",
+				"--tmpfs", "/run/user/1000",
+				"--ro-bind", "/dev/null", "/run/docker.sock"),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := namespaceArgv(tt.box, tt.exists)
+			got := namespaceArgv(tt.box, tt.exists, tt.sockets)
 
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("namespaceArgv =\n  %q\nwant\n  %q", got, tt.want)
@@ -264,7 +319,7 @@ func TestNamespaceCapabilitiesHonest(t *testing.T) {
 }
 
 // TestNamespaceProbe drives the shared escape battery (confinement-execution-contract §6.2
-// rows #1–#6, #11, #12) against the namespace backend as this host constructs it. The
+// rows #1–#6, #11, #12, #14 and #15) against the namespace backend as this host constructs it. The
 // harness skips itself when the construction probe reported FSWrite==false (no bwrap, or a
 // kernel that refuses unprivileged user namespaces), so a CI container without userns
 // skips cleanly; wherever bwrap and userns work — landlock or not — every row runs for
@@ -346,6 +401,81 @@ func TestNamespaceHidesHostProcesses(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), hostName) {
 		t.Errorf("confined child read %s/status and saw the host process (%q); the box shares the host PID namespace", hostProc, hostName)
+	}
+}
+
+// unixAcceptWait is how long a test listener waits for a confined connect once the confined
+// client has exited. A connect that got through is already queued by then, so the window only
+// covers scheduling — and it is the exact cost of the negative case, which always waits it out.
+var unixAcceptWait = testtime.Fixed(2 * time.Second)
+
+// listenUnix binds a unix-socket listener at path for the rest of the test.
+func listenUnix(t *testing.T, path string) *net.UnixListener {
+	t.Helper()
+	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatalf("listen unix %q: %v", path, err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	return ln
+}
+
+// acceptedWithin reports whether a connect reached ln within unixAcceptWait, failing the test
+// on any accept error other than the deadline expiring.
+func acceptedWithin(t *testing.T, ln *net.UnixListener) bool {
+	t.Helper()
+	if err := ln.SetDeadline(time.Now().Add(unixAcceptWait)); err != nil {
+		t.Fatalf("set accept deadline: %v", err)
+	}
+	conn, err := ln.Accept()
+	if err == nil {
+		_ = conn.Close()
+		return true
+	}
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("accept on %s: %v", ln.Addr(), err)
+	}
+	return false
+}
+
+// TestNamespaceMasksRuntimeDirSockets pins the runtime-dir mask from inside the box (ADR 0112):
+// a same-user service listening under $XDG_RUNTIME_DIR — the session bus's place — is out of a
+// confined command's reach, while the ssh-agent socket $SSH_AUTH_SOCK names beneath that dir
+// stays reachable. Both listeners are bound by this unconfined test and are the witnesses, as in
+// the battery's row #15, whose in-box client this test reuses. The mask is planned from the
+// environment at Confine time, so t.Setenv points it at a runtime dir the test owns.
+func TestNamespaceMasksRuntimeDirSockets(t *testing.T) {
+	// Not parallel: t.Setenv, and the confined clients are real subprocesses.
+	c := fencingNamespaceConfiner(t)
+
+	// os.MkdirTemp, not t.TempDir(): a test-named path can outgrow sun_path's 108 bytes.
+	runtimeDir, err := os.MkdirTemp("", "rt")
+	if err != nil {
+		t.Fatalf("runtime dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(runtimeDir) })
+	// The XDG spec's mode, which the mask requires; MkdirTemp's 0700 is narrowed by the umask.
+	if err := os.Chmod(runtimeDir, 0o700); err != nil {
+		t.Fatalf("chmod runtime dir: %v", err)
+	}
+	bus := filepath.Join(runtimeDir, "bus")
+	agent := filepath.Join(runtimeDir, "agent")
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	t.Setenv("SSH_AUTH_SOCK", agent)
+	busLn := listenUnix(t, bus)
+	agentLn := listenUnix(t, agent)
+	box := domain.ConfinementBox{WorkspaceRoot: t.TempDir()}
+
+	output, runErr := confinetest.UnixConnectFromBox(t, c, box, agent)
+	if !acceptedWithin(t, agentLn) {
+		t.Errorf("no confined connect reached $SSH_AUTH_SOCK at %s (client: %v, output:\n%s); "+
+			"the agent socket beneath the masked runtime dir must stay reachable", agent, runErr, output)
+	}
+
+	output, runErr = confinetest.UnixConnectFromBox(t, c, box, bus)
+	if acceptedWithin(t, busLn) {
+		t.Errorf("a confined connect reached %s under the masked $XDG_RUNTIME_DIR (client: %v, output:\n%s); "+
+			"the runtime dir must be masked", bus, runErr, output)
 	}
 }
 

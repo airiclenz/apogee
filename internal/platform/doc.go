@@ -79,7 +79,9 @@
 // (landlock_guard_test.go pins the lock). namespace_linux.go is the second Linux backend, for a kernel without landlock:
 // bwrap taken only from a fixed list of system directories (never from PATH), the bwrap flags
 // built from the box (a read-only bind of / with the writable roots bound over it), its
-// capabilities and the launch under bwrap. seatbelt.go is the host-agnostic
+// capabilities and the launch under bwrap. unixsockets_linux.go plans the pathname unix sockets
+// the Linux backends close (ADR 0112): the user runtime dirs to mask, the system container
+// sockets to cover and the agent sockets to re-expose beneath a mask. seatbelt.go is the host-agnostic
 // half of the macOS backend — the generated profile and its quoting — so it unit-tests on
 // any host, and seatbelt_darwin.go is the darwin-tagged constructor that probes once for
 // sandbox-exec.

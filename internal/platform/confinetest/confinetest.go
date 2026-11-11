@@ -382,6 +382,17 @@ func RunHelper(t *testing.T) {
 	_ = conn.Close()
 }
 
+// UnixConnectFromBox runs row #15's in-box client against sock: this test binary re-run confined
+// to box under c, connecting once. It returns the client's combined output and run error, both
+// for diagnostics only — the caller's own listener on sock is the witness, as in row #15. A
+// backend test that closes a particular socket path (the namespace backend's runtime-dir mask)
+// drives it with listeners of its own; the calling binary must define HelperTestName as Probe's
+// callers do.
+func UnixConnectFromBox(t *testing.T, c domain.Confiner, box domain.ConfinementBox, sock string) (string, error) {
+	t.Helper()
+	return runUnixConnectHelper(t, c, box, sock)
+}
+
 // runUnixConnectHelper re-runs this test binary confined to box as row #15's socket client and
 // returns its combined output and run error, both for diagnostics. The argv is built here — the
 // binary and a -test.run selecting HelperTestName alone — never copied from os.Args, which
