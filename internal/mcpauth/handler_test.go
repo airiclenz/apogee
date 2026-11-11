@@ -516,6 +516,110 @@ func TestHandlerRefreshRefusesARecordOfAnotherClient(t *testing.T) {
 }
 
 // assertLoginRequired fails the test unless err is ErrLoginRequired naming the login command.
+// pinnedIssuer is the issuer the issuer-pin tests configure.
+const pinnedIssuer = "https://as.example/realms/a"
+
+func TestNewHandlerLoadsOnlyARecordOfTheConfiguredIssuer(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name             string
+		configuredIssuer string
+		storedIssuer     string
+		wantLogin        bool
+	}{
+		{name: "another issuer needs a login", configuredIssuer: pinnedIssuer,
+			storedIssuer: "https://as.example/realms/b", wantLogin: true},
+		{name: "a record naming no issuer needs a login", configuredIssuer: pinnedIssuer, wantLogin: true},
+		{name: "the same issuer loads", configuredIssuer: pinnedIssuer, storedIssuer: pinnedIssuer},
+		{name: "the same issuer with surrounding space loads", configuredIssuer: " " + pinnedIssuer,
+			storedIssuer: pinnedIssuer + " "},
+		{name: "no configured issuer loads any", storedIssuer: "https://as.example/realms/b"},
+		{name: "no configured issuer loads a record naming none"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tokens := newFakeTokenServer(t, staleRefresh)
+			store := NewStore(t.TempDir())
+			record := tokens.storedRecord(time.Now().Add(-time.Minute))
+			record.Issuer = tt.storedIssuer
+			saveRecord(t, store, testServer, handlerEndpoint, record)
+
+			h, err := NewHandler(HandlerConfig{
+				Name:           testServer,
+				Endpoint:       handlerEndpoint,
+				Store:          store,
+				EndpointClient: loopbackClient(),
+				AuthClient:     loopbackClient(),
+				Issuer:         tt.configuredIssuer,
+			})
+
+			if tt.wantLogin {
+				assertLoginRequired(t, err)
+				if got := len(tokens.refreshes()); got != 0 {
+					t.Errorf("token endpoint saw %d requests; want none", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NewHandler error = %v", err)
+			}
+			if _, err := currentToken(t, context.Background(), h); err != nil {
+				t.Fatalf("Token error = %v", err)
+			}
+			if got := len(tokens.refreshes()); got != 1 {
+				t.Errorf("token endpoint saw %d requests; want the one refresh of the loaded record", got)
+			}
+		})
+	}
+}
+
+func TestHandlerRefreshRefusesARecordOfAnotherIssuer(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		storedIssuer string
+	}{
+		{name: "another issuer", storedIssuer: "https://as.example/realms/b"},
+		{name: "no issuer", storedIssuer: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tokens := newFakeTokenServer(t, staleRefresh)
+			store := NewStore(t.TempDir())
+			record := tokens.storedRecord(time.Now().Add(-time.Minute))
+			record.Client.ID = "pre-1"
+			record.Client.TokenEndpointAuthMethod = authMethodSecretPost
+			record.Issuer = pinnedIssuer
+			saveRecord(t, store, testServer, handlerEndpoint, record)
+			h, err := NewHandler(HandlerConfig{
+				Name:           testServer,
+				Endpoint:       handlerEndpoint,
+				Store:          store,
+				EndpointClient: loopbackClient(),
+				AuthClient:     loopbackClient(),
+				ClientID:       "pre-1",
+				ClientSecret:   "pre-secret",
+				Issuer:         pinnedIssuer,
+			})
+			if err != nil {
+				t.Fatalf("NewHandler error = %v", err)
+			}
+			// Another apogee saved over the record a token some other issuer minted.
+			record.Issuer = tt.storedIssuer
+			saveRecord(t, store, testServer, handlerEndpoint, record)
+
+			_, err = currentToken(t, context.Background(), h)
+
+			assertLoginRequired(t, err)
+			if got := len(tokens.refreshes()); got != 0 {
+				t.Errorf("token endpoint saw %d requests; want none, and no secret sent", got)
+			}
+		})
+	}
+}
+
 func assertLoginRequired(t *testing.T, err error) {
 	t.Helper()
 	if !errors.Is(err, ErrLoginRequired) {

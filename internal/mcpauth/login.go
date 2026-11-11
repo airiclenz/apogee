@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
@@ -24,6 +25,41 @@ var ErrNoAuthRequired = errors.New("the server did not ask for authorization")
 // ErrStateMismatch is returned by Login when the authorization response's state is not the one
 // the authorize URL carried — a response to some other request, which is never exchanged.
 var ErrStateMismatch = errors.New("the authorization response's state does not match the request")
+
+// IssuerMismatchError is returned by Login when an issuer is configured and the authorization
+// servers the endpoint names — its protected-resource metadata's list, or the endpoint's origin
+// when it publishes none — do not include it. The login stops before it fetches any authorization
+// server's metadata, so no request, and no client secret, reaches a server the operator did not
+// name. Its text carries each URL's scheme, host and path, never a query, fragment or userinfo,
+// so two issuers on one host stay distinguishable.
+type IssuerMismatchError struct {
+	// Server is the server's alias.
+	Server string
+	// Issuer is the configured issuer.
+	Issuer string
+	// Offered is every authorization server the endpoint named, in its order.
+	Offered []string
+}
+
+// Error names the server, the configured issuer and the authorization servers offered instead.
+func (e *IssuerMismatchError) Error() string {
+	offered := make([]string, 0, len(e.Offered))
+	for _, server := range e.Offered {
+		offered = append(offered, strconv.Quote(issuerText(server)))
+	}
+	return fmt.Sprintf("mcpauth: log in to server %q: the configured issuer %q is not an authorization "+
+		"server the endpoint names (it names %s)", e.Server, issuerText(e.Issuer), strings.Join(offered, ", "))
+}
+
+// issuerText is rawURL as an issuer mismatch names it: scheme, host and path only, so no query,
+// fragment or userinfo a URL carries reaches the error text.
+func issuerText(rawURL string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "(not an absolute URL)"
+	}
+	return u.Scheme + "://" + u.Host + u.EscapedPath()
+}
 
 // Token endpoint authentication methods (RFC 7591 §2) a registration records.
 const (
@@ -69,6 +105,10 @@ type LoginConfig struct {
 	// ClientSecret is that client's secret, empty for a public client. It is never saved.
 	ClientID     string
 	ClientSecret string
+	// Issuer, when set, is the one authorization server the login may use: the endpoint must
+	// name it, else the login fails with IssuerMismatchError. Empty means no pin — the first
+	// authorization server the endpoint names is used.
+	Issuer string
 	// RedirectURL is the redirect URI the authorization server sends the code to.
 	RedirectURL string
 	// FetchCode obtains the authorization code for the authorize URL.
@@ -85,13 +125,19 @@ type LoginConfig struct {
 // cfg.Store before it is returned.
 //
 // A server that answers the probe without a 401 is ErrNoAuthRequired; a mismatched state is
-// ErrStateMismatch. Error text names the server and never carries more of the endpoint than its
-// origin.
+// ErrStateMismatch; an endpoint that does not name the configured issuer is IssuerMismatchError.
+// Error text names the server and never carries more of the endpoint than its origin — except an
+// IssuerMismatchError, whose text carries each issuer's scheme, host and path, so two issuers on
+// the endpoint's own host stay distinguishable.
 func Login(ctx context.Context, cfg LoginConfig) (Record, error) {
 	if err := cfg.validate(); err != nil {
 		return Record{}, err
 	}
 	record, err := (&loginFlow{cfg: cfg}).run(ctx)
+	if mismatch, ok := errors.AsType[*IssuerMismatchError](err); ok {
+		// Outside the origin redaction: it would cut both issuers to the endpoint's origin.
+		return Record{}, mismatch
+	}
 	if err != nil {
 		return Record{}, security.NewOriginRedactor(cfg.Endpoint).RedactErr(
 			fmt.Errorf("mcpauth: log in to server %q: %w", cfg.Name, err),
@@ -131,7 +177,11 @@ func (f *loginFlow) run(ctx context.Context) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
-	asm, err := f.authServerMetadata(ctx, prm.AuthorizationServers[0])
+	server, err := f.authServer(prm)
+	if err != nil {
+		return Record{}, err
+	}
+	asm, err := f.authServerMetadata(ctx, server)
 	if err != nil {
 		return Record{}, err
 	}
@@ -254,6 +304,22 @@ func (f *loginFlow) resourceMetadata(
 		Resource:             f.cfg.Endpoint,
 		AuthorizationServers: []string{origin.String()},
 	}, nil
+}
+
+// authServer is the authorization server the login uses from those prm lists: the configured
+// issuer wherever the list names it, compared after trimming space, else IssuerMismatchError;
+// with no issuer configured, the first listed.
+func (f *loginFlow) authServer(prm *oauthex.ProtectedResourceMetadata) (string, error) {
+	issuer := strings.TrimSpace(f.cfg.Issuer)
+	if issuer == "" {
+		return prm.AuthorizationServers[0], nil
+	}
+	for _, server := range prm.AuthorizationServers {
+		if strings.TrimSpace(server) == issuer {
+			return issuer, nil
+		}
+	}
+	return "", &IssuerMismatchError{Server: f.cfg.Name, Issuer: issuer, Offered: prm.AuthorizationServers}
 }
 
 // authServerMetadata fetches the RFC 8414 (or OpenID) metadata of the authorization server at

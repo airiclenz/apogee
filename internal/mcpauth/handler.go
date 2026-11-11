@@ -61,6 +61,10 @@ type HandlerConfig struct {
 	// ClientSecret is a preregistered client's secret (its `client-secret-env:` value), sent on a
 	// refresh when the record's registration carries none. It is never saved.
 	ClientSecret string
+	// Issuer, when set, is the configured issuer: a record another authorization server issued —
+	// or one that names none — is no record at all (issuerMatches), so no refresh, and no client
+	// secret, is ever sent to a token endpoint the operator did not pin. Empty means no pin.
+	Issuer string
 }
 
 // Handler is the SDK's auth.OAuthHandler for one `auth: oauth` server: it hands the transport the
@@ -78,8 +82,8 @@ type Handler struct {
 
 // NewHandler loads cfg's record and returns the handler over it. A missing record — never logged
 // in, logged out, minted for another endpoint, or issued to another client than cfg.ClientID — is
-// ErrLoginRequired; an unsafe name, a missing store or client, and an unreadable record are plain
-// errors.
+// ErrLoginRequired, as is one issued by another authorization server than cfg.Issuer; an unsafe
+// name, a missing store or client, and an unreadable record are plain errors.
 func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	if err := ValidateServerName(cfg.Name); err != nil {
 		return nil, err
@@ -97,6 +101,9 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	if !clientMatches(cfg, record) {
 		return nil, loginRequired(cfg.Name, clientChangedReason, nil)
 	}
+	if !issuerMatches(cfg, record) {
+		return nil, loginRequired(cfg.Name, issuerChangedReason, nil)
+	}
 	return &Handler{cfg: cfg, record: record}, nil
 }
 
@@ -108,6 +115,17 @@ const clientChangedReason = "the stored token was issued to another client than 
 // changed `client-id:` needs a new login, as a changed endpoint does.
 func clientMatches(cfg HandlerConfig, record Record) bool {
 	return cfg.ClientID == "" || record.Client.ID == cfg.ClientID
+}
+
+// issuerChangedReason is the login-required reason for a record of another authorization server.
+const issuerChangedReason = "the stored token was not issued by the configured issuer"
+
+// issuerMatches reports whether record may be used under cfg: always when no issuer is configured,
+// else only when the record names the configured issuer, compared after trimming space — a record
+// naming no issuer, saved before the pin, needs a new login too.
+func issuerMatches(cfg HandlerConfig, record Record) bool {
+	issuer := strings.TrimSpace(cfg.Issuer)
+	return issuer == "" || strings.TrimSpace(record.Issuer) == issuer
 }
 
 // TokenSource returns the source the transport draws each request's bearer token from. ctx is
@@ -175,8 +193,9 @@ func (h *Handler) token(ctx context.Context) (*oauth2.Token, error) {
 // re-reads the record from disk first: a valid token there that is not the rejected one was saved
 // by another handler and is adopted as is. Otherwise the disk record's refresh token — the newest
 // one, never a copy this handler may hold after another spent it — is exchanged, and the result is
-// saved before it is used. A disk record issued to another client than the configured one is
-// ErrLoginRequired, as it is to NewHandler.
+// saved before it is used. A disk record issued to another client than the configured one, or by
+// another authorization server than the configured issuer, is ErrLoginRequired, as it is to
+// NewHandler.
 func (h *Handler) refreshLocked(ctx context.Context, rejected string) error {
 	release, err := h.lockRecord()
 	if err != nil {
@@ -193,6 +212,9 @@ func (h *Handler) refreshLocked(ctx context.Context, rejected string) error {
 	}
 	if !clientMatches(h.cfg, disk) {
 		return loginRequired(h.cfg.Name, clientChangedReason, nil)
+	}
+	if !issuerMatches(h.cfg, disk) {
+		return loginRequired(h.cfg.Name, issuerChangedReason, nil)
 	}
 	if tokenValid(disk) && disk.AccessToken != rejected {
 		h.record = disk

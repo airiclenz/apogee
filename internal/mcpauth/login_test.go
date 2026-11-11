@@ -39,6 +39,12 @@ type fakeOAuth struct {
 	// hintMetadata puts a resource_metadata URL in the 401 challenge; without it the login has
 	// to find the metadata at the well-known path.
 	hintMetadata bool
+	// noMetadata answers the well-known metadata URL with a 404, so the login falls back to the
+	// endpoint's origin as its authorization server.
+	noMetadata bool
+	// authServers, when set, is the authorization server list the metadata names; nil names authSrv
+	// alone.
+	authServers []string
 
 	mu             sync.Mutex
 	registrations  []oauthex.ClientRegistrationMetadata
@@ -86,9 +92,17 @@ func (f *fakeOAuth) serveResource(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("WWW-Authenticate", challenge)
 		w.WriteHeader(http.StatusUnauthorized)
 	case metadataPath:
+		if f.noMetadata {
+			http.NotFound(w, r)
+			return
+		}
+		servers := f.authServers
+		if servers == nil {
+			servers = []string{f.authSrv.URL}
+		}
 		writeJSON(w, http.StatusOK, oauthex.ProtectedResourceMetadata{
 			Resource:             f.endpoint(),
-			AuthorizationServers: []string{f.authSrv.URL},
+			AuthorizationServers: servers,
 		})
 	default:
 		http.NotFound(w, r)
@@ -276,6 +290,146 @@ func TestLoginWithAPreregisteredClientDoesNotRegister(t *testing.T) {
 	}
 	if got := fake.seen().tokenForm.Get("client_secret"); got != "pre-secret" {
 		t.Errorf("token request client_secret = %q, want the configured secret", got)
+	}
+}
+
+// originOf is rawURL's scheme and host.
+func originOf(t *testing.T, rawURL string) string {
+	t.Helper()
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("parse %q: %v", rawURL, err)
+	}
+	return u.Scheme + "://" + u.Host
+}
+
+// preregisteredLogin is a login against f as the preregistered client "pre-1" with its secret,
+// pinned to issuer.
+func (f *fakeOAuth) preregisteredLogin(store *Store, issuer string) LoginConfig {
+	cfg := f.loginConfig(store)
+	cfg.ClientID = "pre-1"
+	cfg.ClientSecret = "pre-secret"
+	cfg.Issuer = issuer
+	return cfg
+}
+
+func TestLoginRefusesAnotherIssuer(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		// setup configures the fake and returns the issuer to pin.
+		setup func(f *fakeOAuth) string
+		// wantText is what the error text must carry beyond the server's name and both issuers'
+		// origins; wantAbsent is what it must not carry.
+		wantText   []string
+		wantAbsent []string
+	}{
+		{
+			name:  "the endpoint names another origin's server",
+			setup: func(f *fakeOAuth) string { return f.resource.URL },
+		},
+		{
+			name: "a same-host pair stays distinguishable",
+			setup: func(f *fakeOAuth) string {
+				f.authServers = []string{f.resource.URL + "/realms/b"}
+				return f.resource.URL + "/realms/a"
+			},
+			wantText: []string{"/realms/a", "/realms/b"},
+		},
+		{
+			name: "a listed server's query and userinfo never reach the text",
+			setup: func(f *fakeOAuth) string {
+				u, _ := url.Parse(f.authSrv.URL)
+				f.authServers = []string{"http://user:hunter2@" + u.Host + "/as?token=s3cret#frag"}
+				return f.resource.URL
+			},
+			wantText:   []string{"/as"},
+			wantAbsent: []string{"user", "hunter2", "s3cret", "frag", "?"},
+		},
+		{
+			name: "the fallback origin is not the issuer",
+			setup: func(f *fakeOAuth) string {
+				f.noMetadata = true
+				return f.authSrv.URL
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			fake := newFakeOAuth(t, "/mcp")
+			issuer := tt.setup(fake)
+			offered := fake.authServers
+			switch {
+			case fake.noMetadata:
+				offered = []string{fake.resource.URL}
+			case offered == nil:
+				offered = []string{fake.authSrv.URL}
+			}
+
+			_, err := Login(context.Background(), fake.preregisteredLogin(NewStore(t.TempDir()), issuer))
+
+			mismatch, ok := errors.AsType[*IssuerMismatchError](err)
+			if !ok {
+				t.Fatalf("Login() error = %v, want an IssuerMismatchError", err)
+			}
+			if mismatch.Issuer != issuer || !reflect.DeepEqual(mismatch.Offered, offered) {
+				t.Errorf("mismatch = %+v, want issuer %q offered %q", mismatch, issuer, offered)
+			}
+			text := err.Error()
+			for _, want := range append([]string{testServer, issuer, originOf(t, offered[0])}, tt.wantText...) {
+				if !strings.Contains(text, want) {
+					t.Errorf("error = %q, want it to name %q", text, want)
+				}
+			}
+			for _, absent := range tt.wantAbsent {
+				if strings.Contains(text, absent) {
+					t.Errorf("error = %q, want no %q in it", text, absent)
+				}
+			}
+			if got := fake.seen().tokenForm; got != nil {
+				t.Errorf("a token request was sent despite the issuer mismatch: %v", got)
+			}
+		})
+	}
+}
+
+func TestLoginSelectsTheIssuerWhereverItIsListed(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		listed func(f *fakeOAuth) []string
+		// pad surrounds the configured issuer with space.
+		pad string
+	}{
+		{name: "listed first", listed: func(f *fakeOAuth) []string { return []string{f.authSrv.URL} }},
+		{name: "listed second", listed: func(f *fakeOAuth) []string {
+			return []string{f.resource.URL + "/elsewhere", f.authSrv.URL}
+		}},
+		{name: "configured with surrounding space", pad: " ", listed: func(f *fakeOAuth) []string {
+			return []string{f.authSrv.URL}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			fake := newFakeOAuth(t, "/mcp")
+			fake.authServers = tt.listed(fake)
+
+			issuer := tt.pad + fake.authSrv.URL + tt.pad
+
+			record, err := Login(context.Background(), fake.preregisteredLogin(NewStore(t.TempDir()), issuer))
+
+			if err != nil {
+				t.Fatalf("Login() error = %v", err)
+			}
+			if record.Issuer != fake.authSrv.URL {
+				t.Errorf("record.Issuer = %q, want the pinned %q", record.Issuer, fake.authSrv.URL)
+			}
+			if got := fake.seen().tokenForm.Get("client_secret"); got != "pre-secret" {
+				t.Errorf("token request client_secret = %q, want the configured secret", got)
+			}
+		})
 	}
 }
 

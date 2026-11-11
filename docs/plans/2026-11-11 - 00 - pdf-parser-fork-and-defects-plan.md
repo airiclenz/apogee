@@ -224,7 +224,11 @@ NOTES (2026-11-11): the glossary `heartbeat` Note and the picker.go comments mat
 **Closes:** remove-classifier-narrowing-untested
 **Commit:** `test(session): pin isRemoveSharingError refusing ERROR_ACCESS_DENIED`
 
-## 10. mcpauth sends a client secret only to the pinned issuer
+## 10. mcpauth sends a client secret only to the pinned issuer — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): the issuer test runs the space-trimming compare on the configured side only: the SDK rejects protected-resource metadata whose listed server has surrounding space, and the login then falls back to the endpoint origin, so a padded listed entry cannot reach the compare through the fake.
+NOTES (2026-11-11): NewHandler also refuses a record of another (or no) issuer, as it does a record of another client, so no access token is sent to the endpoint either. The plan named only the refresh path; this follows the `clientMatches` precedent beside it.
+NOTES (2026-11-11): beyond the plan's test list, added a row where the issuer pin rejects the fallback origin (new `fakeOAuth.noMetadata` field) and a row for a configured issuer with surrounding space.
 
 **What:** Recast at the regression check (2026-11-11).
 **Goal:** with an issuer configured, a login whose authorization server is not that issuer fails naming both and sends no token request; a refresh whose stored record names another issuer (or none) fails as login-required and sends no token request; a public client and Dynamic Client Registration with no issuer behave as before.
