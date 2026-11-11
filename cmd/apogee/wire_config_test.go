@@ -381,6 +381,7 @@ func TestProjectConfigScrubsTheMCPHeaderEnvNames(t *testing.T) {
 		Auth:            mcp.AuthOAuth,
 		ClientID:        "apogee-client",
 		ClientSecretEnv: "WIKI_CLIENT_SECRET",
+		Issuer:          "https://auth.example.com/realms/wiki",
 	}}
 	roots := firingRoots(t)
 	provider := skills.NewProvider(skills.Sources{Home: roots.config, Workspace: roots.workspace})

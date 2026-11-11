@@ -275,6 +275,7 @@ func TestLoginWithAPreregisteredClientDoesNotRegister(t *testing.T) {
 	cfg := fake.loginConfig(store)
 	cfg.ClientID = "pre-1"
 	cfg.ClientSecret = "pre-secret"
+	cfg.Issuer = fake.authSrv.URL
 
 	record, err := Login(context.Background(), cfg)
 
@@ -290,6 +291,31 @@ func TestLoginWithAPreregisteredClientDoesNotRegister(t *testing.T) {
 	}
 	if got := fake.seen().tokenForm.Get("client_secret"); got != "pre-secret" {
 		t.Errorf("token request client_secret = %q, want the configured secret", got)
+	}
+}
+
+func TestLoginRefusesAClientSecretWithoutAnIssuer(t *testing.T) {
+	t.Parallel()
+	for _, issuer := range []string{"", "  "} {
+		t.Run(fmt.Sprintf("issuer %q", issuer), func(t *testing.T) {
+			t.Parallel()
+			fake := newFakeOAuth(t, "/mcp")
+
+			_, err := Login(context.Background(), fake.preregisteredLogin(NewStore(t.TempDir()), issuer))
+
+			want := fmt.Sprintf("mcpauth: server %q: a client secret needs a configured issuer — "+
+				"set issuer: beside client-secret-env:", testServer)
+			if err == nil || err.Error() != want {
+				t.Fatalf("Login() error = %v, want %q", err, want)
+			}
+			if strings.Contains(err.Error(), "pre-secret") {
+				t.Errorf("error = %q, want it never to carry the secret", err)
+			}
+			seen := fake.seen()
+			if seen.tokenForm != nil || len(seen.registrations) != 0 {
+				t.Errorf("the login reached the authorization server before refusing: %+v", seen)
+			}
+		})
 	}
 }
 

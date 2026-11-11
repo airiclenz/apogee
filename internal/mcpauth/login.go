@@ -107,7 +107,7 @@ type LoginConfig struct {
 	ClientSecret string
 	// Issuer, when set, is the one authorization server the login may use: the endpoint must
 	// name it, else the login fails with IssuerMismatchError. Empty means no pin — the first
-	// authorization server the endpoint names is used.
+	// authorization server the endpoint names is used — and is refused beside a ClientSecret.
 	Issuer string
 	// RedirectURL is the redirect URI the authorization server sends the code to.
 	RedirectURL string
@@ -158,6 +158,17 @@ func (cfg LoginConfig) validate() error {
 		return fmt.Errorf("mcpauth: server %q: login needs a store, both HTTP clients and a code fetcher", cfg.Name)
 	case cfg.RedirectURL == "":
 		return fmt.Errorf("mcpauth: server %q: login needs a redirect URL", cfg.Name)
+	}
+	return requireSecretIssuer(cfg.Name, cfg.ClientSecret, cfg.Issuer)
+}
+
+// requireSecretIssuer refuses a client secret without a configured issuer: the secret goes only to
+// the token endpoint of an authorization server the operator pinned, never to whichever one the
+// endpoint names. The error names the server and the keys, never the secret.
+func requireSecretIssuer(name, secret, issuer string) error {
+	if secret != "" && strings.TrimSpace(issuer) == "" {
+		return fmt.Errorf("mcpauth: server %q: a client secret needs a configured issuer — "+
+			"set issuer: beside client-secret-env:", name)
 	}
 	return nil
 }

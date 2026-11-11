@@ -1173,7 +1173,7 @@ func TestServerConfigValidateAuth(t *testing.T) {
 			name: "oauth with a preregistered confidential client",
 			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
 				Auth: AuthOAuth, ClientID: "apogee-client", ClientSecretEnv: "DOCS_CLIENT_SECRET",
-				Headers: map[string]string{"X-Tenant": "acme"}},
+				Issuer: "https://auth.example.com/realms/a", Headers: map[string]string{"X-Tenant": "acme"}},
 		},
 		{
 			name: "oauth pinned to an issuer",
@@ -1223,6 +1223,19 @@ func TestServerConfigValidateAuth(t *testing.T) {
 				Auth: AuthOAuth, ClientSecretEnv: "DOCS_CLIENT_SECRET"},
 			want: "client-secret-env: needs client-id: — the secret belongs to a client registered " +
 				"ahead of time, and client-id: names that client",
+		},
+		{
+			name: "client-secret-env without issuer",
+			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
+				Auth: AuthOAuth, ClientID: "apogee-client", ClientSecretEnv: "DOCS_CLIENT_SECRET"},
+			want: secretNeedsIssuer,
+		},
+		{
+			name: "client-secret-env beside an issuer of space alone",
+			cfg: ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: endpoint,
+				Auth: AuthOAuth, ClientID: "apogee-client", ClientSecretEnv: "DOCS_CLIENT_SECRET",
+				Issuer: "   "},
+			want: secretNeedsIssuer,
 		},
 		{
 			name: "issuer without auth",
@@ -1316,6 +1329,10 @@ func TestServerConfigValidateAuth(t *testing.T) {
 // issuerNotAURL is ValidateAuth's refusal of an `issuer:` that is not an absolute http(s) URL.
 const issuerNotAURL = "issuer: is not an absolute http or https URL with a host — it names the " +
 	"authorization server as its metadata's issuer does"
+
+// secretNeedsIssuer is ValidateAuth's refusal of a `client-secret-env:` without an `issuer:`.
+const secretNeedsIssuer = "client-secret-env: needs issuer: — the secret is sent only to the " +
+	"authorization server issuer: names, never to one the endpoint picks"
 
 // oauthServer is an MCP server that answers only requests carrying its current bearer token,
 // beside an authorization server's token endpoint on another origin that mints that token.

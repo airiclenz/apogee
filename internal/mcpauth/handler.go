@@ -63,7 +63,8 @@ type HandlerConfig struct {
 	ClientSecret string
 	// Issuer, when set, is the configured issuer: a record another authorization server issued —
 	// or one that names none — is no record at all (issuerMatches), so no refresh, and no client
-	// secret, is ever sent to a token endpoint the operator did not pin. Empty means no pin.
+	// secret, is ever sent to a token endpoint the operator did not pin. Empty means no pin, and is
+	// refused beside a ClientSecret.
 	Issuer string
 }
 
@@ -83,13 +84,17 @@ type Handler struct {
 // NewHandler loads cfg's record and returns the handler over it. A missing record — never logged
 // in, logged out, minted for another endpoint, or issued to another client than cfg.ClientID — is
 // ErrLoginRequired, as is one issued by another authorization server than cfg.Issuer; an unsafe
-// name, a missing store or client, and an unreadable record are plain errors.
+// name, a missing store or client, a client secret without an issuer, and an unreadable record are
+// plain errors.
 func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	if err := ValidateServerName(cfg.Name); err != nil {
 		return nil, err
 	}
 	if cfg.Store == nil || cfg.EndpointClient == nil || cfg.AuthClient == nil {
 		return nil, fmt.Errorf("mcpauth: server %q: the OAuth handler needs a store and both HTTP clients", cfg.Name)
+	}
+	if err := requireSecretIssuer(cfg.Name, cfg.ClientSecret, cfg.Issuer); err != nil {
+		return nil, err
 	}
 	record, ok, err := cfg.Store.Load(cfg.Name, cfg.Endpoint)
 	if err != nil {

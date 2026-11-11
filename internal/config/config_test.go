@@ -3743,7 +3743,7 @@ func TestApplyConfigMCPServerAuth(t *testing.T) {
 		home := testConfigHome(t, "")
 		writeConfigHome(t, home, "mcp-servers:\n  - name: docs\n    transport: streamable-http\n"+
 			"    endpoint: https://mcp.example.com/\n    auth: oauth\n    client-id: apogee-client\n"+
-			"    client-secret-env: DOCS_CLIENT_SECRET\n")
+			"    client-secret-env: DOCS_CLIENT_SECRET\n    issuer: https://auth.example.com/realms/a\n")
 		opts := Options{ConfigDir: home}
 
 		err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
@@ -3759,6 +3759,7 @@ func TestApplyConfigMCPServerAuth(t *testing.T) {
 			Auth:            mcp.AuthOAuth,
 			ClientID:        "apogee-client",
 			ClientSecretEnv: "DOCS_CLIENT_SECRET",
+			Issuer:          "https://auth.example.com/realms/a",
 		}}
 		if !reflect.DeepEqual(opts.MCPServers, want) {
 			t.Errorf("mcpServers = %+v; want %+v", opts.MCPServers, want)
@@ -3834,6 +3835,13 @@ func TestApplyConfigMCPServerAuth(t *testing.T) {
 			entryYAML: "    transport: streamable-http\n    endpoint: https://mcp.example.com/\n    auth: oauth\n" +
 				"    client-secret-env: DOCS_CLIENT_SECRET\n",
 			want: "apogee: mcp-servers.docs: client-secret-env: needs client-id:",
+		},
+		{
+			name: "client-secret-env without issuer",
+			entryYAML: "    transport: streamable-http\n    endpoint: https://mcp.example.com/\n    auth: oauth\n" +
+				"    client-id: apogee-client\n    client-secret-env: DOCS_CLIENT_SECRET\n",
+			want: "apogee: mcp-servers.docs: client-secret-env: needs issuer: — the secret is sent only to " +
+				"the authorization server issuer: names",
 		},
 		{
 			name: "issuer without auth",

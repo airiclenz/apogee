@@ -1194,6 +1194,21 @@ func TestConnect_RejectsBadServerNames(t *testing.T) {
 	}
 }
 
+// TestConnect_RefusesAClientSecretWithoutAnIssuer proves a host that builds its ServerConfigs
+// without the config loader meets ValidateAuth's issuer rule too: a client secret with no
+// `issuer:` is refused naming the entry and both keys before any connection.
+func TestConnect_RefusesAClientSecretWithoutAnIssuer(t *testing.T) {
+	cfg := ServerConfig{Name: "docs", Transport: TransportStreamableHTTP, Endpoint: "https://mcp.example.com/mcp",
+		Auth: AuthOAuth, ClientID: "apogee-client", ClientSecretEnv: "DOCS_CLIENT_SECRET"}
+
+	_, err := Connect(context.Background(), []ServerConfig{cfg}, security.URLGuard{}, t.TempDir())
+
+	want := `mcp: server "docs": ` + secretNeedsIssuer
+	if err == nil || err.Error() != want {
+		t.Fatalf("Connect error = %v, want %q", err, want)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Transport selection / SSRF floor (no connection made)
 // ----------------------------------------------------------------------------

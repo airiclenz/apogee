@@ -423,8 +423,8 @@ func TestMCPCmdLoginWithTheEndpointsIssuerSavesTheRecord(t *testing.T) {
 
 // A login whose `issuer:` is not the authorization server the endpoint names fails as an issuer
 // mismatch before any token request, so the preregistered client's secret never leaves — which
-// proves `issuer:` reaches the login: unpinned, the same login exchanges the code. Not parallel:
-// it sets the secret's environment variable.
+// proves `issuer:` reaches the login (unpinned, the same secret is refused at config load). Not
+// parallel: it sets the secret's environment variable.
 func TestMCPCmdLoginRefusesAnotherIssuer(t *testing.T) {
 	const secretEnv = "APOGEE_TEST_MCP_CLIENT_SECRET"
 	fake := newFakeOAuthMCP(t, &atomic.Int64{})

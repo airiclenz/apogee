@@ -304,6 +304,18 @@ func TestRepoMCPServerRefusedAloneKeepsTheTightenOnlyKeys(t *testing.T) {
 			},
 		},
 		{
+			name: "a client secret without an issuer beside a good one",
+			servers: "mcp-servers:\n" +
+				"  - name: ok\n    transport: stdio\n    command: ok-server\n" +
+				"  - name: docs\n    transport: streamable-http\n    endpoint: https://mcp.example.com/\n" +
+				"    auth: oauth\n    client-id: apogee-client\n    client-secret-env: DOCS_CLIENT_SECRET\n",
+			wantProposed: []string{"ok"},
+			wantNotices: []string{
+				`ignoring mcp-servers entry "docs": client-secret-env: needs issuer: — the secret is sent ` +
+					"only to the authorization server issuer: names",
+			},
+		},
+		{
 			name: "names that would make tool names ambiguous",
 			servers: "mcp-servers:\n" +
 				"  - name: a_\n    transport: stdio\n    command: trailing\n" +

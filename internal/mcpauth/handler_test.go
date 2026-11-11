@@ -95,7 +95,8 @@ func (f *fakeTokenServer) refreshes() []url.Values {
 	return append([]url.Values(nil), f.forms...)
 }
 
-// storedRecord is a record bound to handlerEndpoint whose token endpoint is f's.
+// storedRecord is a record bound to handlerEndpoint whose token endpoint is f's, issued by
+// pinnedIssuer.
 func (f *fakeTokenServer) storedRecord(expiry time.Time) Record {
 	return Record{
 		AccessToken:   staleAccess,
@@ -105,6 +106,7 @@ func (f *fakeTokenServer) storedRecord(expiry time.Time) Record {
 		TokenEndpoint: f.srv.URL + "/token",
 		Resource:      handlerEndpoint,
 		Client:        Client{ID: "client-1", TokenEndpointAuthMethod: authMethodNone},
+		Issuer:        pinnedIssuer,
 	}
 }
 
@@ -515,7 +517,6 @@ func TestHandlerRefreshRefusesARecordOfAnotherClient(t *testing.T) {
 	}
 }
 
-// assertLoginRequired fails the test unless err is ErrLoginRequired naming the login command.
 // pinnedIssuer is the issuer the issuer-pin tests configure.
 const pinnedIssuer = "https://as.example/realms/a"
 
@@ -620,6 +621,42 @@ func TestHandlerRefreshRefusesARecordOfAnotherIssuer(t *testing.T) {
 	}
 }
 
+// assertLoginRequired fails the test unless err is ErrLoginRequired naming the login command.
+func TestNewHandlerRefusesAClientSecretWithoutAnIssuer(t *testing.T) {
+	t.Parallel()
+	for _, issuer := range []string{"", "  "} {
+		t.Run(fmt.Sprintf("issuer %q", issuer), func(t *testing.T) {
+			t.Parallel()
+			tokens := newFakeTokenServer(t, staleRefresh)
+			store := NewStore(t.TempDir())
+			saveRecord(t, store, testServer, handlerEndpoint, tokens.storedRecord(time.Now().Add(-time.Minute)))
+
+			_, err := NewHandler(HandlerConfig{
+				Name:           testServer,
+				Endpoint:       handlerEndpoint,
+				Store:          store,
+				EndpointClient: loopbackClient(),
+				AuthClient:     loopbackClient(),
+				ClientSecret:   "secret-1",
+				Issuer:         issuer,
+			})
+
+			want := fmt.Sprintf("mcpauth: server %q: a client secret needs a configured issuer — "+
+				"set issuer: beside client-secret-env:", testServer)
+			if err == nil || err.Error() != want {
+				t.Fatalf("NewHandler error = %v; want %q", err, want)
+			}
+			if errors.Is(err, ErrLoginRequired) {
+				t.Errorf("error = %v; want a plain error, not ErrLoginRequired — a login cannot fix the config", err)
+			}
+			if strings.Contains(err.Error(), "secret-1") {
+				t.Errorf("error = %q; want it never to carry the secret", err)
+			}
+		})
+	}
+}
+
+// assertLoginRequired fails the test unless err is ErrLoginRequired naming the login command.
 func assertLoginRequired(t *testing.T, err error) {
 	t.Helper()
 	if !errors.Is(err, ErrLoginRequired) {
@@ -672,6 +709,7 @@ func TestHandlerRefreshAuthenticatesTheClientAsRegistered(t *testing.T) {
 				EndpointClient: loopbackClient(),
 				AuthClient:     loopbackClient(),
 				ClientSecret:   "secret-1",
+				Issuer:         pinnedIssuer,
 			})
 			if err != nil {
 				t.Fatalf("NewHandler error = %v", err)

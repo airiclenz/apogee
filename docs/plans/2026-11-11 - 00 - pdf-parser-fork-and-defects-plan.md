@@ -265,7 +265,12 @@ Depends on item 10.
 - `go build ./cmd/apogee/ && go test -race -count=1 -run 'MCP|WireConfig' ./cmd/apogee/`
 **Commit:** `feat(mcp): add issuer: to pin an OAuth server's authorization server`
 
-## 12. `client-secret-env:` without `issuer:` is refused
+## 12. `client-secret-env:` without `issuer:` is refused — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): the `validateServers` row lands in internal/mcp/mcp_test.go (`TestConnect_RefusesAClientSecretWithoutAnIssuer`, beside `TestConnect_RejectsBadServerNames`), a file the item's Files line does not name; the plan's Tests line asks for "a `validateServers` row in `internal/mcp`" and that is where the package's Connect-refusal tests live.
+NOTES (2026-11-11): consequential edit — cmd/apogee/mcp_cmd_test.go: made necessary by the required `issuer:` (the `TestMCPCmdLoginRefusesAnotherIssuer` comment claimed an unpinned secret login exchanges the code; it is now refused at config load). The file's one secret fixture already carried `issuer:` from item 11.
+NOTES (2026-11-11): the issuer check uses `strings.TrimSpace`, so a space-only `issuer:` beside `client-secret-env:` is refused with the needs-issuer wording (new transport_test row); without a secret a space-only issuer keeps its `issuerNotAURL` refusal. `mcpauth`'s refusal is a plain error, not ErrLoginRequired (a login cannot fix the config), shared by `Login` and `NewHandler` through `requireSecretIssuer`.
+NOTES (2026-11-11): item 10 verifier's note applied — assertLoginRequired's doc comment moved back above it in internal/mcpauth/handler_test.go; `storedRecord` now carries `Issuer: pinnedIssuer`.
 
 Depends on item 11.
 

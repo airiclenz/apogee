@@ -122,12 +122,13 @@ type ServerConfig struct {
 	// time; empty means apogee registers one itself (Dynamic Client Registration).
 	// ClientSecretEnv is the NAME of the environment variable holding that client's secret, so the
 	// secret never sits in the config file — empty for a public client. Both need Auth set to
-	// AuthOAuth, and ClientSecretEnv needs ClientID.
+	// AuthOAuth, and ClientSecretEnv needs ClientID and Issuer.
 	ClientID        string
 	ClientSecretEnv string
-	// Issuer optionally pins the authorization server: when set, a login uses that issuer only if
-	// the endpoint names it, and a stored token another issuer minted is no token at all
-	// (mcpauth.LoginConfig.Issuer, mcpauth.HandlerConfig.Issuer). Empty means no pin. It needs Auth
+	// Issuer pins the authorization server: when set, a login uses that issuer only if the endpoint
+	// names it, and a stored token another issuer minted is no token at all
+	// (mcpauth.LoginConfig.Issuer, mcpauth.HandlerConfig.Issuer). Empty means no pin, which only a
+	// client without a ClientSecretEnv may have: a secret goes to a pinned issuer only. It needs Auth
 	// set to AuthOAuth and is an absolute http(s) URL with a host and no user info, query or
 	// fragment, taken as written (ValidateAuth).
 	Issuer string
@@ -271,7 +272,7 @@ func (cfg ServerConfig) ValidateHeaders() error {
 // ValidateAuth refuses an `auth:` / `client-id:` / `client-secret-env:` / `issuer:` combination
 // that could not do what it says: an Auth value other than AuthOAuth; AuthOAuth on any transport
 // but streamable-http; a ClientID, ClientSecretEnv or Issuer without AuthOAuth; a ClientSecretEnv
-// without the ClientID it is the secret of; an Issuer that is not an issuer URL (validateIssuer);
+// without the ClientID it is the secret of, or without the Issuer it may be sent to; an Issuer that is not an issuer URL (validateIssuer);
 // and an Authorization header — in Headers or HeadersEnv, any case — beside AuthOAuth, which would
 // fight the bearer token apogee sends itself.
 //
@@ -309,6 +310,10 @@ func (cfg ServerConfig) ValidateAuth() error {
 	if cfg.ClientSecretEnv != "" && cfg.ClientID == "" {
 		return errors.New("client-secret-env: needs client-id: — the secret belongs to a client " +
 			"registered ahead of time, and client-id: names that client")
+	}
+	if cfg.ClientSecretEnv != "" && strings.TrimSpace(cfg.Issuer) == "" {
+		return errors.New("client-secret-env: needs issuer: — the secret is sent only to the " +
+			"authorization server issuer: names, never to one the endpoint picks")
 	}
 	if cfg.Issuer != "" {
 		if err := validateIssuer(cfg.Issuer); err != nil {
