@@ -118,6 +118,60 @@ func TestUpstreamSwitchedEventNoticeNamesBothServers(t *testing.T) {
 	}
 }
 
+// TestUpstreamLoadingEventNoticeNamesTheBound pins the one sentence every Driver shows while a call
+// waits on a server still loading its model: the server, or "this server" when the host names
+// none, and the bound worded "10m" byte for byte — the Drivers' own tests pin the same text.
+func TestUpstreamLoadingEventNoticeNamesTheBound(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		server string
+		want   string
+	}{
+		{"a named server", "box", "box is still loading its model (HTTP 503) — waiting up to 10m"},
+		{"no server named", "", "this server is still loading its model (HTTP 503) — waiting up to 10m"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := UpstreamLoadingEvent{Server: tc.server, Model: "qwen"}.Notice()
+
+			if got != tc.want {
+				t.Errorf("Notice() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNoticeDurationDropsATrailingZeroUnit pins how a Notice words a bound: a whole number of
+// minutes or hours drops its zero seconds and minutes, and a bound that is not whole keeps every
+// unit time.Duration prints.
+func TestNoticeDurationDropsATrailingZeroUnit(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		in   time.Duration
+		want string
+	}{
+		{10 * time.Minute, "10m"},
+		{90 * time.Second, "1m30s"},
+		{time.Hour, "1h"},
+		{90 * time.Minute, "1h30m"},
+		{10 * time.Second, "10s"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in.String(), func(t *testing.T) {
+			t.Parallel()
+
+			if got := noticeDuration(tc.in); got != tc.want {
+				t.Errorf("noticeDuration(%v) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestMalformedChunksEventNoticeNamesTheCount pins the one sentence every Driver shows for a
 // successful reply that dropped undecodable stream chunks: the count, and the singular noun for a
 // single chunk, so no surface spells the drop its own way.

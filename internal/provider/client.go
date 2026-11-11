@@ -73,16 +73,19 @@ const (
 	defaultMaxRetries     = 2
 	defaultRetryBaseDelay = 200 * time.Millisecond
 
-	// loadingRetryBase, loadingRetryCap and loadingBackstop pace the wait on a server still
+	// loadingRetryBase, loadingRetryCap and LoadingBackstop pace the wait on a server still
 	// loading its model (llama-server's 503 loading reply, isLoadingReply): the request is re-sent
 	// after loadingRetryBase, the hold-off doubling to loadingRetryCap, until a reply that is not
-	// the loading reply arrives, the caller's ctx ends, or loadingBackstop has passed since the
+	// the loading reply arrives, the caller's ctx ends, or LoadingBackstop has passed since the
 	// call's first wait began. A large model on a slow box takes minutes to load, which the
 	// 200ms·2ⁿ ladder above gives up on in 0.6 s (loading-server-503-giveup); ten minutes is the
 	// default stream idle window, so a wait never outlives the bound a silent server gets.
+	// LoadingBackstop is exported only so a test outside this package can hold it equal to
+	// domain.UpstreamLoadingBound, the bound every Driver's loading notice names; the provider
+	// stays domain-free (ADR 0010).
 	loadingRetryBase = 1 * time.Second
 	loadingRetryCap  = 8 * time.Second
-	loadingBackstop  = 10 * time.Minute
+	LoadingBackstop  = 10 * time.Minute
 
 	// defaultStreamIdleTimeout is how long Stream lets an upstream sit silent — before its
 	// headers or between two body reads — before cutting it as a retryable fault. Ten minutes
@@ -173,7 +176,7 @@ func upstreamStatusText(code int, body, location string) string {
 // the Client's configured base for transport faults and 5xx and off the slower
 // retry429BaseDelay for a 429. The one exception is a server still loading its model — the 503
 // whose body is llama-server's loading reply (isLoadingReply): that one is waited out
-// patiently, re-sent at loadingRetryBase doubling to loadingRetryCap for up to loadingBackstop,
+// patiently, re-sent at loadingRetryBase doubling to loadingRetryCap for up to LoadingBackstop,
 // unless retries are off (WithMaxRetries(0)) or the request yields the wait to a fallback
 // resolver (Request.SkipLoadingWait). Every wait is cancellable by the caller's context.
 //
@@ -227,7 +230,7 @@ type Client struct {
 	identity *serverIdentity
 
 	// loadingBase, loadingCap and loadingBackstop pace the wait on a loading server (awaitLoaded):
-	// loadingRetryBase, loadingRetryCap and loadingBackstop, set by NewClient. They are fields
+	// loadingRetryBase, loadingRetryCap and LoadingBackstop, set by NewClient. They are fields
 	// rather than the constants read directly only so this package's tests can scale the wait.
 	loadingBase     time.Duration
 	loadingCap      time.Duration
@@ -302,7 +305,7 @@ func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.httpClie
 // WithMaxRetries sets how many times a retryable attempt is re-tried (default 2 ⇒ up to
 // 3 attempts). Zero disables retries, the wait on a loading server's 503 included. The budget
 // does not bound that wait: a loading reply is re-sent until the server answers otherwise or
-// loadingBackstop passes, and the reply that ends the wait goes on to the remaining budget.
+// LoadingBackstop passes, and the reply that ends the wait goes on to the remaining budget.
 func WithMaxRetries(n int) Option { return func(c *Client) { c.maxRetries = n } }
 
 // WithRetryBaseDelay sets the base backoff for transport faults and 5xx replies; attempt n
@@ -419,7 +422,7 @@ func NewClient(baseURL, model string, opts ...Option) *Client {
 		streamIdleTimeout: defaultStreamIdleTimeout,
 		loadingBase:       loadingRetryBase,
 		loadingCap:        loadingRetryCap,
-		loadingBackstop:   loadingBackstop,
+		loadingBackstop:   LoadingBackstop,
 	}
 	for _, opt := range opts {
 		opt(c)

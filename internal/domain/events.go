@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -902,9 +903,11 @@ type UpstreamLoadingEvent struct {
 	Model  string
 }
 
-// upstreamLoadingBound is how long a call waits on a loading server before it gives up, as the
-// Notice words it: the provider's loading-wait backstop (provider.loadingBackstop, 10 minutes).
-const upstreamLoadingBound = "10m"
+// UpstreamLoadingBound is how long a call waits on a loading server before it gives up, as the
+// Notice words it. It restates the provider's loading-wait backstop (provider.LoadingBackstop),
+// which the domain does not import (ADR 0010); a test in internal/agent, which imports both, fails
+// when the two disagree.
+const UpstreamLoadingBound = 10 * time.Minute
 
 // Notice is the human-facing sentence for one wait: which server is loading and how long the call
 // will wait for it. A server with no name is "this server".
@@ -913,7 +916,21 @@ func (e UpstreamLoadingEvent) Notice() string {
 	if server == "" {
 		server = "this server"
 	}
-	return fmt.Sprintf("%s is still loading its model (HTTP 503) — waiting up to %s", server, upstreamLoadingBound)
+	return fmt.Sprintf("%s is still loading its model (HTTP 503) — waiting up to %s", server, noticeDuration(UpstreamLoadingBound))
+}
+
+// noticeDuration renders d the way a Notice words a bound: time.Duration's own form with a
+// trailing zero unit dropped, so a whole number of minutes reads "10m" (never "10m0s") and a whole
+// number of hours "1h" (never "1h0m0s"), while 90 seconds still reads "1m30s".
+func noticeDuration(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
 }
 
 // MCPServerPhase names the point in one MCP server's connection life that an MCPServerEvent

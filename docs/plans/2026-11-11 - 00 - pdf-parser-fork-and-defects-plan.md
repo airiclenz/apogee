@@ -130,7 +130,10 @@ Depends on item 2.
 **Closes:** gitexec-timeout-names-flag
 **Commit:** `fix(gitexec): name the subcommand in a git failure that leads with an option`
 
-## 5. The loading notice's bound is tied to the provider's backstop
+## 5. The loading notice's bound is tied to the provider's backstop — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): internal/provider/reliability_test.go (named in Files) needed no change — loadingPacing sets the unexported Client.loadingBackstop field, whose name stays; only the package constant was exported as LoadingBackstop and the doc comments naming the constant updated.
+NOTES (2026-11-11): the formatter noticeDuration drops a trailing zero unit off time.Duration's form ("10m", "1h", "1h30m"; "1m30s" and "10s" unchanged); its test also covers 90m and 10s beside the plan's 10m, 90s and 1h.
 
 **What:**
 **Goal:** a test fails when the provider's loading backstop and the bound `UpstreamLoadingEvent.Notice()` names disagree; the notice still reads `waiting up to 10m` byte for byte.

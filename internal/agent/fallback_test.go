@@ -1849,6 +1849,19 @@ func loadingEvents(sink *recordingSink) []domain.UpstreamLoadingEvent {
 	return out
 }
 
+// TestLoadingBackstopMatchesTheNoticeBound ties the two halves of the loading wait together: the
+// provider's backstop (how long a call actually waits on a loading server) and the bound the
+// domain's UpstreamLoadingEvent.Notice names to the user. The provider stays domain-free (ADR
+// 0010), so this package, which imports both, is where a change to one without the other fails.
+func TestLoadingBackstopMatchesTheNoticeBound(t *testing.T) {
+	t.Parallel()
+
+	if provider.LoadingBackstop != domain.UpstreamLoadingBound {
+		t.Errorf("provider.LoadingBackstop = %v, domain.UpstreamLoadingBound = %v; the loading notice names a wait the provider does not keep",
+			provider.LoadingBackstop, domain.UpstreamLoadingBound)
+	}
+}
+
 // TestLoadingWaitEmitsOneNoticePerCall pins the engine's half of the loading notice: a model call
 // that waits out a server still loading its model emits exactly one UpstreamLoadingEvent (the
 // provider yields its wait Delta once per call, pinned in its own tests), naming the bound server
