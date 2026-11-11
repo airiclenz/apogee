@@ -272,9 +272,9 @@ func (cfg ServerConfig) ValidateHeaders() error {
 // ValidateAuth refuses an `auth:` / `client-id:` / `client-secret-env:` / `issuer:` combination
 // that could not do what it says: an Auth value other than AuthOAuth; AuthOAuth on any transport
 // but streamable-http; a ClientID, ClientSecretEnv or Issuer without AuthOAuth; a ClientSecretEnv
-// without the ClientID it is the secret of, or without the Issuer it may be sent to; an Issuer that is not an issuer URL (validateIssuer);
-// and an Authorization header — in Headers or HeadersEnv, any case — beside AuthOAuth, which would
-// fight the bearer token apogee sends itself.
+// without the ClientID it is the secret of, or without the Issuer it may be sent to; an Issuer
+// that is not an issuer URL (validateIssuer); and an Authorization header — in Headers or
+// HeadersEnv, any case — beside AuthOAuth, which would fight the bearer token apogee sends itself.
 //
 // AuthOAuth on stdio or sse is a refusal, not the notice a transport-mismatched key earns
 // elsewhere (internal/config's mcpEnvAllowlistNotices): an ignored `auth:` would leave the server

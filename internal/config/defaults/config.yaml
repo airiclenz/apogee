@@ -484,7 +484,10 @@ context-files:
 # The token is sent to that endpoint's origin alone, and the authorization server is reached under
 # the SSRF floor. Optional `client-id:` names a client registered ahead of time (redirect URI
 # http://127.0.0.1/callback, any port), and `client-secret-env:` the NAME of the variable holding
-# its secret — scrubbed from tool subprocesses like a `headers-env:` one.
+# its secret — scrubbed from tool subprocesses like a `headers-env:` one. `issuer:` pins the
+# authorization server (its issuer URL, exactly as its metadata states it): the login uses it only
+# if the endpoint names it, and a saved token another server issued needs a new login. A secret is
+# sent only to that pinned issuer, so `client-secret-env:` without `issuer:` is refused at startup.
 #
 # mcp-servers:
 #   - name: github                       # the prefix on each tool's name; must be unique
@@ -506,6 +509,7 @@ context-files:
 #     auth: oauth                        # streamable-http only: log in, no Authorization header
 #     client-id: apogee-desktop          # optional: a client registered ahead of time
 #     client-secret-env: TRACKER_SECRET  # optional: env variable NAME holding its secret
+#     issuer: https://auth.tracker.example.com/  # the authorization server; required with a secret
 
 # =============================================================================
 # The tool roster: which of Apogee's BUILT-IN tools this configuration offers the model. Almost all

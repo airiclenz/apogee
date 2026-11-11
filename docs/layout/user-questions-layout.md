@@ -216,9 +216,9 @@ parts, one blank line apart, each part a run of labelled fields:
   fields below say what is there now.
 - **For an MCP server entry**, what it runs or where it connects — `transport:`, then `command:` and
   `args:` for a stdio server or `endpoint:` for an HTTP one — and then what it carries: `env:`,
-  `env-allowlist:`, `headers:`, `headers-env:`, `auth:`, `client-id:` and `client-secret-env:`. The
-  whole entry is pinned, so every field it sets is shown, in that fixed order; a field the entry does
-  not set is not drawn, with one exception — a stdio server with no `env-allowlist:` reads
+  `env-allowlist:`, `headers:`, `headers-env:`, `auth:`, `client-id:`, `client-secret-env:` and
+  `issuer:`. The whole entry is pinned, so every field it sets is shown, in that fixed order; a
+  field the entry does not set is not drawn, with one exception — a stdio server with no `env-allowlist:` reads
   `env-allowlist: not set — the platform floor only`, because that is what a repo server gets
   (ADR 0104 §6) and the absence is itself a fact the human is ruling on. **`env:` entries are shown
   in full, as the `KEY=VALUE` the child receives**, never as bare names: a repo
@@ -226,7 +226,8 @@ parts, one blank line apart, each part a run of labelled fields:
   screen before it is adopted. `env-allowlist:` lists the inherited names; `headers:` shows each
   header with its literal value; `headers-env:` and `client-secret-env:` show the **names** of the
   variables whose values are sent — the variable's value is never read for the pane — and the
-  `endpoint:` is where those values go.
+  `endpoint:` is where those values go, save the client secret, which goes only to the
+  authorization server `issuer:` names (required beside `client-secret-env:`).
 - **For a reaction**, its pinned actions — `run:`, `advise:` and `gate:`, whichever it sets, in that
   fixed order, each action a part of its own. An argv action shows every element, the program
   first; a webhook action shows its `url:`, `headers:` and `headers-env:`, in that order; an MCP action
@@ -427,8 +428,9 @@ endpoint: https://mcp.example.com/v1
 headers:
   X-Team: platform
 headers-env:
-  Authorization: DOCS_TOKEN
+  X-Api-Key: DOCS_API_KEY
 auth: oauth
 client-id: apogee-docs
 client-secret-env: DOCS_CLIENT_SECRET
+issuer: https://login.example.com/realms/docs
 ```

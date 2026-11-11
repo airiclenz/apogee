@@ -412,8 +412,8 @@ entries are written exactly as yours are, and are proposed, adopted or rejected 
 is. Their pane shows, between the question and the answers, everything adopting pins, verbatim: a
 server's transport, its command and arguments or its endpoint, its `env:` entries in full as
 `KEY=VALUE`, its `env-allowlist:` (or `not set — the platform floor only`), its `headers:`, the
-**names** of the variables its `headers-env:` and `client-secret-env:` send, its `auth:` and
-`client-id:`; a reaction's `run:`, `advise:` and `gate:` actions, argv, webhook or MCP tool; and every project
+**names** of the variables its `headers-env:` and `client-secret-env:` send, its `auth:`,
+`client-id:` and `issuer:`; a reaction's `run:`, `advise:` and `gate:` actions, argv, webhook or MCP tool; and every project
 file the pin holds. A long value wraps and is never cut; a body too tall for the window gives up
 lines, counted, before any answer does, and `apogee project adopt` prints it whole. What is pinned:
 
@@ -461,7 +461,8 @@ A repo entry also differs from one of yours in what it is let do, before and aft
 
 Otherwise an adopted entry is trusted as yours is: its endpoint and webhook URL keep the exemption
 from the private-range floor, and it may use `headers-env:` and `client-secret-env:` — the pane
-names the endpoint and every variable it sends, and that is the gate. An adopted server connects and
+names the endpoint, every variable it sends and the `issuer:` a client secret may go to, and that
+is the gate. An adopted server connects and
 an adopted reaction arms at once, whether you answered in the pane, in `/settings` or with
 `apogee project adopt` beside the session, and a variable it sends is scrubbed from the tools from
 that moment. `apogee headless` and a [daemon firing](daemon.md) fire the project reactions you
@@ -678,7 +679,8 @@ model sees `github__create_issue` and you can tell whose tool a call reached) an
 which is `stdio` for a local process apogee launches or `sse` / `streamable-http` for a server
 reached over http(s). A stdio entry takes `command`, optional `args`, and optional `env`; an http
 one takes `endpoint`, and optional `headers` and `headers-env` — and a `streamable-http` one can
-instead log in with OAuth (`auth: oauth`, optionally with `client-id` and `client-secret-env`).
+instead log in with OAuth (`auth: oauth`, optionally with `client-id`, `client-secret-env` and
+`issuer`).
 
 A `name` may not hold `__` or end in `_`: server `a__b`'s tool `c` and server `a`'s tool `b__c`
 would both be offered as `a__b__c`, and `a_`'s `b` and `a`'s `_b` both as `a___b`. Such an entry
@@ -788,7 +790,8 @@ entry that sets either is told so at startup, as a notice and never a refusal.
 spec](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization) — takes
 `auth: oauth`, and apogee does the login itself rather than wanting a token in `headers-env:`. It
 asks the server, learns its authorization server from the server's own answer (protected-resource
-and authorization-server metadata, RFC 9728 and RFC 8414), registers itself there as a client
+and authorization-server metadata, RFC 9728 and RFC 8414) — or, with `issuer:`, checks that the
+answer names the one you pinned — registers itself there as a client
 (Dynamic Client Registration, RFC 7591) unless you name one, runs a browser login with PKCE, and
 keeps the token it gets.
 
@@ -805,6 +808,7 @@ mcp-servers:
     auth: oauth
     client-id: apogee-desktop             # a client registered ahead of time
     client-secret-env: WIKI_OAUTH_SECRET  # the variable's NAME; leave out for a public client
+    issuer: https://login.example.com/realms/wiki  # required beside client-secret-env:
 ```
 
 `client-id:` names a client an administrator registered with the authorization server ahead of
@@ -813,17 +817,33 @@ redirect URI **`http://127.0.0.1/callback`** and loopback port variance (RFC 825
 login listens on a free port of `127.0.0.1` chosen when it starts, so the authorization server must
 accept any port on that address — there is no key that fixes the port. `client-secret-env:` names
 the environment variable holding a confidential client's secret, read at each login and each
-connect; it needs `client-id:`, a variable that is not set fails the login or the connect naming
-the server and the variable, and — like a `headers-env:` variable — it is dropped from the
-environment of every tool subprocess, from the moment an edit or an adoption names it.
+connect; it needs `client-id:` and `issuer:`, a variable that is not set fails the login or the
+connect naming the server and the variable, and — like a `headers-env:` variable — it is dropped
+from the environment of every tool subprocess, from the moment an edit or an adoption names it.
+
+`issuer:` pins the authorization server: its issuer URL, exactly as that server's own metadata
+states it — an absolute `http` or `https` URL with a host and no user info, query or fragment,
+compared as written once surrounding space is trimmed. A login uses it only if the endpoint's
+protected-resource metadata lists it, in any position; otherwise the login stops before it
+contacts any authorization server, naming the issuer you set and the ones the endpoint offered
+(an endpoint that publishes no such metadata offers only its own origin). A saved token another
+authorization server issued is no token for that server: the next connect asks for a new login,
+and no refresh is sent. A client secret goes only to the issuer you pinned, never to one the
+endpoint picks, so **`client-secret-env:` needs `issuer:`** — an entry with a secret and no
+`issuer:` is refused when the file is loaded, and a configuration written before the key existed
+adds it to start again: the value is the `issuer` field of the authorization server's metadata
+(`/.well-known/oauth-authorization-server` on that server). Without a secret, `issuer:` is
+optional, and a public or self-registered client may set it to pin its login all the same.
 
 `auth:` is checked when the file is loaded, and every check is a refusal naming the entry, never a
 notice: an ignored `auth:` would leave a server connecting with no credentials while you believe it
 authorised. Refused are `auth:` on a `stdio` or `sse` server or an entry with no `transport:`, any
-value but `oauth`, `client-id:` or `client-secret-env:` without `auth: oauth`,
-`client-secret-env:` without `client-id:`, and an `Authorization` header in `headers:` or
-`headers-env:` beside `auth: oauth` — apogee sends the bearer token itself. Other headers still
-ride along.
+value but `oauth`, `client-id:`, `client-secret-env:` or `issuer:` without `auth: oauth`,
+`client-secret-env:` without `client-id:` or without `issuer:`, an `issuer:` that is not such an
+issuer URL (the refusal names the key, never its value), and an `Authorization` header in
+`headers:` or `headers-env:` beside `auth: oauth` — apogee sends the bearer token itself. Other
+headers still ride along. A [Project config](#a-projects-own-config--apogeeconfigyaml) entry
+that breaks one of these is dropped with a notice naming it while the rest of the layer loads.
 
 **`apogee mcp login` and `apogee mcp logout`.** `apogee mcp login <name>` runs the login for a
 configured `auth: oauth` server and saves its token, replacing any it had; `apogee mcp logout
@@ -844,7 +864,8 @@ read another directory's Project config than the current one.
 You rarely need `login` by hand. At startup, every `auth: oauth` server with no saved token is
 offered the login on the terminal before the TUI opens (`MCP server "tracker" needs an OAuth
 login. Log in now? [y/N]`), and so is one whose saved token the authorization server will no
-longer refresh or was issued to another client than its `client-id:` now names. Answer anything but yes, or start apogee with stdin not a terminal, and the launch
+longer refresh or was issued to another client than its `client-id:` now names, or by another
+authorization server than its `issuer:` names. Answer anything but yes, or start apogee with stdin not a terminal, and the launch
 stops with an error naming `apogee mcp login <name>` — connecting is all-or-nothing, so one server
 that cannot log in holds back the rest. (A repo server whose pinned file moved is the one server the
 connect skips rather than fails the set over: a notice names it and the moved file, the rest of the
@@ -880,12 +901,13 @@ turns through a lock file beside it, so neither spends a refresh token the other
 
 **Who sees the token.** The bearer token rides the same origin-pinned connection as the headers
 above, so it reaches the configured endpoint's own origin and nothing else. The authorization
-server is not one you wrote — the MCP server names it — so it gets no share of the endpoint's
-exemption: every request to it (its metadata, the client registration, the code exchange, each
-refresh) runs under the SSRF floor and your
-[`url-safety:`](#what-the-network-tools-may-reach--url-safety) lists, with bounded replies, a
+server is not one you wrote — the MCP server names it, and `issuer:` only decides which named one
+apogee accepts — so it gets no share of the endpoint's exemption: every request to it (its
+metadata, the client registration, the code exchange, each refresh) runs under the SSRF floor and
+your [`url-safety:`](#what-the-network-tools-may-reach--url-safety) lists, with bounded replies, a
 30-second timeout and no redirects followed. Only an authorization server on the endpoint's own
-origin is reached over the endpoint's pinned connection.
+origin is reached over the endpoint's pinned connection. A client secret goes only to the
+authorization server `issuer:` pins.
 
 **Fixed limits.** Three bounds hold for every server, and none has a key. A tool call that has not
 answered after **5 minutes** ends as an error result, `mcp: call timed out after 5m0s`, that the

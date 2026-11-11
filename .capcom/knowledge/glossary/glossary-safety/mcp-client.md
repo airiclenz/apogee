@@ -33,13 +33,17 @@ across both (names are case-insensitive), a literal value carrying CR, LF or NUL
 names the key and the header, never a value. A stdio entry that sets either key draws a note — it
 has no HTTP request to carry them. A **streamable-http** entry may instead set `auth: oauth`
 (optionally `client-id:` and `client-secret-env:` for a client registered ahead of time; without
-them apogee registers its own by Dynamic Client Registration): apogee then logs in by an
+them apogee registers its own by Dynamic Client Registration; and `issuer:`, which pins the
+authorization server): apogee then logs in by an
 interactive browser login (`apogee mcp login <name>`, or the offer on stderr at startup before the
 TUI), persists the OAuth 2.1 bearer token under `~/.apogee/mcp-auth/<name>.json`, refreshes it on its
 own, and sends it on every request. The **bearer reaches only the endpoint's origin** — it rides
 the same origin-pinned client as the headers — while the **authorization server**, named by the MCP
 server rather than by you, runs **under the SSRF floor** and url-safety with bounded bodies: the
-endpoint's floor exemption never extends to it. `auth:` on stdio or sse, or beside an
+endpoint's floor exemption never extends to it. `issuer:` only narrows which named authorization
+server apogee accepts: a login whose endpoint does not name it fails naming both, and a token
+another issuer minted needs a new login. A **client secret goes only to the pinned issuer**, so
+`client-secret-env:` without `issuer:` is refused at load. `auth:` on stdio or sse, or beside an
 `Authorization` header, is a refusal rather than a note. A live `mcp-servers:` edit **reconnects
 server by server** (ADR 0109): only the servers it adds or changes are dialled, off the TUI's Update
 loop, and the finished dials join the registry at the next idle point; a failed re-dial keeps that

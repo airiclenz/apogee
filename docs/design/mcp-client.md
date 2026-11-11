@@ -155,13 +155,17 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   naming another origin is refused before a header could leave.
 - **An `auth: oauth` server's bearer rides the origin pin; its authorization server runs under the
   floor** (2026-10-08, [ADR 0095](../../.capcom/knowledge/decisions/adr-0095.md)).
-  `ServerConfig.Auth` (`auth: oauth`), `ClientID` and `ClientSecretEnv` (`client-id:`, the NAME of
-  the variable holding a preregistered client's secret) are a streamable-http server's OAuth
-  opt-in, and `ServerConfig.ValidateAuth` is their one rule, refused at load and again in
+  `ServerConfig.Auth` (`auth: oauth`), `ClientID`, `ClientSecretEnv` (`client-id:`, the NAME of
+  the variable holding a preregistered client's secret) and `Issuer` (`issuer:`, the pinned
+  authorization server) are a streamable-http server's OAuth opt-in, and
+  `ServerConfig.ValidateAuth` is their one rule, refused at load, by `checkRepoServer` for a
+  Project config entry (dropped with a notice, the rest of the layer loading) and again in
   `validateServers`: any other `auth` value, `oauth` on stdio or sse (a refusal, never the
   transport-mismatch note — an ignored `auth:` would connect with no credentials), `client-id:` /
-  `client-secret-env:` without `auth: oauth`, a secret without its client id, and an
-  `Authorization` header in `headers:` / `headers-env:` beside it. The `client-secret-env:` name
+  `client-secret-env:` / `issuer:` without `auth: oauth`, a secret without its client id or
+  without an issuer, an issuer that is not an absolute http(s) URL with a host and no user info,
+  query or fragment (named by key, never by value), and an `Authorization` header in `headers:` /
+  `headers-env:` beside it. The `client-secret-env:` name
   joins the secret-env scrub with the `headers-env:` names (`config.MCPHeaderEnvNames`). The
   token store is `internal/mcpauth`: one 0600 JSON record per server at
   `<home>/mcp-auth/<name>.json` (directory 0700, atomic replace), keyed by the server name and the
@@ -169,14 +173,24 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   `buildStreamableTransport` sets an `mcpauth.Handler` as the SDK transport's `OAuthHandler`
   over the same `vetEndpoint` client, so the **bearer is set only on requests that already passed
   `OriginPinTransport`** and reaches the configured endpoint's origin and nowhere else. The
-  **authorization server is untrusted** — the MCP server names it, the operator never does — so
-  its traffic (metadata, Dynamic Client Registration, the PKCE code exchange, every refresh) goes
+  **authorization server is untrusted** — the MCP server names it; an operator's `issuer:`
+  (2026-11-11) only narrows which named one apogee accepts, never adds one the endpoint did not
+  name — so its traffic (metadata, Dynamic Client Registration, the PKCE code exchange, every refresh) goes
   over `mcpauth.NewAuthClient`: each request pre-flighted by the url-safety guard, dialled under
   `security.DialFloor` through a guarded client built per origin, bodies bounded at 1 MiB, a
   30-second timeout and no redirects followed. The endpoint's floor exemption never extends to it;
   only a request to the endpoint's own origin (the unauthenticated probe, protected-resource
   metadata served there, an authorization server co-hosted there) rides the endpoint's pinned client
-  (`routeClient`). The handler refreshes an expired token itself, bound to the server as the RFC
+  (`routeClient`). **A client secret goes only to the pinned issuer**: with `Issuer` set,
+  `loginFlow.authServer` selects it wherever the protected-resource metadata lists it (exact
+  string after trimming space; with no metadata, the endpoint's origin is the one offer) and
+  otherwise fails with `mcpauth.IssuerMismatchError` before any authorization-server request — its
+  text, outside `Login`'s origin redaction, carries each issuer's scheme, host and path so two
+  issuers on one host stay distinguishable; `NewHandler` treats a stored record another issuer
+  minted as `ErrLoginRequired`, as it does a record of another client, so neither a refresh nor
+  the access token is sent; and `Login` and `NewHandler` refuse a client secret with no issuer
+  (`requireSecretIssuer`), the engine-side twin of `ValidateAuth`'s rule for an embedder Host.
+  The handler refreshes an expired token itself, bound to the server as the RFC
   8707 resource, and saves a rotated refresh token before it is used, serialised across processes
   by a lock file beside the record. A missing record or a refresh the authorization server
   refuses in a way only a login fixes (`invalid_grant` or `invalid_client` at any 4xx, or a 400 or

@@ -290,7 +290,11 @@ Depends on item 11.
 - `go build ./cmd/apogee/ && go test -race -count=1 -run 'MCP|WireConfig' ./cmd/apogee/`
 **Commit:** `fix(mcp): refuse client-secret-env: without issuer:`
 
-## 13. Document the issuer pin and amend ADR 0095 and ADR 0104
+## 13. Document the issuer pin and amend ADR 0095 and ADR 0104 — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): per the run's DECISION, folded in two comment-only cleanups left by items 10–12: internal/mcpauth/handler_test.go — the stray copy of the `assertLoginRequired` doc comment above TestNewHandlerRefusesAClientSecretWithoutAnIssuer replaced by an accurate doc; internal/mcp/transport.go — the ValidateAuth doc comment re-wrapped from a 139-column line to the file's usual width.
+NOTES (2026-11-11): the layout spec's HTTP server body example also had `headers-env: Authorization: DOCS_TOKEN` beside `auth: oauth`, an entry ValidateAuth refuses; the header became `X-Api-Key: DOCS_API_KEY` while adding `issuer:` to the same example.
+NOTES (2026-11-11): the manual's refusal paragraph also gained a sentence that a Project config entry breaking an `auth:` rule is dropped with a notice while the rest of the layer loads (the per-layer refusal item 12 shipped); the ADR 0104 amendment covers decision 9 (the pane names the issuer a secret may go to) beside decisions 2 and 11.
 
 Depends on item 12.
 

@@ -621,7 +621,8 @@ func TestHandlerRefreshRefusesARecordOfAnotherIssuer(t *testing.T) {
 	}
 }
 
-// assertLoginRequired fails the test unless err is ErrLoginRequired naming the login command.
+// A client secret with no configured issuer (empty or space alone) is a config error, refused
+// before any token request, never a login-required.
 func TestNewHandlerRefusesAClientSecretWithoutAnIssuer(t *testing.T) {
 	t.Parallel()
 	for _, issuer := range []string{"", "  "} {
