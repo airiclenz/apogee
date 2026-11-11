@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"testing/fstest"
 
 	"golang.org/x/sys/unix"
 
@@ -111,6 +113,8 @@ func TestLandlockResidualsMatchHostABI(t *testing.T) {
 	}
 	// AF_UNIX connect is write-class and open at every ABI that fences at all (ADR 0112): a
 	// host on ABI 1–3 that omits it hides the spawn-elsewhere escape from Auto's start notice.
+	// It stays at ABI 9 and up too: RESOLVE_UNIX closes only the runtime dir and the container
+	// sockets, and every other pathname socket and every abstract one stays reachable.
 	wantResiduals = append(wantResiduals, domain.ResidualUnixEgress)
 	if !slices.Equal(caps.Residuals, wantResiduals) {
 		t.Errorf("host landlock ABI %d discloses Residuals = %v, want %v", c.abi, caps.Residuals, wantResiduals)
@@ -158,6 +162,10 @@ func TestLandlockCapabilitiesHonest(t *testing.T) {
 		// at ABI 4.
 		{"abi4_kernel_6_7", 4, true, true, true, fullFSWriteAccess, networkResiduals, 0, ""},
 		{"abi6_newer", 6, true, true, true, fullFSWriteAccess, networkResiduals, 0, ""},
+		// RESOLVE_UNIX is handled from here and closes the user runtime dir and the container
+		// sockets (ADR 0112) — but only those, so AF_UNIX connect stays disclosed. No abstract
+		// scoping either: there is no ABI-6 scope row because the backend never scopes.
+		{"abi9_resolve_unix", 9, true, true, true, fullFSWriteAccess | unix.LANDLOCK_ACCESS_FS_RESOLVE_UNIX, networkResiduals, 0, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -276,7 +284,9 @@ func TestAccessMaskForABI(t *testing.T) {
 		{"abi3_kernel_6_2", 3, fullFSWriteAccess, true},
 		{"abi4_kernel_6_7", 4, fullFSWriteAccess, true},
 		{"abi6_newer", 6, fullFSWriteAccess, true},
-		{"abi99_future", 99, fullFSWriteAccess, true},
+		{"abi8_before_resolve_unix", 8, fullFSWriteAccess, true},
+		{"abi9_resolve_unix", 9, fullFSWriteAccess | unix.LANDLOCK_ACCESS_FS_RESOLVE_UNIX, true},
+		{"abi99_future", 99, fullFSWriteAccess | unix.LANDLOCK_ACCESS_FS_RESOLVE_UNIX, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -297,8 +307,15 @@ func TestAccessMaskForABIRightsTrackTheKernel(t *testing.T) {
 
 	// The properties behind the table, stated so a future right added to the mask cannot
 	// regress them by moving the pinned constants too.
-	for abi := landlockABIFSWrite; abi <= 8; abi++ {
+	for abi := landlockABIFSWrite; abi <= 10; abi++ {
 		mask := accessMaskForABI(abi)
+
+		// RESOLVE_UNIX is ABI 9: asked for earlier it is EINVAL; left out from there, a pathname
+		// connect into the user runtime dir or a container socket goes unfenced (ADR 0112).
+		if hasResolveUnix := mask&unix.LANDLOCK_ACCESS_FS_RESOLVE_UNIX != 0; hasResolveUnix != (abi >= landlockABIResolveUnix) {
+			t.Errorf("abi %d: mask %#x handles RESOLVE_UNIX = %v, want %v (ABI %d and up)",
+				abi, mask, hasResolveUnix, abi >= landlockABIResolveUnix, landlockABIResolveUnix)
+		}
 
 		// Never above the kernel: an unknown bit in handled_access_fs is EINVAL from
 		// landlock_create_ruleset, and the child dies before exec.
@@ -385,13 +402,15 @@ func TestDeviceAccessMaskStaysRuleApplicable(t *testing.T) {
 	// allowWriteBeneath actually picks (ruleAccessMaskForABI) for both kinds of parent_fd.
 	// Breaking either one does not merely lose the rule: landlock_add_rule answers EINVAL,
 	// applyLandlock fails, and every confined call on the host dies before exec.
-	for abi := landlockABIFSWrite; abi <= 8; abi++ {
+	for abi := landlockABIFSWrite; abi <= 10; abi++ {
 		handled := accessMaskForABI(abi)
 
-		// A directory root takes the whole handled mask, so a confined child can create, remove
-		// and rename beneath it.
-		if dirMask := ruleAccessMaskForABI(abi, true); dirMask != handled {
-			t.Errorf("abi %d: directory rule mask %#x, want the full handled mask %#x", abi, dirMask, handled)
+		// A directory root takes the whole handled mask but RESOLVE_UNIX, so a confined child can
+		// create, remove and rename beneath it — and a root that contains a closed socket path
+		// (a root at /run) cannot re-open it, since a rule inherits beneath its parent_fd.
+		if dirMask := ruleAccessMaskForABI(abi, true); dirMask != handled&^unix.LANDLOCK_ACCESS_FS_RESOLVE_UNIX {
+			t.Errorf("abi %d: directory rule mask %#x, want the handled mask less RESOLVE_UNIX %#x",
+				abi, dirMask, handled&^unix.LANDLOCK_ACCESS_FS_RESOLVE_UNIX)
 		}
 
 		mask := ruleAccessMaskForABI(abi, false)
@@ -707,5 +726,183 @@ func TestConfinedExecSentinelAccessor(t *testing.T) {
 	t.Parallel()
 	if ConfinedExecSentinel() != confinedExecSentinel {
 		t.Errorf("ConfinedExecSentinel() = %q, want %q", ConfinedExecSentinel(), confinedExecSentinel)
+	}
+}
+
+// TestLandlockResolveUnixPlan drives the RESOLVE_UNIX planner over a fake root filesystem: every
+// pathname socket stays reachable through a sibling rule except the closed paths (the user runtime
+// dir, the container sockets), whose ancestors never get a rule of their own, and the re-opened
+// agent sockets get one on the socket file or the agent's directory (ADR 0112).
+func TestLandlockResolveUnixPlan(t *testing.T) {
+	t.Parallel()
+
+	socket := &fstest.MapFile{Mode: fs.ModeSocket}
+	dir := &fstest.MapFile{Mode: fs.ModeDir | 0o755}
+	hostFS := fstest.MapFS{
+		"bin":                             {Mode: fs.ModeSymlink, Data: []byte("usr/bin")},
+		"home/u/proj/go.mod":              {},
+		"run/dbus/system_bus_socket":      socket,
+		"run/docker.sock":                 socket,
+		"run/foo.pid":                     {},
+		"run/podman/podman.sock":          socket,
+		"run/podman/containers":           dir,
+		"run/snapd.socket":                socket,
+		"run/user/1000/bus":               socket,
+		"run/user/1000/ssh.sock":          socket,
+		"run/user/1000/gnupg/S.gpg-agent": socket,
+		"run/user/1001/bus":               socket,
+		"tmp/rt/bus":                      socket,
+		"tmp/tmux-1000/default":           socket,
+		"tmp/x.sock":                      socket,
+		"var/run":                         {Mode: fs.ModeSymlink, Data: []byte("../run")},
+	}
+	resolve := func(p string, isFile bool) landlockRule {
+		return landlockRule{Path: p, Access: unix.LANDLOCK_ACCESS_FS_RESOLVE_UNIX, IsFile: isFile}
+	}
+
+	tests := []struct {
+		name    string
+		closure domain.UnixSocketClosure
+		want    []landlockRule
+	}{
+		{
+			// Nothing to close: one rule on `/`, so handling the right denies nothing.
+			name: "nothing_closed_grants_root",
+			want: []landlockRule{resolve("/", false)},
+		},
+		{
+			// /run/user/1000 closed beside a granted /run/user/1001; podman.sock closed beside a
+			// granted /run/podman/containers; docker.sock closed beside a granted socket file in
+			// /run. /run, /run/user and /run/podman are ancestors and get no rule; the symlinks
+			// (/bin, /var/run) and the regular file (/run/foo.pid) get none either. The agent
+			// sockets beneath the closed runtime dir are re-opened: ssh-agent on its socket file,
+			// gpg-agent on its directory.
+			name: "runtime_dir_and_container_sockets_closed",
+			closure: domain.UnixSocketClosure{
+				Closed:   []string{"/run/user/1000", "/run/docker.sock", "/run/podman/podman.sock"},
+				Reopened: []string{"/run/user/1000/ssh.sock", "/run/user/1000/gnupg"},
+			},
+			want: []landlockRule{
+				resolve("/home", false),
+				resolve("/run/dbus", false),
+				resolve("/run/podman/containers", false),
+				resolve("/run/snapd.socket", true),
+				resolve("/run/user/1001", false),
+				resolve("/tmp", false),
+				resolve("/var", false),
+				resolve("/run/user/1000/ssh.sock", true),
+				resolve("/run/user/1000/gnupg", false),
+			},
+		},
+		{
+			// A runtime dir under /tmp: the planner descends into /tmp, not /run, so tmux's
+			// socket and a bare socket file in /tmp stay reachable and /run is granted whole.
+			name:    "runtime_dir_under_tmp",
+			closure: domain.UnixSocketClosure{Closed: []string{"/tmp/rt"}},
+			want: []landlockRule{
+				resolve("/home", false),
+				resolve("/run", false),
+				resolve("/tmp/tmux-1000", false),
+				resolve("/tmp/x.sock", true),
+				resolve("/var", false),
+			},
+		},
+		{
+			// A re-opened path that is not beneath a closed one is already granted by its
+			// sibling rule; one that is missing, or that would contain a closed path, gets none.
+			name: "reopened_outside_missing_or_containing_closed",
+			closure: domain.UnixSocketClosure{
+				Closed:   []string{"/run/user/1000"},
+				Reopened: []string{"/home/u/.gnupg", "/run/user/1000/gone.sock", "/run/user"},
+			},
+			want: []landlockRule{
+				resolve("/home", false),
+				resolve("/run/dbus", false),
+				resolve("/run/docker.sock", true),
+				resolve("/run/podman", false),
+				resolve("/run/snapd.socket", true),
+				resolve("/run/user/1001", false),
+				resolve("/tmp", false),
+				resolve("/var", false),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := planResolveUnixRules(tt.closure, hostFS)
+
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("planResolveUnixRules =\n  %v\nwant\n  %v", got, tt.want)
+			}
+			for _, rule := range got {
+				if rule.Access != unix.LANDLOCK_ACCESS_FS_RESOLVE_UNIX {
+					t.Errorf("rule %q allows %#x, want exactly RESOLVE_UNIX (never a write right)", rule.Path, rule.Access)
+				}
+				if slices.Contains(tt.closure.Reopened, rule.Path) {
+					continue
+				}
+				for _, closed := range tt.closure.Closed {
+					if rule.Path == closed || isBeneath(rule.Path, closed) || isBeneath(closed, rule.Path) {
+						t.Errorf("rule %q re-opens closed path %q (the path, an ancestor, or beneath it)", rule.Path, closed)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestLandlockConfineCarriesUnixSocketClosure pins that the socket closure is planned in the parent
+// at Confine time and survives encodeBox/DecodeConfinedBox into the child, which must never re-read
+// it from its own environment (its TMPDIR is the scratch dir). Below ABI 9 nothing is planned.
+func TestLandlockConfineCarriesUnixSocketClosure(t *testing.T) {
+	runtimeDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	if err := os.Chmod(runtimeDir, 0o700); err != nil {
+		t.Fatalf("chmod runtime dir: %v", err)
+	}
+	agentSock := filepath.Join(runtimeDir, "agent.sock")
+	if err := os.WriteFile(agentSock, nil, 0o600); err != nil {
+		t.Fatalf("create agent socket stand-in: %v", err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	t.Setenv("SSH_AUTH_SOCK", agentSock)
+
+	for _, tt := range []struct {
+		name       string
+		abi        int
+		wantClosed bool
+	}{
+		{"abi9_plans_and_carries", 9, true},
+		{"abi8_plans_nothing", 8, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &landlockConfiner{abi: tt.abi, reexecPath: "/path/to/apogee"}
+			cmd := exec.Command("/bin/true")
+
+			if err := c.Confine(context.Background(), domain.ConfinementBox{WorkspaceRoot: "/ws"}, cmd); err != nil {
+				t.Fatalf("Confine: %v", err)
+			}
+			got, err := DecodeConfinedBox(cmd.Args[2])
+			if err != nil {
+				t.Fatalf("decode box arg: %v", err)
+			}
+
+			if !tt.wantClosed {
+				if len(got.UnixSockets.Closed) != 0 || len(got.UnixSockets.Reopened) != 0 {
+					t.Errorf("abi %d: UnixSockets = %+v, want none planned below ABI %d", tt.abi, got.UnixSockets, landlockABIResolveUnix)
+				}
+				return
+			}
+			if !slices.Contains(got.UnixSockets.Closed, runtimeDir) {
+				t.Errorf("decoded Closed = %v, want it to hold the runtime dir %q", got.UnixSockets.Closed, runtimeDir)
+			}
+			if !slices.Contains(got.UnixSockets.Reopened, agentSock) {
+				t.Errorf("decoded Reopened = %v, want it to hold the agent socket %q", got.UnixSockets.Reopened, agentSock)
+			}
+		})
 	}
 }

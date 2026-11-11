@@ -185,7 +185,15 @@ NOTES (2026-11-11): the live test was mutation-checked — with the `--tmpfs` em
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestNamespace|TestUnixSocket' ./internal/platform/`
 **Commit:** `fix(platform): mask the user runtime dir and container sockets under bwrap`
 
-## 9. landlock: close the user runtime dir and container sockets with RESOLVE_UNIX at ABI ≥ 9
+## 9. landlock: close the user runtime dir and container sockets with RESOLVE_UNIX at ABI ≥ 9 — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): the planner `planResolveUnixRules(closure, fsys)` takes the closed/re-opened paths and an `fs.FS` rooted at `/` (production `os.DirFS("/")`, tests `fstest.MapFS`) as its dir-lister, but not the box roots or the scratch dir the plan's guard (b) listed: no writable root's rule carries RESOLVE_UNIX (`ruleAccessMaskForABI` strips it, so a root such as `/run` cannot re-open a closed path beneath it), and the sibling grant already covers every root and the scratch dir, since `planUnixSockets` never closes a dir that is or contains a box root.
+NOTES (2026-11-11): parent_fd stated and tested — a sibling or re-opened rule sits on the socket file itself (`IsFile: true`) when the entry is a socket and on the directory otherwise; only directories and sockets are granted, symlinks never (a symlink's rule would bypass the canonical path's own ancestors), regular files never. With nothing closed the plan is one rule on `/`.
+NOTES (2026-11-11): the planner inputs ride on a new `domain.ConfinementBox.UnixSockets` field (`domain.UnixSocketClosure{Closed, Reopened}`), set by `landlockConfiner.Confine` only at ABI ≥ 9 from `planUnixSockets(currentUnixSocketHost(), roots)`; `Config.ConfinementBox` never sets it and a zero value closes nothing.
+NOTES (2026-11-11): a socket rule whose path cannot be opened at apply time (gone, swapped for a symlink, a dead mount point) is skipped instead of failing the confinement — a missing socket grant only denies a connect — while a `landlock_add_rule` error still fails closed; a directory the child cannot list gets no rules beneath it (deny side), and entries created after the listing beside a closed path's ancestor are denied too.
+NOTES (2026-11-11): `TestDeviceAccessMaskStaysRuleApplicable` (outside the Acceptance pattern, run separately and passing) now expects a directory write rule to carry the handled mask less RESOLVE_UNIX, its loop extended to ABI 10; the round-trip test is `TestLandlockConfineCarriesUnixSocketClosure` (Confine at ABI 9 plans and carries, ABI 8 plans nothing).
+NOTES (2026-11-11): consequential edit — docs/design/confinement-execution-contract.md: made necessary by the new RESOLVE_UNIX rules in the landlock ruleset (dated amendment under §2.3's ApplyLandlockAndExec paragraph).
+NOTES (2026-11-11): this box's kernel is ABI < 9, so the live RESOLVE_UNIX path is unexercised here; it runs where CI's kernel allows, through item 7's confinetest row.
 
 **What:** Recast at the regression check (2026-11-11).
 **Goal:** at ABI ≥ 9 a confined connect to a socket under the user runtime dir or to the docker/podman sockets fails, while sockets elsewhere (e.g. /var/run/postgresql, sssd, the system bus, /tmp) and the allowlisted agent sockets stay reachable; Capabilities keeps `connect(2) AF_UNIX`; no abstract scoping. ABI < 9 is unchanged from item 6.

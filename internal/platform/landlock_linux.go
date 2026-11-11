@@ -8,9 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -75,11 +79,13 @@ type landlockConfiner struct {
 //   - ABI >= 2 (kernel >= 5.19) => LANDLOCK_ACCESS_FS_REFER exists (cross-directory rename/link).
 //   - ABI >= 3 (kernel >= 6.2)  => LANDLOCK_ACCESS_FS_TRUNCATE exists.
 //   - ABI >= 4 (kernel >= 6.7)  => TCP-connect (network-egress) restriction is enforceable.
+//   - ABI >= 9                  => LANDLOCK_ACCESS_FS_RESOLVE_UNIX exists (pathname AF_UNIX connect).
 const (
-	landlockABIFSWrite  = 1
-	landlockABIRefer    = 2
-	landlockABITruncate = 3
-	landlockABINetwork  = 4
+	landlockABIFSWrite     = 1
+	landlockABIRefer       = 2
+	landlockABITruncate    = 3
+	landlockABINetwork     = 4
+	landlockABIResolveUnix = 9
 )
 
 // landlockFSWriteAccessABI1 is the ABI-1 baseline of filesystem accesses the ruleset HANDLES
@@ -101,13 +107,13 @@ const landlockFSWriteAccessABI1 = unix.LANDLOCK_ACCESS_FS_WRITE_FILE |
 	unix.LANDLOCK_ACCESS_FS_REMOVE_DIR |
 	unix.LANDLOCK_ACCESS_FS_REMOVE_FILE
 
-// accessMaskForABI returns the filesystem access mask to HANDLE at ruleset creation and to
-// ALLOW beneath each of the box's writable roots that is a directory (a root that is a file takes
-// deviceAccessMaskForABI instead — see ruleAccessMaskForABI), on a kernel reporting landlock ABI
-// abi. Both call sites derive their mask from this one pure function because the kernel checks
-// them against each other: landlock_create_ruleset answers EINVAL for a handled_access_fs carrying a
-// bit this ABI does not know, and landlock_add_rule answers EINVAL for an allowed_access that is
-// not a subset of the handled set.
+// accessMaskForABI returns the filesystem access mask to HANDLE at ruleset creation, on a kernel
+// reporting landlock ABI abi. Every rule's allowed_access is a subset of it: a writable root's and
+// the /dev/null exemption's through ruleAccessMaskForABI, a socket rule's (resolveUnixAccess) only
+// from the ABI that handles it. The kernel checks the two against each other:
+// landlock_create_ruleset answers EINVAL for a handled_access_fs carrying a bit this ABI does not
+// know, and landlock_add_rule answers EINVAL for an allowed_access that is not a subset of the
+// handled set.
 //
 //   - ABI 1: the write-class baseline. TRUNCATE has no bit here, so truncating an existing file
 //     is the one write landlock cannot fence on a 5.13–6.1 kernel — the alternative, asking for
@@ -117,6 +123,9 @@ const landlockFSWriteAccessABI1 = unix.LANDLOCK_ACCESS_FS_WRITE_FILE |
 //     the right is unhandled, so handling it and re-granting it beneath the writable roots is
 //     what lets a confined child `git mv` or mkdir-then-rename inside its own box.
 //   - ABI >= 3: + TRUNCATE, closing the ABI-1/2 gap above.
+//   - ABI >= 9: + RESOLVE_UNIX, a pathname AF_UNIX connect (ADR 0112). It is not a write right
+//     and no writable root carries it: planResolveUnixRules grants it everywhere except the user
+//     runtime dir(s) and the container sockets the box's UnixSockets closes.
 //
 // An abi below the fs-write floor is not a valid input — applyLandlock refuses it before
 // reaching here — and clamps to the baseline, so this function can never hand a caller a mask
@@ -129,8 +138,15 @@ func accessMaskForABI(abi int) uint64 {
 	if abi >= landlockABITruncate {
 		mask |= unix.LANDLOCK_ACCESS_FS_TRUNCATE
 	}
+	if abi >= landlockABIResolveUnix {
+		mask |= unix.LANDLOCK_ACCESS_FS_RESOLVE_UNIX
+	}
 	return mask
 }
+
+// resolveUnixAccess is the one right a socket rule grants (planResolveUnixRules). It is
+// file-applicable, so a rule may take a socket file as its parent_fd as well as a directory.
+const resolveUnixAccess = uint64(unix.LANDLOCK_ACCESS_FS_RESOLVE_UNIX)
 
 // deviceAccessMaskForABI returns the file-applicable access mask to ALLOW on a rule whose
 // parent_fd is not a directory — the /dev/null exemption and any writable root that is a regular
@@ -156,14 +172,17 @@ func deviceAccessMaskForABI(abi int) uint64 {
 	return mask
 }
 
-// ruleAccessMaskForABI returns the access mask a path-beneath rule ALLOWS on a kernel reporting
-// landlock ABI abi, chosen by what the rule's parent_fd is: a directory takes the full write-class
-// mask (accessMaskForABI), anything else the file-applicable one (deviceAccessMaskForABI).
-// allowWriteBeneath calls it after fstat-ing the fd it opened, so no caller can hand a file a
-// directory-only right — the EINVAL that would take every confined call down with it.
+// ruleAccessMaskForABI returns the access mask a write rule ALLOWS on a kernel reporting
+// landlock ABI abi, chosen by what the rule's parent_fd is: a directory takes the handled mask
+// (accessMaskForABI) less RESOLVE_UNIX, anything else the file-applicable one
+// (deviceAccessMaskForABI). allowWriteBeneath calls it after fstat-ing the fd it opened, so no
+// caller can hand a file a directory-only right — the EINVAL that would take every confined call
+// down with it. RESOLVE_UNIX stays off every write rule because a writable root may contain a
+// closed path (a root at /run holds the user runtime dir), and a rule inherits beneath its
+// parent_fd: the root's grant would re-open what the socket plan closes.
 func ruleAccessMaskForABI(abi int, isDir bool) uint64 {
 	if isDir {
-		return accessMaskForABI(abi)
+		return accessMaskForABI(abi) &^ resolveUnixAccess
 	}
 	return deviceAccessMaskForABI(abi)
 }
@@ -240,13 +259,14 @@ func (c *landlockConfiner) unavailableCause() domain.ConfinementCause {
 // rides in Residuals, named by its syscall, and every surface that words the caps says
 // so (internal/probe's CapabilityLine and ResidualNotice).
 //
-// The fence also leaves AF_UNIX connect(2) open, at every ABI: connecting to a pathname
-// socket is no write right the box handles, and an abstract socket has no path to fence at
-// all — LANDLOCK_ACCESS_FS_RESOLVE_UNIX (ABI 9), the one right that reaches a pathname
-// socket, never reaches an abstract one, so the disclosure holds at ABI 9 too. A same-user service listening on one — tmux, the user
-// bus's systemd-run, docker — runs commands outside the fence for whoever asks, so the access
-// is write-class (ADR 0112): it rides in Residuals wherever landlock fences writes, beside
-// truncate(2), and probe.ResidualNotice words it at Auto start.
+// The fence also leaves AF_UNIX connect(2) open, at every ABI. Below ABI 9 connecting to a
+// pathname socket is no right the ruleset can handle. From ABI 9 LANDLOCK_ACCESS_FS_RESOLVE_UNIX
+// closes the user runtime dir and the container sockets (ADR 0112; planResolveUnixRules), but
+// every other pathname socket — a tmux server under /tmp, the system bus — stays reachable, and
+// an abstract socket has no path for the right to reach at all (no abstract scoping: it would
+// break X11's). A same-user service listening on one runs commands outside the fence for whoever
+// asks, so the access is write-class (ADR 0112): it rides in Residuals wherever landlock fences
+// writes, beside truncate(2), and probe.ResidualNotice words it at Auto start.
 //
 // NetworkEgress is disclosed the same way, and for a gap that no kernel closes: landlock's
 // network rights are LANDLOCK_ACCESS_NET_BIND_TCP and LANDLOCK_ACCESS_NET_CONNECT_TCP and
@@ -304,6 +324,13 @@ func (c *landlockConfiner) Confine(_ context.Context, box domain.ConfinementBox,
 		self = exe
 	}
 
+	// The socket closure is planned here, in the parent, from the host as Confine finds it, and
+	// rides in the encoded box: the child's own environment has TMPDIR pointed at the scratch dir
+	// (subprocess.ScratchEnv), so a plan read there would protect the wrong temp dir.
+	if c.abi >= landlockABIResolveUnix {
+		box.UnixSockets = unixSocketClosure(currentUnixSocketHost(), box)
+	}
+
 	encoded, err := encodeBox(box)
 	if err != nil {
 		return fmt.Errorf("apogee: confine: encode box: %w", err)
@@ -350,7 +377,8 @@ func ApplyLandlockAndExec(box domain.ConfinementBox, argv []string) error {
 }
 
 // applyLandlock creates the ruleset for box, adds the path-beneath allow rules for each
-// writable root (and a TCP-connect handler when the box opts into network-deny), then
+// writable root (and a TCP-connect handler when the box opts into network-deny; from ABI 9 the
+// socket rules planResolveUnixRules derives from box.UnixSockets), then
 // calls landlock_restrict_self with NO_NEW_PRIVS set. Both bind to the calling OS thread only:
 // after it returns nil that thread is confined for the remainder of its life and across an
 // execve it makes, which is why ApplyLandlockAndExec locks the thread before calling it.
@@ -406,6 +434,16 @@ func applyLandlock(box domain.ConfinementBox) error {
 	// a regular file.
 	if err := allowWriteBeneath(fd, os.DevNull, abi); err != nil {
 		return err
+	}
+
+	// From ABI 9 the ruleset handles RESOLVE_UNIX, so a pathname connect is denied unless a socket
+	// rule grants it: one beneath every path but the closed ones (ADR 0112).
+	if abi >= landlockABIResolveUnix {
+		for _, rule := range planResolveUnixRules(box.UnixSockets, os.DirFS("/")) {
+			if err := allowResolveUnix(fd, rule); err != nil {
+				return err
+			}
+		}
 	}
 
 	// NO_NEW_PRIVS is mandatory before restrict_self for an unprivileged process.
@@ -480,6 +518,135 @@ func allowWriteBeneath(rulesetFD int, root string, abi int) error {
 		0, 0, 0,
 	); errno != 0 {
 		return fmt.Errorf("apogee: confined-exec: landlock_add_rule %q: %w", root, errno)
+	}
+	return nil
+}
+
+// landlockRule is one path-beneath rule a planner hands applyLandlock: the path whose inode is the
+// rule's parent_fd, the access it allows there and beneath, and whether that parent_fd is a file
+// (a socket) rather than a directory.
+type landlockRule struct {
+	Path   string
+	Access uint64
+	IsFile bool
+}
+
+// unixSocketClosure plans, for box, the pathname unix sockets the landlock backend closes, from the
+// host host describes: planUnixSockets' runtime dirs and container sockets closed whole, its agent
+// sockets re-opened. bwrap masks the same plan (namespaceArgv), so the two Linux rungs close one
+// set (ADR 0112).
+func unixSocketClosure(host unixSocketHost, box domain.ConfinementBox) domain.UnixSocketClosure {
+	roots := append([]string{box.WorkspaceRoot}, box.WritablePaths...)
+	plan := planUnixSockets(host, roots)
+	closed := make([]string, 0, len(plan.RuntimeDirs)+len(plan.ContainerSockets))
+	closed = append(closed, plan.RuntimeDirs...)
+	closed = append(closed, plan.ContainerSockets...)
+	return domain.UnixSocketClosure{Closed: closed, Reopened: plan.AgentSockets}
+}
+
+// planResolveUnixRules returns the RESOLVE_UNIX rules that leave every pathname socket reachable
+// except the ones closure closes, reading directories through fsys (rooted at `/`; production
+// passes os.DirFS("/")). Every rule carries exactly resolveUnixAccess — never a write right.
+//
+// A rule inherits beneath its parent_fd, so the grant is planned top-down. At `/` every entry gets
+// a rule except a closed path and an entry on the way to one; the planner then descends into each
+// such ancestor (`/run`, `/run/user`, `/run/podman`, or `/tmp` for a runtime dir there) and does
+// the same, so `/run/user/<other-uid>` and the rest of `/run/podman` are granted while the closed
+// paths are not, and no ancestor of a closed path ever gets a rule of its own. Only directories and
+// sockets are granted — no other file can be connected to or hold a socket — and a symlink never
+// is: the path it points at is reached through its own canonical ancestors, which a symlink's rule
+// would bypass. Each Reopened path beneath a closed one then gets a rule of its own, on the socket
+// file or the agent's directory, unless it would itself contain a closed path.
+//
+// With nothing closed the plan is one rule on `/`, so the ruleset handles the right and denies
+// nothing. A directory fsys cannot list is left without rules beneath it: that only denies more.
+// The listing is taken when the child applies the rules, so an entry created later beside a closed
+// path's ancestor is denied too — again the fail-closed side.
+func planResolveUnixRules(closure domain.UnixSocketClosure, fsys fs.FS) []landlockRule {
+	if len(closure.Closed) == 0 {
+		return []landlockRule{{Path: "/", Access: resolveUnixAccess}}
+	}
+
+	var rules []landlockRule
+	var grantSiblings func(dir string)
+	grantSiblings = func(dir string) {
+		entries, err := fs.ReadDir(fsys, fsysPath(dir))
+		if err != nil {
+			return
+		}
+		for _, entry := range entries {
+			p := filepath.Join(dir, entry.Name())
+			switch {
+			case slices.Contains(closure.Closed, p):
+			case ancestorOfAny(p, closure.Closed):
+				grantSiblings(p)
+			case entry.IsDir():
+				rules = append(rules, landlockRule{Path: p, Access: resolveUnixAccess})
+			case entry.Type()&fs.ModeSocket != 0:
+				rules = append(rules, landlockRule{Path: p, Access: resolveUnixAccess, IsFile: true})
+			}
+		}
+	}
+	grantSiblings("/")
+
+	for _, p := range closure.Reopened {
+		if !beneathAny(closure.Closed, p) || slices.Contains(closure.Closed, p) || ancestorOfAny(p, closure.Closed) {
+			continue
+		}
+		info, err := fs.Stat(fsys, fsysPath(p))
+		if err != nil {
+			continue
+		}
+		rules = append(rules, landlockRule{Path: p, Access: resolveUnixAccess, IsFile: !info.IsDir()})
+	}
+	return rules
+}
+
+// ancestorOfAny reports whether the clean absolute path dir lies strictly above any of paths.
+func ancestorOfAny(dir string, paths []string) bool {
+	for _, p := range paths {
+		if isBeneath(dir, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// fsysPath turns the clean absolute path p into its name in an fs.FS rooted at `/`.
+func fsysPath(p string) string {
+	if p == "/" {
+		return "."
+	}
+	return strings.TrimPrefix(p, "/")
+}
+
+// allowResolveUnix adds rule — a planResolveUnixRules socket rule — to the ruleset. The path is
+// opened O_PATH without following a final symlink, and a planned directory must still be one. A
+// path that cannot be opened as planned (gone since the listing, swapped for a symlink, a dead
+// mount point) is skipped rather than failing the confinement: a missing socket rule only denies
+// a connect, never widens one, while failing would kill every confined call on the host. A
+// landlock_add_rule error does fail it closed.
+func allowResolveUnix(rulesetFD int, rule landlockRule) error {
+	flags := unix.O_PATH | unix.O_NOFOLLOW | unix.O_CLOEXEC
+	if !rule.IsFile {
+		flags |= unix.O_DIRECTORY
+	}
+	pathFD, err := unix.Open(rule.Path, flags, 0)
+	if err != nil {
+		// Skipped, not failed: the missing grant denies a connect (see the doc comment).
+		return nil
+	}
+	defer func() { _ = unix.Close(pathFD) }()
+
+	attr := unix.LandlockPathBeneathAttr{Allowed_access: rule.Access, Parent_fd: int32(pathFD)}
+	if _, _, errno := unix.Syscall6(
+		unix.SYS_LANDLOCK_ADD_RULE,
+		uintptr(rulesetFD),
+		uintptr(unix.LANDLOCK_RULE_PATH_BENEATH),
+		uintptr(unsafe.Pointer(&attr)),
+		0, 0, 0,
+	); errno != 0 {
+		return fmt.Errorf("apogee: confined-exec: landlock_add_rule %q: %w", rule.Path, errno)
 	}
 	return nil
 }

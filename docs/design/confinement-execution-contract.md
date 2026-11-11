@@ -199,6 +199,20 @@ typed `LandlockRulesetAttr`/`LandlockPathBeneathAttr`) — no CGO, consistent wi
 decides raw-syscall vs the `github.com/landlock-l/go-landlock` helper and records it in the commit; the
 *contract* above is the same either way.
 
+> **Amended 2026-11-11 (ADR 0112, plan `2026-11-11 - 01` item 9).** From landlock ABI 9 the ruleset
+> also handles `LANDLOCK_ACCESS_FS_RESOLVE_UNIX` and closes the set the bwrap rung masks (the item-8
+> amendment below): the user runtime dir(s) and `/run/docker.sock` / `/run/podman/podman.sock`.
+> `Confine` plans them in the parent with the same `planUnixSockets` and carries them in the encoded
+> box (`ConfinementBox.UnixSockets`), never re-reading them from the child's environment, whose
+> `TMPDIR` is the scratch dir. In the child, `planResolveUnixRules` grants the right beneath every
+> entry of `/` except a closed path and an entry on the way to one, descending into each such
+> ancestor (`/run`, `/run/user`, `/run/podman`, or `/tmp` for a runtime dir there) to grant its other
+> entries; no ancestor of a closed path gets a rule of its own, symlinks get none, and each agent
+> socket beneath a closed path (`$SSH_AUTH_SOCK`, gpg-agent's) gets one on its socket file or
+> directory. Every socket rule carries `RESOLVE_UNIX` alone, and no writable root's rule carries it,
+> so a root that contains a closed path cannot re-open it. Abstract sockets are not scoped, and every
+> other pathname socket stays reachable, so the backend still discloses `connect(2) AF_UNIX`.
+
 > **Why re-exec the Apogee binary rather than ship a separate helper executable.** A single static
 > artifact stays a single static artifact (Standing Requirement 2). The helper mode is gated behind an
 > argv sentinel (`__confined-exec`) that the normal CLI never surfaces, dispatched in `main` before

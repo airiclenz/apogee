@@ -169,6 +169,22 @@ type ConfinementBox struct {
 	// GOCACHE, XDG_CACHE_HOME, … — subprocess.ScratchEnv) beneath it. Empty when the session has
 	// no scratch dir, in which case nothing is seeded and the child's environment is left alone.
 	ScratchDir string
+	// UnixSockets is the pathname-unix-socket closure a backend computes for this box in the
+	// parent at Confine time and carries to the confined child inside the encoded box (ADR 0112):
+	// the child must not re-read it from its own environment, whose TMPDIR is the scratch dir.
+	// Callers leave it zero — Config.ConfinementBox never sets it — and a zero value closes
+	// nothing.
+	UnixSockets UnixSocketClosure
+}
+
+// UnixSocketClosure names the pathname unix sockets a confined connect(2) must not reach, as a
+// backend planned them for one box (ADR 0112). Closed holds canonical paths closed whole — the
+// user runtime dir(s) and the system container sockets; Reopened holds the agent sockets
+// beneath a Closed path that stay reachable (ssh-agent's, gpg-agent's). Every path is canonical
+// and existed when it was planned.
+type UnixSocketClosure struct {
+	Closed   []string
+	Reopened []string
 }
 
 // ConfinementBox is the full box this Config declares: the workspace root a subprocess is fenced
