@@ -68,7 +68,10 @@ NOTES (2026-11-11): the error case is its own test, TestBufferReadObject_NonHexD
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestBuffer' ./internal/doctext/pdfparse/`
 **Commit:** `fix(pdfparse): read a closed odd-digit hex string with a final zero`
 
-## 3. Serve PDFs under a policy without the bare sandbox
+## 3. Serve PDFs under a policy without the bare sandbox — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): served-pdf-csp-sandbox is narrowed (retitled to the Chrome/Firefox/Safari check, body rewritten), not closed, so no CLOSES entry; its body names this commit by its subject since the hash does not exist yet.
+NOTES (2026-11-11): added a second test, TestDocServerChoosesThePolicyFromTheMediaType, pinning the pure documentPolicy choice (case and parameters ignored; unknown types fall to documentCSP) beside the plan's exact-PDF-policy test TestDocServerServesAPDFWithoutTheBareSandbox; TestDocServerServesEveryDocumentUnderARestrictivePolicy keeps its name (no renames) with its comment rewritten.
 
 **What:**
 **Goal:** rung 2 serves `application/pdf` with `Content-Security-Policy: frame-ancestors 'none'; form-action 'none'; base-uri 'none'` (no `sandbox`, no `default-src`); every other type, .html/.htm/.svg included, keeps `documentCSP` unchanged; ADR 0019 carries a dated amendment saying why; the issue is narrowed to the manual browser check.

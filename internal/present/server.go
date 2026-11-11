@@ -57,7 +57,8 @@ const idleTimeout = 60 * time.Second
 // and far below any descriptor budget.
 const maxConnections = 32
 
-// documentCSP is the Content-Security-Policy every served document carries. Rung 2 is the ONLY
+// documentCSP is the Content-Security-Policy every served document except a PDF carries (pdfCSP
+// covers that one type; documentPolicy chooses between them). Rung 2 is the ONLY
 // rung that still shows active content: .html, .htm and .svg left rung 1's allow-list
 // precisely because a file:// launch can carry no policy at all (ADR 0019, fourth amendment
 // 2026-08-12), so this header is the whole of the bound here — and the DIRECTIVES are the fix, not
@@ -80,6 +81,17 @@ const maxConnections = 32
 // them off would leave three holes in a policy that reads as closed.
 const documentCSP = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; " +
 	"form-action 'none'; base-uri 'none'; frame-ancestors 'none'; sandbox"
+
+// pdfCSP is the policy a served PDF carries instead of documentCSP (ADR 0019, amendment
+// 2026-11-11). Chromium has a history of rendering a blank page for a PDF whose response carries a
+// CSP `sandbox` (crbug 413851, 1187122), and `default-src 'none'` implies `object-src 'none'`,
+// which the built-in viewer can trip over too — and .pdf is the one format both rungs show, so on
+// an SSH devbox, where rung 2 is the only one that reaches the user, a blank page would be
+// invisible to apogee. Neither directive buys anything for a PDF: it cannot carry the meta refresh
+// `sandbox` exists to stop, and nosniff pins the type, so the bytes cannot be re-read as markup.
+// The three directives that remain have no default-src fallback and refuse framing, form posts and
+// base rewriting on their own.
+const pdfCSP = "frame-ancestors 'none'; form-action 'none'; base-uri 'none'"
 
 // errClosed is returned by Serve after Close: the doc server's lifetime is the app's (ADR 0019 §1
 // — nothing live crosses the quiescent boundary), so a presentation arriving during or after
@@ -363,13 +375,14 @@ func (s *DocServer) handle(w http.ResponseWriter, r *http.Request) {
 	// The content type is decided here rather than left to ServeContent's sniffing, so the answer
 	// is a function of the extension alone. ServeContent then only adds what it is good at: range
 	// requests (a PDF viewer fetches a document in pieces) and conditional GETs.
-	w.Header().Set("Content-Type", contentType(granted.name))
+	mediaType := contentType(granted.name)
+	w.Header().Set("Content-Type", mediaType)
 	// And nosniff makes that decision binding on the browser too: a document whose extension says
 	// text/plain cannot be re-read as markup by content sniffing, so the extension keeps deciding
 	// which documents are active at all. The policy below is what bounds the ones that say markup
 	// honestly.
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", documentCSP)
+	w.Header().Set("Content-Security-Policy", documentPolicy(mediaType))
 	http.ServeContent(w, r, "", info.ModTime(), doc)
 }
 
@@ -405,6 +418,20 @@ func newToken() (string, error) {
 		return "", fmt.Errorf("present: could not mint a doc server token: %w", err)
 	}
 	return hex.EncodeToString(buf), nil
+}
+
+// documentPolicy chooses the Content-Security-Policy for a served document from the media type
+// contentType decided. Only application/pdf is named, and it gets pdfCSP; every other type —
+// .html, .htm and .svg included, and any format that becomes active later — falls to the bare-
+// sandbox documentCSP, so the default stays the closed policy and the exception is the one type
+// that cannot carry active content. Parameters and case are ignored, since they do not change
+// which document format the browser will render.
+func documentPolicy(mediaType string) string {
+	base, _, _ := strings.Cut(mediaType, ";")
+	if strings.EqualFold(strings.TrimSpace(base), "application/pdf") {
+		return pdfCSP
+	}
+	return documentCSP
 }
 
 // contentType names the media type of a document from its extension, and only from its extension:

@@ -259,9 +259,10 @@ const commandWithheldReason = "present.command not run on a model-named document
 // download — but the three active formats here (.html, .htm, .svg) were removed from it on
 // 2026-08-12 (ADR 0019, fourth amendment), so the two sets now CROSS on .pdf rather than nest.
 //
-// The crossing is what the ladder is for rather than a hole in it: a served document carries a
-// restrictive Content-Security-Policy (internal/present, documentCSP), and a file:// launch carries
-// none, so the rung that can bound active content is the rung that shows it. The consequence is
+// The crossing is what the ladder is for rather than a hole in it: a served active document carries
+// a restrictive Content-Security-Policy (internal/present, documentCSP; the inert .pdf gets pdfCSP,
+// without the bare sandbox), and a file:// launch carries none, so the rung that can bound active
+// content is the rung that shows it. The consequence is
 // visible to the user — a LOCAL `present_document report.html` degrades to the baseline transcript
 // rung and launches no browser, because climb's two branches are exclusive. A test in this package
 // pins the crossing, in both directions.

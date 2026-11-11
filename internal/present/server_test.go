@@ -189,12 +189,14 @@ func cspDirectives(t *testing.T, header string) map[string][]string {
 func TestDocServerServesEveryDocumentUnderARestrictivePolicy(t *testing.T) {
 	t.Parallel()
 
-	// Every document gets the same headers, active or not: the policy is a property of the server
-	// rather than of the extension, so a format that becomes active later is already covered.
+	// Every document but a PDF gets the same bare-sandbox policy: the closed policy is the
+	// server's default rather than a per-extension opt-in, so a format that becomes active later is
+	// already covered. A PDF alone is served without the sandbox (ADR 0019, amendment 2026-11-11);
+	// TestDocServerServesAPDFWithoutTheBareSandbox pins that exception.
 	files := map[string]string{
 		"report.html": "<html><body>the review</body></html>",
+		"report.htm":  "<html><body>the review</body></html>",
 		"graph.svg":   `<svg xmlns="http://www.w3.org/2000/svg"></svg>`,
-		"report.pdf":  "%PDF-1.7\n",
 	}
 
 	for file, content := range files {
@@ -259,6 +261,72 @@ func TestDocServerServesEveryDocumentUnderARestrictivePolicy(t *testing.T) {
 				t.Error("no style-src: a report with an inline stylesheet would render unstyled")
 			}
 		})
+	}
+}
+
+// A PDF is the one served type that does NOT carry the bare-sandbox policy (ADR 0019, amendment
+// 2026-11-11): Chromium has rendered PDFs blank under a CSP `sandbox`, and a PDF can carry neither
+// the script `default-src 'none'` refuses nor the meta refresh `sandbox` stops. The exact policy
+// is pinned so that re-adding either directive — or dropping one of the three that remain — is a
+// deliberate change with a failing test.
+func TestDocServerServesAPDFWithoutTheBareSandbox(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	server := newTestServer(t, root)
+	served, err := server.Serve(writeDoc(t, root, "report.pdf", "%PDF-1.7\n"))
+	if err != nil {
+		t.Fatalf("Serve() = %v, want no error", err)
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(served)
+	if err != nil {
+		t.Fatalf("GET %s: %v", served, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		t.Fatalf("reading the response body: %v", err)
+	}
+
+	if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want %q — nosniff is what pins a PDF as a PDF", got, "nosniff")
+	}
+	const want = "frame-ancestors 'none'; form-action 'none'; base-uri 'none'"
+	policy := resp.Header.Get("Content-Security-Policy")
+	if policy != want {
+		t.Errorf("Content-Security-Policy = %q, want %q", policy, want)
+	}
+	directives := cspDirectives(t, policy)
+	for _, name := range []string{"sandbox", "default-src", "object-src"} {
+		if _, ok := directives[name]; ok {
+			t.Errorf("a served PDF carries %s, which browsers' built-in viewers have rendered blank under", name)
+		}
+	}
+}
+
+// The policy is chosen from the media type, not from the extension, and only application/pdf
+// escapes the bare sandbox: parameters and case do not change the format, and everything else —
+// the active formats and any type nobody named — keeps the closed default.
+func TestDocServerChoosesThePolicyFromTheMediaType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		mediaType string
+		want      string
+	}{
+		{mediaType: "application/pdf", want: pdfCSP},
+		{mediaType: "Application/PDF; charset=binary", want: pdfCSP},
+		{mediaType: "text/html; charset=utf-8", want: documentCSP},
+		{mediaType: "image/svg+xml", want: documentCSP},
+		{mediaType: "application/octet-stream", want: documentCSP},
+		{mediaType: "", want: documentCSP},
+	}
+
+	for _, tt := range tests {
+		if got := documentPolicy(tt.mediaType); got != tt.want {
+			t.Errorf("documentPolicy(%q) = %q, want %q", tt.mediaType, got, tt.want)
+		}
 	}
 }
 
