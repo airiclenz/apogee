@@ -1,9 +1,11 @@
 ---
 title: The Inspector's wire tap reads the top-level Agent's turn counter and Config from background workflow goroutines
-status: open
+status: done
 type: bug
 priority: 2
 created: 2026-11-10T19:36:31Z
+closed: 2026-11-11T06:36:34Z
+reason: resolved by audit-defects plan (2026-11-10 - 02 - audit-defects-plan), archived at e5e5bb54
 ---
 
 Source: docs/reviews/code-audit-2026-11-10.md ("Data race on the turn counter from background workflow children"). Verified VALID (widened) 2026-11-10 at a5c4f2db.

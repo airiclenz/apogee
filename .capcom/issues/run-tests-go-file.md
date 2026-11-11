@@ -1,9 +1,11 @@
 ---
 title: run_tests hands go test a file path as a <file>/... package pattern and reports the setup failure as FAIL
-status: open
+status: done
 type: bug
 priority: 3
 created: 2026-11-10T19:36:39Z
+closed: 2026-11-11T06:36:34Z
+reason: resolved by audit-defects plan (2026-11-10 - 02 - audit-defects-plan), archived at e5e5bb54
 ---
 
 Source: docs/reviews/code-audit-2026-11-10.md ("`run_tests` turns a file path into a package pattern that matches nothing"). Verified PARTLY 2026-11-10 at a5c4f2db.

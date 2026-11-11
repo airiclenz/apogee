@@ -1,10 +1,12 @@
 ---
 title: apogee update cuts off a slow but progressing archive download at 2 minutes
-status: open
+status: done
 type: bug
 priority: 2
 labels: [slow-box]
 created: 2026-11-10T19:35:12Z
+closed: 2026-11-11T06:36:34Z
+reason: resolved by audit-defects plan (2026-11-10 - 02 - audit-defects-plan), archived at e5e5bb54
 ---
 
 Source: docs/reviews/code-audit-2026-11-10.md ("`apogee update` fails on a slow but progressing download"). Verified 2026-11-10 at a5c4f2db.

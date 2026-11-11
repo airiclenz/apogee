@@ -1,9 +1,11 @@
 ---
 title: diagnostics reports a clean file under a nested or non-root go.mod as go vet findings
-status: open
+status: done
 type: bug
 priority: 2
 created: 2026-11-10T19:36:32Z
+closed: 2026-11-11T06:36:34Z
+reason: resolved by audit-defects plan (2026-11-10 - 02 - audit-defects-plan), archived at e5e5bb54
 ---
 
 Source: docs/reviews/code-audit-2026-11-10.md ("`diagnostics` reports a clean file in a nested Go module as a vet failure"). Verified VALID (widened) 2026-11-10 at a5c4f2db.

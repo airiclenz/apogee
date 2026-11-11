@@ -1,10 +1,12 @@
 ---
 title: A local server still loading its model fails the turn after about 0.6 s of 503s
-status: open
+status: done
 type: bug
 priority: 2
 labels: [slow-box]
 created: 2026-11-10T19:35:12Z
+closed: 2026-11-11T06:36:33Z
+reason: resolved by audit-defects plan (2026-11-10 - 02 - audit-defects-plan), archived at e5e5bb54
 ---
 
 Source: docs/reviews/code-audit-2026-11-10.md ("Provider gives up on a loading local server after about 0.6 s"). Verified 2026-11-10 at a5c4f2db.

@@ -23,3 +23,7 @@ Source: docs/reviews/code-audit-2026-11-10.md (High, "A hostile PDF can crash th
 - A PDF whose FlateDecode page content stream inflates to deeply nested [ (or <<) is refused the same way.
 - Tests in internal/doctext cover both shapes and run under the suite's memory limits: the refusal comes before the parser recurses.
 - The package comment's 'nothing escapes this function' claim is true again, or worded to what is now guaranteed.
+
+## Log
+
+- 2026-11-11 Airic Lenz: audit-defects plan item 1 (archived at e5e5bb54) landed the depth refusal for nested object bytes, /ObjStm, /CMap, /ToUnicode and page content streams; left open: a forged xref offset into an unscanned binary stream body still overflows the stack, and an unclosed '[' at EOF hangs the parser.

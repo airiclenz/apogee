@@ -1,9 +1,11 @@
 ---
 title: Write-tool syntax trailer flags valid JSX, PHP, C# and Rust as broken, and Bypass cannot turn it off
-status: open
+status: done
 type: bug
 priority: 2
 created: 2026-11-10T19:36:31Z
+closed: 2026-11-11T06:36:34Z
+reason: resolved by audit-defects plan (2026-11-10 - 02 - audit-defects-plan), archived at e5e5bb54
 ---
 
 Source: docs/reviews/code-audit-2026-11-10.md ("The syntax check false-positives on valid JSX, PHP and C#"). Verified PARTLY (consumer corrected, one more shape found) 2026-11-10 at a5c4f2db.

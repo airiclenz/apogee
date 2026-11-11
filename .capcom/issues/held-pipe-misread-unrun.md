@@ -1,9 +1,11 @@
 ---
 title: A command that exited 0 is reported as "could not run" when a child it spawned keeps stdout or stderr open
-status: open
+status: done
 type: bug
 priority: 2
 created: 2026-11-10T19:35:13Z
+closed: 2026-11-11T06:36:33Z
+reason: resolved by audit-defects plan (2026-11-10 - 02 - audit-defects-plan), archived at e5e5bb54
 ---
 
 Source: docs/reviews/code-audit-2026-11-10.md ("A command that ran is reported as 'could not run' when a detached child holds stderr"). Verified 2026-11-10 at a5c4f2db.

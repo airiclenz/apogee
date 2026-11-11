@@ -1,10 +1,12 @@
 ---
 title: Snapshot git calls share a fixed 60 s deadline that a large workspace on a slow box exceeds
-status: open
+status: done
 type: bug
 priority: 2
 labels: [slow-box]
 created: 2026-11-10T19:35:13Z
+closed: 2026-11-11T06:36:34Z
+reason: resolved by audit-defects plan (2026-11-10 - 02 - audit-defects-plan), archived at e5e5bb54
 ---
 
 Source: docs/reviews/code-audit-2026-11-10.md ("Fixed 60 s deadline on every snapshot git call"). Verified 2026-11-10 at a5c4f2db. The failure cost is worse than reported, the outcome milder.

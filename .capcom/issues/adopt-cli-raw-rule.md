@@ -1,10 +1,12 @@
 ---
 title: apogee project adopt prints a repo's Allow rule text to the terminal unescaped
-status: open
+status: done
 type: bug
 priority: 2
 labels: [security]
 created: 2026-11-10T19:34:35Z
+closed: 2026-11-11T06:36:33Z
+reason: resolved by audit-defects plan (2026-11-10 - 02 - audit-defects-plan), archived at e5e5bb54
 ---
 
 Source: docs/reviews/code-audit-2026-11-10.md (Medium, "`apogee project adopt` prints repo-supplied rule text raw into the terminal"). Verified 2026-11-10 at a5c4f2db.

@@ -1,10 +1,12 @@
 ---
 title: The commit secrets scan reads only the first 256 KiB of the staged diff and passes
-status: open
+status: done
 type: bug
 priority: 2
 labels: [security]
 created: 2026-11-10T19:34:27Z
+closed: 2026-11-11T06:36:33Z
+reason: resolved by audit-defects plan (2026-11-10 - 02 - audit-defects-plan), archived at e5e5bb54
 ---
 
 Source: docs/reviews/code-audit-2026-11-10.md (Medium, "The commit secrets guard can scan a clipped diff and pass"). Verified 2026-11-10 at a5c4f2db.
