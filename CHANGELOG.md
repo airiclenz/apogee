@@ -11,6 +11,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.35.2] — 2026-11-12
+
 - **Session-log notes read as one paragraph.** A note that joins the start-up `✦ Session log` with line breaks in its text (Auto's residual notice, worded for stderr) now has each break and the indent around it folded to one space, so the open log wraps it only at the window's width, every wrapped row hung at the note's text column. The stderr text is unchanged.
 - **One session-log note per fence residual.** On an Auto start whose fence leaves a write-class access open, the TUI's start-up `✦ Session log` now holds one note per residual, worded `<backend> cannot fence <token> — <consequence>` (for example `landlock cannot fence truncate(2) — a confined command can still empty an existing file outside the workspace (kernel < 6.2)`), with no `apogee: ` prefix, instead of the stderr notice's header and clause lines run together. stderr, `apogee headless` and `apogee daemon` print the notice exactly as before.
 - **`git_status` joins the grouped Tools block.** A `git_status` call's row is now led by the fixed words `working tree`, so a run of reads, searches and git calls folds into one `✦ Tools` umbrella that counts the `git_status` call with the rest, instead of breaking the run with a block of its own. Opening its member row still shows the branch and the staged / unstaged / untracked report.
