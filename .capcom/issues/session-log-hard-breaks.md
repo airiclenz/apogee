@@ -1,10 +1,12 @@
 ---
 title: Session log notes keep stderr hard line breaks instead of wrapping to width
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-11-12 - 01 - session-log-wrap-and-tool-grouping-plan.md
 created: 2026-11-12T18:44:29Z
+closed: 2026-11-12T20:22:36Z
+reason: "Resolved by plan '2026-11-12 - 01 - session-log-wrap-and-tool-grouping-plan' items 1-2 (archived at df06255f): session-log notes fold hard breaks into one paragraph; the residual notice becomes one '<backend> cannot fence <token> — <consequence>' note per residual, stderr unchanged."
 ---
 
 An expanded **Session log** note keeps the hard line breaks of its stderr form, so it reads oddly in the transcript. Seen on macOS (seatbelt) in Auto mode, 2026-11-12:

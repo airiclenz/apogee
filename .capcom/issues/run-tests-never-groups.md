@@ -1,10 +1,12 @@
 ---
 title: run_tests with no arguments never joins the grouped Tools block (empty target)
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-11-12 - 01 - session-log-wrap-and-tool-grouping-plan.md
 created: 2026-11-12T18:48:26Z
+closed: 2026-11-12T20:22:37Z
+reason: "Resolved by plan '2026-11-12 - 01 - session-log-wrap-and-tool-grouping-plan' item 4 (archived at df06255f): a bare run_tests targets 'whole project' (qualified by filter) and groups."
 ---
 
 A `run_tests` call made with no arguments — the normal "test the whole project" call — never joins the grouped **Tools** block and is not counted in it. It gets its own full block, which breaks a run of grouped calls. Same class as git-status-never-groups (owner report, 2026-11-12).

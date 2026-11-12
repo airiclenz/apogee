@@ -1,10 +1,12 @@
 ---
 title: git_status never joins the grouped Tools block (no target)
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-11-12 - 01 - session-log-wrap-and-tool-grouping-plan.md
 created: 2026-11-12T18:46:27Z
+closed: 2026-11-12T20:22:36Z
+reason: "Resolved by plan '2026-11-12 - 01 - session-log-wrap-and-tool-grouping-plan' item 3 (archived at df06255f): git_status targets 'working tree' and groups/counts in the Tools umbrella."
 ---
 
 A `git_status` call never joins the grouped **Tools** block. Its neighbours fold into one umbrella with one row per call, and the umbrella counts them; `git_status` breaks the run with its own full block, and is not counted with them. To the user it looks like a special tool, but it is an ordinary read-only call (owner report, 2026-11-12).

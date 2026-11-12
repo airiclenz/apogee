@@ -1,10 +1,12 @@
 ---
 title: MCP and other unregistered tools never join the grouped Tools block (no target)
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-11-12 - 01 - session-log-wrap-and-tool-grouping-plan.md
 created: 2026-11-12T18:48:26Z
+closed: 2026-11-12T20:22:37Z
+reason: "Resolved by plan '2026-11-12 - 01 - session-log-wrap-and-tool-grouping-plan' items 5-6 (archived at df06255f): unregistered/MCP calls get a target from their first string argument (or raw name) and group; MCP labels read '<server> · <tool>'."
 ---
 
 A call to an MCP tool (qualified name `<server>__<tool>`, `internal/mcp/tool.go`) never joins the grouped **Tools** block and is not counted in it. The same holds for any other tool with no row in `toolRegistry`. Each such call gets its own full block, with its arguments listed as branches (owner report, 2026-11-12).
