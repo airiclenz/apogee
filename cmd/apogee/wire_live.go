@@ -33,6 +33,7 @@ import (
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
+	"github.com/airiclenz/apogee/internal/tui"
 	"github.com/airiclenz/apogee/internal/undo"
 )
 
@@ -284,7 +285,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		return err
 	}
 	if shareWarning != "" {
-		w.announce(shareWarning)
+		w.announce(tui.Notice{Text: shareWarning, Loud: true})
 	}
 	w.store = session.NewStore(w.roots.sessions, storeOpts...)
 	// The configured watched homes (`sessions.watch-homes:`, ADR 0103 decision 7), each behind a

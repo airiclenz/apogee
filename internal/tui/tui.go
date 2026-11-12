@@ -1282,6 +1282,17 @@ type Engine interface {
 // Wiring values the binary resolves and the TUI renders
 // ----------------------------------------------------------------------------
 
+// Notice is one start-up notice the binary composed — and has already printed on stderr — together
+// with the one fact the transcript needs to place it (Options.StartupNotices). A LOUD notice needs
+// the human — Auto running unconfined, degraded Auto, a skipped server — and keeps its own note line;
+// a routine one is a record of the start-up the human may read at leisure, and is gathered into the
+// session log, folded under its counted header (layout.md, "The start-up box"). Text is placed
+// verbatim: the transcript escape-strips it at its seam, as it does every note.
+type Notice struct {
+	Text string
+	Loud bool
+}
+
 // Options carries the wiring the binary resolves (the composition root, cmd/apogee) and
 // hands the TUI: the display values it renders in its status line but cannot read off the
 // Engine (model, endpoint, autonomy mode, workspace root), plus the session saver seam.
@@ -1382,13 +1393,14 @@ type Options struct {
 	// ordinary run, where the scheme loaded cleanly.
 	ColorSchemeWarnings []string
 
-	// StartupNotices is what the binary said about this session's confinement posture — the
-	// unconfined-Auto warning, the degradation notice, the residual disclosure — printed on stderr
-	// before the alternate screen opened; repeated here so the moment is not lost when that screen
-	// opens over the line. Each becomes one ephemeral transcript note at construction, verbatim
-	// and in print order, after the colour-scheme warnings. Nil on the ordinary run, where the
-	// posture needed no announcing.
-	StartupNotices []string
+	// StartupNotices is what the binary said about this session's start-up posture — the
+	// unconfined-Auto warning, the degradation notice, the residual disclosure, a shared-home
+	// warning, a repo MCP server the connect skipped — printed on stderr before the alternate screen
+	// opened; repeated here so the moment is not lost when that screen opens over the line. Each is
+	// placed at construction, verbatim and in print order, after the colour-scheme warnings: a loud
+	// one as its own ephemeral transcript note, a routine one inside the session log (Notice). Nil on
+	// the ordinary run, where the posture needed no announcing.
+	StartupNotices []Notice
 
 	// Schemes is what keeps the palette switchable from inside the program: what the picker offers,
 	// the resolve behind an answer to it, and the export that creates a file to edit ([SchemeHost]).

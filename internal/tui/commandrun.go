@@ -366,6 +366,8 @@ func (m *Model) resetSessionView() {
 	m.resetPanelDisk()     // and the disk re-check of its changed files, whose reply would name the closed session's rows
 	m.transcript.reset()
 	m.transcript.addStartup(newStartupView(m.opts))
+	// The new session opens its own start-up log, as a launch does, before its first notice.
+	m.transcript.openSessionLog()
 	// A bound reset's clear was a session boundary, so the engine re-read the workspace context files:
 	// the fresh view says what the NEW session is carrying (which is why the notice is reprinted
 	// rather than assumed unchanged — the repo's AGENTS.md may have moved since launch). A pre-bound

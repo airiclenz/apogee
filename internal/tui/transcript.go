@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -122,6 +123,14 @@ type transcript struct {
 	// conversation state outside the paint — no renderView input, so no write to it touches — and
 	// reset drops it with the entries it was anchored to.
 	wave announcedWave
+	// sessionLogOpen says the session's start-up log still takes routine notes
+	// ([transcript.addSessionLogNote]). It is a different fact from whether a log ENTRY exists: each
+	// session boundary opens the log before any note arrives ([transcript.openSessionLog]), a start
+	// with no routine note leaves it open with no entry at all, and the session's first Exchange
+	// launch closes it ([transcript.closeSessionLog], from [Model.enterRunning]) whether or not one
+	// was ever drawn. It is outside the paint like wave — the entry's notes are what paints — and
+	// reset drops it, so the caller re-seeding a fresh view opens the new session's log itself.
+	sessionLogOpen bool
 }
 
 // announcedWave is the one top-level sub_agent group the engine has announced and the transcript
@@ -438,6 +447,10 @@ type entry struct {
 	images    []imageMark
 	presented presentedView
 	startup   startupView // entryStartup only: the one-time start-up box's logo + session facts
+	// entrySessionLog only: the routine start-up notes the log gathers, escape-stripped, in arrival
+	// order (transcript.addSessionLogNote). It grows in place — copy-on-write, so a discarded Model
+	// copy cannot leave a note behind (ADR 0011) — which is why the kind is never cached.
+	notes []string
 	// entryWorkflow only: the state of the Workflow the block reports (workflowblock.go), which each
 	// fold re-renders into text. Its structure is persisted beside the text (session.Entry.Workflow),
 	// so a replayed block carries it back — without the Workflow's id, so no later event finds it.
@@ -970,6 +983,63 @@ func (t *transcript) addEphemeralNote(text string) {
 	t.commit(entry{kind: entryNote, text: stripEscapes(text), ephemeral: true})
 }
 
+// openSessionLog opens a fresh start-up session log: the routine notes this session starts with —
+// the context files it loaded, a disclosed residual — gather from now on into one folded block
+// rather than taking a line each (layout.md, "The start-up box"). It is called at each session
+// boundary — construction, /clear and /new, a /sessions restore — after the view is re-seeded and
+// before the first notice is placed. It draws nothing: the entry is created by the first note that
+// joins it, so a start with no routine note paints no log at all.
+func (t *transcript) openSessionLog() {
+	t.sessionLogOpen = true
+}
+
+// closeSessionLog stops the session log taking notes: a note placed after it prints as its own line,
+// as it always has, and the log's count stands where it stood. The session's first Exchange launch
+// closes it ([Model.enterRunning]); closing a log that is already closed is a no-op.
+func (t *transcript) closeSessionLog() {
+	t.sessionLogOpen = false
+}
+
+// addSessionLogNote places one routine start-up note in the open session log, creating the log's
+// entry on the first note and appending to it after that, and reports whether it did. It answers
+// false, placing nothing, once the log is closed (or before any boundary opened one): the caller
+// then places the note on its own line, as it did before the log existed ([Model.noteRoutine]).
+//
+// The log is an ephemeral host note in every respect but its paint: never persisted (its kind has no
+// wire name), and parked at the tail when it is created exactly as the first note it gathers would
+// have been. It escape-strips at the seam exactly as addNote and addEphemeralNote do, for their
+// reason — a note is worded from untrusted config, disk and server strings.
+func (t *transcript) addSessionLogNote(text string) bool {
+	if !t.sessionLogOpen {
+		return false
+	}
+	text = stripEscapes(text)
+	at := t.sessionLogIndex()
+	if at < 0 {
+		t.commit(entry{kind: entrySessionLog, notes: []string{text}, ephemeral: true})
+		return true
+	}
+	// A fresh backing array rather than an append in place: the entries slice is shared by every
+	// Model copy (ADR 0011), and an append into spare capacity would reach a copy being discarded.
+	log := &t.entries[at]
+	log.notes = append(slices.Clip(log.notes), text)
+	t.touch()
+	return true
+}
+
+// sessionLogIndex is the index of the open session's log entry, or -1 when no note has drawn one
+// yet. It is found by scanning, as refreshStartup finds the start-up box, because entries placed
+// behind it can move its index (placeBehind); the scan runs from the tail, where the one log a
+// session holds sits nearest.
+func (t *transcript) sessionLogIndex() int {
+	for i := len(t.entries) - 1; i >= 0; i-- {
+		if t.entries[i].kind == entrySessionLog {
+			return i
+		}
+	}
+	return -1
+}
+
 // addPresented records the presentation entry for one shown document — rung 0 of the ladder,
 // and the reason a failed mechanism above it is never an error (ADR 0019 §4). Like addUser it is
 // called from the Update loop rather than the event fold: a presentation is the HOST's act, not
@@ -1055,6 +1125,7 @@ func (t *transcript) reset() {
 	t.pendingRun = runRef{}
 	t.parked = nil
 	t.wave = announcedWave{}
+	t.sessionLogOpen = false
 	// The block-paint cache is keyed by ENTRY INDEX, and this is the one path that makes an index
 	// mean something else: the caller re-fills the list (a fresh start-up box, a replayed
 	// scrollback) before anything renders again, so pruning against the entry count at the next

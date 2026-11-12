@@ -31,6 +31,7 @@ const (
 	entryCompacted
 	entryWorkflow
 	entryWorkflowItem
+	entrySessionLog
 )
 
 // entryKindRule is one kind's answer to every question the view asks ABOUT A KIND. Each field is
@@ -48,13 +49,14 @@ type entryKindRule struct {
 	persistedName string
 
 	// carriesBlockState reports whether the kind owns a collapsed/expanded block state — the gate
-	// [transcript.setExpanded] and [transcript.toggleExpanded] both answer through. Five kinds do:
+	// [transcript.setExpanded] and [transcript.toggleExpanded] both answer through. Six kinds do:
 	// a tool call, a stray result (entryToolResult) and a scheduled Firing (entrySchedule), whose
 	// retained bodies are capped when the block is collapsed — the stray result and the Firing are
 	// painted by the same block painter, so they collapse and expand by the tool block's rule — and
 	// the human's own two voices, the prompt (entryUser) and the interjection (entryInterjected),
 	// which read as one block and collapse by one rule when they run long (layout.md, "Collapsed
-	// and expanded blocks"). Every other kind — an assistant answer, a note, the start-up box —
+	// and expanded blocks"), and the start-up session log (entrySessionLog), which folds to its
+	// counted header. Every other kind — an assistant answer, a note, the start-up box —
 	// paints one way whatever is asked of it, so a click on it keeps its selection meaning.
 	carriesBlockState bool
 
@@ -64,12 +66,13 @@ type entryKindRule struct {
 	isHostNote bool
 
 	// cacheable reports whether a block headed by this kind may be stored in the paint cache at
-	// all ([paintKey], paintcache.go). Three kinds may not, for one reason. [transcript.refreshStartup]
+	// all ([paintKey], paintcache.go). Four kinds may not, for one reason. [transcript.refreshStartup]
 	// rewrites the start-up box's facts in place without touching a single field the key reads, so
 	// a cached box would keep saying "connecting" after the model bound late. The box is one small
 	// block at the very top of the scrollback and is not what the cache is for. The Workflow block's
 	// view and text grow in place the same way as its events fold (workflowblock.go), and a Workflow
-	// item's run head has its card rewritten in place when the item's receipt lands.
+	// item's run head has its card rewritten in place when the item's receipt lands, and the
+	// session log gains its notes in place (transcript.addSessionLogNote).
 	cacheable bool
 
 	// hasLiveStar reports whether the kind's header can still be WAITING for something, and so is
@@ -130,6 +133,13 @@ var entryKindRules = map[entryKind]entryKindRule{
 	// view. It is never cached, because its card is rewritten in place when the item's receipt
 	// lands, which can come after the phase and done bits the paint key reads have settled.
 	entryWorkflowItem: {persistedName: session.EntryKindWorkflowItem, hasLiveStar: true},
+	// The start-up session log — the routine notes a session starts with, gathered under one counted
+	// header (layout.md, "The start-up box"; [transcript.addSessionLogNote]). It is ephemeral chrome
+	// for the start-up box's reason: re-derived at every boundary, so never serialized. It carries a
+	// block state of its own, its fold, and is never cached because it grows IN PLACE as notes join
+	// it, touching no field the paint key reads. It is a host note: the program speaks it, and it
+	// parks at the tail exactly as the separate notes it gathers did.
+	entrySessionLog: {carriesBlockState: true, isHostNote: true},
 }
 
 // entryKindByName is the decode-side inverse of the table's persistedName column, built once at

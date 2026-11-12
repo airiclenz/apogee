@@ -22,6 +22,7 @@ import (
 	"github.com/airiclenz/apogee/internal/mcpauth"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // mcpLoginDeps is what an MCP OAuth login takes from its host rather than deciding for itself: the
@@ -559,7 +560,7 @@ func connectStartupServer(
 // servers and the other adopted ones are connected; only the skipped server is left out.
 func (w *rootWiring) announceSkippedMCP(skipped []mcp.Denied) {
 	for _, s := range skipped {
-		w.announce("apogee: " + mcpSkipClause(s))
+		w.announce(tui.Notice{Text: "apogee: " + mcpSkipClause(s), Loud: true})
 	}
 	w.cueSkippedMCP(skipped)
 }

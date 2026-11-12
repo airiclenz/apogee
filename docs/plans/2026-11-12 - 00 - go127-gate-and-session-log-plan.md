@@ -121,7 +121,11 @@ Revise every sentence that counts or enumerates the header-alone blocks (`grep -
 - `capcom show session-log-side-panel`
 **Commit:** `docs(layout): specify the start-up session log`
 
-## 5. Session-log block: entry kind, painter, construction-time notes
+## 5. Session-log block: entry kind, painter, construction-time notes — ✅ DONE (2026-11-12)
+
+NOTES (2026-11-12): re-derived from the assumption that the log paints through renderToolBlock as a task_list-shaped toolView: the guard's "or its own painter" was taken (renderSessionLog in render.go), because the spec'd open rows are `· <note>` hung rows rather than ┝/┕ branches. The notes ride a new `entry.notes` field, carried to the painter on paintInput — hence internal/tui/paintcache.go, which the plan's Files did not name. internal/tui/toolbranch.go and cmd/apogee/wire_options.go needed no change.
+
+NOTES (2026-11-12): the shared-home config warning (`wire_live.go` shareWarning) and the MCP skip notice are classed loud, as the guard states. Unit tests live in a new internal/tui/sessionlog_test.go, and the e2e test lives in a new cmd/apogee/e2e_sessionlog_test.go. The e2e stub advertises a 32k window, so the first beat adds no unknown-window line (item 6 may route first-beat notes into the log).
 
 **What:**
 **Goal:** at construction the TUI puts every routine start-up note into one ephemeral `entrySessionLog` block, collapsed, with header `✦ Session log (N notes) ▶`. ⌥↑ then ⏎, or a click, expands it to show each note verbatim. Loud notes stay their own `entryNote` lines. stderr output is byte-for-byte unchanged.

@@ -23,12 +23,29 @@ func loadedReport() domain.ContextFilesReport {
 	return domain.ContextFilesReport{Files: []domain.ContextFileNote{{Name: "AGENTS.md", Bytes: 3174}}}
 }
 
-// contextNotes returns the transcript notes the context-files notice produced, in display order.
+// contextNotes returns the transcript notes the context-files notice produced, in display order —
+// its own note lines and the routine ones the session log gathered alike (TestSessionLog… pins
+// which goes where).
 func contextNotes(m Model) []string {
 	var out []string
-	for _, text := range noteTexts(m) {
+	for _, text := range noteAndLogTexts(m) {
 		if strings.HasPrefix(text, "context:") || strings.HasPrefix(text, "standing system content") {
 			out = append(out, text)
+		}
+	}
+	return out
+}
+
+// noteAndLogTexts is every note the transcript shows, in display order, with the session log
+// expanded into the notes it gathered at the place it stands.
+func noteAndLogTexts(m Model) []string {
+	var out []string
+	for _, e := range m.transcript.entries {
+		switch e.kind {
+		case entryNote:
+			out = append(out, e.text)
+		case entrySessionLog:
+			out = append(out, e.notes...)
 		}
 	}
 	return out
@@ -117,6 +134,14 @@ func TestContextFilesNoticeNamesEveryFile(t *testing.T) {
 	}
 	if got := contextNotes(m); !slices.Equal(got, want) {
 		t.Errorf("context notes = %v, want %v", got, want)
+	}
+	// The loaded line is a routine record and joins the session log; the unreadable file needs the
+	// human and keeps its own line.
+	if got := sessionLogNotes(m); !slices.Equal(got, want[:1]) {
+		t.Errorf("session log notes = %v, want the loaded line alone %v", got, want[:1])
+	}
+	if !hasEntry(m, entryNote, want[1]) {
+		t.Errorf("the unreadable-file notice %q is not its own note line", want[1])
 	}
 }
 

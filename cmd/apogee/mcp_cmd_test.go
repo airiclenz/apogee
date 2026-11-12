@@ -883,8 +883,8 @@ func TestStartupSkipsARepoServerWhosePinMoved(t *testing.T) {
 		t.Error("the global server's tools are missing; a pin skip must spare the rest of the set")
 	}
 	want := "apogee: mcp server wiki skipped — stdio server \"wiki\": refusing to launch — bin/wiki.sh changed since you adopted it"
-	if len(w.startupNotices) != 1 || !strings.HasPrefix(w.startupNotices[0], want) {
-		t.Errorf("startup notices = %q, want one opening %q", w.startupNotices, want)
+	if len(w.startupNotices) != 1 || !strings.HasPrefix(w.startupNotices[0].Text, want) || !w.startupNotices[0].Loud {
+		t.Errorf("startup notices = %+v, want one loud one opening %q", w.startupNotices, want)
 	}
 	if !awaitPinWake(t, w) {
 		t.Error("AwaitConfigChange did not return true — the skip must wake the re-read with no watcher moved")
@@ -922,10 +922,10 @@ func TestStartupSkipsARepoServerWhosePinIsUnreadable(t *testing.T) {
 		t.Error("the global server's tools are missing; a pin skip must spare the rest of the set")
 	}
 	want := "apogee: mcp server wiki skipped — stdio server \"wiki\": refusing to launch — "
-	if len(w.startupNotices) != 1 || !strings.HasPrefix(w.startupNotices[0], want) ||
-		!strings.Contains(w.startupNotices[0], "bin/wiki.sh") ||
-		strings.Contains(w.startupNotices[0], "proposed again") {
-		t.Errorf("startup notices = %q, want one opening %q naming bin/wiki.sh, never \"proposed again\"", w.startupNotices, want)
+	if len(w.startupNotices) != 1 || !strings.HasPrefix(w.startupNotices[0].Text, want) ||
+		!strings.Contains(w.startupNotices[0].Text, "bin/wiki.sh") ||
+		strings.Contains(w.startupNotices[0].Text, "proposed again") || !w.startupNotices[0].Loud {
+		t.Errorf("startup notices = %+v, want one opening %q naming bin/wiki.sh, never \"proposed again\"", w.startupNotices, want)
 	}
 	if !awaitPinWake(t, w) {
 		t.Error("AwaitConfigChange did not return true — the skip must wake the re-read with no watcher moved")

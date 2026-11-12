@@ -131,6 +131,9 @@ type paintInput struct {
 	// replayed from an older record, which paints its text.
 	// It is no term of the key: the kind is never cached (entryKindRules)
 	workflowView workflowView
+	// the session log's notes (transcript.addSessionLogNote), from which its rows are painted; nil
+	// on every other kind. No term of the key, for workflowView's reason: the kind is never cached
+	notes []string
 
 	// the mutable half, EMBEDDED so a painter reads in.expanded exactly as it read e.expanded and
 	// the key can be derived from precisely this much of the record
@@ -142,7 +145,7 @@ type paintInput struct {
 // record exists for (see [paintInput]).
 func (e entry) painted() paintInput {
 	return paintInput{
-		e.kind, e.depth, e.text, e.tool, e.skillSpans, e.images, e.presented, e.startup, e.workflow,
+		e.kind, e.depth, e.text, e.tool, e.skillSpans, e.images, e.presented, e.startup, e.workflow, e.notes,
 		entryState{e.expanded, e.done, e.typeExpanded, e.phase, e.ctxUsed, e.ctxLimit, e.ctxModel,
 			e.stepCap, e.capRequested},
 	}

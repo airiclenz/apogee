@@ -158,14 +158,14 @@ func TestE2EAutoDegradationJourneyOnAnIncapableHost(t *testing.T) {
 	// (apogee-2sj): the same sentences, verbatim, in print order, free of the warning above.
 	var wantNotices string
 	if len(rec.opts.StartupNotices) > 0 {
-		wantNotices = strings.Join(rec.opts.StartupNotices, "\n") + "\n"
+		wantNotices = strings.Join(noticeTexts(rec.opts.StartupNotices), "\n") + "\n"
 	}
 	if wantNotices != stderr {
-		t.Errorf("tui.Options.StartupNotices = %q; want exactly the stderr lines %q", rec.opts.StartupNotices, stderr)
+		t.Errorf("tui.Options.StartupNotices = %+v; want exactly the stderr lines %q", rec.opts.StartupNotices, stderr)
 	}
 	for _, notice := range rec.opts.StartupNotices {
-		if strings.Contains(notice, "running UNCONFINED") {
-			t.Errorf("the transcript would repeat the unconfined-Auto warning on a confined launch: %q", notice)
+		if strings.Contains(notice.Text, "running UNCONFINED") {
+			t.Errorf("the transcript would repeat the unconfined-Auto warning on a confined launch: %q", notice.Text)
 		}
 	}
 	hostID := rec.opts.Confinement.HostID

@@ -257,8 +257,8 @@ func TestSessionBrowserResumeNotesDoNotAccumulate(t *testing.T) {
 		if !hasEntry(m, entryNote, "resumed: france question") {
 			t.Fatalf("round %d: the human was not shown the resume notice", round)
 		}
-		if !hasEntry(m, entryNote, "context: AGENTS.md (3.1 KiB)") {
-			t.Fatalf("round %d: the human was not shown the context-files notice", round)
+		if !slices.Contains(sessionLogNotes(m), "context: AGENTS.md (3.1 KiB)") {
+			t.Fatalf("round %d: the human was not shown the context-files notice in the session log", round)
 		}
 		// A per-Turn save writes the resumed view back over the record — which is exactly what the
 		// next round loads, so anything persisted here compounds.
@@ -279,8 +279,8 @@ func TestSessionBrowserResumeNotesDoNotAccumulate(t *testing.T) {
 		t.Fatalf("record holds %d entries after two resumes; want the original 2 (user + assistant): %+v", len(entries), entries)
 	}
 	for _, e := range entries {
-		if e.kind == entryNote {
-			t.Errorf("record accumulated a note entry: %q", e.text)
+		if e.kind == entryNote || e.kind == entrySessionLog {
+			t.Errorf("record accumulated a note entry: %q %q", e.text, e.notes)
 		}
 	}
 }

@@ -555,14 +555,33 @@ func TestRunRootConfinementStartupNotices(t *testing.T) {
 			// Off Windows the label pre-warm prints nothing, so the two surfaces are equal.
 			var wantNotices string
 			if len(rec.opts.StartupNotices) > 0 {
-				wantNotices = strings.Join(rec.opts.StartupNotices, "\n") + "\n"
+				wantNotices = strings.Join(noticeTexts(rec.opts.StartupNotices), "\n") + "\n"
 			}
 			if wantNotices != stderr {
-				t.Errorf("tui.Options.StartupNotices = %q; want exactly the stderr lines %q",
+				t.Errorf("tui.Options.StartupNotices = %+v; want exactly the stderr lines %q",
 					rec.opts.StartupNotices, stderr)
+			}
+
+			// And how loud each is in the transcript (layout.md, "The start-up box"): the warning and
+			// the degradation need the human and keep their own line, while the residual is a routine
+			// record the session log gathers — disclosed there (ADR 0112, amended 2026-11-12).
+			for _, n := range rec.opts.StartupNotices {
+				wantLoud := !strings.Contains(n.Text, residualNotice)
+				if n.Loud != wantLoud {
+					t.Errorf("startup notice %q is Loud = %v; want %v", n.Text, n.Loud, wantLoud)
+				}
 			}
 		})
 	}
+}
+
+// noticeTexts is each startup notice's text, in print order — what stderr carried, one line each.
+func noticeTexts(notices []tui.Notice) []string {
+	out := make([]string, 0, len(notices))
+	for _, n := range notices {
+		out = append(out, n.Text)
+	}
+	return out
 }
 
 // The presentation ladder's mechanisms are wired per session (ADR 0019): an Opener only where

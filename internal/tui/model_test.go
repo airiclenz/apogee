@@ -8962,20 +8962,21 @@ func TestCancelCommitsThePartialBeforeTheNote(t *testing.T) {
 }
 
 // TestStartupNoticesPostAsEphemeralNotes pins the transcript half of apogee-2sj: what the binary
-// said on stderr about the confinement posture before the alternate screen opened is repeated in
-// the opening frame — one note per notice, verbatim, in print order, after the colour-scheme
-// warnings — and none of it reaches the saved record, since every line is re-derived at launch.
+// said on stderr about the start-up posture before the alternate screen opened is repeated in the
+// opening frame, verbatim and in print order, after the colour-scheme warnings — a loud notice as
+// its own note, a routine one inside the session log (layout.md, "The start-up box") — and none of
+// it reaches the saved record, since every line is re-derived at launch.
 func TestStartupNoticesPostAsEphemeralNotes(t *testing.T) {
 	t.Parallel()
 
 	const (
 		schemeWarning = `color-scheme "mine.yaml": key "error": bad hex "#zz0000" — using default`
-		first         = "apogee: WARNING — auto mode is running UNCONFINED (confine-to-workspace: false)."
-		second        = "apogee: landlock cannot fence truncate(2) on this kernel; see /confine status."
+		loud          = "apogee: WARNING — auto mode is running UNCONFINED (confine-to-workspace: false)."
+		routine       = "apogee: landlock cannot fence truncate(2) on this kernel; see /confine status."
 	)
 	m := newModel(context.Background(), &fakeEngine{}, Options{
 		ColorSchemeWarnings: []string{schemeWarning},
-		StartupNotices:      []string{first, second},
+		StartupNotices:      []Notice{{Text: loud, Loud: true}, {Text: routine}},
 		UI:                  testUIPrefs,
 	}, nil)
 
@@ -8985,32 +8986,38 @@ func TestStartupNoticesPostAsEphemeralNotes(t *testing.T) {
 			continue
 		}
 		switch e.text {
-		case schemeWarning, first, second:
+		case schemeWarning, loud, routine:
 			notes = append(notes, e.text)
 			if !e.ephemeral {
 				t.Errorf("note %q is persisted; it is re-derived at every launch", e.text)
 			}
 		}
 	}
-	if want := []string{schemeWarning, first, second}; !slices.Equal(notes, want) {
-		t.Errorf("startup notes = %q; want the scheme warning then the notices in print order %q", notes, want)
+	if want := []string{schemeWarning, loud}; !slices.Equal(notes, want) {
+		t.Errorf("startup notes = %q; want the scheme warning then the loud notice %q", notes, want)
+	}
+	if got, want := sessionLogNotes(m), []string{routine}; !slices.Equal(got, want) {
+		t.Errorf("session log notes = %q; want the routine notice alone %q", got, want)
 	}
 
 	blob, err := encodeTranscript(&m.transcript)
 	if err != nil {
 		t.Fatalf("encodeTranscript: %v", err)
 	}
-	for _, notice := range []string{first, second} {
+	for _, notice := range []string{loud, routine} {
 		if bytes.Contains(blob, []byte(notice)) {
 			t.Errorf("the saved transcript carries the startup notice %q; it must stay display-only", notice)
 		}
 	}
 
 	clean := newModel(context.Background(), &fakeEngine{}, Options{UI: testUIPrefs}, nil)
-	for _, notice := range []string{first, second} {
+	for _, notice := range []string{loud, routine} {
 		if hasEntry(clean, entryNote, notice) {
 			t.Errorf("a run with no startup notices still noted %q", notice)
 		}
+	}
+	if sessionLogIndex(clean) >= 0 {
+		t.Error("a run with no startup notices drew a session log")
 	}
 }
 

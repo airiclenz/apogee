@@ -1242,6 +1242,8 @@ func renderEntryLines(th theme, in paintInput, width int, blink bool) blockPaint
 		return plainPaint(railLines(th, renderPresentedBlock(th, in.presented, inner), in.depth))
 	case entryStartup:
 		return plainPaint(railLines(th, renderStartupBox(th, in.startup, inner), in.depth))
+	case entrySessionLog:
+		return renderSessionLog(th, in.notes, inner, in.expanded).railed(th, in.depth)
 	case entryWorkflow:
 		return renderWorkflowBlock(th, in.workflowView, in.text, inner,
 			blockState{live: in.workflowView.running(), blink: blink}).railed(th, in.depth)
@@ -1252,4 +1254,40 @@ func renderEntryLines(th theme, in paintInput, width int, blink bool) blockPaint
 	default:
 		return blockPaint{}
 	}
+}
+
+// The session log's own wording (layout.md, "The start-up box"): "✦ Session log (4 notes)", "(1
+// note)" for one, and each note a "· <text>" row hung two columns in beneath the header.
+const (
+	sessionLogLabel  = "Session log"
+	sessionLogNoun   = "note"
+	sessionLogMarker = "  · "
+)
+
+// renderSessionLog paints the start-up session log, the third block that folds to its HEADER alone
+// (docs/layout/tool-layout.md). Collapsed it is its counted header in the Tasks card's grammar —
+// "✦ Session log (4 notes) ▶" and nothing beneath, no note row and no "+N more lines", the count
+// saying what the fold holds; open, the header's ▼ is the fold and every note is its own row,
+// uncapped and with no see-less footer, in the tone an expanded block's body wears. A note of several
+// lines keeps them, hung under its first line's text.
+//
+// It is its own painter rather than a task_list-shaped tool card on purpose: the card's fold is the
+// one every task card shares (toolView.collapsesToHeader — a click on any of them flips them all and
+// writes `ui.task-list-open`), where this fold is the log's own, per-block and session-only. So every
+// row it paints is the plain block toggle (targetHeader), which reaches [transcript.toggleExpanded]
+// and nothing else ([Model.toggleBlockAt]).
+func renderSessionLog(th theme, notes []string, width int, expanded bool) blockPaint {
+	label := th.toolLabel.Render(sessionLogLabel) +
+		" " + th.toolIndicator.Render("("+plural(len(notes), sessionLogNoun)+")") +
+		" " + th.toolIndicator.Render(stateIndicator(th, expanded))
+	var out blockPaint
+	out.add(hangingWrap(th, th.toolHeader, th.glyphs.assistant+" ", label, width), targetHeader)
+	if !expanded {
+		return out
+	}
+	tone := detailTone(th, expanded)
+	for _, note := range notes {
+		out.add(hangingWrap(th, tone, sessionLogMarker, note, width), targetHeader)
+	}
+	return out
 }

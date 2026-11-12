@@ -291,9 +291,9 @@ type rootWiring struct {
 	colorScheme         scheme.Scheme
 	colorSchemeWarnings []string
 
-	// What announceConfinement printed on stderr before the alternate screen opened, verbatim and
-	// in print order, for the TUI to repeat as ephemeral notes (tui.Options.StartupNotices).
-	startupNotices []string
+	// What announce printed on stderr before the alternate screen opened, verbatim and in print
+	// order, each with its loudness, for the TUI to repeat (tui.Options.StartupNotices).
+	startupNotices []tui.Notice
 }
 
 // close ends the run: every facility this wiring opened, in the reverse of the order it was opened,

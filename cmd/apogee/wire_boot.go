@@ -355,7 +355,7 @@ func (w *rootWiring) announceConfinement() {
 	// A per-session startup warning whenever Auto runs unconfined (ADR 0012): confine=false
 	// is safe only inside a VM, and it is the only blanket loosen in the system.
 	if w.mode == domain.ModeAuto && !w.opts.ConfineToWorkspace {
-		w.announce(unconfinedAutoWarning)
+		w.announce(tui.Notice{Text: unconfinedAutoWarning, Loud: true})
 	}
 
 	// The mirror branch: Auto WITH confinement asked for, on a host whose backend cannot
@@ -363,7 +363,7 @@ func (w *rootWiring) announceConfinement() {
 	// now, which is what made Auto look broken (the issue register, 2026-07-21). Say it once,
 	// name the backend, and point at /confine.
 	if notice := probe.DegradedNotice(probe.BackendName(w.confiner), w.confiner.Capabilities(), w.mode, w.opts.ConfineToWorkspace); notice != "" {
-		w.announce(notice)
+		w.announce(tui.Notice{Text: notice, Loud: true})
 	}
 
 	// The third cell, and the sibling of the branch above rather than a third exclusive one: a
@@ -373,8 +373,12 @@ func (w *rootWiring) announceConfinement() {
 	// nothing is refused — the operator is told what the fence does not stop, once, at the same
 	// moment the posture is announced. It cannot fire together with the degradation notice: that one needs
 	// FSWrite false, this one needs it true.
+	//
+	// It is ROUTINE in the transcript, gathered into the session log with the other start-up
+	// records: a residual inside the log counts as disclosed (ADR 0112, amended 2026-11-12), and
+	// stderr carries it exactly as before.
 	if notice := probe.ResidualNotice(probe.BackendName(w.confiner), w.confiner.Capabilities(), w.mode, w.opts.ConfineToWorkspace); notice != "" {
-		w.announce(notice)
+		w.announce(tui.Notice{Text: notice})
 	}
 
 	// The unknown-window honesty line used to print here, before the alt-screen. It has moved into
@@ -399,9 +403,11 @@ func (w *rootWiring) announceConfinement() {
 }
 
 // announce prints one startup notice on stderr and keeps it for the transcript — the one seam
-// through which announceConfinement speaks, so the two surfaces cannot drift: what the shell
-// scrollback shows is, verbatim, what the opening frame repeats.
-func (w *rootWiring) announce(notice string) {
-	fmt.Fprintln(os.Stderr, notice)
+// through which every start-up notice speaks, so the two surfaces cannot drift: what the shell
+// scrollback shows is, verbatim, what the opening frame repeats. Loudness reaches only the
+// transcript, where a loud notice keeps its own line and a routine one joins the session log;
+// stderr prints both alike.
+func (w *rootWiring) announce(notice tui.Notice) {
+	fmt.Fprintln(os.Stderr, notice.Text)
 	w.startupNotices = append(w.startupNotices, notice)
 }
