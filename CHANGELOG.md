@@ -11,6 +11,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.35.1] — 2026-11-12
+
 - **`make lint` works under Go 1.27.** golangci-lint is now pinned to v2.15.0 (`GOLANGCI_LINT_VERSION` in the `Makefile`), since v2.13.2 stopped at typecheck on Go 1.27's export data (`export data version 5 is greater than maximum supported version 4`). The six errcheck findings the new release raises (a discarded receive from an error channel in test teardown and wait helpers) are fixed where they occur. errcheck is still on.
 - **A non-string key in `request-extra:` is refused under Go 1.27 too.** Go 1.27's `encoding/json` (now backed by json/v2) writes a mapping key such as `1:` or `true:` as its text where 1.26 refused it, so a build on 1.27 accepted a `request-extra:` block it should have refused. The config loader now looks for such a key itself, at any depth and inside lists, and refuses the entry naming it and `JSON` under either toolchain; a quoted key (`"1": x`) is a string and still loads.
 - **CI lints and tests on the newest stable Go.** A new workflow, `.github/workflows/latest-go.yml`, runs `make lint` and `make test` on setup-go `stable`, so a Go release that breaks the pinned golangci-lint or a test shows up before a dev box upgrades into it. go.mod's `go` line stays the minimum. The workflow does not gate releases: the release gate reads `ci.yml` only (`docs/manual/building.md`).
