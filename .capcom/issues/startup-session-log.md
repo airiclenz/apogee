@@ -1,10 +1,12 @@
 ---
 title: Collapsed session-log block for startup notices (side panel when open)
-status: open
+status: done
 type: feature
 priority: 3
 plan: 2026-11-12 - 00 - go127-gate-and-session-log-plan.md
 created: 2026-11-12T08:19:33Z
+closed: 2026-11-12T16:45:38Z
+reason: "Resolved by plan '2026-11-12 - 00 - go127-gate-and-session-log-plan' (archived a1d86ac0), items 4-6: routine start-up and first-beat notes gather into a collapsed '✦ Session log (N notes)' block until the session's first Exchange launch; notices that need the human keep their own line; layout spec plus driven TUI and e2e tests cover collapsed and expanded states. The side-panel placement is follow-up session-log-side-panel."
 ---
 
 Gather the start-up notices (context files, confinement posture and residuals, model facts such as mandatory reasoning, rebind notes of the first beat) into one **session log** block in the transcript, collapsed by default like tool blocks and sub-agent blocks. Its collapsed header is one line (e.g. `session log · 4 notes`); expanding shows each note. When the side panel is available, the log may live there instead of in the transcript.

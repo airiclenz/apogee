@@ -1,10 +1,12 @@
 ---
 title: "make check fails under Go 1.27.4: lint typecheck and a config test"
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-11-12 - 00 - go127-gate-and-session-log-plan.md
 created: 2026-11-12T08:30:35Z
+closed: 2026-11-12T16:45:38Z
+reason: "Resolved by plan '2026-11-12 - 00 - go127-gate-and-session-log-plan' (archived a1d86ac0): golangci-lint pinned to v2.15.0 (item 1); the nested non-string request-extra key is refused by a key walk in RequestExtra.UnmarshalYAML, not by encoding/json, whose Go 1.27 json/v2 backing marshals map[any]any int keys (item 2); a latest-go workflow lints and tests on stable Go (item 3). Closeout ran make check green under go1.26.11 and under go1.27.4 with the 1.27.4 toolchain first on PATH. A plain GOTOOLCHAIN=go1.27.4 run failed only TestE2EAnnouncedScratchDirHoldsTheToolchainCaches, a test-environment artifact: the system go1.26.11 on PATH inside the test's confinement box attempts a toolchain switch and cannot create a module cache under the test HOME."
 ---
 
 Under a local Go 1.27.4 (go.mod says `go 1.26.11`; CI is green on 9c76ea69), `make check` fails in two places on clean `main`:
