@@ -1,9 +1,11 @@
 ---
 title: Confirm that served PDFs render in Chrome, Firefox and Safari under the PDF policy
-status: open
+status: done
 type: task
 priority: 2
 created: 2026-11-10T19:36:31Z
+closed: 2026-11-12T14:28:41Z
+reason: "Confirmed 2026-11-12: a PDF served over rung 2 under pdfCSP renders in Chrome 157.0.8103.51, Safari 27.2 and Firefox 160.0 (macOS) with no console error; .html/.svg controls keep the bare sandbox and the HTML control's script is blocked. Recorded on adr-0019-amend-1111; pdfCSP unchanged."
 ---
 
 Source: docs/reviews/code-audit-2026-11-10.md ("The document CSP may stop browsers rendering served PDFs (uncertain)"). Verified PARTLY (uncertain; needs a browser check) 2026-11-10 at a5c4f2db. Narrowed 2026-11-11 by the commit `fix(present): serve PDFs under a policy without the bare sandbox` (plan `2026-11-11 - 01 - fence-escape-and-open-defects-plan`, item 3).

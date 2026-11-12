@@ -11,6 +11,7 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **Served PDFs confirmed to render in Chrome, Safari and Firefox.** A PDF served by the built-in document server over SSH, under its policy without the bare sandbox, renders in Chrome 157, Safari 27.2 and Firefox 160 on macOS, and the `.html` and `.svg` controls keep the bare sandbox. Recorded on ADR 0019's 2026-11-11 amendment; no code change. (`served-pdf-csp-sandbox`)
 - **No more `context window changed: unknown → 1M` at launch.** When the model is configured but its window is not, the first clean beat learns the window and the restated start-up box already shows it, so the note is gone. A known window that changes, or one learned after a failed beat, still gets its line. (`startup-window-note-repeat`)
 - **Shorter startup notices.** Auto's residual notice is now a head line plus one line per unfenced access, each still naming the token and what a confined command can do through it (`apogee: auto mode fences terminal commands, but seatbelt cannot fence:` / `mach-lookup — a same-user launchd service (launchctl submit, osascript) can run commands outside the fence`). The note for a model whose reasoning cannot be turned off now reads `<model> always reasons — compaction and titles spend part of their output cap on it`. (`startup-notice-wording`)
 
