@@ -1286,11 +1286,31 @@ type Engine interface {
 // with the one fact the transcript needs to place it (Options.StartupNotices). A LOUD notice needs
 // the human — Auto running unconfined, degraded Auto, a skipped server — and keeps its own note line;
 // a routine one is a record of the start-up the human may read at leisure, and is gathered into the
-// session log, folded under its counted header (layout.md, "The start-up box"). Text is placed
-// verbatim: the transcript escape-strips it at its seam, as it does every note.
+// session log, folded under its counted header (layout.md, "The start-up box"). The transcript
+// escape-strips every note at its seam.
 type Notice struct {
+	// Text is the notice exactly as stderr printed it, and the transcript's wording whenever Log
+	// is empty.
 	Text string
+
+	// Log is the transcript's own wording, when the stderr text does not read right there: one
+	// note each, in order, placed where Text would have been (its own line when Loud, the session
+	// log when routine). The residual disclosure sets it — stderr's header over indented clause
+	// lines becomes one "<backend> cannot fence <token> — <consequence>" note per residual. Empty
+	// ⇒ Text is the one note. It is read ONLY from Options.StartupNotices: a Notice handed back in
+	// RebindResult.Notices has Log ignored, and no rebind producer sets it.
+	Log []string
+
 	Loud bool
+}
+
+// transcriptNotes is what the transcript places for this notice: Log's notes when it has any,
+// otherwise Text as the one note.
+func (n Notice) transcriptNotes() []string {
+	if len(n.Log) > 0 {
+		return n.Log
+	}
+	return []string{n.Text}
 }
 
 // Options carries the wiring the binary resolves (the composition root, cmd/apogee) and
@@ -1397,9 +1417,10 @@ type Options struct {
 	// unconfined-Auto warning, the degradation notice, the residual disclosure, a shared-home
 	// warning, a repo MCP server the connect skipped — printed on stderr before the alternate screen
 	// opened; repeated here so the moment is not lost when that screen opens over the line. Each is
-	// placed at construction, verbatim and in print order, after the colour-scheme warnings: a loud
-	// one as its own ephemeral transcript note, a routine one inside the session log (Notice). Nil on
-	// the ordinary run, where the posture needed no announcing.
+	// placed at construction, in print order, after the colour-scheme warnings — in stderr's words,
+	// or in the transcript's own where the notice carries them (Notice.Log): a loud one as its own
+	// ephemeral transcript note, a routine one inside the session log (Notice). Nil on the ordinary
+	// run, where the posture needed no announcing.
 	StartupNotices []Notice
 
 	// Schemes is what keeps the palette switchable from inside the program: what the picker offers,

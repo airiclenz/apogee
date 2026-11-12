@@ -55,7 +55,13 @@ internal/tui/sessionlog_test.go — TestSessionLogPaintsHeaderAloneThenEveryNote
 - `go vet ./internal/tui/`
 **Commit:** `fix(tui): fold hard line breaks in session-log notes into one paragraph`
 
-## 2. Residual notice gets its own session-log wording, one note per residual
+## 2. Residual notice gets its own session-log wording, one note per residual — ✅ DONE (2026-11-12)
+
+NOTES (2026-11-12): the shared gate is a new unexported `probe.disclosedResiduals` (Auto ∧ confine ∧ FSWrite, then `writeClassResiduals`), read by both `ResidualNotice` and `ResidualNotes`; `tui.Notice` gains an unexported `transcriptNotes()` method that `noteStartupNotices` reads, so the Log-or-Text choice lives in one place.
+
+NOTES (2026-11-12): the ADR 0112 amendment is a dated `> **Amended 2026-11-12 (…)**` blockquote under §1 of `adr-0112-amend-1112` (the plan's Files list names no new child Note), named on `adr-0112.md`'s Status line.
+
+NOTES (2026-11-12): the `TestRunRootConfinementStartupNotices` Log assertion lives in a new helper `assertResidualLogWording` in `wire_boot_test.go`, which also checks that stderr carries `probe.ResidualNotice`'s text byte for byte.
 
 **What:** fixes the defect in `session-log-hard-breaks`: the start-up residual notice reached the session log as its multi-line stderr text.
 **Goal:** on an Auto + confine start with write-class residuals, the session log holds one note per residual, worded `<backend> cannot fence <token> — <consequence>` with no `apogee: ` prefix; stderr still prints `probe.ResidualNotice`'s text byte-identical.

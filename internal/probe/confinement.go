@@ -136,10 +136,7 @@ func DegradedNotice(backendName string, caps domain.ConfinementCaps, mode domain
 // not a refusal, which is why no caller may treat it as a blocker. "" in every other cell, and
 // pure so the wording is table-testable without capturing os.Stderr.
 func ResidualNotice(backendName string, caps domain.ConfinementCaps, mode domain.Mode, confineToWorkspace bool) string {
-	if mode != domain.ModeAuto || !confineToWorkspace || !caps.FSWrite {
-		return ""
-	}
-	writeClass := writeClassResiduals(caps.Residuals)
+	writeClass := disclosedResiduals(caps, mode, confineToWorkspace)
 	if len(writeClass) == 0 {
 		return ""
 	}
@@ -150,6 +147,37 @@ func ResidualNotice(backendName string, caps domain.ConfinementCaps, mode domain
 	return fmt.Sprintf(
 		"apogee: auto mode fences terminal commands, but %s cannot fence:\n%s",
 		backendName, strings.Join(clauses, "\n"))
+}
+
+// ResidualNotes words the same disclosure as ResidualNotice for the TUI's session log: one note per
+// write-class residual, each a whole sentence of its own — "<backend> cannot fence <token> —
+// <consequence>" — with no "apogee: " prefix and no hard line break, so each reads as one paragraph
+// wrapped only at the window width. The stderr notice is a header over indented clause lines, which
+// only reads right in a terminal's scrollback; folded into one log note it ran every token into one
+// sentence. It shares ResidualNotice's gate and its wording (disclosedResiduals,
+// residualConsequence), so the two surfaces can never disagree on whether, or what, to disclose.
+// Nil in every cell where ResidualNotice is "".
+func ResidualNotes(backendName string, caps domain.ConfinementCaps, mode domain.Mode, confineToWorkspace bool) []string {
+	writeClass := disclosedResiduals(caps, mode, confineToWorkspace)
+	if len(writeClass) == 0 {
+		return nil
+	}
+	notes := make([]string, 0, len(writeClass))
+	for _, residual := range writeClass {
+		notes = append(notes, backendName+" cannot fence "+residual+" — "+residualConsequence(residual))
+	}
+	return notes
+}
+
+// disclosedResiduals is the residual disclosure's one gate: the write-class residuals Auto must
+// name at startup — Auto, confinement asked for, a backend that fences the filesystem — or nil in
+// every other cell. ResidualNotice and ResidualNotes both read it, so the stderr notice and the
+// session-log notes fire in exactly the same cells.
+func disclosedResiduals(caps domain.ConfinementCaps, mode domain.Mode, confineToWorkspace bool) []string {
+	if mode != domain.ModeAuto || !confineToWorkspace || !caps.FSWrite {
+		return nil
+	}
+	return writeClassResiduals(caps.Residuals)
 }
 
 // residualTruncate is the one worded residual token spelled here rather than in internal/domain.

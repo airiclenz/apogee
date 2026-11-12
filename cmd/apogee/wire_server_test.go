@@ -88,7 +88,7 @@ func TestRebindRecomposesTheToolSetUnderTheProfileRoster(t *testing.T) {
 	if !liveSetHas(w.toolSet, "view_diff") {
 		t.Error("view_diff is missing after the switch onto model-b: the profile's roster was announced but never applied")
 	}
-	if !slices.Contains(result.Notices, tui.Notice{Text: "tools: +view_diff (profile)"}) {
+	if !slices.ContainsFunc(result.Notices, func(n tui.Notice) bool { return n.Text == "tools: +view_diff (profile)" }) {
 		t.Errorf("notices = %+v, want the switch line for the lifted tool among them", result.Notices)
 	}
 

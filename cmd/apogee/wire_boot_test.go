@@ -19,6 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/recall"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/testtime"
@@ -571,7 +572,40 @@ func TestRunRootConfinementStartupNotices(t *testing.T) {
 					t.Errorf("startup notice %q is Loud = %v; want %v", n.Text, n.Loud, wantLoud)
 				}
 			}
+
+			// The residual's transcript wording is its own (probe.ResidualNotes): one session-log note
+			// per residual, each a sentence naming the backend, with no "apogee: " prefix — while
+			// stderr above still prints probe.ResidualNotice byte for byte.
+			if tt.wantResidual {
+				assertResidualLogWording(t, rec.opts.StartupNotices, stderr, tt.caps)
+			}
 		})
+	}
+}
+
+// assertResidualLogWording checks the one residual notice runRoot announced: stderr carries
+// probe.ResidualNotice's text, and the notice's Log holds one "<backend> cannot fence <token>"
+// note per write-class residual, in the fake backend's name.
+func assertResidualLogWording(t *testing.T, notices []tui.Notice, stderr string, caps apogee.ConfinementCaps) {
+	t.Helper()
+
+	backend := probe.BackendName(fakeConfiner{})
+	want := probe.ResidualNotice(backend, caps, domain.ModeAuto, true)
+	if !strings.Contains(stderr, want+"\n") {
+		t.Errorf("stderr = %q; want probe.ResidualNotice's text byte for byte %q", stderr, want)
+	}
+	at := slices.IndexFunc(notices, func(n tui.Notice) bool { return n.Text == want })
+	if at < 0 {
+		t.Fatalf("no startup notice carries the residual text; notices = %+v", notices)
+	}
+	log := notices[at].Log
+	if len(log) != len(caps.Residuals) {
+		t.Fatalf("residual Log = %q; want one note per residual %v", log, caps.Residuals)
+	}
+	for i, note := range log {
+		if prefix := backend + " cannot fence " + caps.Residuals[i]; !strings.HasPrefix(note, prefix) {
+			t.Errorf("residual Log[%d] = %q; want it to start %q", i, note, prefix)
+		}
 	}
 }
 

@@ -9021,6 +9021,43 @@ func TestStartupNoticesPostAsEphemeralNotes(t *testing.T) {
 	}
 }
 
+// TestStartupNoticesPlaceTheirLogWordingOneNoteEach pins Notice.Log: a notice whose stderr text
+// does not read right in the transcript — the residual disclosure's header over indented clause
+// lines — carries the transcript's own wording, and each Log entry is its own note, in order,
+// where Text would have gone. The stderr text itself is never placed. A loud notice with Log keeps
+// each entry on its own line, outside the log.
+func TestStartupNoticesPlaceTheirLogWordingOneNoteEach(t *testing.T) {
+	t.Parallel()
+
+	routine := Notice{
+		Text: "apogee: auto mode fences terminal commands, but landlock cannot fence:\n" +
+			"  truncate(2) — a confined command can still empty an existing file\n" +
+			"  connect(2) AF_UNIX — a same-user socket service can run commands outside the fence",
+		Log: []string{
+			"landlock cannot fence truncate(2) — a confined command can still empty an existing file",
+			"landlock cannot fence connect(2) AF_UNIX — a same-user socket service can run commands outside the fence",
+		},
+	}
+	loud := Notice{Text: "apogee: loud stderr text", Log: []string{"loud first", "loud second"}, Loud: true}
+
+	m := newModel(context.Background(), &fakeEngine{}, Options{
+		StartupNotices: []Notice{routine, loud},
+		UI:             testUIPrefs,
+	}, nil)
+
+	if got := sessionLogNotes(m); !slices.Equal(got, routine.Log) {
+		t.Errorf("session log notes = %q; want exactly the notice's Log entries %q", got, routine.Log)
+	}
+	for _, note := range loud.Log {
+		if !hasEntry(m, entryNote, note) {
+			t.Errorf("the loud notice's Log entry %q is not its own note", note)
+		}
+	}
+	if hasEntry(m, entryNote, loud.Text) {
+		t.Errorf("the stderr text %q was placed although the notice carries its own wording", loud.Text)
+	}
+}
+
 // estimateGauge is the `~` gauge's used/limit prefix for an estimate of n tokens against the test
 // window, styling stripped — what the right slot shows before any depth-0 usage reading.
 func estimateGauge(n int) string {

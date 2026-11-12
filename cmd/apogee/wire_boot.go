@@ -376,9 +376,12 @@ func (w *rootWiring) announceConfinement() {
 	//
 	// It is ROUTINE in the transcript, gathered into the session log with the other start-up
 	// records: a residual inside the log counts as disclosed (ADR 0112, amended 2026-11-12), and
-	// stderr carries it exactly as before.
-	if notice := probe.ResidualNotice(probe.BackendName(w.confiner), w.confiner.Capabilities(), w.mode, w.opts.ConfineToWorkspace); notice != "" {
-		w.announce(tui.Notice{Text: notice})
+	// stderr carries it exactly as before. The log gets its own wording (probe.ResidualNotes), one
+	// note per residual: stderr's header over indented clause lines reads as one run-on sentence
+	// once folded into a single note.
+	backend, caps := probe.BackendName(w.confiner), w.confiner.Capabilities()
+	if notice := probe.ResidualNotice(backend, caps, w.mode, w.opts.ConfineToWorkspace); notice != "" {
+		w.announce(tui.Notice{Text: notice, Log: probe.ResidualNotes(backend, caps, w.mode, w.opts.ConfineToWorkspace)})
 	}
 
 	// The unknown-window honesty line used to print here, before the alt-screen. It has moved into
@@ -403,10 +406,11 @@ func (w *rootWiring) announceConfinement() {
 }
 
 // announce prints one startup notice on stderr and keeps it for the transcript — the one seam
-// through which every start-up notice speaks, so the two surfaces cannot drift: what the shell
-// scrollback shows is, verbatim, what the opening frame repeats. Loudness reaches only the
-// transcript, where a loud notice keeps its own line and a routine one joins the session log;
-// stderr prints both alike.
+// through which every start-up notice speaks, so the two surfaces cannot drift: the opening frame
+// repeats what the shell scrollback shows, in the same words unless the notice carries the
+// transcript's own (tui.Notice.Log, composed beside Text from the same source). Loudness and Log
+// reach only the transcript, where a loud notice keeps its own line and a routine one joins the
+// session log; stderr prints Text alike for both.
 func (w *rootWiring) announce(notice tui.Notice) {
 	fmt.Fprintln(os.Stderr, notice.Text)
 	w.startupNotices = append(w.startupNotices, notice)

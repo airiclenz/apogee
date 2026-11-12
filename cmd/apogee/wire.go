@@ -291,8 +291,9 @@ type rootWiring struct {
 	colorScheme         scheme.Scheme
 	colorSchemeWarnings []string
 
-	// What announce printed on stderr before the alternate screen opened, verbatim and in print
-	// order, each with its loudness, for the TUI to repeat (tui.Options.StartupNotices).
+	// What announce printed on stderr before the alternate screen opened, in print order, each with
+	// its loudness and any transcript wording of its own, for the TUI to repeat
+	// (tui.Options.StartupNotices).
 	startupNotices []tui.Notice
 }
 

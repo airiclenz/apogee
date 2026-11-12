@@ -3385,9 +3385,11 @@ it at startup with its consequence, on every Linux and macOS host.
 
 That startup disclosure — the `apogee: auto mode fences terminal commands, but … cannot fence:`
 lines, truncation among them — still prints on stderr before the screen opens, and `apogee
-headless` and `apogee daemon` print it as before. In the TUI it is a routine start-up note: it
+headless` and `apogee daemon` print it as before. In the TUI it is a routine start-up record: it
 sits inside the collapsed `✦ Session log (N notes)` block below the start-up card rather than on a
-line of its own, and opening that block shows it verbatim (see
+line of its own, one note per access the fence leaves open — `landlock cannot fence truncate(2) —
+a confined command can still empty an existing file outside the workspace (kernel < 6.2)` — so
+opening that block shows each one with its consequence (see
 [the session log](commands.md#the-start-up-session-log)). A notice that needs you — Auto running
 unconfined, or Auto degraded on a host that cannot fence writes — is never folded into it and keeps
 its own line.

@@ -3,6 +3,7 @@ package probe_test
 import (
 	"context"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
@@ -483,5 +484,55 @@ func TestAutoUnattendedBlockedMirrorsTheAutoLadder(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+// ResidualNotes is the session log's wording of the residual disclosure: one note per write-class
+// residual, "<backend> cannot fence <token> — <consequence>", with no "apogee: " prefix and no hard
+// break, so each reads as one paragraph. It fires in exactly ResidualNotice's cells and words each
+// token with exactly the clause the stderr notice gives it — the two surfaces share one gate and one
+// wording, so the last assertion holds every note to its stderr line.
+func TestResidualNotes(t *testing.T) {
+	t.Parallel()
+
+	const (
+		truncateNote = "landlock cannot fence truncate(2) — a confined command can still empty an existing file outside the workspace (kernel < 6.2)"
+		unixNote     = "landlock cannot fence " + domain.ResidualUnixEgress + " — a same-user socket service (tmux; systemd-run, docker if not masked) can run commands outside the fence"
+		unknownNote  = "landlock cannot fence refer(2) — not fenced; a confined command can still perform it outside the workspace"
+	)
+	tests := []struct {
+		name      string
+		mode      domain.Mode
+		residuals []string
+		want      []string
+	}{
+		{"both_tokens", domain.ModeAuto, []string{"truncate(2)", domain.ResidualUnixEgress}, []string{truncateNote, unixNote}},
+		{"truncate_alone", domain.ModeAuto, []string{"truncate(2)"}, []string{truncateNote}},
+		{"unknown_token", domain.ModeAuto, []string{"refer(2)"}, []string{unknownNote}},
+		{"network_beside_write_class", domain.ModeAuto, []string{"truncate(2)", domain.ResidualUDPEgress}, []string{truncateNote}},
+		{"network_only", domain.ModeAuto, []string{domain.ResidualUDPEgress}, nil},
+		{"not_auto", domain.ModeAllowEdits, []string{"truncate(2)", domain.ResidualUnixEgress}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			caps := domain.ConfinementCaps{FSWrite: true, Residuals: tt.residuals}
+
+			got := probe.ResidualNotes("landlock", caps, tt.mode, true)
+
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("ResidualNotes(%q, residuals=%v) = %q; want %q", tt.mode, tt.residuals, got, tt.want)
+			}
+			notice := probe.ResidualNotice("landlock", caps, tt.mode, true)
+			if (notice != "") != (len(got) > 0) {
+				t.Errorf("ResidualNotes fired = %v but ResidualNotice = %q; the two must share one gate", len(got) > 0, notice)
+			}
+			for _, note := range got {
+				clause := "  " + strings.TrimPrefix(note, "landlock cannot fence ")
+				if !slices.Contains(strings.Split(notice, "\n"), clause) {
+					t.Errorf("note %q words its token unlike the stderr notice:\n%s", note, notice)
+				}
+			}
+		})
 	}
 }
