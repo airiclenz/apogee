@@ -844,6 +844,15 @@ func unregisteredLabel(tool string) string {
 	return server + mcpLabelJoin + remote
 }
 
+// workflowFinishToolName is the raw tool id a workflow item's child hands its receipt back under.
+// It restates internal/tools' FinishToolName, which the TUI does not import outside its tests
+// (TestWorkflowFinishStaysTargetless pins the two together). The tool is in no registry row — the
+// engine builds one per workflow child (ADR 0087) — so its call takes the unregistered fallback,
+// all but the target: the receipt is the run's closing card, its status, summary and typed fields
+// the labelled branches beneath a `finish` header, and a target lifted from its first string field
+// ("ok") would name nothing while folding that card into a Tools row.
+const workflowFinishToolName = "finish"
+
 // presentToolCall builds the header view of a tool call — and, for the tools whose arguments
 // already say what the call will change, its body too (argBody: the edit tools' -/+ lines, a
 // write's + lines).
@@ -857,7 +866,8 @@ func unregisteredLabel(tool string) string {
 // surfaces spell one call one way), so a not-yet-registered tool still renders and a malformed
 // argument is shown verbatim rather than dropped (the approval flow is a security surface — the
 // model's request is never hidden). Its target is its first string argument's first line, or its
-// raw name when it has none (unregisteredTarget), so it groups and counts like any other call.
+// raw name when it has none (unregisteredTarget), so it groups and counts like any other call —
+// save a workflow child's receipt (workflowFinishToolName), which stays a targetless card.
 // The verb mirrors that fallback: an unregistered tool is "running <raw name>", which stays a
 // truthful sentence fragment for a dynamic MCP tool nobody has a verb for.
 // Everything the header states traces back to the model's own JSON arguments — the target on every
@@ -883,9 +893,11 @@ func presentToolCall(call domain.ToolCall, resolved string, ws workspaceRoot) to
 			Label:    unregisteredLabel(call.Tool),
 			Verb:     "running " + call.Tool,
 			name:     call.Tool,
-			Target:   unregisteredTarget(call.Tool, call.Arguments),
 			Details:  newToolBody(argumentDetails(call.Arguments)),
 			argsWire: wireArgs(call.Tool, call.Arguments),
+		}
+		if call.Tool != workflowFinishToolName {
+			tv.Target = unregisteredTarget(call.Tool, call.Arguments)
 		}
 		tv.finishDisplay(ws)
 		return tv

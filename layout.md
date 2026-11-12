@@ -917,7 +917,9 @@ target has nothing to lead a row with, since there the detail lines *are* the br
 its own block. An unregistered (MCP) tool is not one of them: its target is its first string
 argument's first line, a blank one skipped, or its raw name when it has none, so a run of MCP calls
 between two reads groups and counts like any other (2026-11-12). The targetless calls left are a
-registered call that arrived without its target and a stray `result`. And a presenter may state outright that its record must never be an ordinary row in
+registered call that arrived without its target, a stray `result`, and a workflow item's `finish`
+receipt: no registry row knows it, but its first string field (`ok`) would name nothing, so it
+keeps the unregistered label and labelled arguments and stands as the run's closing `finish` card. And a presenter may state outright that its record must never be an ordinary row in
 a list. The RULE behind that flag is one rule: a call whose presenter marks it solo either is a
 record in its own right, or it **groups with its own kind** — a list of one tool's calls under its
 own umbrella — and a call that has its own list never joins the mixed one. Three calls say it, and

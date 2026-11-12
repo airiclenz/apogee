@@ -43,6 +43,33 @@ func TestToolRegistryCoversEveryBuiltInTool(t *testing.T) {
 	}
 }
 
+// TestWorkflowFinishStaysTargetless pins the one unregistered call that keeps no target: a workflow
+// child's receipt. It takes the unregistered fallback's label and labelled arguments, but a target
+// lifted from its first string field would turn the run's closing `finish` card into a member row
+// of a Tools umbrella, so it stays targetless — and so never groupable — whatever its fields say.
+// The TUI's restated name is pinned to the engine's here, where internal/tools is imported.
+func TestWorkflowFinishStaysTargetless(t *testing.T) {
+	t.Parallel()
+
+	if workflowFinishToolName != tools.FinishToolName {
+		t.Fatalf("workflowFinishToolName = %q, want tools.FinishToolName %q", workflowFinishToolName, tools.FinishToolName)
+	}
+	call := domain.ToolCall{ID: "f1", Tool: tools.FinishToolName, Arguments: []byte(`{"status":"ok","summary":"done"}`)}
+	tv := presentToolCall(call, "", workspaceRoot{})
+	if tv.Target != "" {
+		t.Errorf("the finish receipt's Target = %q, want none", tv.Target)
+	}
+	if groupable(tv) {
+		t.Error("the finish receipt is groupable; it must stand as its own card")
+	}
+	if tv.Label != tools.FinishToolName {
+		t.Errorf("the finish receipt's Label = %q, want %q", tv.Label, tools.FinishToolName)
+	}
+	if tv.Details.len() == 0 {
+		t.Error("the finish receipt lost its labelled arguments")
+	}
+}
+
 // TestGrepTarget pins what a grep row LEADS with. The pattern alone answers "what was searched
 // for" but never "where", and the two searches a reader has to tell apart in a group — the whole
 // workspace and one file — differ in nothing else, so the path the call scoped itself to and the
