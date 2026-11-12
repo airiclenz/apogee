@@ -11,6 +11,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **No more `context window changed: unknown → 1M` at launch.** When the model is configured but its window is not, the first clean beat learns the window and the restated start-up box already shows it, so the note is gone. A known window that changes, or one learned after a failed beat, still gets its line. (`startup-window-note-repeat`)
+
 ## [0.35.0] — 2026-11-11
 
 - **A settings save no longer fails under a Windows junction.** When the config home is reached through an NTFS junction, a save failed with `resolve config` although the file existed; a config that exists but that Go's link resolver cannot resolve is now written through, following only the file's own links by hand, so the save lands on the junction's target and the junction stays a junction.

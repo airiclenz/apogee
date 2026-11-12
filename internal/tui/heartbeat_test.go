@@ -1061,6 +1061,39 @@ func TestModelChangeRebindsWithNotice(t *testing.T) {
 	}
 }
 
+// A launch that names its model but not its window learns the window on the first clean beat. The
+// restated box already shows it, so a quiet first contact says nothing; the same learning after a
+// failed beat is news and keeps its line (startup-window-note-repeat).
+func TestFirstContactWindowNote(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		beats []heartbeat.Beat
+		want  int
+	}{
+		{"quiet first contact", []heartbeat.Beat{upBeat("test-model", 1<<20)}, 0},
+		{"after a failed beat", []heartbeat.Beat{downBeat("connection refused"), upBeat("test-model", 1<<20)}, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			opts := testOpts
+			opts.ContextWindow = 0 // the model is named, the window is not
+			m := wireRebind(t, opts, &fakeHeartbeat{}, &fakeRebind{})
+			for _, beat := range tc.beats {
+				m = foldBeatMsg(t, m, beat)
+			}
+			if m.opts.ContextWindow != 1<<20 {
+				t.Fatalf("bound window = %d, want the beat's 1M", m.opts.ContextWindow)
+			}
+			if n := countNotes(m, "context window changed: unknown → 1M"); n != tc.want {
+				t.Errorf("window notes = %d, want %d; notes = %q", n, tc.want, noteTexts(m))
+			}
+		})
+	}
+}
+
 // The same model reloaded with a different -c is a real change too: the gauge's denominator and the
 // engine's Budget both move, so it rebinds — and the note says only what moved.
 func TestWindowOnlyChangeRebinds(t *testing.T) {

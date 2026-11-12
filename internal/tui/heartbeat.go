@@ -534,7 +534,7 @@ const unknownWindowNote = notice.WindowUnknown
 // rebindNote words what a successful rebind actually moved, in the three shapes it can take: the
 // late seed that binds the session's first model (the async cold start — same code path, different
 // words), a model change, and a window-only change. It returns "" whenever nothing the human is not
-// already shown moved, which is two cases. The pinned window: the server switched to a
+// already shown moved, which is three cases. The pinned window: the server switched to a
 // differently-sized window, the pin outranked it, and the binding the human can see is unchanged —
 // a note there would describe a change that did not happen. And the quiet first-contact seed
 // (quietSeed): the session's very first beat landed clean, so the start-up box restated in place is
@@ -543,7 +543,10 @@ const unknownWindowNote = notice.WindowUnknown
 // serving nothing, or one that lands on a server the human just SWITCHED to (heartbeatState.switched
 // — the box is far up the scrollback by then and the move was asked for), is genuine news and keeps
 // its line. The window clause is carried only when the BOUND window moved, so a pin never narrates
-// the change it suppressed.
+// the change it suppressed. And the quiet first-contact window: a launch with its model named but
+// its window unknown learns the window on that same first clean beat, and the restated box already
+// shows it — "context window changed: unknown → 1M" would describe a change nobody made. A window
+// that was KNOWN and moves, or one learned after a failed beat, keeps its line.
 //
 // Both ids are rendered the way the footer and the start-up box render them (displayModel), so the
 // note and the chrome beside it can never name the same model two different ways. Neither is
@@ -567,6 +570,9 @@ func rebindNote(oldModel string, oldWindow int, newModel string, newWindow int, 
 		}
 		return note
 	case newWindow != oldWindow:
+		if quietSeed && oldWindow <= 0 {
+			return "" // the restated box already names the window the first clean beat learned
+		}
 		return "context window changed: " + windowWord(oldWindow) + " → " + windowWord(newWindow)
 	}
 	return ""
