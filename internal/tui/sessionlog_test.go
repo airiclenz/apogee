@@ -259,6 +259,7 @@ func TestSessionLogOpensAtBoundaryWithoutContextFiles(t *testing.T) {
 	}{
 		{"the startup seed", func(t *testing.T) Model { return newTestModelEng(t, &fakeEngine{}, testOpts) }},
 		{"/clear", closedThen(clearSession)},
+		{"/new", closedThen(newSession)},
 		{"a /sessions restore", closedThen(restoreSession)},
 	}
 	for _, tc := range tests {

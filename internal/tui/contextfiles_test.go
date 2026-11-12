@@ -59,6 +59,15 @@ func clearSession(t *testing.T, m Model) Model {
 	return m
 }
 
+// newSession drives /new through the input box. It runs what /clear runs today; the boundary
+// tests drive it as its own row so a /new that drifts from /clear is caught where it drifts.
+func newSession(t *testing.T, m Model) Model {
+	t.Helper()
+	m.input.SetValue("/new")
+	m, _ = stepCmd(t, m, keyEnter())
+	return m
+}
+
 // restoreSession folds a loaded record into the live engine — the /sessions browser's resume,
 // driven from the Msg the Load Cmd returns.
 func restoreSession(t *testing.T, m Model) Model {
