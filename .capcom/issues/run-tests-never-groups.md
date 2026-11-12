@@ -3,6 +3,7 @@ title: run_tests with no arguments never joins the grouped Tools block (empty ta
 status: open
 type: bug
 priority: 3
+plan: 2026-11-12 - 01 - session-log-wrap-and-tool-grouping-plan.md
 created: 2026-11-12T18:48:26Z
 ---
 

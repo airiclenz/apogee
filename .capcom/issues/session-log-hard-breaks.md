@@ -3,6 +3,7 @@ title: Session log notes keep stderr hard line breaks instead of wrapping to wid
 status: open
 type: bug
 priority: 3
+plan: 2026-11-12 - 01 - session-log-wrap-and-tool-grouping-plan.md
 created: 2026-11-12T18:44:29Z
 ---
 
