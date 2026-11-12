@@ -373,11 +373,11 @@ func TestPresentToolCall(t *testing.T) {
 			wantTarget: "Deploy to prod?", wantDetail: "yes, after the demo",
 		},
 		{
-			name:       "unknown tool → raw label, labelled args as detail",
+			name:       "unknown tool → raw label, raw name as target when no string arg, labelled args as detail",
 			call:       domain.ToolCall{ID: "6", Tool: "frobnicate", Arguments: []byte(`{"x":1}`)},
 			wantLabel:  "frobnicate",
 			wantVerb:   "running frobnicate",
-			wantTarget: "",
+			wantTarget: "frobnicate",
 			wantDetail: "x:\n  1",
 		},
 		{
@@ -385,7 +385,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "7", Tool: "weird", Arguments: []byte("{not json")},
 			wantLabel:  "weird",
 			wantVerb:   "running weird",
-			wantTarget: "",
+			wantTarget: "weird",
 			wantDetail: "{not json",
 		},
 	}
@@ -408,6 +408,44 @@ func TestPresentToolCall(t *testing.T) {
 			}
 			if got := detailsText(tv); !strings.Contains(got, tc.wantDetail) {
 				t.Errorf("details = %q; want a line containing %q", got, tc.wantDetail)
+			}
+		})
+	}
+}
+
+// TestUnregisteredTarget pins the target an unregistered (MCP) call leads its row with: the first
+// line of the first string argument whose first line says anything, walked in the order the body
+// lists the arguments (orderedArgs), clipped like every target; the raw name when no argument
+// qualifies. It is never empty, which is what lets the call group (groupable).
+func TestUnregisteredTarget(t *testing.T) {
+	t.Parallel()
+
+	long := strings.Repeat("a", detailClipRunes+10)
+	tests := []struct {
+		name string
+		args string
+		want string
+	}{
+		{name: "the first string argument", args: `{"query":"collapse","server":"docs"}`, want: "collapse"},
+		{name: "wire order, not key order", args: `{"zeta":"first","alpha":"second"}`, want: "first"},
+		{name: "a non-string argument is passed over", args: `{"limit":20,"query":"x"}`, want: "x"},
+		{name: "an empty first value is skipped", args: `{"cursor":"","query":"x"}`, want: "x"},
+		{name: "a blank first line is skipped", args: `{"note":"  \nlater","query":"x"}`, want: "x"},
+		{name: "an escape-only value is skipped", args: `{"a":"\u001b[31m","query":"x"}`, want: "x"},
+		{name: "a multi-line value gives its first line", args: `{"script":"cd /ws\ngit status"}`, want: "cd /ws"},
+		{name: "a long value is clipped", args: `{"q":"` + long + `"}`, want: clipDetail(long)},
+		{name: "no arguments → the raw name", args: `{}`, want: "mcp_thing"},
+		{name: "no string argument → the raw name", args: `{"limit":20,"deep":true}`, want: "mcp_thing"},
+		{name: "absent arguments → the raw name", args: ``, want: "mcp_thing"},
+		{name: "not an object → the raw name", args: `"go"`, want: "mcp_thing"},
+		{name: "malformed → the raw name", args: `{not json`, want: "mcp_thing"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := unregisteredTarget("mcp_thing", []byte(tc.args)); got != tc.want {
+				t.Errorf("unregisteredTarget(%s) = %q, want %q", tc.args, got, tc.want)
 			}
 		})
 	}

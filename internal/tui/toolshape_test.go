@@ -87,24 +87,27 @@ func TestRenderInFlightStandalone(t *testing.T) {
 	}
 }
 
-// The one shape with no target line: an unregistered tool has nothing to lead a branch with, so
-// the header stands alone and its LABELLED arguments — one `name:` line with the value's own lines
-// beneath it, the same rendering the approval prompt shows — are themselves the ┝/┕ branches.
+// The one shape with no target line: a registered call that arrived without its target argument
+// (a Terminal call missing its `command`) has nothing to lead a branch with, so the header stands
+// alone and its body — the output, closed by its summary — is itself the ┝/┕ branches.
 // Collapsed, that branch list is capped like any other block's body and the header's ▶ is what
 // says there is more behind it — this shape has no outcome slot for a count to ride
-// (collapsedRemainder); expanded, every line the model sent is back — the approval
-// popup is where a human approves an action, the transcript block is the record (layout.md,
-// "Collapsed and expanded blocks").
+// (collapsedRemainder); expanded, every line it retained is back (layout.md, "Collapsed and
+// expanded blocks").
 func TestRenderNoTargetStandalone(t *testing.T) {
 	t.Parallel()
 
 	tr := &transcript{}
-	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "mcp_thing", Arguments: []byte(`{"a":1,"b":2}`)}})
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"cmd":"go test"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "a\nb\nc"}})
+	if tv := tr.entries[0].tool; tv.Target != "" {
+		t.Fatalf("Target = %q; the fixture must be a call with no target", tv.Target)
+	}
 
 	want := strings.Join([]string{
-		"✦ mcp_thing ▶",
-		"  ┝ a:",
-		"  ┕   1",
+		"✦ Terminal ▶",
+		"  ┝ a",
+		"  ┕ b",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("collapsed targetless block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -114,11 +117,11 @@ func TestRenderNoTargetStandalone(t *testing.T) {
 		t.Fatal("toggleExpanded(0) = false; want the targetless block to expand")
 	}
 	want = strings.Join([]string{
-		"✦ mcp_thing ▼",
-		"  ┝ a:",
-		"  ┝   1",
-		"  ┝ b:",
-		"  ┕   2",
+		"✦ Terminal ▼",
+		"  ┝ a",
+		"  ┝ b",
+		"  ┝ c",
+		"  ┕ exit 0",
 		seeLessFooterLine(t, 80),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -127,25 +130,24 @@ func TestRenderNoTargetStandalone(t *testing.T) {
 }
 
 // A targetless call has no branch line for its summary to ride, so the outcome closes the branch
-// list instead of vanishing: an unregistered tool's arguments, then the message its failure laid in
-// the body, then the bare verdict word it earned closing the list (absorbFailure, under the
+// list instead of vanishing: a registered call sent without its target, the message its failure
+// laid in the body, then the bare verdict word it earned closing the list (absorbFailure, under the
 // ratified call on failed tool rows). The summary is part of that list, so the collapsed cap counts
 // it like any other branch line.
 func TestRenderNoTargetKeepsItsSummary(t *testing.T) {
 	t.Parallel()
 
 	tr := &transcript{}
-	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "mcp_thing", Arguments: []byte(`{"a":1}`)}})
-	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "no such server", IsError: true}})
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"cmd":"go test"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "missing argument\nno such command", IsError: true}})
 	if !tr.toggleExpanded(0) {
 		t.Fatal("toggleExpanded(0) = false; want the targetless block to expand")
 	}
 
 	want := strings.Join([]string{
-		"✦ mcp_thing ▼",
-		"  ┝ a:",
-		"  ┝   1",
-		"  ┝ no such server",
+		"✦ Terminal ▼",
+		"  ┝ missing argument",
+		"  ┝ no such command",
 		"  ┕ error",
 		seeLessFooterLine(t, 80),
 	}, "\n")
@@ -155,21 +157,22 @@ func TestRenderNoTargetKeepsItsSummary(t *testing.T) {
 }
 
 // TestTargetlessBlocksCollapseToTheBudget pins the reversal of layout.md's old never-hide rule
-// across all three targetless shapes: the unregistered/MCP argument dump, a registered call whose
-// target argument never arrived, and a stray result. Each collapses to the house budget under a ▶
+// across the targetless shapes: a registered call whose target argument never arrived (with a
+// 60-line output, and with a short one), and a stray result. An unregistered (MCP) call is no longer
+// one of them — it is targeted by its first string argument (unregisteredTarget). Each collapses to the house budget under a ▶
 // header — two branch rows, whatever it is hiding, which is the whole of the ask — and each expands
 // to every line it retained. This shape counts what it withheld nowhere: the count rides an outcome
 // slot and a targetless block paints none (collapsedRemainder), so its ▶ carries the news alone. The
-// 60-line blob is the case the old rule made 61 permanent rows.
+// 60-line output is the case the old rule made 61 permanent rows.
 func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 	t.Parallel()
 
-	blob := func(lines int) []byte {
+	blob := func(lines int) string {
 		items := make([]string, lines)
 		for i := range items {
-			items[i] = strconv.Quote("arg" + strconv.Itoa(i))
+			items[i] = "line" + strconv.Itoa(i)
 		}
-		return []byte("[" + strings.Join(items, ",") + "]")
+		return strings.Join(items, "\n")
 	}
 	cases := []struct {
 		name          string
@@ -178,16 +181,16 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 		wantExpanded  int // physical lines, header and see-less footer included
 	}{
 		{
-			name: "an unregistered tool's 60-line argument blob",
+			name: "a registered call with no target and a 60-line output",
 			build: func(tr *transcript) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
-					ID: "c1", Tool: "mcp_search", Arguments: blob(58)}})
+					ID: "c1", Tool: "terminal", Arguments: []byte(`{"cmd":"go test"}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+					CallID: "c1", Content: blob(60)}})
 			},
-			// The blob's own rows hang at argumentValueIndent, unlabelled argument bytes being
-			// value lines wherever they surface (prettyJSONDetails) — the branch glyphs are the
-			// block's, the two columns behind them are the blob's.
-			wantCollapsed: []string{"✦ mcp_search ▶", "  ┝   [", `  ┕     "arg0",`},
-			wantExpanded:  62,
+			// Sixty output lines, the stat closing the list, the header and the see-less footer.
+			wantCollapsed: []string{"✦ Terminal ▶", "  ┝ line0", "  ┕ line1"},
+			wantExpanded:  63,
 		},
 		{
 			name: "a registered call whose target argument is missing",
@@ -244,7 +247,7 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 
 // TestEveryToolShapeCollapsesInsideTheRowBudget is the UNIFORM cap read across every shape that
 // wears the tool block, at a width narrow enough that each one's content soft-wraps if nothing stops
-// it: a targeted call with a long target and a long body, a targetless argument blob, a stray
+// it: a targeted call with a long target and a long body, a targetless call's long output, a stray
 // result, a scheduled Firing and a collapsed sub-agent run. Collapsed, none of them may stand taller
 // than its header plus collapsedBodyCap content rows — two, since the remainder count rides the
 // leader row's outcome slot and no longer spends a row of its own — or wider than the column it was
@@ -274,16 +277,27 @@ func TestEveryToolShapeCollapsesInsideTheRowBudget(t *testing.T) {
 			},
 		},
 		{
-			name: "a targetless call whose one verbatim argument line overflows the row",
+			name: "a targetless call whose one output line overflows the row",
 			build: func() *transcript {
 				tr := &transcript{}
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
-					ID: "c1", Tool: "mcp_search", Arguments: []byte(strconv.Quote(long))}})
+					ID: "c1", Tool: "terminal", Arguments: []byte(`{"cmd":"go test"}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: long}})
 				return tr
 			},
 		},
 		{
-			name: "a targetless argument list past both the cap and the row",
+			name: "a targetless call's output past both the cap and the row",
+			build: func() *transcript {
+				tr := &transcript{}
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+					ID: "c1", Tool: "terminal", Arguments: []byte(`{"cmd":"go test"}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: long + "\n" + body}})
+				return tr
+			},
+		},
+		{
+			name: "an unregistered call with a long first argument and more behind it",
 			build: func() *transcript {
 				tr := &transcript{}
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
@@ -393,8 +407,9 @@ func TestEveryToolShapeCollapsesInsideTheRowBudget(t *testing.T) {
 // one `name:` line per argument with the value's own real lines beneath it — no brace envelope
 // around the set, no quoted key names, and a multi-line value showing the lines it will actually
 // run rather than one `"…\n…"` blob. The labelling changes what a body SAYS and nothing about how
-// a block behaves: it still collapses to the house budget behind a remainder marker and still
-// gives every retained line back on toggle.
+// a block behaves: the first string argument's first line leads the target row (unregisteredTarget),
+// the body hides behind it collapsed with its count in the outcome slot, and every retained line
+// comes back on toggle.
 func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
 	t.Parallel()
 
@@ -408,34 +423,34 @@ func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
 			name: "a multi-key argument object",
 			args: `{"query":"collapse","server":"docs","limit":20}`,
 			wantCollapsed: []string{
-				"✦ mcp_search ▶",
-				"  ┝ query:",
-				"  ┕   collapse",
+				"✦ mcp_search",
+				groupMemberLine("  ┕ collapse ⋯ +6 more lines"),
 			},
 			wantExpanded: []string{
-				"✦ mcp_search ▼",
-				"  ┝ query:",
-				"  ┝   collapse",
-				"  ┝ server:",
-				"  ┝   docs",
-				"  ┝ limit:",
-				"  ┕   20",
+				"✦ mcp_search",
+				leaderEdgeRow("  ┕ collapse ⋯", glyphExpanded),
+				"    query:",
+				"      collapse",
+				"    server:",
+				"      docs",
+				"    limit:",
+				"      20",
 			},
 		},
 		{
 			name: "a multi-line value keeps its own lines",
 			args: `{"script":"cd /ws\ngit status\ngit diff"}`,
 			wantCollapsed: []string{
-				"✦ mcp_search ▶",
-				"  ┝ script:",
-				"  ┕   cd /ws",
+				"✦ mcp_search",
+				groupMemberLine("  ┕ cd /ws ⋯ +4 more lines"),
 			},
 			wantExpanded: []string{
-				"✦ mcp_search ▼",
-				"  ┝ script:",
-				"  ┝   cd /ws",
-				"  ┝   git status",
-				"  ┕   git diff",
+				"✦ mcp_search",
+				leaderEdgeRow("  ┕ cd /ws ⋯", glyphExpanded),
+				"    script:",
+				"      cd /ws",
+				"      git status",
+				"      git diff",
 			},
 		},
 	}
@@ -472,6 +487,107 @@ func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Unregistered (MCP) calls between a read and a grep fold into the one Tools umbrella like any other
+// call: each is targeted by its first string argument whose first line says anything
+// (unregisteredTarget) — an empty first value skipped — or by its raw name when it has none, so a
+// no-argument call groups too. The umbrella counts all four, and an open member still lists every
+// argument the model sent, the empty one included, beneath the target that names one of them.
+func TestUnregisteredCallsGroupAndCount(t *testing.T) {
+	t.Parallel()
+
+	const (
+		width      = 80
+		searchHead = 1
+		listHead   = 2
+	)
+	build := func(t *testing.T) *transcript {
+		t.Helper()
+		tr := &transcript{}
+		readCall(tr, "c1", "a.go", 1, 5, 0)
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "mcp_search",
+			Arguments: []byte(`{"cursor":"","query":"x","limit":20}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "found 3"}})
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c3", Tool: "mcp_list", Arguments: []byte(`{}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c3", Content: "a\nb"}})
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c4", Tool: "grep", Arguments: []byte(`{"pattern":"TODO"}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c4", Content: "a.go:3: // TODO"}})
+		return tr
+	}
+
+	header := umbrellaHeaderRow("1 Read, 1 mcp_search, 1 mcp_list, 1 Grep", glyphExpanded)
+	readRow := groupMemberLine("  ┝ Read ⋯ 5 lines")
+	searchRow := groupMemberLine("  ┝ mcp_search ⋯")
+	listRow := groupMemberLine("  ┝ mcp_list ⋯")
+	grepRow := groupMemberLine("  ┕ Grep ⋯ a.go:3: // TODO")
+
+	t.Run("collapsed: one umbrella counting all four", func(t *testing.T) {
+		t.Parallel()
+
+		tr := build(t)
+		if got := tr.entries[searchHead].tool.Target; got != "x" {
+			t.Errorf("mcp_search Target = %q, want %q (the empty cursor skipped)", got, "x")
+		}
+		if got := tr.entries[listHead].tool.Target; got != "mcp_list" {
+			t.Errorf("mcp_list Target = %q, want its raw name", got)
+		}
+		want := strings.Join([]string{header, readRow, searchRow, listRow, grepRow}, "\n")
+		if got := renderPlain(tr, width); got != want {
+			t.Errorf("collapsed umbrella mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("member open: every argument beneath the target", func(t *testing.T) {
+		t.Parallel()
+
+		tr := build(t)
+		if !tr.setTypeExpanded(searchHead, true) || !tr.setExpanded(searchHead, true) {
+			t.Fatalf("setTypeExpanded/setExpanded(%d, true) = false; want the mcp_search member open", searchHead)
+		}
+		want := strings.Join([]string{
+			header,
+			readRow,
+			leaderEdgeRow("  ┝ mcp_search ⋯", glyphExpanded),
+			leaderEdgeRow("  │ ┕ x ⋯", glyphExpanded),
+			"  │ │ cursor:",
+			"  │ │",
+			"  │ │ query:",
+			"  │ │   x",
+			"  │ │ limit:",
+			"  │ │   20",
+			"  │ │ found 3",
+			memberEdgeRow(t, "  │ │", promptSeeLess, width),
+			listRow,
+			grepRow,
+		}, "\n")
+		if got := renderPlain(tr, width); got != want {
+			t.Errorf("open member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("a no-argument member opens on its raw name", func(t *testing.T) {
+		t.Parallel()
+
+		tr := build(t)
+		if !tr.setTypeExpanded(listHead, true) || !tr.setExpanded(listHead, true) {
+			t.Fatalf("setTypeExpanded/setExpanded(%d, true) = false; want the mcp_list member open", listHead)
+		}
+		want := strings.Join([]string{
+			header,
+			readRow,
+			searchRow,
+			leaderEdgeRow("  ┝ mcp_list ⋯", glyphExpanded),
+			leaderEdgeRow("  │ ┕ mcp_list ⋯", glyphExpanded),
+			"  │ │ a",
+			"  │ │ b",
+			memberEdgeRow(t, "  │ │", promptSeeLess, width),
+			grepRow,
+		}, "\n")
+		if got := renderPlain(tr, width); got != want {
+			t.Errorf("open member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
 }
 
 // Anything between two same-label calls ends the run, and so does a call with no target to lead a
@@ -652,7 +768,7 @@ func TestRenderSkillFetchMissKeepsTheQuery(t *testing.T) {
 
 // Two adjacent fetches never fold into the mixed "✦ Tools" umbrella. The guard is worth
 // stating twice over: each view carries a non-empty Target — which is what would otherwise make it
-// groupable, and what the unregistered fallback never gave it — and the never-group mark keeps it
+// groupable — and the never-group mark keeps it
 // out anyway, at every index the umbrella could form from.
 func TestSkillFetchesNeverJoinTheToolsSuperGroup(t *testing.T) {
 	t.Parallel()

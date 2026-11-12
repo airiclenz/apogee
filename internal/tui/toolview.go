@@ -830,11 +830,12 @@ func promotedOutput(text string, stat statValue) toolOutcome {
 // (argumentDetails — the same rendering the approval prompt reads a decision off, so the two
 // surfaces spell one call one way), so a not-yet-registered tool still renders and a malformed
 // argument is shown verbatim rather than dropped (the approval flow is a security surface — the
-// model's request is never hidden).
+// model's request is never hidden). Its target is its first string argument's first line, or its
+// raw name when it has none (unregisteredTarget), so it groups and counts like any other call.
 // The verb mirrors that fallback: an unregistered tool is "running <raw name>", which stays a
 // truthful sentence fragment for a dynamic MCP tool nobody has a verb for.
 // Everything the header states traces back to the model's own JSON arguments — the target on every
-// registered tool, and the raw name behind an unknown tool's label, verb and labelled body —
+// registered tool, and the raw name behind an unknown tool's label, verb, target and labelled body —
 // so both exits leave through finishDisplay, which escape-strips the view and spells the paths it
 // NAMES relative to the workspace root ws names.
 //
@@ -856,6 +857,7 @@ func presentToolCall(call domain.ToolCall, resolved string, ws workspaceRoot) to
 			Label:    call.Tool,
 			Verb:     "running " + call.Tool,
 			name:     call.Tool,
+			Target:   unregisteredTarget(call.Tool, call.Arguments),
 			Details:  newToolBody(argumentDetails(call.Arguments)),
 			argsWire: wireArgs(call.Tool, call.Arguments),
 		}

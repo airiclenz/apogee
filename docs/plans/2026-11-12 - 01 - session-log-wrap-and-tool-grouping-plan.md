@@ -115,7 +115,11 @@ internal/tui/activity_test.go — TestToolActivityVerb; internal/tui/toolshape_t
 **Closes:** run-tests-never-groups
 **Commit:** `fix(tui): target a bare run_tests call at the whole project`
 
-## 5. Unregistered tool calls get a target and group
+## 5. Unregistered tool calls get a target and group — ✅ DONE (2026-11-12)
+
+NOTES (2026-11-12): the helper is `unregisteredTarget` in toolargs.go, walking `orderedArgs` (the order `argumentDetails` lists in); the blank-first-line test is made on the escape-stripped form, so an escape-only value cannot win the slot and paint it empty.
+NOTES (2026-11-12): the golden's mcp_search call now joins the umbrella, whose header falls back to `Tools (9 calls)` at 80 columns (the breakdown no longer fits; the breakdown stays pinned in blocktarget_test/mouse_test); TestRenderMarksTheWholeBlock keeps an "inside the cap marks nothing" case on a registered targetless terminal call and adds a weird_tool `"go"` toggle-target case; TestEveryToolShapeCollapsesInsideTheRowBudget keeps one unregistered case as a targeted shape beside the two moved ones; new tests are `TestUnregisteredTarget` (toolpresent_test.go) and `TestUnregisteredCallsGroupAndCount` (toolshape_test.go).
+NOTES (2026-11-12): toolregistry.go and workspacepath.go (named in Files) needed no change: their unregistered mentions do not call the tool targetless (the body stays verbatim, which workspacepath.go states).
 
 **What:** fixes part of `mcp-tools-never-group`: `presentToolCall` (`internal/tui/toolview.go`) builds an unregistered tool's view with no Target.
 **Goal:** an unregistered tool's call has Target = the first string argument's first line in `argumentDetails` order, bounded like other targets, or the raw tool name when it has no string argument; two such calls between a read_file and a grep render as one Tools umbrella of four member rows; expanding a member still lists every argument.

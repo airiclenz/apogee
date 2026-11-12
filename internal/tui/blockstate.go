@@ -126,8 +126,8 @@ func memberFlags(ins []paintInput) []bool {
 // (clipDetails): a block that hides nothing at 200 columns hides a tail at 60, and the indicator,
 // the click target and the paint all have to say so together.
 //
-// BOTH shapes answer through it, the targetless one included: an unregistered tool's verbatim
-// arguments, a registered call that arrived without its target, a stray result — all spend the same
+// BOTH shapes answer through it, the targetless one included: a registered call that arrived
+// without its target, a stray result — both spend the same
 // collapsed budget (layout.md, "Collapsed and expanded blocks"), so a call whose argument blob
 // overflows its cap is a block that hides something, and so is a two-line one whose lines the width
 // cuts. One call in a block with something to reveal makes the whole block a target — the header

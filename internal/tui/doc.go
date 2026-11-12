@@ -831,7 +831,7 @@
 // ([renderSubDetails]) rather than sprouting branches of its own — a Terminal call's output, a
 // diff's coloured lines under their diffstat. A call with no target at all is the one shape with no
 // target line: its body, closed by its summary, is rendered as the branches themselves
-// ([renderDetails] — the stray-result and unregistered-tool fallbacks). One grammar covers both
+// ([renderDetails] — the stray-result fallback and a registered call sent without its target). One grammar covers both
 // counts — the reason the standalone and grouped paths were converged rather than kept in sync —
 // and a body of one line lays out exactly like a body of ten. Where they part is the ROW BUDGET a
 // group imposes and the STATE it hands out: a collapsed member is one line wearing its own ▶ at the

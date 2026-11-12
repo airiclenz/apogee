@@ -332,7 +332,9 @@ func TestAskUserAnswerIsQuotedAndAPathReportStillShortens(t *testing.T) {
 // An unregistered tool's arguments are the model's request quoted verbatim — the approval surface's
 // whole point — so the VALUES are shown exactly as they were sent, workspace paths included, even
 // though the body labels them by name rather than printing the JSON envelope around them. What is
-// equally untouched is the tool's own id: it is a name, not a path.
+// equally untouched is the tool's own id: it is a name, not a path. The TARGET row is the other
+// side of the line: it names the first string argument (unregisteredTarget), so it is shortened
+// like every target while the same value in the body stays absolute.
 func TestUnregisteredToolCardQuotesItsArgumentsVerbatim(t *testing.T) {
 	t.Parallel()
 
@@ -341,6 +343,9 @@ func TestUnregisteredToolCardQuotesItsArgumentsVerbatim(t *testing.T) {
 		Arguments: []byte(`{"path":"/home/me/proj/docs/plan.md","other":"/etc/hosts"}`)}, "", ws)
 	if tv.Label != "mcp_thing" || tv.Verb != "running mcp_thing" {
 		t.Errorf("view = %+v; want the raw-name fallback", tv)
+	}
+	if tv.Target != "docs/plan.md" {
+		t.Errorf("target = %q, want the first string argument shortened to %q", tv.Target, "docs/plan.md")
 	}
 	got := detailsText(tv)
 	if !strings.Contains(got, "path:\n  /home/me/proj/docs/plan.md") {

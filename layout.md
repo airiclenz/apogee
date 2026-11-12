@@ -876,7 +876,10 @@ path rides it.
 **A body is quoted, never respelled — and so is a promoted line.** The rule above reaches the paths
 a block *names* and stops there. The **body** beneath the branch is text the block *quotes* — a
 diff's hunk lines, an edit's replacement string, a command's output, an unregistered tool's
-argument values — and it prints exactly as the tool wrote it, absolute paths included. A
+argument values — and it prints exactly as the tool wrote it, absolute paths included. An
+unregistered tool's **target row** is not quoted: it is the first line of its first string argument
+(or its raw name when it has none), *named* like every target, and so shortened like every target
+while the same value in the body beneath stays verbatim (2026-11-12). A
 **summary that was promoted rather than worded** is quoted in the very same sense: a command whose
 whole output is a single line puts that line in the row's outcome slot
 (`┕ cat paths.txt ⋯⋯⋯ /home/me/proj/docs/plan.md`), and promotion changes where the text sits, never
@@ -907,7 +910,10 @@ names, or a summary it wrote itself (`154 lines`, `replaced text in docs/plan.md
 **What stays standalone.** A call is groupable when it has a **target** and its presenter did not
 mark it **solo** — nothing else, and in particular nothing about what it is carrying. A call with no
 target has nothing to lead a row with, since there the detail lines *are* the branches, so it keeps
-its own block. And a presenter may state outright that its record must never be an ordinary row in
+its own block. An unregistered (MCP) tool is not one of them: its target is its first string
+argument's first line, a blank one skipped, or its raw name when it has none, so a run of MCP calls
+between two reads groups and counts like any other (2026-11-12). The targetless calls left are a
+registered call that arrived without its target and a stray `result`. And a presenter may state outright that its record must never be an ordinary row in
 a list. The RULE behind that flag is one rule: a call whose presenter marks it solo either is a
 record in its own right, or it **groups with its own kind** — a list of one tool's calls under its
 own umbrella — and a call that has its own list never joins the mixed one. Three calls say it, and
@@ -923,9 +929,9 @@ joins a run either (*The firing block*, below).
 
 **A call with no target** is the one shape the canon spec does not draw, for want of a target to
 draw it around: the header stands alone and the lines are themselves the `┝`/`┕` branches, the
-summary closing the list since it has no row of its own to ride (an unregistered tool's labelled
-arguments, then the message a failure laid in its body, then the bare `error` it earned; a stray
-`result`). Collapsed, that branch list is what the
+summary closing the list since it has no row of its own to ride (a registered call that arrived
+without its target, then the message a failure laid in its body, then the bare `error` it earned; a
+stray `result`). Collapsed, that branch list is what the
 cap falls on — the block has no body to cap instead — and the remainder marker hangs beneath it at
 the branch marker's own width.
 
@@ -1026,7 +1032,7 @@ shape decides:
 - **A call with no target** has no body to hide, so the cap falls on its branch list instead: the
   first **two** branch lines, each clipped to a single row. It counts what it cut nowhere, having no
   outcome slot for a count to ride; its `▶` is what says there is more behind it. Clipping each line
-  is what holds this shape to the budget at all — unclipped, one MCP call's argument blob soft-wraps
+  is what holds this shape to the budget at all — unclipped, one stray result's long blob soft-wraps
   a block as tall as the terminal is narrow.
 - **A member of a group** gets **one** row and no marker, because a list's rows are one line each
   and what a member hides is reached by opening that member.
@@ -1041,8 +1047,8 @@ nothing about the entry changing. A **clipped target on its own** is enough: a b
 path the row cut has a second state worth showing, and it is a click target and wears an indicator
 exactly as a body-carrying one does.
 
-Hiding a targetless call's branches — an unregistered tool's labelled arguments, a registered call
-that arrived without its target, a stray `result` —
+Hiding a call's arguments — an unregistered tool's labelled arguments behind its target row, a
+registered call that arrived without its target, a stray `result` —
 costs nothing, because the **approval popup** is the surface a human approves an action on and it shows every
 argument at decision time, each one under its own `name:` label (above); the transcript block is the
 *record*, and a record may collapse. The two surfaces spell one call ONE way: an unrecognised call's

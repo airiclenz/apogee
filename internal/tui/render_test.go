@@ -270,29 +270,29 @@ func TestFiringBlockJoinsNoToolGrouping(t *testing.T) {
 // call whose output hangs beneath its command, a diff whose "+2 −2" fills the outcome slot over a
 // coloured body, two edits showing the lines they change beneath their own reports, a write showing
 // the lines it writes beneath the "3 lines" its own slot states, an
-// unregistered tool whose verbatim arguments are its own branches, an
+// unregistered (MCP) tool that joins the run like any other call, an
 // approval note, and a sub-agent read — as an exact line sequence, blank lines included. It is the
 // backstop across the layout changes rather than a test of any one of them: the blank-line hygiene
 // shows as the single separator row between every block — empty at the top level, the │ rail
 // gutter inside the sub-agent run — and the bracketless bold-gold label as the header text.
 //
-// The eight calls in a row are ONE block now, the umbrella of docs/layout/tool-layout.md: five type
-// rows in time order under "✦ Tools (3 Read, 1 Terminal, 1 Diff Preview, 2 Replace, 1 Write)",
+// The nine calls in a row are ONE block now, the umbrella of docs/layout/tool-layout.md: six type
+// rows in time order under "✦ Tools (9 calls)" — the per-kind breakdown no longer fits the row at
+// 80 columns, so the header falls back to the bare total (umbrellaBreakdown) —
 // each counting its run where the run holds more than one call ("Read (3)", "Replace (2)") and
 // aggregating it in the outcome slot — the reads' 570 lines summed, the Replace run blank because
 // a diffstat and a change count do not add up. The golden
 // carries all three of the canon sketch's states at once: the rows collapsed, the Terminal row open
 // to the call behind it under a │ gutter, and that call open to its output under a second one,
-// closed by the see-less footer. The targetless mcp_search block is the run's breaker as well as the
-// grammar's other shape — it can lead no member row, so it stands alone with its verbatim arguments
-// as its own branches.
+// closed by the see-less footer. The mcp_search call is the run's last type row: an unregistered
+// tool is targeted by its first string argument (unregisteredTarget), so it leads a member row like
+// any other call, and the approval note after it is what ends the run.
 //
 // The uniform shape shows as the fact that every header here — umbrella, standalone, railed — is a
 // label and nothing else, with the target always leading its own branch row, the summary standing in
 // the outcome slot flush against that row's right edge behind a leader, and the body beneath. The
 // ▶/▼ at the right edge of every row that hides something — the umbrella's own header among them,
-// at the end of its breakdown's leader, and of the other blocks' headers only the targetless
-// mcp_search block's, which paints no leader row for it to sit at the edge of — and its absence
+// at the end of its leader — and its absence
 // everywhere else is the affordance rule in the same picture: exactly the rows here that hide
 // something say so. A regression in any of them changes this golden, and the golden doubles as the
 // living example of what the canon spec sketches.
@@ -345,7 +345,7 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		strings.Repeat(glyphPadBelow, 80), // the prompt's ▀ half row stands in for the separator
 		"✦ Reading the docs first.",
 		"",
-		umbrellaHeaderRow("3 Read, 1 Terminal, 1 Diff Preview, 2 Replace, 1 Write", glyphExpanded),
+		umbrellaHeaderRow("9 calls", glyphExpanded),
 		groupMemberLine("  ┝ Read (3) ⋯ 570 lines"),
 		leaderEdgeRow("  ┝ Terminal ⋯ exit 0", glyphExpanded),
 		leaderEdgeRow("  │ ┕ go test ./... ⋯ exit 0", glyphExpanded),
@@ -355,11 +355,8 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		memberEdgeRow(t, "  │ │", promptSeeLess, 80),
 		groupMemberLine("  ┝ Diff Preview ⋯ +2 −2"),
 		groupMemberLine("  ┝ Replace (2) ⋯"),
-		groupMemberLine("  ┕ Write ⋯ 3 lines"),
-		"",
-		"✦ mcp_search ▶",
-		"  ┝ query:",
-		"  ┕   collapse",
+		groupMemberLine("  ┝ Write ⋯ 3 lines"),
+		groupMemberLine("  ┕ mcp_search ⋯"),
 		"",
 		"· approval allow: terminal",
 		"",

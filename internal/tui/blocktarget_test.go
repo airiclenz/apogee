@@ -163,20 +163,21 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 			},
 		},
 		{
-			// The targetless shape is capped like every other: an unregistered tool's verbatim
-			// arguments ARE its branches, and a blob that overflows the cap makes the block a
-			// target, exactly as a body would. It counts what it cut nowhere — the count rides an
+			// The targetless shape is capped like every other: a registered call sent without its
+			// target has its output for branches, and a list that overflows the cap makes the block
+			// a target, exactly as a body would. It counts what it cut nowhere — the count rides an
 			// outcome slot and this shape paints none — so its ▶ is what says there is more.
 			name:  "a targetless block over the cap marks its rows",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
-					ID: "c1", Tool: "weird_tool", Arguments: []byte(`{"a":1,"b":2,"c":3}`)}})
+					ID: "c1", Tool: "terminal", Arguments: []byte(`{"cmd":"go test"}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "one\ntwo\nthree"}})
 			},
 			want: []blockMark{
-				{line: 0, kind: targetHeader, entry: 0, text: "✦ weird_tool ▶"},
-				{line: 1, kind: targetHeader, entry: 0, text: "  ┝ a:"},
-				{line: 2, kind: targetHeader, entry: 0, text: "  ┕   1"},
+				{line: 0, kind: targetHeader, entry: 0, text: "✦ Terminal ▶"},
+				{line: 1, kind: targetHeader, entry: 0, text: "  ┝ one"},
+				{line: 2, kind: targetHeader, entry: 0, text: "  ┕ two"},
 			},
 		},
 		{
@@ -186,9 +187,25 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
-					ID: "c1", Tool: "weird_tool", Arguments: []byte(`"go"`)}})
+					ID: "c1", Tool: "terminal", Arguments: []byte(`{"cmd":"go test"}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok"}})
 			},
 			want: nil,
+		},
+		{
+			// An unregistered call is targeted (unregisteredTarget — its raw name, when no
+			// argument is a string), so even a one-value argument body is hidden behind its target
+			// row and the block is a toggle target like any other targeted call with a body.
+			name:  "an unregistered call hides its arguments behind its target",
+			width: 80,
+			build: func(t *testing.T, tr *transcript) {
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+					ID: "c1", Tool: "weird_tool", Arguments: []byte(`"go"`)}})
+			},
+			want: []blockMark{
+				{line: 0, kind: targetHeader, entry: 0, text: "✦ weird_tool"},
+				{line: 1, kind: targetHeader, entry: 0, text: groupMemberLine("  ┕ weird_tool ⋯ +1 more line")},
+			},
 		},
 		{
 			// Narrow enough that the header wraps: the click lands on the header, not on its first

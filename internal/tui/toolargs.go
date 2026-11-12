@@ -165,6 +165,36 @@ func argumentDetails(raw json.RawMessage) []detailLine {
 	return details
 }
 
+// unregisteredTarget is the target of a call no registry row recognises (presentToolCall's
+// unregistered fallback — an MCP tool, typically): the first line of the first STRING argument
+// whose first line says anything, clipped like every other target (firstLineArg), or the tool's
+// raw name when no argument qualifies — none at all, none a string, or a blob orderedArgs cannot
+// label. A target is what makes the call groupable (groupable), so the fallback never leaves one
+// empty: a run of MCP calls between two reads reads as one Tools umbrella like any other run.
+//
+// The arguments are walked in orderedArgs' order — the order argumentDetails lists them in — so the
+// row names the same argument the expanded body opens with, by construction rather than by two
+// walks kept in step. A blank first line ("cursor": "") is skipped because it would name nothing.
+// The test is made on the RENDERED form (stripEscapes, as sanitize will leave it) for the reason
+// subAgentTarget gives: a value of nothing but control characters is non-blank as it arrives and
+// would otherwise win the slot and paint it empty.
+func unregisteredTarget(tool string, raw json.RawMessage) string {
+	pairs, ok := orderedArgs(raw)
+	if !ok {
+		return tool
+	}
+	for _, p := range pairs {
+		var value string
+		if json.Unmarshal(p.value, &value) != nil {
+			continue
+		}
+		if line := strings.TrimSpace(stripEscapes(firstLine(value))); line != "" {
+			return clipDetail(line)
+		}
+	}
+	return tool
+}
+
 // duplicateKeyNote is what a label says when the model wrote that key more than once: which of the
 // values is on the screen, and — by saying it at all — that there were others. It rides the LABEL
 // rather than the value so the value beneath it is still nothing but the bytes the tool receives.
