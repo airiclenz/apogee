@@ -11,8 +11,10 @@ is `✦ Session log (N notes)` (`(1 note)` for one) under a `▶`, in the task-l
 grammar; opened by a click or `enter` at the block cursor, each note is its own `· <text>` row. Each
 session boundary — launch, `/clear`, `/new`, a `/sessions` restore — opens a fresh log, which absorbs
 routine notes until the session's first Exchange launch (`Model.enterRunning`); later notes print as
-their own lines. A notice that needs the human (Auto unconfined, degraded Auto, an unreadable context
-file, a refused rebind, a routing notice) is **loud** and never enters it, and a start with no routine
+their own lines. A notice that needs the human (Auto unconfined, degraded Auto, a skipped MCP server, a
+group-readable config under `sessions.share-group`, an unreadable context file, a colour-scheme
+warning, a refused rebind, an unapplied profile roster, an unknown context window, a dropped effort
+level, the server going offline or coming back, a routing notice) is **loud** and never enters it, and a start with no routine
 note has no log. The log is an **ephemeral** entry (see **Session**): never encoded into a Session
 record. Its fold is per-block and session-only, never the shared `ui.task-list-open`. Only the TUI's
 transcript has one: stderr, `apogee headless` and `apogee daemon` print each notice as before. A

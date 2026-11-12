@@ -1803,9 +1803,11 @@ body wears; a note of several lines keeps its lines, the later ones hung under t
 
 The header reads `(1 note)` for one. The fold is the log's own — per-block, session-only, never
 `ui.task-list-open` ("Collapsed and expanded blocks", above). **A notice that needs the human is
-never folded away:** Auto running unconfined, degraded Auto, an unreadable context file, a
-colour-scheme warning, a refused rebind and a routing notice each keep their own `· …` note line
-outside the log, exactly as before. The log holds routine notes only, so a start with none paints
+never folded away:** Auto running unconfined, degraded Auto, a skipped MCP server, a
+group-readable config under `sessions.share-group`, an unreadable context file, a colour-scheme
+warning, a refused rebind, a profile roster that was not applied, an unknown context window, an
+effort level the new model dropped, the server going offline or coming back, and a routing notice
+each keep their own `· …` note line outside the log, exactly as before. The log holds routine notes only, so a start with none paints
 no log at all — never an empty `(0 notes)` header.
 
 **One log per session, open until the first Exchange.** Each session boundary — launch, `/clear`,

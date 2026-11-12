@@ -262,7 +262,8 @@ and every note is its own `· ` row beneath it, word for word. The fold is the l
 no task card and saves nothing.
 
 **A notice that needs you is never folded away.** Auto running unconfined, Auto degraded on a host
-that cannot fence writes, a skipped MCP server, an unreadable context file, a colour-scheme
+that cannot fence writes, a skipped MCP server, a config file other members of your
+`sessions.share-group` can read, an unreadable context file, a colour-scheme
 warning, a rebind the server refused, a profile roster that could not be applied, an unknown
 context window, an effort level the new model dropped, the server going offline or coming back,
 and every `sub-agents: …` routing notice keep their own line, exactly as before. A start with no
