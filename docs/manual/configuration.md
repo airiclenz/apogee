@@ -3383,6 +3383,15 @@ apogee closes it where the backend can and discloses the rest as **write-class**
 `connect(2) AF_UNIX` (and, on macOS, `mach-lookup`) sits in the `unfenced:` field and Auto names
 it at startup with its consequence, on every Linux and macOS host.
 
+That startup disclosure — the `apogee: auto mode fences terminal commands, but … cannot fence:`
+lines, truncation among them — still prints on stderr before the screen opens, and `apogee
+headless` and `apogee daemon` print it as before. In the TUI it is a routine start-up note: it
+sits inside the collapsed `✦ Session log (N notes)` block below the start-up card rather than on a
+line of its own, and opening that block shows it verbatim (see
+[the session log](commands.md#the-start-up-session-log)). A notice that needs you — Auto running
+unconfined, or Auto degraded on a host that cannot fence writes — is never folded into it and keeps
+its own line.
+
 - **bwrap**, and **landlock from ABI 9**, close one fixed set: your user runtime directory
   (`/run/user/<uid>`, and `$XDG_RUNTIME_DIR` where it names another) — the session bus, the
   `systemd --user` socket and rootless docker and podman sockets live there — and the system

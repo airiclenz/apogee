@@ -123,6 +123,14 @@ type rebindIntent struct {
 	// and none had ever failed. It is an observation FACT, captured before the fold erases the
 	// evidence, rather than presentation state; [rebindNote] is what decides the wording it buys.
 	quietSeed bool
+	// firstBeat records that this change is the session's FIRST-CONTACT beat itself — set only by
+	// [Model.observeBinding], from the same pre-fold evidence quietSeed is, and never by any other
+	// door. It is what lets [Model.applyRebind] gather that beat's routine notes into the session's
+	// start-up log while the log is still open (layout.md, "The start-up box"). quietSeed cannot
+	// stand in for it: a fallback settle ([Model.followFallback]) sets quietSeed too, and its notes
+	// are news about a move the session just made, not a record of how it started — as are a
+	// `/model` pick's, the post-`/server` seed's and every later beat's, which all leave it false.
+	firstBeat bool
 }
 
 // offlineFailureThreshold is how many consecutive idle beat failures flip the footer offline once
@@ -356,6 +364,7 @@ func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bo
 		// the observation that captured the change rather than from a later beat's state.
 		effort:    beat.EffortSupport,
 		quietSeed: firstContact,
+		firstBeat: firstContact,
 	}
 	if !m.engineHolds().canRebind() {
 		// The engine is not the Update loop's to re-point right now, and Agent.Rebind is idle-only by
@@ -415,10 +424,14 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	// "connecting" box at the top of the scrollback until the next /clear.
 	m.transcript.refreshStartup(newStartupView(m.opts))
 	if note := rebindNote(oldModel, oldWindow, m.opts.Model, m.opts.ContextWindow, intent.quietSeed); note != "" {
-		m.transcript.addNote(note)
+		m.noteRebindRoutine(intent, note)
 	}
 	for _, notice := range result.Notices {
-		m.transcript.addNote(notice)
+		if notice.Loud {
+			m.transcript.addNote(notice.Text)
+			continue
+		}
+		m.noteRebindRoutine(intent, notice.Text)
 	}
 	if m.opts.ContextWindow == 0 {
 		m.transcript.addNote(unknownWindowNote)
@@ -443,9 +456,25 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	// as well as Mandatory because EffortSupport documents every field below Supported as meaningless
 	// when it is false — a beat that reports Mandatory with no dial is reporting nothing.
 	if intent.effort.Supported && intent.effort.Mandatory {
-		m.transcript.addNote(mandatoryEffortNote(m.opts.Model))
+		m.noteRebindRoutine(intent, mandatoryEffortNote(m.opts.Model))
 	}
 	return m, true
+}
+
+// noteRebindRoutine places one ROUTINE rebind note — what moved, a model profile or roster delta
+// the binding brought, a model that always reasons. The session's first-contact beat
+// (rebindIntent.firstBeat) is part of how the session started, so while the start-up log is still
+// open — no Exchange has launched yet — its routine notes join that log and raise its count
+// (layout.md, "The start-up box"), display-only like the rest of it. Every other rebind, and the
+// first beat once the log has closed, writes the persisted note it always has: a `/model` pick, a
+// `/server` seed, a fallback settle and every later beat are genuine news ([rebindNote]). The notes
+// that need the human — a refused rebind, an unknown window, a cleared override, a loud notice —
+// never come through here.
+func (m *Model) noteRebindRoutine(intent rebindIntent, text string) {
+	if intent.firstBeat && m.transcript.addSessionLogNote(text) {
+		return
+	}
+	m.transcript.addNote(text)
 }
 
 // effortExcluded reports whether a live session effort override is one the bound model has ruled
@@ -551,7 +580,8 @@ const unknownWindowNote = notice.WindowUnknown
 // Both ids are rendered the way the footer and the start-up box render them (displayModel), so the
 // note and the chrome beside it can never name the same model two different ways. Neither is
 // escape-stripped here: the new id is whatever the server advertised, so it is untrusted, but the
-// note's one destination is addNote, which strips at the seam for every producer.
+// note's two destinations — addNote, or addSessionLogNote for a first-contact beat while the start-up
+// log is open ([Model.noteRebindRoutine]) — both strip at the seam for every producer.
 func rebindNote(oldModel string, oldWindow int, newModel string, newWindow int, quietSeed bool) string {
 	switch {
 	case oldModel == "":

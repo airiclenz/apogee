@@ -39,9 +39,17 @@ func (w *rootWiring) rebind(model string, window int, effortDialect provider.Eff
 	// dialled server stays dialled.
 	w.live.observe(window, effortDialect)
 	base, pinnedWindow, outputCap := w.live.rebindInputs(w.holder.Binding())
-	spec, notices, err := rebindSpecFor(base, w.roots, model, window, pinnedWindow, outputCap)
+	spec, bindingNotices, err := rebindSpecFor(base, w.roots, model, window, pinnedWindow, outputCap)
 	if err != nil {
 		return tui.RebindResult{}, err
+	}
+	// What the resolution decided about the model — a built-in profile match, the roster deltas it
+	// brings, the trusted-hint line below — is a routine record of the binding: the session's
+	// first-contact beat gathers it into the start-up session log. Only a refusal the human may have
+	// to act on is loud.
+	notices := make([]tui.Notice, 0, len(bindingNotices)+2)
+	for _, text := range bindingNotices {
+		notices = append(notices, tui.Notice{Text: text})
 	}
 	// The wire shape this server reads a thinking-effort intent in, forwarded from the observation
 	// rather than resolved here (ADR 0060): detection is the heartbeat's, so this root has nothing to
@@ -61,7 +69,7 @@ func (w *rootWiring) rebind(model string, window int, effortDialect provider.Eff
 	// both in hand. It joins the rebind's other notices rather than printing itself: a notice is
 	// something the transcript tells the human, and this seam already has that channel.
 	if notice := hintNotice(spec.Model, w.hints.gradeFor(model), window, spec.MaxContextTokens); notice != "" {
-		notices = append(notices, notice)
+		notices = append(notices, tui.Notice{Text: notice})
 	}
 	if err := w.engine.Rebind(spec); err != nil {
 		return tui.RebindResult{}, err
@@ -74,9 +82,9 @@ func (w *rootWiring) rebind(model string, window int, effortDialect provider.Eff
 	// SwapTools can only refuse mid-Exchange, which the boundary the TUI rebinds at (ADR 0024) rules
 	// out; the line says the tools did not move and when they will.
 	if err := w.toolSet.setProfileRoster(spec.Profile.Tools, w.engine); err != nil {
-		notices = append(notices, fmt.Sprintf(
+		notices = append(notices, tui.Notice{Text: fmt.Sprintf(
 			"tools: the profile roster for %s was not applied (%v) — it applies at the next model switch",
-			spec.Model, err))
+			spec.Model, err), Loud: true})
 	}
 	// Session metadata follows the wire: a session that switched models mid-conversation is
 	// listed under the model it ends on, which is the one its last Turns actually ran against. The

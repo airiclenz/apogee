@@ -1744,11 +1744,14 @@ func (o Options) colorScheme() scheme.Scheme {
 // against — the observed one, or the `context-window:` pin that outranks it — and any per-rebind
 // lines worth telling the human (a validated set that matched the new model, say), surfaced in
 // order as transcript notes. The TUI renders it and never derives it: which window won, and why, is
-// the binary's decision, so the renderer needs no knowledge of the pin at all.
+// the binary's decision, so the renderer needs no knowledge of the pin at all. Each notice carries
+// its loudness ([Notice]), which the binary decides: a routine one raised by the session's
+// first-contact beat joins the start-up session log while it is open, and a loud one always keeps
+// its own line.
 type RebindResult struct {
 	Model         string   // the model id now bound; what the footer and the start-up box show
 	ContextWindow int      // the BOUND window in tokens (a pin wins over the observation); 0 ⇒ unknown
-	Notices       []string // per-rebind lines to surface as transcript notes, in order
+	Notices       []Notice // per-rebind lines to surface as transcript notes, in order
 }
 
 // ServerChoice is one upstream server the `/server` picker offers. Name does four jobs with one

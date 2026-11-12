@@ -88,8 +88,8 @@ func TestRebindRecomposesTheToolSetUnderTheProfileRoster(t *testing.T) {
 	if !liveSetHas(w.toolSet, "view_diff") {
 		t.Error("view_diff is missing after the switch onto model-b: the profile's roster was announced but never applied")
 	}
-	if !slices.Contains(result.Notices, "tools: +view_diff (profile)") {
-		t.Errorf("notices = %q, want the switch line for the lifted tool among them", result.Notices)
+	if !slices.Contains(result.Notices, tui.Notice{Text: "tools: +view_diff (profile)"}) {
+		t.Errorf("notices = %+v, want the switch line for the lifted tool among them", result.Notices)
 	}
 
 	// Switching back onto a model with no roster axis composes the set the global lists describe:
@@ -124,12 +124,17 @@ func TestRebindReportsARefusedRosterSwapAsANotice(t *testing.T) {
 	}
 	var lines []string
 	for _, n := range result.Notices {
-		if strings.Contains(n, "next model switch") {
-			lines = append(lines, n)
+		if strings.Contains(n.Text, "next model switch") {
+			// The refusal is the one rebind notice the human may have to act on, so it is LOUD: it
+			// keeps its own line even on the first-contact beat, never folded into the session log.
+			if !n.Loud {
+				t.Errorf("notice %q is routine, want it loud", n.Text)
+			}
+			lines = append(lines, n.Text)
 		}
 	}
 	if len(lines) != 1 {
-		t.Fatalf("notices = %q, want exactly one line saying the roster applies at the next switch", result.Notices)
+		t.Fatalf("notices = %+v, want exactly one line saying the roster applies at the next switch", result.Notices)
 	}
 	if !strings.Contains(lines[0], "model-b") || !strings.Contains(lines[0], "not applied") {
 		t.Errorf("notice = %q, want it to name the model and say the tools did not move", lines[0])

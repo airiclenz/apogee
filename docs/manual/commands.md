@@ -248,6 +248,35 @@ through `tmux load-buffer -w`, which tmux forwards to your terminal's clipboard 
 default `set-clipboard external`, where it drops the escape; `set-clipboard off` blocks
 that route too.
 
+## The start-up session log
+
+The routine notes a session starts with do not each take a line of the transcript. They gather
+into one block below the start-up card, collapsed to its counted header —
+`✦ Session log (3 notes) ▶`, `(1 note)` for one. The log holds the context files the session
+loaded, Auto's disclosed fence residuals
+([Auto mode's blast radius](configuration.md#auto-modes-blast-radius)), and the notes of the
+first heartbeat against the server: the model profile it matched, the tools that profile adds or
+removes, a model that always reasons, a model the server did not list but your config named. A
+click on the header opens it, as does `⌥↑` into navigation mode and `⏎` on it; the `▶` turns `▼`
+and every note is its own `· ` row beneath it, word for word. The fold is the log's own: it moves
+no task card and saves nothing.
+
+**A notice that needs you is never folded away.** Auto running unconfined, Auto degraded on a host
+that cannot fence writes, a skipped MCP server, an unreadable context file, a colour-scheme
+warning, a rebind the server refused, a profile roster that could not be applied, an unknown
+context window, an effort level the new model dropped, the server going offline or coming back,
+and every `sub-agents: …` routing notice keep their own line, exactly as before. A start with no
+routine note shows no log at all.
+
+Each session boundary — launch, `/clear`, `/new`, a `/sessions` restore — opens a fresh log, and
+it takes notes until the session's first Exchange starts: a prompt you send, `/continue`, a
+workflow waking, `/compact`. A note that arrives after that prints as its own line, as it always
+has. A `/model` pick, a `/server` move and a server fallback are news you asked for or need to
+see, so their notes keep their own line even before the first prompt. The log is display-only:
+it is never written into the session record, and a resumed session builds a fresh one. What
+apogee prints on stderr at launch, and every `apogee headless` and `apogee daemon` line, are
+unchanged.
+
 ## The status line — what a live run reports
 
 The dark row just above the prompt box is the status line, and while the model works its left

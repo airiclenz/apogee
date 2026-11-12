@@ -158,7 +158,12 @@ Open the log explicitly at `newModel`, `resetSessionView` and `resumeLoaded`, be
 **Commit:** `feat(tui): gather routine start-up notes into a collapsed session log`
 Depends on item 4.
 
-## 6. Session log absorbs first-beat notes until the session's first Exchange launch; manual
+## 6. Session log absorbs first-beat notes until the session's first Exchange launch; manual — ✅ DONE (2026-11-12)
+
+NOTES (2026-11-12): internal/tui/model.go needed no change — the routing lives in a new `Model.noteRebindRoutine` in heartbeat.go beside `applyRebind`; `picker_test.go`, `e2e_test.go` and `watch_test.go` stayed green unchanged (their notes come from non-first beats or picks), so they are not in FILES.
+NOTES (2026-11-12): the e2e extension is a second test function, `TestE2ESessionLogGathersTheFirstBeatsProfileNote`, sharing a new `launchSessionLog` helper with item 5's test, rather than a second launch inside `TestE2ESessionLogCollapsedThenExpanded`; item 5's `(1 note)` wait stays, since its stub's first beat still adds no note.
+NOTES (2026-11-12): the "roster not applied stays loud" check lives in `TestRebindReportsARefusedRosterSwapAsANotice` (cmd/apogee, asserts `Loud`) and in the TUI's `TestSessionLogLeavesTheFirstBeatsLoudNotesOnTheirOwnLine`; a cmd/apogee `TestSessionLog…` name would not match the item's cmd/apogee Acceptance pattern.
+NOTES (2026-11-12): consequential edit — internal/tui/heartbeat.go: the `rebindNote` doc said addNote was the note's one destination; made necessary by routing first-beat notes through addSessionLogNote.
 
 **What:** Recast at the regression check (2026-11-12).
 **Goal:**
