@@ -1790,13 +1790,14 @@ replays under it, collapsed by default to its counted header in the Tasks card's
 
 Opened — a click on it, or `alt+up` into navigation mode and `enter` on it — the header's `▶` turns
 `▼` and every note is its own `· <text>` row beneath it, uncapped, in the tone an expanded block's
-body wears; a note of several lines keeps its lines, the later ones hung under the first one's text:
+body wears. A note is one paragraph: any line break it was worded with folds to one space as it
+joins the log, and a note too long for the window soft-wraps, hung at its text column:
 
 ```
 ✦ Session log (4 notes) ▼
   · <note>
-  · <note>
-    <the same note's second line>
+  · <a note too long for one row, soft-wrapped at the window's width and
+    hung at its text column>
   · <note>
   · <note>
 ```

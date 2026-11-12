@@ -205,7 +205,9 @@ closer is drawn today.
   notes)` (`(1 note)` for one) under a `▶`, no note row beneath and no `+N
   more lines`, the count saying what the fold holds; open, the header's `▼` is
   the fold and every note is its own `· <text>` row, uncapped, with no `see
-  less…` footer, a note of several lines keeping its lines:
+  less…` footer, each note one paragraph — a line break it was worded with
+  folds to one space as it joins the log — soft-wrapped and hung at its text
+  column:
 
   ```text
   ✦ Session log (4 notes) ▶
@@ -214,8 +216,8 @@ closer is drawn today.
   ```text
   ✦ Session log (4 notes) ▼
     · <note>
-    · <note>
-      <the same note's second line>
+    · <a note too long for one row, soft-wrapped at the window's width
+      and hung at its text column>
     · <note>
     · <note>
   ```

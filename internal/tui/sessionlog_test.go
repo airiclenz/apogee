@@ -13,8 +13,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/scheme"
 )
 
@@ -144,12 +146,18 @@ func TestSessionLogStripsEscapes(t *testing.T) {
 }
 
 // Collapsed, the log is its counted header alone under a ▶; open, the ▼ is the fold and every note
-// is its own `· ` row, uncapped, a note of several lines hung under its first line's text.
+// is its own `· ` row, uncapped. A note given with hard breaks reaches the log as one paragraph — the
+// sink folds each break and the indent around it to one space — so the open log wraps it only at
+// the width, every continuation row hung at the note's text column and none deeper.
 func TestSessionLogPaintsHeaderAloneThenEveryNote(t *testing.T) {
 	t.Parallel()
 
 	th := newTheme(scheme.Default())
-	in := paintInput{kind: entrySessionLog, notes: []string{"context: AGENTS.md (3.1 KiB)", "first line\nsecond line"}}
+	notes := storedSessionLogNotes(t, "context: AGENTS.md (3.1 KiB)", "head:\n  a — b\n  c — d")
+	if want := []string{"context: AGENTS.md (3.1 KiB)", "head: a — b c — d"}; !slices.Equal(notes, want) {
+		t.Fatalf("stored notes = %q, want every hard break folded to one space %q", notes, want)
+	}
+	in := paintInput{kind: entrySessionLog, notes: notes}
 
 	collapsed := renderEntryLines(th, in, 80, false)
 	if got, want := stripAll(collapsed.lines), []string{"✦ Session log (2 notes) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(got, want) {
@@ -161,8 +169,7 @@ func TestSessionLogPaintsHeaderAloneThenEveryNote(t *testing.T) {
 	want := []string{
 		"✦ Session log (2 notes) " + glyphExpanded,
 		"  · context: AGENTS.md (3.1 KiB)",
-		"  · first line",
-		"    second line",
+		"  · head: a — b c — d",
 	}
 	if got := stripAll(open.lines); !reflect.DeepEqual(got, want) {
 		t.Errorf("expanded paint = %q, want %q", got, want)
@@ -173,10 +180,77 @@ func TestSessionLogPaintsHeaderAloneThenEveryNote(t *testing.T) {
 		}
 	}
 
+	in.notes = notes[1:]
+	narrow := stripAll(renderEntryLines(th, in, 12, false).lines)
+	first := slices.IndexFunc(narrow, func(row string) bool { return strings.HasPrefix(row, sessionLogMarker) })
+	if first < 0 || first == len(narrow)-1 {
+		t.Fatalf("narrow paint = %q, want the note's %q row soft-wrapped onto more", narrow, sessionLogMarker)
+	}
+	hang := strings.Repeat(" ", utf8.RuneCountInString(sessionLogMarker))
+	words := strings.Fields(strings.TrimPrefix(narrow[first], sessionLogMarker))
+	for _, row := range narrow[first+1:] {
+		if !strings.HasPrefix(row, hang) || strings.HasPrefix(row, hang+" ") {
+			t.Errorf("continuation row %q is not hung at the note's text column (%d spaces)", row, len(hang))
+		}
+		words = append(words, strings.Fields(row)...)
+	}
+	if got := strings.Join(words, " "); got != notes[1] {
+		t.Errorf("the wrapped rows read %q, want the whole note %q", got, notes[1])
+	}
+
 	single := renderEntryLines(th, paintInput{kind: entrySessionLog, notes: []string{"one"}}, 80, false)
 	if got := strings.TrimRight(strip(single.lines[0]), " "); got != "✦ Session log (1 note) "+defaultGlyphs.collapsed {
 		t.Errorf("one note paints %q, want the singular header", got)
 	}
+}
+
+// The residual notice probe words for stderr — a header line, then one indented `token —
+// consequence` line per residual — joins the log as one line holding the same words.
+func TestSessionLogFoldsTheResidualNotice(t *testing.T) {
+	t.Parallel()
+
+	caps := domain.ConfinementCaps{FSWrite: true, Residuals: []string{"truncate(2)", domain.ResidualUnixEgress}}
+	notice := probe.ResidualNotice("landlock", caps, domain.ModeAuto, true)
+	if strings.Count(notice, "\n") != 2 {
+		t.Fatalf("setup: the residual notice %q is not a header and two clause lines", notice)
+	}
+
+	notes := storedSessionLogNotes(t, notice)
+	if len(notes) != 1 {
+		t.Fatalf("stored notes = %q, want the one notice", notes)
+	}
+	got := notes[0]
+	if strings.Contains(got, "\n") || strings.Contains(got, "  ") {
+		t.Errorf("stored note %q keeps a hard break or its indent", got)
+	}
+	if want := strings.Join(strings.Fields(notice), " "); got != want {
+		t.Errorf("stored note = %q, want the notice's words on one line %q", got, want)
+	}
+}
+
+// storedSessionLogNotes sends each note through the log's own sink — openSessionLog then
+// addSessionLogNote — and returns what the log stored, the notes its painter reads.
+func storedSessionLogNotes(t *testing.T, notes ...string) []string {
+	t.Helper()
+
+	var tr transcript
+	tr.openSessionLog()
+	for _, note := range notes {
+		if !tr.addSessionLogNote(note) {
+			t.Fatalf("an open log refused the note %q", note)
+		}
+	}
+	at := tr.sessionLogIndex()
+	if at < 0 {
+		t.Fatal("the notes drew no session log")
+	}
+	stored := tr.entries[at].notes
+	for _, note := range stored {
+		if strings.Contains(note, "\n") {
+			t.Errorf("the stored note %q holds a hard line break", note)
+		}
+	}
+	return stored
 }
 
 // stripAll is each painted line with its styling stripped and its trailing pad trimmed.

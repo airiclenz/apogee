@@ -1008,12 +1008,14 @@ func (t *transcript) closeSessionLog() {
 // The log is an ephemeral host note in every respect but its paint: never persisted (its kind has no
 // wire name), and parked at the tail when it is created exactly as the first note it gathers would
 // have been. It escape-strips at the seam exactly as addNote and addEphemeralNote do, for their
-// reason — a note is worded from untrusted config, disk and server strings.
+// reason — a note is worded from untrusted config, disk and server strings — and then folds every
+// hard break into one space (foldHardBreaks): a note in the log is one paragraph, wrapped only at the
+// window's width by its painter (renderSessionLog).
 func (t *transcript) addSessionLogNote(text string) bool {
 	if !t.sessionLogOpen {
 		return false
 	}
-	text = stripEscapes(text)
+	text = foldHardBreaks(stripEscapes(text))
 	at := t.sessionLogIndex()
 	if at < 0 {
 		t.commit(entry{kind: entrySessionLog, notes: []string{text}, ephemeral: true})
@@ -1025,6 +1027,22 @@ func (t *transcript) addSessionLogNote(text string) bool {
 	log.notes = append(slices.Clip(log.notes), text)
 	t.touch()
 	return true
+}
+
+// foldHardBreaks is text as one paragraph: every run of whitespace that holds a line break — the
+// break, the indent after it and any blank lines — becomes one space, and the ends are trimmed.
+// Whitespace inside a line stays as it was. A note worded for stderr lays its clauses out on
+// indented lines of their own (probe.ResidualNotice); the session log keeps the words and drops the
+// layout, since a hard break inside a `· ` row would wrap at a width the note was never shown at.
+func foldHardBreaks(text string) string {
+	lines := strings.Split(text, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		if line = strings.TrimSpace(line); line != "" {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, " ")
 }
 
 // sessionLogIndex is the index of the open session's log entry, or -1 when no note has drawn one

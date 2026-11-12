@@ -38,7 +38,9 @@
 - The side-panel session log (`session-log-side-panel`).
 - `probe.DegradedNotice` and every other loud notice: they keep their own lines.
 
-## 1. Session-log notes fold hard breaks into one paragraph
+## 1. Session-log notes fold hard breaks into one paragraph — ✅ DONE (2026-11-12)
+
+NOTES (2026-11-12): added a separate test `TestSessionLogFoldsTheResidualNotice` for the plan's "Add a case" (the residual text exactly as `probe.ResidualNotice` emits it) rather than a row inside the recast paint test; both drive the sink through a shared `storedSessionLogNotes` helper that asserts no stored note holds a `\n`.
 
 **What:**
 **Goal:** every note stored in the session log is a single line of text with no `\n`; a note given with embedded breaks and indents reaches the log with each break-plus-surrounding-whitespace replaced by one space, and the expanded log paints it through `hangingWrap` only.
