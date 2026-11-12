@@ -42,7 +42,7 @@ ACTIONLINT = go run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERS
 # third-party GitHub Action in the workflow's context, and no second version literal to drift.
 # CI runs `make lint` rather than its own copy of the command. After the first run the module
 # cache serves the tool, so an offline build still lints.
-GOLANGCI_LINT_VERSION := v2.13.2
+GOLANGCI_LINT_VERSION := v2.15.0
 GOLANGCI_LINT = go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 # govulncheck reports known vulnerabilities in the module's dependencies, filtered to the ones

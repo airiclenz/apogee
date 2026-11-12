@@ -351,7 +351,8 @@ func (d *Driver) Kill() {
 	d.joinReadLoop()
 	cancel()
 	select {
-	case <-d.done:
+	case err := <-d.done:
+		_ = err // a cancelled program's error is expected; Kill asserts only that it ended
 	case <-time.After(DefaultTimeout):
 		waiter{screen: d.screen, what: "the program to end after its context was cancelled"}.fail(d.t)
 	}
@@ -378,7 +379,8 @@ func (d *Driver) Close() {
 			// A teardown clock, not an assertion one: Close fails nothing when it runs out,
 			// and a run that will not return is [CheckLeaks]'s finding to report.
 			select {
-			case <-d.done:
+			case err := <-d.done:
+				_ = err // teardown only waits the run out; its result is the test's to read
 			case <-time.After(teardownTimeout):
 			}
 		}

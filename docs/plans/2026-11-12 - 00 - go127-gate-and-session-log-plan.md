@@ -41,7 +41,9 @@
 - The side-panel placement (follow-up issue only); an expand-all toggle; a persisted fold preference.
 - Bumping go.mod's `go` line.
 
-## 1. Pin golangci-lint to a release that reads Go 1.27 export data
+## 1. Pin golangci-lint to a release that reads Go 1.27 export data — ✅ DONE (2026-11-12)
+
+NOTES (2026-11-12): each discarded receive is written `case err := <-ch:` / `err := <-ch` then `_ = err // <reason>`, not `_ = <-ch`, because staticcheck S1005 (on under `checks: all`) flags a blank assignment from a receive as unnecessary.
 
 **What:**
 **Goal:** `make lint` passes under the go.mod toolchain and under `GOTOOLCHAIN=go1.27.4`.

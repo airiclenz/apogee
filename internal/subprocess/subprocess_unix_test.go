@@ -374,7 +374,8 @@ func TestRunSubprocessCancelKillsANoTerminalGrandchild(t *testing.T) {
 	}
 	cancel()
 	select {
-	case <-done:
+	case err := <-done:
+		_ = err // a cancelled run's error is expected; only its return is asserted
 	case <-time.After(testtime.Budget(10 * time.Second)):
 		t.Fatal("the cancelled run did not return")
 	}

@@ -787,7 +787,8 @@ func TestBuildStdioTransport_CancelArmsTheCmdsTeardown(t *testing.T) {
 
 	bound := platform.ProcessWaitDelay + testtime.Budget(2*time.Second)
 	select {
-	case <-waited:
+	case err := <-waited:
+		_ = err // the fixture was killed, so Wait's error is expected; only its return is asserted
 	case <-time.After(bound):
 		t.Fatalf("cmd.Wait did not return within %v of the cancel; the stdio Cmd's context is inert, so cmd.Cancel and cmd.WaitDelay never fire", bound)
 	}

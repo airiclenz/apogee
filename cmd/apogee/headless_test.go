@@ -4955,7 +4955,8 @@ func TestHeadlessWritesALiveJournalWhileItRuns(t *testing.T) {
 	paths := r.journals(t)
 	if len(paths) != 1 {
 		stub.Release(journalGate)
-		<-r.done
+		err := <-r.done
+		_ = err // joined so the run ends before the failure; the journal count is the finding
 		t.Fatalf("mid-run the store holds %d journal(s) %q; want exactly the running Firing's", len(paths), paths)
 	}
 	body, err := os.ReadFile(paths[0])

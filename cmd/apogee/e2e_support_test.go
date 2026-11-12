@@ -507,7 +507,8 @@ func (s *e2eSession) stop() {
 		return
 	}
 	select {
-	case <-s.drv.Done():
+	case err := <-s.drv.Done():
+		_ = err // already over: stop only ends a run, and its result is the test's to read
 	default:
 		s.drv.Kill()
 	}
