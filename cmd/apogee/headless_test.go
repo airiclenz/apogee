@@ -508,20 +508,16 @@ func TestHeadlessAutoDisclosesTheFenceResidual(t *testing.T) {
 		wantClause string
 	}{
 		{
-			name: "a fence with a known hole in it discloses the hole",
-			caps: apogee.ConfinementCaps{FSWrite: true, Residuals: []string{"truncate(2)"}},
-			want: true,
-			wantClause: "  truncate(2) — a confined command can still empty an existing file outside the workspace\n" +
-				"    (landlock ABI 1–2, kernel < 6.2). A kernel ≥ 6.2 closes it; until then treat auto's\n" +
-				"    fence as create-and-write only.",
+			name:       "a fence with a known hole in it discloses the hole",
+			caps:       apogee.ConfinementCaps{FSWrite: true, Residuals: []string{"truncate(2)"}},
+			want:       true,
+			wantClause: "  truncate(2) — a confined command can still empty an existing file outside the workspace (kernel < 6.2)",
 		},
 		{
-			name: "a reachable unix socket discloses the spawn-elsewhere escape",
-			caps: apogee.ConfinementCaps{FSWrite: true, Residuals: []string{domain.ResidualUnixEgress}},
-			want: true,
-			wantClause: "  connect(2) AF_UNIX — a same-user service listening on a unix socket the box can still reach\n" +
-				"    (such as tmux, or the user bus's systemd-run and docker where this backend does not\n" +
-				"    mask them) can run commands outside the fence for a confined command.",
+			name:       "a reachable unix socket discloses the spawn-elsewhere escape",
+			caps:       apogee.ConfinementCaps{FSWrite: true, Residuals: []string{domain.ResidualUnixEgress}},
+			want:       true,
+			wantClause: "  connect(2) AF_UNIX — a same-user socket service (tmux; systemd-run, docker if not masked) can run commands outside the fence",
 		},
 		{
 			name: "the network-class udp residual alone says nothing",

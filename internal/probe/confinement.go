@@ -148,7 +148,7 @@ func ResidualNotice(backendName string, caps domain.ConfinementCaps, mode domain
 		clauses = append(clauses, "  "+residual+" — "+residualConsequence(residual))
 	}
 	return fmt.Sprintf(
-		"apogee: auto mode confines terminal commands, but the %s backend on this kernel cannot fence:\n%s",
+		"apogee: auto mode fences terminal commands, but %s cannot fence:\n%s",
 		backendName, strings.Join(clauses, "\n"))
 }
 
@@ -172,20 +172,13 @@ const residualTruncate = "truncate(2)"
 func residualConsequence(residual string) string {
 	switch residual {
 	case residualTruncate:
-		return "a confined command can still empty an existing file outside the workspace\n" +
-			"    (landlock ABI 1–2, kernel < 6.2). A kernel ≥ 6.2 closes it; until then treat auto's\n" +
-			"    fence as create-and-write only."
+		return "a confined command can still empty an existing file outside the workspace (kernel < 6.2)"
 	case domain.ResidualUnixEgress:
-		return "a same-user service listening on a unix socket the box can still reach\n" +
-			"    (such as tmux, or the user bus's systemd-run and docker where this backend does not\n" +
-			"    mask them) can run commands outside the fence for a confined command."
+		return "a same-user socket service (tmux; systemd-run, docker if not masked) can run commands outside the fence"
 	case domain.ResidualMachLookup:
-		return "a same-user launchd or Mach service that runs code for its caller\n" +
-			"    (such as launchctl submit, or osascript) can run commands outside the fence for a\n" +
-			"    confined command."
+		return "a same-user launchd service (launchctl submit, osascript) can run commands outside the fence"
 	}
-	return "the backend discloses this access rather than fencing it, so a\n" +
-		"    confined command can still perform it outside the workspace."
+	return "not fenced; a confined command can still perform it outside the workspace"
 }
 
 // writeClassResiduals drops the network-egress-class token from a residual set, leaving the

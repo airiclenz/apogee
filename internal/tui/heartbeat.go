@@ -501,7 +501,7 @@ func effortClearedNote(override, profile domain.ThinkingEffort, model, reportedD
 // not escape-stripped here: the note's one destination is addNote, which strips at the seam for
 // every producer.
 func mandatoryEffortNote(model string) string {
-	return displayModel(model) + " cannot switch its reasoning off — compaction and title calls spend part of their output cap on it"
+	return displayModel(model) + " always reasons — compaction and titles spend part of their output cap on it"
 }
 
 // applyPendingRebind binds a change that was captured while the engine was not the Update loop's to

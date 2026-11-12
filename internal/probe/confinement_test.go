@@ -338,7 +338,7 @@ func TestResidualNoticeWordsEachTokenOnItsOwnTerms(t *testing.T) {
 	t.Parallel()
 
 	const unknown = "refer(2)"
-	const header = "apogee: auto mode confines terminal commands, but the seatbelt backend on this kernel cannot fence:\n"
+	const header = "apogee: auto mode fences terminal commands, but seatbelt cannot fence:\n"
 
 	// The spawning-service clauses are pinned verbatim: they are the sentence an operator reads
 	// to learn the fence does not stop a same-user service (ADR 0112), worded to hold on every
@@ -352,17 +352,13 @@ func TestResidualNoticeWordsEachTokenOnItsOwnTerms(t *testing.T) {
 			name:     "connect(2) AF_UNIX names the spawn-elsewhere escape",
 			residual: domain.ResidualUnixEgress,
 			want: header +
-				"  connect(2) AF_UNIX — a same-user service listening on a unix socket the box can still reach\n" +
-				"    (such as tmux, or the user bus's systemd-run and docker where this backend does not\n" +
-				"    mask them) can run commands outside the fence for a confined command.",
+				"  connect(2) AF_UNIX — a same-user socket service (tmux; systemd-run, docker if not masked) can run commands outside the fence",
 		},
 		{
 			name:     "mach-lookup names the launchd and Mach services",
 			residual: domain.ResidualMachLookup,
 			want: header +
-				"  mach-lookup — a same-user launchd or Mach service that runs code for its caller\n" +
-				"    (such as launchctl submit, or osascript) can run commands outside the fence for a\n" +
-				"    confined command.",
+				"  mach-lookup — a same-user launchd service (launchctl submit, osascript) can run commands outside the fence",
 		},
 	}
 	for _, tt := range exact {
@@ -393,7 +389,7 @@ func TestResidualNoticeWordsEachTokenOnItsOwnTerms(t *testing.T) {
 		if !strings.Contains(got, "can still perform it outside the workspace") {
 			t.Errorf("notice does not word the token neutrally:\n%s", got)
 		}
-		for _, borrowed := range []string{"empty an existing file", "6.2", "create-and-write", "outside the fence"} {
+		for _, borrowed := range []string{"empty an existing file", "6.2", "outside the fence"} {
 			if strings.Contains(got, borrowed) {
 				t.Errorf("notice lends another token's consequence %q to %s:\n%s", borrowed, unknown, got)
 			}

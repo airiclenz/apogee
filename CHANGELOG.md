@@ -12,6 +12,7 @@ or Moment is a **minor** bump, not a breaking change.
 ## [Unreleased]
 
 - **No more `context window changed: unknown → 1M` at launch.** When the model is configured but its window is not, the first clean beat learns the window and the restated start-up box already shows it, so the note is gone. A known window that changes, or one learned after a failed beat, still gets its line. (`startup-window-note-repeat`)
+- **Shorter startup notices.** Auto's residual notice is now a head line plus one line per unfenced access, each still naming the token and what a confined command can do through it (`apogee: auto mode fences terminal commands, but seatbelt cannot fence:` / `mach-lookup — a same-user launchd service (launchctl submit, osascript) can run commands outside the fence`). The note for a model whose reasoning cannot be turned off now reads `<model> always reasons — compaction and titles spend part of their output cap on it`. (`startup-notice-wording`)
 
 ## [0.35.0] — 2026-11-11
 
