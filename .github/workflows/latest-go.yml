@@ -1,0 +1,57 @@
+name: latest Go
+
+# Lints and tests the module on the newest stable Go release (setup-go `stable`), so a Go
+# release that breaks the pinned golangci-lint or a test shows here before it reaches a dev
+# box that upgraded first (issue go127-local-check-fails). go.mod's `go` line stays the
+# minimum toolchain; ci.yml keeps building and testing on it.
+#
+# A workflow of its own, not a job in ci.yml, on purpose: the release gate reads ci.yml's
+# runs alone (`ciWorkflow` in cmd/release/gate.go), so a red run here is visible but never
+# blocks a release cut while the tree is green on go.mod's toolchain. It does not weaken
+# that gate — ci.yml stays the release gate, with no bypass (ADR 0098).
+on:
+  push:
+    branches: [main]
+    # Skips a push that touches only prose no test reads. A shorter list than ci.yml's
+    # `paths` filter, and free to drift from it: this workflow gates nothing, so a run it
+    # skips costs only an early warning that the next code push brings anyway.
+    paths-ignore:
+      - '.capcom/issues/**'
+      - 'docs/plans/**'
+      - 'docs/handoffs/**'
+      - 'docs/reviews/**'
+      - 'CHANGELOG.md'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  latest-go:
+    name: lint / test (newest stable Go)
+    runs-on: ubuntu-26.04
+    steps:
+      # Actions are pinned by commit SHA with the release tag in the comment beside it.
+      # Bump by resolving the new tag's commit — never by editing the tag comment alone.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # This job runs Go tooling only and needs no git credential.
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          # A cache key of this job's own: hashing this workflow file as well keeps it apart
+          # from every ci.yml job's key, so a newer toolchain's build objects never land in
+          # (or are restored from) the cache the go.mod-toolchain jobs use.
+          cache-dependency-path: |
+            go.sum
+            .github/workflows/latest-go.yml
+      - name: golangci-lint
+        # The Makefile target, so the pinned GOLANGCI_LINT_VERSION lives once (see ci.yml's
+        # lint job).
+        run: make lint
+      - name: go test (race, in lanes)
+        # The same `make test` ci.yml's check job and `make check` run.
+        run: make test

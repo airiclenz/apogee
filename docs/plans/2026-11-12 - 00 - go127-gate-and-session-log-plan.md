@@ -71,7 +71,10 @@ NOTES (2026-11-12): each discarded receive is written `case err := <-ch:` / `err
 - `GOTOOLCHAIN=go1.27.4 GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestServerEntryRequestExtra' ./internal/config/`
 **Commit:** `fix(config): refuse a non-string request-extra key under Go 1.27's encoding/json`
 
-## 3. CI job on the newest stable Go
+## 3. CI job on the newest stable Go — ✅ DONE (2026-11-12)
+
+NOTES (2026-11-12): per the owner's DECISION, the job lives in its own workflow `.github/workflows/latest-go.yml` (job `latest-go`), not in `ci.yml`, so it never blocks the release gate (which reads `ci.yml` runs only); `ci.yml` and `cmd/release` are untouched, and the Acceptance grep `go-version: stable` reads the new file.
+NOTES (2026-11-12): the new workflow triggers on push to main (with a short `paths-ignore` for issues, plans, handoffs, reviews and CHANGELOG.md), pull_request and workflow_dispatch; its setup-go cache key hashes `go.sum` plus the workflow file, so it never shares a ci.yml job's key.
 
 **What:**
 **Goal:** `.github/workflows/ci.yml` has a job that runs `make lint` and `make test` on setup-go `go-version: stable`, beside the existing jobs, and `make actionlint` and `./scripts/check-pins.sh` pass.

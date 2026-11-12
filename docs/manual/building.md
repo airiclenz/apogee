@@ -423,6 +423,11 @@ It also lints the module itself: `make lint` runs `golangci-lint`'s standard set
 vulnerabilities your code actually reaches; it is the one gate that needs the network, and
 it fails with the tool's own error when the database is unreachable rather than passing
 quietly. Both run in CI too.
+A second workflow, `.github/workflows/latest-go.yml`, runs `make lint` and `make test` on
+the newest stable Go (setup-go `stable`), so a Go release that breaks the pinned linter or a
+test shows up before a dev box upgrades into it; go.mod's `go` line stays the minimum, and
+`ci.yml` keeps building on it. That workflow does not gate releases: the release gate reads
+`ci.yml`'s runs only, so a red `latest-go` run is a warning to act on, never a blocked cut.
 CI's `windows-latest` job runs the tests of five trees only — `internal/platform`, `internal/console`, `internal/probe`, `internal/auditsplit` and `cmd/release` — and there is no macOS runner (darwin is only cross-compiled). A Windows-tagged test anywhere else (`internal/tui`, `internal/tools`, `internal/session`, …) is never run, by CI or anyone: `make check` on a Linux or macOS box vets the whole module for Windows (`GOOS=windows go vet ./...`), so every Windows-tagged file must compile and vet clean, but it cannot run them. A new Windows test outside those five trees joins the `test-windows` job in `.github/workflows/ci.yml`. (2026-10-10, docs/plans/archived/2026-10-10 - 01 - audit-split-windows-plan.md)
 
 Prefer the raw toolchain? `go build -o apogee ./cmd/apogee` builds the same binary, minus
