@@ -3,6 +3,7 @@ title: "make check fails under Go 1.27.4: lint typecheck and a config test"
 status: open
 type: bug
 priority: 2
+plan: 2026-11-12 - 00 - go127-gate-and-session-log-plan.md
 created: 2026-11-12T08:30:35Z
 ---
 

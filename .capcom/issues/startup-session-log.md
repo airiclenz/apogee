@@ -3,6 +3,7 @@ title: Collapsed session-log block for startup notices (side panel when open)
 status: open
 type: feature
 priority: 3
+plan: 2026-11-12 - 00 - go127-gate-and-session-log-plan.md
 created: 2026-11-12T08:19:33Z
 ---
 
