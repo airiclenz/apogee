@@ -495,6 +495,12 @@ const announcedScratchCachesPrompt = "Show me where the toolchain caches live."
 // true (subprocess.ScratchEnv), and a seed that pointed anywhere else fails here.
 func TestE2EAnnouncedScratchDirHoldsTheToolchainCaches(t *testing.T) {
 	guardHome(t)
+	// The confined command inherits this process's environment, so a GOTOOLCHAIN the outer run
+	// exported (`GOTOOLCHAIN=go1.27.4 make check`) would send the `go` on PATH off to switch
+	// toolchains — a download into a module cache under guardHome's empty HOME, which the fence
+	// refuses — and the command would fail before it ever printed GOCACHE. Which toolchain answers
+	// is not what this test proves, so it pins the one on PATH.
+	t.Setenv("GOTOOLCHAIN", "local")
 	deps, _ := installFenceableConfiner(t)
 
 	stub := stubllm.New(t, loadScript(t, "announced-scratch-caches"))
