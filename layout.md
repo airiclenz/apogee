@@ -824,7 +824,11 @@ them. The label carries no brackets and is rendered **bold in the scheme's `tool
 (`#aea580` under `dark`) — a role of its own rather than the `code` role inline code and fenced
 blocks carry, so the blocks apogee *ran* read apart from the code it *prints*, and either tone can
 be retuned without dragging the other along. The styling is uniform too: a known friendly label
-("Read"), an unknown tool's raw name, and `result` all look the same. The
+("Read"), an unknown tool's label, and `result` all look the same. An unknown tool's label is
+its raw name, except an MCP tool's: its raw name `<server>__<tool>` reads `<server> · <tool>`
+(`github · search_issues`), split at the first `__` and only where both halves are non-empty; the
+raw name stays the key every lookup reads and the one the active verb (`running <raw name>`)
+names (2026-11-12). The
 bare-name-means-unregistered signal was the brackets' job and dies with them. The count is **not**
 part of the name and is painted in the faint indicator tone rather than the gold: it is the
 block's own arithmetic, and a reader scanning the gold down the left edge should not read a

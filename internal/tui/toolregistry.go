@@ -51,8 +51,9 @@ import (
 // The label+extractor map is an OPEN, name-keyed registry, not a closed switch: the Phase-3
 // tool fan-out (P3.7–P3.11, ~30 tools, ADR 0002) adds one entry per tool (terminal→"Terminal",
 // git→"Git Status", find_replace→"Replace", …) rather than editing a control-flow statement. An
-// unknown tool falls back to its raw name and labelled arguments (argumentDetails), so a tool
-// with no registry entry still renders legibly.
+// unknown tool falls back to its raw name — an MCP tool's split as `<server> · <tool>`
+// (unregisteredLabel) — and labelled arguments (argumentDetails), so a tool with no registry
+// entry still renders legibly.
 //
 // The same entry also carries the tool's active verb ("reading", "running"), which the live
 // status line pairs with the target while the call is in flight — the per-tool knowledge

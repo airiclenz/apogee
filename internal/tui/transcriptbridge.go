@@ -637,7 +637,9 @@ func fromWireToolView(w *session.ToolView, done bool) toolView {
 	// a fact about the call, so a record written before a relabelling (the Title Case labels
 	// sub_agent and task_list once wore) replays under the label the live presenter gives the same
 	// tool today rather than the one it gave then. A name with no row — a dynamic tool's — keeps the
-	// record's own label, which is the raw name the live path gave it. A background sub_agent's
+	// record's own label, which is the label the live path gave it (unregisteredLabel: an MCP tool's
+	// `<server> · <tool>`, the raw name otherwise); it is not re-derived, so a record written before
+	// the split replays under the raw name it was written with. A background sub_agent's
 	// card wears the delegation's label as well (backgroundSubAgentPresenter), so reading the
 	// sub_agent row serves both.
 	if p, known := toolRegistry[tv.name]; known && p.label != "" {

@@ -496,6 +496,37 @@ func TestTranscriptCodecReDerivesARelabelledToolsLabel(t *testing.T) {
 	}
 }
 
+// TestTranscriptCodecKeepsAnMCPLabel proves a resumed MCP call wears the label the live one did:
+// the record carries `<server> · <tool>` as written, and decode — which re-derives a label only for
+// a tool the registry knows — hands it back unchanged beside the raw name it is keyed on.
+func TestTranscriptCodecKeepsAnMCPLabel(t *testing.T) {
+	t.Parallel()
+
+	live := presentToolCall(domain.ToolCall{ID: "m1", Tool: "github__search_issues",
+		Arguments: []byte(`{"query":"flaky"}`)}, "", workspaceRoot{})
+	if live.Label != "github · search_issues" {
+		t.Fatalf("setup: live label = %q; want the split server · tool label", live.Label)
+	}
+	tr := &transcript{entries: []entry{{kind: entryToolCall, callID: "m1", done: true, tool: live}}}
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("decoded %d entries; want 1", len(got))
+	}
+	if got[0].tool.Label != live.Label {
+		t.Errorf("replayed label = %q; want the live label %q", got[0].tool.Label, live.Label)
+	}
+	if got[0].tool.name != "github__search_issues" {
+		t.Errorf("replayed name = %q; want the raw name", got[0].tool.name)
+	}
+}
+
 // TestTranscriptCodecReDerivesAnsweredQuestionSolo proves the second verdict decode does not take
 // from the file — and the one no name settles. An ANSWERED ask_user record is a card the reader
 // comes back to (askUserAnswerRecord, design call 3), while a question still awaiting its answer is

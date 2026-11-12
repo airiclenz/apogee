@@ -133,7 +133,10 @@ internal/tui/toolpresent_test.go — TestPresentToolCall; internal/tui/workspace
 - `go test -race -count=1 -run 'Unregistered|NoTarget|Targetless|TestPresentToolCall|TestTranscriptLayoutGolden|TestRenderMarksTheWholeBlock|Group' ./internal/tui/`
 **Commit:** `fix(tui): give unregistered tool calls a target so they group`
 
-## 6. MCP tool label splits server and tool
+## 6. MCP tool label splits server and tool — ✅ DONE (2026-11-12)
+
+NOTES (2026-11-12): the rule is `unregisteredLabel` in toolview.go beside the local constant `mcpNameSeparator` (naming internal/mcp's toolNameSeparator); new tests are `TestMCPLabelSplitsServerAndTool` (toolpresent_test.go), an MCP case in `TestPresentToolCall`, and `TestTranscriptCodecKeepsAnMCPLabel` (transcriptbridge_test.go); `fromWireToolView` needed no code change, only its comment.
+NOTES (2026-11-12): consequential edit — internal/tui/toolregistry.go: made necessary by unregisteredLabel (the registry doc comment said an unknown tool's label falls back to its raw name)
 
 **What:** completes `mcp-tools-never-group`. Depends on item 5.
 **Goal:** an unregistered call whose raw name holds `__` shows the label `<server> · <tool>` (split at the first `__`); a name without `__` shows unchanged; `toolView.name` and every lookup keyed on it keep the raw name.

@@ -819,6 +819,31 @@ func promotedOutput(text string, stat statValue) toolOutcome {
 	return toolOutcome{Summary: quotedSummary(detailLine{Text: text}), Stat: stat}
 }
 
+// mcpNameSeparator is what joins an MCP server's alias to that server's own tool name in the raw
+// name the engine registers the tool under. It restates internal/mcp's toolNameSeparator, which
+// the TUI does not import; ServerConfig.ValidateName there is what keeps it out of an alias, so
+// the first occurrence is always the join.
+const mcpNameSeparator = "__"
+
+// mcpLabelJoin is what an MCP tool's label puts between the server and the tool.
+const mcpLabelJoin = " · "
+
+// unregisteredLabel is the header label of a call no registry row recognises (presentToolCall's
+// unregistered fallback). An MCP tool's raw name, `<server>__<tool>`, reads as `<server> · <tool>`,
+// split at the FIRST separator because an alias never holds one while a server's own tool name
+// may. Only a split with both halves non-empty is one: `__init__` or `x__` is not an MCP name, so
+// it — and every name without the separator — is its own label, unchanged.
+//
+// The label is display only. The raw name stays the key (toolView.name) every registry lookup,
+// the verb and the stored record read, so nothing that resolves a call ever sees the split.
+func unregisteredLabel(tool string) string {
+	server, remote, found := strings.Cut(tool, mcpNameSeparator)
+	if !found || server == "" || remote == "" {
+		return tool
+	}
+	return server + mcpLabelJoin + remote
+}
+
 // presentToolCall builds the header view of a tool call — and, for the tools whose arguments
 // already say what the call will change, its body too (argBody: the edit tools' -/+ lines, a
 // write's + lines).
@@ -826,7 +851,8 @@ func promotedOutput(text string, stat statValue) toolOutcome {
 // nothing is asked of the tool, nothing is added to a result, and the block shows the change
 // before the result even lands. A known tool gets its friendly
 // label, its active verb, and a target pulled from the arguments; an unknown tool falls back
-// to its raw name (styled like any other label) with its arguments as LABELLED detail lines
+// to its raw name, split into `<server> · <tool>` where it is an MCP tool's (unregisteredLabel),
+// styled like any other label, with its arguments as LABELLED detail lines
 // (argumentDetails — the same rendering the approval prompt reads a decision off, so the two
 // surfaces spell one call one way), so a not-yet-registered tool still renders and a malformed
 // argument is shown verbatim rather than dropped (the approval flow is a security surface — the
@@ -854,7 +880,7 @@ func presentToolCall(call domain.ToolCall, resolved string, ws workspaceRoot) to
 	p, ok := toolRegistry[call.Tool]
 	if !ok {
 		tv := toolView{
-			Label:    call.Tool,
+			Label:    unregisteredLabel(call.Tool),
 			Verb:     "running " + call.Tool,
 			name:     call.Tool,
 			Target:   unregisteredTarget(call.Tool, call.Arguments),

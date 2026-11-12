@@ -381,6 +381,14 @@ func TestPresentToolCall(t *testing.T) {
 			wantDetail: "x:\n  1",
 		},
 		{
+			name:       "MCP tool → server · tool label, raw name in the verb",
+			call:       domain.ToolCall{ID: "6m", Tool: "github__search_issues", Arguments: []byte(`{"query":"flaky"}`)},
+			wantLabel:  "github · search_issues",
+			wantVerb:   "running github__search_issues",
+			wantTarget: "flaky",
+			wantDetail: "query:\n  flaky",
+		},
+		{
 			name:       "malformed args → shown verbatim, not dropped",
 			call:       domain.ToolCall{ID: "7", Tool: "weird", Arguments: []byte("{not json")},
 			wantLabel:  "weird",
@@ -446,6 +454,41 @@ func TestUnregisteredTarget(t *testing.T) {
 
 			if got := unregisteredTarget("mcp_thing", []byte(tc.args)); got != tc.want {
 				t.Errorf("unregisteredTarget(%s) = %q, want %q", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestMCPLabelSplitsServerAndTool pins the label an unregistered call wears: an MCP tool's raw
+// name, `<server>__<tool>`, reads as `<server> · <tool>`, split at the first separator, while a
+// name that is not one — no separator, or an empty half either side of it — is its own label. The
+// view's key stays the raw name whatever the label says, since every lookup reads that.
+func TestMCPLabelSplitsServerAndTool(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		tool string
+		want string
+	}{
+		{tool: "github__search_issues", want: "github · search_issues"},
+		{tool: "plain_tool", want: "plain_tool"},
+		{tool: "a__b__c", want: "a · b__c"},
+		{tool: "__init__", want: "__init__"},
+		{tool: "x__", want: "x__"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.tool, func(t *testing.T) {
+			t.Parallel()
+
+			if got := unregisteredLabel(tc.tool); got != tc.want {
+				t.Errorf("unregisteredLabel(%q) = %q, want %q", tc.tool, got, tc.want)
+			}
+			tv := presentToolCall(domain.ToolCall{ID: "1", Tool: tc.tool, Arguments: []byte(`{}`)}, "", workspaceRoot{})
+			if tv.Label != tc.want {
+				t.Errorf("presented label = %q, want %q", tv.Label, tc.want)
+			}
+			if tv.name != tc.tool {
+				t.Errorf("presented name = %q, want the raw name %q", tv.name, tc.tool)
 			}
 		})
 	}
