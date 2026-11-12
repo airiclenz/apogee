@@ -990,7 +990,7 @@ facts**: the entry keeps every line, and the cap applies at paint, not at build.
 **One budget, and every tool-shaped block spends it: the header, and at most two content rows.**
 So a collapsed block stands no taller than three screen rows, whatever tool filled it and however
 long its target is — which is the point, because a scrollback of tool calls should read as a list
-and not as a wall. The one block that spends none of the two rows is `task_list`, the model's own
+and not as a wall. The first block that spends none of the two rows is `task_list`, the model's own
 checklist (2026-09-14): collapsed, it is its counted header alone — `✦ Tasks (done/total)`,
 `▶` on the header, no task row and no `+N more lines`, because the count already says what the
 fold holds — and open it is every row uncapped, the header's `▼` its only fold, since a two-row
@@ -1008,7 +1008,13 @@ transcript, the gesture on any of them toggling them all, remembered across sess
 `ui.tools-open` beside `ui.task-list-open`. A small umbrella folds on its own session-only flag,
 written nowhere, so it starts every session open; one that grows large follows the shared state from
 then on. A folded umbrella with a call in flight keeps the header an open one has — the blinking
-`✦`, the count climbing — and nothing else on the line. Where the two rows go is the only thing the
+`✦`, the count climbing — and nothing else on the line. The start-up **session log** is the third
+block that folds to its header (2026-11-12; "The start-up box", below): collapsed, it is its counted
+header alone in the Tasks card's grammar — `✦ Session log (4 notes)`, `(1 note)` for one, `▶` on
+the header, no note row and no `+N more lines` — and open it is every note uncapped under a `▼`.
+Unlike `task_list`'s shared `ui.task-list-open`, its fold is **per-block and session-only**: a click
+on the log, or `enter` at the block cursor on it, flips that one log and no other block, and the
+state is written nowhere, so every log starts collapsed. Where the two rows go is the only thing the
 shape decides:
 
 - **A call with a target** spends **one** of them on its row, and only that one — the leader shape
@@ -1767,6 +1773,48 @@ binary's own host never does, it answers nothing instead. With no current versio
 an arrow from, and the value stays as it is. The longer value widens the info block, so it can tip a
 card that was wide into the stacked layout — which drops the `context` row — and on a stacked card
 too narrow for it the row ends in `…` like any other.
+
+**The session log beneath it (2026-11-12).** The routine notes a session starts with — the context
+files it loaded, Auto's disclosed residuals, model facts such as mandatory reasoning, the first
+heartbeat's rebind notes (model profile, roster change, a hint) — do not each take a line. They
+gather into ONE transcript block that sits below the card, and below any scrollback a resume
+replays under it, collapsed by default to its counted header in the Tasks card's grammar:
+
+```
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ ▗▄▄ ▄▄▄ ▗▄▄ ▗▄▄▖▗▄▄ ▗▄▄                          host     workstation        │
+│ …                                                                            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+✦ Session log (4 notes) ▶
+```
+
+Opened — a click on it, or `alt+up` into navigation mode and `enter` on it — the header's `▶` turns
+`▼` and every note is its own `· <text>` row beneath it, uncapped, in the tone an expanded block's
+body wears; a note of several lines keeps its lines, the later ones hung under the first one's text:
+
+```
+✦ Session log (4 notes) ▼
+  · <note>
+  · <note>
+    <the same note's second line>
+  · <note>
+  · <note>
+```
+
+The header reads `(1 note)` for one. The fold is the log's own — per-block, session-only, never
+`ui.task-list-open` ("Collapsed and expanded blocks", above). **A notice that needs the human is
+never folded away:** Auto running unconfined, degraded Auto, an unreadable context file, a
+colour-scheme warning, a refused rebind and a routing notice each keep their own `· …` note line
+outside the log, exactly as before. The log holds routine notes only, so a start with none paints
+no log at all — never an empty `(0 notes)` header.
+
+**One log per session, open until the first Exchange.** Each session boundary — launch, `/clear`,
+`/new`, a `/sessions` restore — opens a fresh log, and it absorbs routine notes until the
+session's first Exchange launch (`Model.enterRunning`: a submitted prompt, `/continue`, a workflow
+wake, `/compact`); a note that arrives after that prints as its own line, as it always has, and the
+log's count stops where it stood. The log is ephemeral like the card: never written into a session
+record, re-derived at each start. Only the TUI's transcript changes: what apogee prints on stderr
+at launch, and every `apogee headless` and `apogee daemon` line, stay byte-for-byte as they were.
 
 ---
 

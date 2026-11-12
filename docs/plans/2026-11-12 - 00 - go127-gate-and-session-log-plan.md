@@ -90,7 +90,9 @@ NOTES (2026-11-12): the new workflow triggers on push to main (with a short `pat
 **Commit:** `ci: lint and test on the newest stable Go`
 **Closes:** go127-local-check-fails
 
-## 4. Session-log contract: layout spec, glossary, ADR 0112 amendment, panel follow-up
+## 4. Session-log contract: layout spec, glossary, ADR 0112 amendment, panel follow-up — ✅ DONE (2026-11-12)
+
+NOTES (2026-11-12): the `Session log` glossary Note carries `refs: [layout.md]` (its spec), so capcom check flags it if the spec file moves; the `session-log-side-panel` issue is created without `--plan` (it is a follow-up, not designed by this plan).
 
 **What:**
 **Goal:** the session log is specified before code. `layout.md` and `docs/layout/tool-layout.md` sketch it collapsed and expanded. The glossary has a `Session log` Note. ADR 0112 carries a dated amendment saying a residual inside the collapsed log is disclosed. The issue `session-log-side-panel` exists.

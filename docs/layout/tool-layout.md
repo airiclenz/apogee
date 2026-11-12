@@ -158,7 +158,7 @@ closer is drawn today.
   exception to it: a framed sub-agent has one state, collapsed, and opening it
   opens a different *surface* rather than a third fold stage of the row
   ([ADR 0063](../../.capcom/knowledge/decisions/adr-0063.md)).
-  `task_list` is the first of two blocks whose collapsed state is its
+  `task_list` is the first of three blocks whose collapsed state is its
   **header alone**: it folds to `✦ Tasks (done/total)` — no task row
   beneath, no `+N more lines`, because the header's own count already says
   what the fold holds — and opens to every row uncapped with no `see less…`
@@ -198,6 +198,33 @@ closer is drawn today.
   bare header whose click closed its open children — plan
   `docs/plans/2026-09-18 - 01`. Design call 9, which had the umbrella never
   fold to one line, was superseded then.)
+- The start-up **session log** is the third block that folds to its **header
+  alone** (2026-11-12; `layout.md`, "The start-up box"). It is no tool call —
+  it gathers the routine notes a session starts with — but it wears the
+  `task_list` card's header-alone grammar: collapsed, `✦ Session log (N
+  notes)` (`(1 note)` for one) under a `▶`, no note row beneath and no `+N
+  more lines`, the count saying what the fold holds; open, the header's `▼` is
+  the fold and every note is its own `· <text>` row, uncapped, with no `see
+  less…` footer, a note of several lines keeping its lines:
+
+  ```text
+  ✦ Session log (4 notes) ▶
+  ```
+
+  ```text
+  ✦ Session log (4 notes) ▼
+    · <note>
+    · <note>
+      <the same note's second line>
+    · <note>
+    · <note>
+  ```
+
+  Unlike `task_list`'s, its fold is **per-block and session-only**: a click on
+  the log, or `enter` at the block cursor on it, flips that one log and no
+  other block — never every task card, never `ui.task-list-open` — and the
+  state is written nowhere, so every log starts collapsed. A start with no
+  routine note paints no log at all.
 - Failure marking: the red right-slot summary only; no glyph or header color
   changes. Failures propagate upward as red `N errors` on type rows.
 - Keyboard: a **modal block cursor**, the transcript region of **navigation

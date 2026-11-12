@@ -21,7 +21,8 @@ parent's spend: its `Usage*` fields are cleared at the cut, so the child starts 
 delegate spend included, and its `Meta.DelegateUsage` counts only the calls the child makes. Not
 every scrollback entry is persisted: an **ephemeral** entry is display-only — rendered exactly
 like its kind, skipped by the encoder — because it is *re-derived* at each startup or resume
-rather than earned by the conversation. Today those are the start-up box, the `resumed: <title>`
+rather than earned by the conversation. Today those are the start-up box, the **Session log** (the
+collapsed block the routine start-up notes gather into, 2026-11-12), the `resumed: <title>`
 notice (with its no-scrollback degrade variant, the progress-saved note and the
 interrupted-mid-exchange note), the colour-scheme warnings, the start-up confinement notices, the
 routing notice, a Reaction's failure notice, Watch mode's unreadable-record note and the
