@@ -112,6 +112,11 @@ func TestToolActivityVerb(t *testing.T) {
 			want: "reading",
 		},
 		{
+			name: "a bare run_tests keeps its verb, never its whole-project target",
+			call: domain.ToolCall{Tool: "run_tests", Arguments: []byte(`{}`)},
+			want: "running tests",
+		},
+		{
 			name: "unregistered (MCP) tool falls back to the raw name",
 			call: domain.ToolCall{Tool: "mcp_weather", Arguments: []byte(`{"city":"Oslo"}`)},
 			want: "running mcp_weather",

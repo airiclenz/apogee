@@ -2250,6 +2250,88 @@ func TestGitStatusReportSurvivesItsTypedSummary(t *testing.T) {
 	}
 }
 
+// TestRunTestsTarget pins run_tests' target in all four argument shapes (issue
+// run-tests-never-groups): a call naming no path targets the whole project, a filter qualifies
+// whichever head the call has, and a path leads when one was given.
+func TestRunTestsTarget(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{name: "no arguments is the whole project", args: map[string]any{}, want: "whole project"},
+		{name: "a filter alone qualifies the whole project", args: map[string]any{"filter": "TestX"}, want: "whole project · TestX"},
+		{name: "a path alone stands alone", args: map[string]any{"path": "./internal/tui"}, want: "./internal/tui"},
+		{name: "a path and a filter", args: map[string]any{"path": "./internal/tui", "filter": "TestX"}, want: "./internal/tui · TestX"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := runTestsTarget(tt.args); got != tt.want {
+				t.Errorf("runTestsTarget(%v) = %q, want %q", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRunTestsGroupsAndCounts pins a bare run_tests call inside a grouped Tools block (issue
+// run-tests-never-groups): its target is "whole project", so a read_file followed by a no-argument
+// run_tests is ONE umbrella counting both, the run a member row like the read, and its type row
+// opened shows the branch led by that target.
+func TestRunTestsGroupsAndCounts(t *testing.T) {
+	t.Parallel()
+
+	const (
+		width     = 80
+		testsHead = 1
+	)
+	build := func(t *testing.T) *transcript {
+		t.Helper()
+		tr := &transcript{}
+		readCall(tr, "c1", "a.go", 1, 5, 0)
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "run_tests", Arguments: []byte(`{}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "PASS (go test)\nok  \tpkg\t0.4s"}})
+		return tr
+	}
+
+	header := umbrellaHeaderRow("1 Read, 1 Tests", glyphExpanded)
+	readRow := groupMemberLine("  ┝ Read ⋯ 5 lines")
+
+	t.Run("collapsed: one umbrella counting both", func(t *testing.T) {
+		t.Parallel()
+
+		want := strings.Join([]string{
+			header,
+			readRow,
+			groupMemberLine("  ┕ Tests ⋯ PASS"),
+		}, "\n")
+		if got := renderPlain(build(t), width); got != want {
+			t.Errorf("collapsed umbrella mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("type row open: run_tests a member led by its target", func(t *testing.T) {
+		t.Parallel()
+
+		tr := build(t)
+		if !tr.setTypeExpanded(testsHead, true) {
+			t.Fatalf("setTypeExpanded(%d, true) = false; want run_tests' type row inside the umbrella", testsHead)
+		}
+		want := strings.Join([]string{
+			header,
+			readRow,
+			leaderEdgeRow("  ┕ Tests ⋯ PASS", glyphExpanded),
+			"  │ ┕ whole project ⋯ PASS",
+		}, "\n")
+		if got := renderPlain(tr, width); got != want {
+			t.Errorf("open type row mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+}
+
 // A stat that DECLINES leaves the prose floor exactly where it was — the degraded card is the
 // tool's own words, never a blank slot or an invented number. git_log run against a ref with
 // nothing to show is that floor end to end: its stat recognises no commit lines, so the extractor's

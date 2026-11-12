@@ -98,7 +98,9 @@ internal/tui/toolblock_test.go — TestTargetlessBlockStillCapsAndToggles; inter
 **Closes:** git-status-never-groups
 **Commit:** `fix(tui): give git_status a working-tree target so it groups`
 
-## 4. run_tests with no path targets the whole project
+## 4. run_tests with no path targets the whole project — ✅ DONE (2026-11-12)
+
+NOTES (2026-11-12): TestToolActivityVerb had no run_tests case to re-pin; added one ("a bare run_tests keeps its verb") pinning that the status line still reads `running tests` with the new target.
 
 **What:** fixes `run-tests-never-groups`: `runTestsTarget` returns `""` with neither `path` nor `filter`. Depends on item 3 (same file).
 **Goal:** `runTestsTarget` returns `whole project` with no args, `whole project · <filter>` with only a filter, `<path>` with only a path, `<path> · <filter>` with both; a no-argument run_tests groups and counts in a Tools umbrella.

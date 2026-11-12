@@ -507,8 +507,8 @@ var toolRegistry = map[string]toolPresenter{
 	"run_tests": {
 		label: "Tests",
 		verb:  "running tests",
-		// Both arguments are optional and the common call carries neither — the whole suite is
-		// the target then, and runTestsTarget renders the empty target a bare "running tests" needs.
+		// Both arguments are optional and the common call carries neither — the whole project is
+		// the target then, and runTestsTarget names it, so a bare call groups like any other.
 		target: runTestsTarget,
 		detail: firstLineDetail, // the tool's own verdict line: "PASS (go test)" / "FAIL …"
 		stat:   testVerdictStat,
@@ -1688,11 +1688,21 @@ func findFilesTarget(args map[string]any) string {
 	return qualifiedTarget(stringArg("pattern")(args), searchScopeArg(args))
 }
 
+// wholeProjectTargetText is run_tests' target head when the call names no path: the tool then
+// runs the workspace's whole suite.
+const wholeProjectTargetText = "whole project"
+
 // runTestsTarget leads run_tests' branch with the package path and the filter that narrowed the
-// run. Both arguments are optional and the common call carries neither — the whole suite is the
-// target then, and the empty target a bare "running tests" needs is what comes back.
+// run. Both arguments are optional and the common call carries neither — the whole project is the
+// target then (wholeProjectTargetText), still qualified by a filter when one was given. A target is
+// what lets a bare call join a grouped Tools block like any other; the live status line never sees
+// it (toolActivityVerb reads the verb alone).
 func runTestsTarget(args map[string]any) string {
-	return qualifiedTarget(stringArg("path")(args), stringArg("filter")(args))
+	head := stringArg("path")(args)
+	if head == "" {
+		head = wholeProjectTargetText
+	}
+	return qualifiedTarget(head, stringArg("filter")(args))
 }
 
 // presentDocumentTarget leads present_document's branch with the document's TITLE — what the human

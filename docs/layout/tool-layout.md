@@ -444,7 +444,7 @@ its body whole while collapsed, and it appears only when the two differ.
 | console_send | Console Send | `console N` (`· what was typed` when the input is not empty) | `alive` / `exit N` / `killed` | what the program printed back |
 | console_read | Console Read | `console N` | `alive` / `exit N` / `killed` | the output since the last read |
 | console_close | Console Close | `console N` | `exit N` / `killed` | the unread tail |
-| run_tests | Tests | path (`· filter` when set) | `PASS` / `FAIL` | runner summary + failing tests |
+| run_tests | Tests | path, else `whole project` (`· filter` when set) | `PASS` / `FAIL` | runner summary + failing tests |
 | git_status | Git Status | `working tree` | `N changed` | changed-file list |
 | git_log | Git Log | ref | `N commits` | one line per commit |
 | git_show | Git Show | path (`:12–80` when ranged) `@ ref` (`· locate "…"` when set) | `N lines` | the located lines (`Located "…" on lines: …`) when locate is set, else — |
@@ -514,6 +514,12 @@ Notes:
   carry while the call runs. Having one is what lets it join a grouped Tools
   block and count there like any other read; its report stays behind the
   member row's own indicator.
+- **2026-11-12** — a `run_tests` call that names no `path` targets the words
+  `whole project` (it was empty): the tool then runs the workspace's whole
+  suite, and the common call carries no argument at all. A filter still
+  qualifies it (`whole project · TestX`). The target is what lets a bare run
+  join a grouped Tools block and count there; the live status line keeps its
+  plain `running tests`, which never reads the target.
 - git_commit never promotes its one-line output into the slot at any width: the
   line repeats the subject the row already leads with, so the slot holds the
   short hash above and the line lays out in the body.
