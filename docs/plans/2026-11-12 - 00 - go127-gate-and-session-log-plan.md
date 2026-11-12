@@ -58,7 +58,7 @@ NOTES (2026-11-12): each discarded receive is written `case err := <-ch:` / `err
 - `grep -n 'GOLANGCI_LINT_VERSION := v2.15.0' Makefile`
 **Commit:** `fix(build): pin golangci-lint v2.15.0 so lint reads Go 1.27 export data`
 
-## 2. Refuse a non-string request-extra key without relying on encoding/json
+## 2. Refuse a non-string request-extra key without relying on encoding/json — ✅ DONE (2026-11-12)
 
 **What:**
 **Goal:** under Go 1.26 and Go 1.27, `request-extra:` is refused, naming the entry and `JSON`, when any mapping inside it has a key yaml.v3 does not decode as a string, at any depth including inside a list. A quoted numeric key (`"1": x`) is accepted.

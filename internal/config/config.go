@@ -1722,10 +1722,13 @@ type ServerEntry struct {
 type RequestExtra string
 
 // UnmarshalYAML accepts exactly a mapping and stores its canonical JSON. Any other shape — a scalar,
-// a list — is refused, and so is a mapping encoding/json cannot represent: a `.nan` or `.inf`
-// anywhere inside it, or a nested mapping with a non-string key. Both refusals are
-// requestExtraErrors, which ServerEntry.UnmarshalYAML completes with the entry's name, because
-// yaml.v3 hands a field's Unmarshaler the value node alone.
+// a list — is refused, and so is a mapping JSON cannot represent: a mapping anywhere inside it,
+// lists included, with a key YAML does not read as a string (`1:`, `true:`; a quoted `"1":` is a
+// string), which nonStringKeyInside finds itself rather than leaving to encoding/json — Go 1.27's
+// marshals such a key as its text where 1.26 refused it — and a `.nan` or `.inf` anywhere inside,
+// which json.Marshal still refuses. Both refusals are requestExtraErrors, which
+// ServerEntry.UnmarshalYAML completes with the entry's name, because yaml.v3 hands a field's
+// Unmarshaler the value node alone.
 //
 // An explicit `null` never reaches here — yaml.v3 short-circuits it before it looks for an
 // Unmarshaler — so ServerEntry.UnmarshalYAML refuses that one itself.
@@ -1740,13 +1743,40 @@ func (r *RequestExtra) UnmarshalYAML(node *yaml.Node) error {
 	if err := node.Decode(&value); err != nil {
 		return &requestExtraError{line: node.Line, reason: "does not decode: " + err.Error()}
 	}
+	const notJSON = "cannot be sent as JSON — every key must be a string and every number finite"
+	if nonStringKeyInside(value) {
+		return &requestExtraError{line: node.Line, reason: notJSON}
+	}
 	canonical, err := json.Marshal(value)
 	if err != nil {
-		return &requestExtraError{line: node.Line, reason: "cannot be sent as JSON — every key " +
-			"must be a string and every number finite (" + err.Error() + ")"}
+		return &requestExtraError{line: node.Line, reason: notJSON + " (" + err.Error() + ")"}
 	}
 	*r = RequestExtra(canonical)
 	return nil
+}
+
+// nonStringKeyInside reports whether value, as yaml.v3 decoded it into an `any`, holds a mapping
+// with a key that is not a string at any depth, inside a list included. yaml.v3 decodes a mapping
+// whose every key is a string as map[string]any and any other mapping as map[any]any, so meeting a
+// map[any]any anywhere is the whole test.
+func nonStringKeyInside(value any) bool {
+	switch v := value.(type) {
+	case map[any]any:
+		return true
+	case map[string]any:
+		for _, inner := range v {
+			if nonStringKeyInside(inner) {
+				return true
+			}
+		}
+	case []any:
+		for _, inner := range v {
+			if nonStringKeyInside(inner) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // MarshalYAML writes the passthrough back as the mapping it was read from, so a ServerEntry that is
