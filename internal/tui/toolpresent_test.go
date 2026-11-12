@@ -2236,6 +2236,9 @@ func TestGitStatusReportSurvivesItsTypedSummary(t *testing.T) {
 		Summary: domain.ChangedFiles{Staged: 2, Untracked: 1},
 	}, workspaceRoot{})
 
+	if want := "working tree"; tv.Target != want {
+		t.Errorf("target = %q, want %q — the row a grouped member is led by", tv.Target, want)
+	}
 	if want := "3 changed"; tv.Summary.Text != want {
 		t.Errorf("slot = %q, want %q", tv.Summary.Text, want)
 	}

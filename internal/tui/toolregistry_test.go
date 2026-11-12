@@ -728,9 +728,9 @@ var taskListCall = domain.ToolCall{
 
 // TestToolRegistryPresentsTheTaskListCall pins the whole card a task_list call draws (ADR 0072):
 // the registry's own label and verb rather than the raw-name fallback a dynamic tool falls to, no
-// target — its one argument IS the list, the same reason git_status carries none — the list the
-// tool echoed back laid out beneath the branch, and the header counting the list's done rows over
-// all of them while the outcome slot stays blank (the ratified call of plan "2026-09-14 - 00").
+// target — its one argument IS the list — the list the tool echoed back laid out beneath the
+// branch, and the header counting the list's done rows over all of them while the outcome slot
+// stays blank (the ratified call of plan "2026-09-14 - 00").
 //
 // The body is asserted to carry the done row UNNUMBERED, which is the prose half of the numbering
 // rule (TestFileContentBodiesAreNumbered, whose walk reaches every registry entry): a task list is

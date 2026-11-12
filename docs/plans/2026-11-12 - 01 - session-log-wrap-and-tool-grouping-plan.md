@@ -78,7 +78,12 @@ internal/tui/model.go — Model.noteStartupNotices; internal/tui/tui.go — Noti
 **Closes:** session-log-hard-breaks
 **Commit:** `fix(notices): word the fence residuals as one session-log note each`
 
-## 3. git_status targets the working tree and groups
+## 3. git_status targets the working tree and groups — ✅ DONE (2026-11-12)
+
+NOTES (2026-11-12): the target is a named extractor `workingTreeTarget` returning the constant `workingTreeTargetText` ("working tree"), placed with the other extractor helpers in toolregistry.go.
+NOTES (2026-11-12): TestTargetlessBlockStillCapsAndToggles now uses a git_diff_range call sent without its refs (a registered call with no target) and asserts the empty Target up front; the new driven test is TestGitStatusGroupsAndCounts (toolblock_test.go), pinning the umbrella collapsed, with git_status' type row open, and with its member open.
+NOTES (2026-11-12): TestToolStat and toolsummary_pin_test.go asserted nothing of the targetless shape, so neither changed (toolsummary_pin_test.go stays unedited); TestGitStatusReportSurvivesItsTypedSummary gained a Target == "working tree" assertion.
+NOTES (2026-11-12): tool-layout.md gains a dated 2026-11-12 note under the table beside the row change, in the shape of its earlier dated row notes.
 
 **What:** fixes `git-status-never-groups`: `groupable` (`internal/tui/toolbranch.go`) requires a Target and `git_status` had none.
 **Goal:** a `git_status` call's Target is `working tree`; a run of read_file, grep, git_status and git_log calls renders as one Tools umbrella of four member rows counting all four; an expanded git_status member still shows the branch and the staged / unstaged / untracked report.

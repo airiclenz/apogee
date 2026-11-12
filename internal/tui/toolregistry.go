@@ -466,10 +466,14 @@ var toolRegistry = map[string]toolPresenter{
 		body:    gitDiffRangeBody,    // that same plain floor, kept beneath the row on the typed path
 		regions: gitDiffRangeRegions, // git's own diff, cut into numbered regions file by file
 	},
+	// git_status takes no arguments — the working tree IS what it reads — so its target is that
+	// fixed phrase (workingTreeTarget). It cannot be the branch: the row is drawn while the call
+	// runs, and the branch is only known from the result. A target is what lets the call join a
+	// grouped Tools block like any other read (groupable).
 	"git_status": {
-		label: "Git Status",
-		verb:  "checking",
-		// No target: the tool takes no arguments — the repository IS the target.
+		label:  "Git Status",
+		verb:   "checking",
+		target: workingTreeTarget,
 		detail: outputDetail, // floor: the branch line plus the staged/unstaged/untracked sections
 		stat:   changedFilesStat,
 		body:   gitStatusBody, // that same report, kept beneath the row on the typed path
@@ -562,10 +566,10 @@ var toolRegistry = map[string]toolPresenter{
 		detail: firstLineDetail,
 	},
 	// task_list is the model's own checklist, held as engine session state (ADR 0072). No target:
-	// its one argument IS the list, so the list is the target — the same reason git_status carries
-	// none — and the rendered list the tool echoes back is both the branch row and the body under
-	// it. No wireDropped either: the tasks array is the call's whole point, and repeating it
-	// above the result it produced would say the same thing twice; the session record keeps it.
+	// its one argument IS the list, so the list is the target, and the rendered list the tool
+	// echoes back is both the branch row and the body under it. No wireDropped either: the tasks
+	// array is the call's whole point, and repeating it above the result it produced would say the
+	// same thing twice; the session record keeps it.
 	"task_list": {
 		label:             "Tasks",
 		verb:              "updating the task list",
@@ -1532,6 +1536,16 @@ func stringArg(key string) func(map[string]any) string {
 		}
 		return ""
 	}
+}
+
+// workingTreeTargetText is git_status' target: the tool reads the workspace's working tree and
+// takes no argument naming it.
+const workingTreeTargetText = "working tree"
+
+// workingTreeTarget is git_status' target extractor: the fixed workingTreeTargetText, whatever
+// the arguments, so the row has a target before its result lands.
+func workingTreeTarget(map[string]any) string {
+	return workingTreeTargetText
 }
 
 // firstLineArg returns a target extractor for a possibly multi-line string argument (a

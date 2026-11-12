@@ -804,27 +804,31 @@ func TestSplitDiffPaintsUnderAnOpenMembersGutter(t *testing.T) {
 }
 
 // TestTargetlessBlockStillCapsAndToggles is the regression half of the header-fold call (plan
-// "2026-09-14 - 00", item 2): the mark is ONE tool's, so a targetless block without it — git_status,
-// whose report is the same shape of free-form output — still spends the collapsed budget: its
-// branch list is cut at collapsedBodyCap, its header wears the ▶ that says there is more, every row
-// of it is a click target, and a click opens it onto the whole report.
+// "2026-09-14 - 00", item 2): the mark is ONE tool's, so a targetless block without it still spends
+// the collapsed budget: its branch list is cut at collapsedBodyCap, its header wears the ▶ that says
+// there is more, every row of it is a click target, and a click opens it onto the whole output.
+// The example is a git_diff_range call that arrived without its refs — a registered call with no
+// target, whose output is free-form lines like any command's.
 func TestTargetlessBlockStillCapsAndToggles(t *testing.T) {
 	t.Parallel()
 
-	const report = "On branch main\n\nStaged (2):\n  a.go\n  b.go\n\nUntracked (1):\n  c.go"
+	const output = "warning: no refs given\n\nfirst line\nsecond line\nthird line\nfourth line"
 	tr := &transcript{}
-	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "git_status", Arguments: []byte(`{}`)}})
-	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: report}})
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "git_diff_range", Arguments: []byte(`{}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: output}})
 
+	if tr.entries[0].tool.Target != "" {
+		t.Fatalf("target = %q; the example must be a call with no target", tr.entries[0].tool.Target)
+	}
 	if tr.entries[0].tool.collapsesToHeader {
-		t.Fatal("git_status carries the header-fold mark; it is task_list's alone")
+		t.Fatal("git_diff_range carries the header-fold mark; it is task_list's alone")
 	}
 	collapsed := strings.Split(renderPlain(tr, 80), "\n")
 	if want := 1 + collapsedBodyCap; len(collapsed) != want {
 		t.Errorf("the collapsed block stands %d rows tall, want the budget's %d:\n%s",
 			len(collapsed), want, strings.Join(collapsed, "\n"))
 	}
-	if want := "✦ Git Status " + defaultGlyphs.collapsed; collapsed[0] != want {
+	if want := "✦ Git Diff " + defaultGlyphs.collapsed; collapsed[0] != want {
 		t.Errorf("header = %q, want %q — a capped targetless block says there is more on its header", collapsed[0], want)
 	}
 	marks := blockMarks(t, tr, 80)
@@ -833,14 +837,113 @@ func TestTargetlessBlockStillCapsAndToggles(t *testing.T) {
 	}
 
 	if !tr.toggleExpanded(0) {
-		t.Fatal("toggleExpanded(0) = false; want the git_status block to open")
+		t.Fatal("toggleExpanded(0) = false; want the targetless block to open")
 	}
 	expanded := renderPlain(tr, 80)
-	for _, ln := range []string{"Staged (2):", "Untracked (1):", "c.go"} {
+	for _, ln := range []string{"warning: no refs given", "third line", "fourth line"} {
 		if !strings.Contains(expanded, ln) {
-			t.Errorf("the open block:\n%s\nwant it to paint %q — the whole report", expanded, ln)
+			t.Errorf("the open block:\n%s\nwant it to paint %q — the whole output", expanded, ln)
 		}
 	}
+}
+
+// TestGitStatusGroupsAndCounts pins git_status inside a grouped Tools block (issue
+// git-status-never-groups): its target is the fixed words "working tree", so a run of read_file,
+// grep, git_status and git_log calls is ONE umbrella counting all four, git_status a member row
+// like the rest, and that member opened still shows the branch and the staged / unstaged /
+// untracked report beneath it.
+func TestGitStatusGroupsAndCounts(t *testing.T) {
+	t.Parallel()
+
+	const (
+		width        = 80
+		statusHead   = 2
+		statusReport = "On branch main\n\nStaged (1):\n  a.go\n\nUnstaged (1):\n  b.go\n\nUntracked (1):\n  c.go"
+	)
+	build := func(t *testing.T) *transcript {
+		t.Helper()
+		tr := &transcript{}
+		readCall(tr, "c1", "a.go", 1, 5, 0)
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "grep", Arguments: []byte(`{"pattern":"TODO"}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "a.go:3: // TODO"}})
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c3", Tool: "git_status", Arguments: []byte(`{}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c3", Content: statusReport,
+			Summary: domain.ChangedFiles{Staged: 1, Unstaged: 1, Untracked: 1}}})
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c4", Tool: "git_log", Arguments: []byte(`{}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c4", Content: "6fd6ff7 feat: x"}})
+		return tr
+	}
+
+	header := umbrellaHeaderRow("1 Read, 1 Grep, 1 Git Status, 1 Git Log", glyphExpanded)
+	readRow := groupMemberLine("  ┝ Read ⋯ 5 lines")
+	grepRow := groupMemberLine("  ┝ Grep ⋯ a.go:3: // TODO")
+	logRow := groupMemberLine("  ┕ Git Log ⋯ 6fd6ff7 feat: x")
+
+	t.Run("collapsed: one umbrella counting all four", func(t *testing.T) {
+		t.Parallel()
+
+		want := strings.Join([]string{
+			header,
+			readRow,
+			grepRow,
+			groupMemberLine("  ┝ Git Status ⋯ 3 changed"),
+			logRow,
+		}, "\n")
+		if got := renderPlain(build(t), width); got != want {
+			t.Errorf("collapsed umbrella mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("type row open: git_status a member led by its target", func(t *testing.T) {
+		t.Parallel()
+
+		tr := build(t)
+		if !tr.setTypeExpanded(statusHead, true) {
+			t.Fatalf("setTypeExpanded(%d, true) = false; want git_status' type row inside the umbrella", statusHead)
+		}
+		want := strings.Join([]string{
+			header,
+			readRow,
+			grepRow,
+			leaderEdgeRow("  ┝ Git Status ⋯ 3 changed", glyphExpanded),
+			groupMemberLine("  │ ┕ working tree ⋯ 3 changed"),
+			logRow,
+		}, "\n")
+		if got := renderPlain(tr, width); got != want {
+			t.Errorf("open type row mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("member open: the branch and the report beneath it", func(t *testing.T) {
+		t.Parallel()
+
+		tr := build(t)
+		if !tr.setTypeExpanded(statusHead, true) || !tr.setExpanded(statusHead, true) {
+			t.Fatalf("setTypeExpanded/setExpanded(%d, true) = false; want the git_status member open", statusHead)
+		}
+		want := strings.Join([]string{
+			header,
+			readRow,
+			grepRow,
+			leaderEdgeRow("  ┝ Git Status ⋯ 3 changed", glyphExpanded),
+			leaderEdgeRow("  │ ┕ working tree ⋯ 3 changed", glyphExpanded),
+			"  │ │ On branch main",
+			"  │ │",
+			"  │ │ Staged (1):",
+			"  │ │   a.go",
+			"  │ │",
+			"  │ │ Unstaged (1):",
+			"  │ │   b.go",
+			"  │ │",
+			"  │ │ Untracked (1):",
+			"  │ │   c.go",
+			memberEdgeRow(t, "  │ │ ", promptSeeLess, width),
+			logRow,
+		}, "\n")
+		if got := renderPlain(tr, width); got != want {
+			t.Errorf("open member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
 }
 
 // The umbrella's header says how its calls divide by tool kind, on a leader row of its own (the

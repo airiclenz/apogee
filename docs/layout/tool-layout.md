@@ -445,7 +445,7 @@ its body whole while collapsed, and it appears only when the two differ.
 | console_read | Console Read | `console N` | `alive` / `exit N` / `killed` | the output since the last read |
 | console_close | Console Close | `console N` | `exit N` / `killed` | the unread tail |
 | run_tests | Tests | path (`· filter` when set) | `PASS` / `FAIL` | runner summary + failing tests |
-| git_status | Git Status | — | `N changed` | changed-file list |
+| git_status | Git Status | `working tree` | `N changed` | changed-file list |
 | git_log | Git Log | ref | `N commits` | one line per commit |
 | git_show | Git Show | path (`:12–80` when ranged) `@ ref` (`· locate "…"` when set) | `N lines` | the located lines (`Located "…" on lines: …`) when locate is set, else — |
 | git_branch | Git Branch | action + branch name | — | command output |
@@ -508,6 +508,12 @@ Notes:
   `sub_agent` and never joins a list; its card paints the Workflow's item
   rows (`workflowblock.go`), and its fold hides the card's own body, never
   those rows.
+- **2026-11-12** — the `git_status` row's target is the fixed words
+  `working tree` (it was `—`). The tool takes no arguments, and the branch is
+  only known from the result, so a fixed phrase is the target the row can
+  carry while the call runs. Having one is what lets it join a grouped Tools
+  block and count there like any other read; its report stays behind the
+  member row's own indicator.
 - git_commit never promotes its one-line output into the slot at any width: the
   line repeats the subject the row already leads with, so the slot holds the
   short hash above and the line lays out in the body.
