@@ -601,14 +601,14 @@ const (
 	projectConfigWorkspace = "/work/proj"
 )
 
-// projectConfigGuard is the shipped floor plus the Project config's refusal for root and
-// workspace — the guard internal/agent builds for a session with a Project root.
-func projectConfigGuard(t *testing.T, root, workspace string) *DangerousActionGuard {
+// projectConfigGuard is the shipped floor plus the Project config's refusal for paths — the guard
+// internal/agent builds for a session with a Project root.
+func projectConfigGuard(t *testing.T, paths ProjectRootPaths) *DangerousActionGuard {
 	t.Helper()
 
-	rule, ok := ProjectConfigRule(root, workspace)
+	rule, ok := ProjectConfigRule(paths)
 	if !ok {
-		t.Fatalf("ProjectConfigRule(%q, %q) built no rule", root, workspace)
+		t.Fatalf("ProjectConfigRule(%+v) built no rule", paths)
 	}
 	return NewDangerousActionGuard(append(DefaultDangerousRules(), rule))
 }
@@ -619,7 +619,7 @@ func projectConfigGuard(t *testing.T, root, workspace string) *DangerousActionGu
 // moving or replacing `.apogee` itself is too.
 func TestProjectConfigControlPlaneIsRefused(t *testing.T) {
 	t.Parallel()
-	g := projectConfigGuard(t, projectConfigRoot, projectConfigWorkspace)
+	g := projectConfigGuard(t, ProjectRootPaths{Root: projectConfigRoot, Workspace: projectConfigWorkspace})
 	fileTool := stubTool{name: "write_file", payloadKeys: []string{"content"}}
 
 	cases := []struct {
@@ -681,7 +681,7 @@ func TestProjectConfigControlPlaneIsRefused(t *testing.T) {
 // `~/.apogee/config.yaml` keeps the forced look ADR 0049 §4 asks — never this refusal.
 func TestProjectConfigControlPlaneLeavesTheRestAlone(t *testing.T) {
 	t.Parallel()
-	g := projectConfigGuard(t, projectConfigRoot, projectConfigWorkspace)
+	g := projectConfigGuard(t, ProjectRootPaths{Root: projectConfigRoot, Workspace: projectConfigWorkspace})
 	fileTool := stubTool{name: "write_file", payloadKeys: []string{"content"}}
 	gitCommit := stubTool{name: "git_commit", payloadKeys: []string{"message"}}
 
@@ -729,7 +729,7 @@ func TestProjectConfigControlPlaneLeavesTheRestAlone(t *testing.T) {
 // root is matched as the guard's normalized text spells it, case folded.
 func TestProjectConfigControlPlaneSpellsTheRootFromTheWorkspace(t *testing.T) {
 	t.Parallel()
-	g := projectConfigGuard(t, "/Work/Proj", "/Work/Proj/sub")
+	g := projectConfigGuard(t, ProjectRootPaths{Root: "/Work/Proj", Workspace: "/Work/Proj/sub"})
 
 	cases := []struct {
 		name     string
@@ -755,11 +755,61 @@ func TestProjectConfigControlPlaneSpellsTheRootFromTheWorkspace(t *testing.T) {
 	}
 }
 
+// TestProjectConfigControlPlaneSpellsALinkedRoot pins the root's two spellings under a link or
+// junction: with the workspace reached through a linked prefix, the config is refused through the
+// resolved root, the root as the workspace spells it, and the `../` climb from either — while a
+// workspace that is itself a link (no linked root: its climb lands on the link's parent) still
+// refuses the resolved climb, and the home config, absolute or `~`-led, keeps its forced look.
+func TestProjectConfigControlPlaneSpellsALinkedRoot(t *testing.T) {
+	t.Parallel()
+	linkedPrefix := projectConfigGuard(t, ProjectRootPaths{
+		Root:          "/real/proj",
+		LinkedRoot:    "/link/proj",
+		Workspace:     "/link/proj/sub",
+		RealWorkspace: "/real/proj/sub",
+	})
+	linkedWorkspace := projectConfigGuard(t, ProjectRootPaths{
+		Root:          "/home/u/real/proj",
+		Workspace:     "/home/u/ws",
+		RealWorkspace: "/home/u/real/proj/sub",
+	})
+	fileTool := stubTool{name: "write_file", payloadKeys: []string{"content"}}
+
+	cases := []struct {
+		name     string
+		guard    *DangerousActionGuard
+		path     string
+		wantTier Tier
+		wantRule string
+	}{
+		{"the resolved root", linkedPrefix, "/real/proj/.apogee/config.yaml", TierHardRefuse, ProjectConfigRuleID},
+		{"the root as the workspace spells it", linkedPrefix, "/link/proj/.apogee/config.yaml", TierHardRefuse, ProjectConfigRuleID},
+		{"the climb to the root", linkedPrefix, "../.apogee/config.yaml", TierHardRefuse, ProjectConfigRuleID},
+		{"the climb, dot-led", linkedPrefix, "./../.apogee/config.yaml", TierHardRefuse, ProjectConfigRuleID},
+		{"the workspace's own folder", linkedPrefix, ".apogee/config.yaml", TierNone, ""},
+		{"a linked workspace's resolved climb", linkedWorkspace, "../.apogee/config.yaml", TierHardRefuse, ProjectConfigRuleID},
+		{"a linked workspace's home config keeps its look", linkedWorkspace, "~/.apogee/config.yaml", TierForceApproval, "write-apogee-control-plane"},
+		{"a linked workspace's absolute home config keeps its look", linkedWorkspace, "/home/u/.apogee/config.yaml", TierForceApproval, "write-apogee-control-plane"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := tc.guard.Inspect(writeCall(tc.path), fileTool, nil)
+
+			if d.Tier != tc.wantTier || d.RuleID != tc.wantRule {
+				t.Errorf("Inspect(%q) = tier %d rule %q; want tier %d rule %q", tc.path, d.Tier, d.RuleID, tc.wantTier, tc.wantRule)
+			}
+		})
+	}
+}
+
 // TestProjectConfigControlPlaneNeedsAProjectRoot pins the empty-root half: no Project root, no rule.
 func TestProjectConfigControlPlaneNeedsAProjectRoot(t *testing.T) {
 	t.Parallel()
 
-	if rule, ok := ProjectConfigRule("", projectConfigWorkspace); ok {
+	if rule, ok := ProjectConfigRule(ProjectRootPaths{Workspace: projectConfigWorkspace}); ok {
 		t.Errorf("ProjectConfigRule with no root built %+v; want no rule", rule)
 	}
 }

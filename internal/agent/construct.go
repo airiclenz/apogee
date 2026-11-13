@@ -14,6 +14,7 @@ import (
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/gitexec"
+	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -280,16 +281,51 @@ func guardsFor(cfg domain.Config) security.Guards {
 	return guards
 }
 
-// projectConfigRule is security.ProjectConfigRule for cfg's Project root and workspace — none when
-// there is no Project root, and none when the Project config IS the global config file under
-// another name (the root's `.apogee/` is the apogee home or links to it, or its `config.yaml` links
-// to the global one): that file keeps the forced look `write-apogee-control-plane` asks, the same
-// skip the host's layered load makes so the global file is never layered over itself.
+// projectConfigRule is security.ProjectConfigRule for cfg's Project root and workspace, in every
+// spelling projectRootPaths finds for them — none when there is no Project root, and none when the
+// Project config IS the global config file under another name (the root's `.apogee/` is the apogee
+// home or links to it, or its `config.yaml` links to the global one): that file keeps the forced
+// look `write-apogee-control-plane` asks, the same skip the host's layered load makes so the global
+// file is never layered over itself.
 func projectConfigRule(cfg domain.Config) (security.Rule, bool) {
 	if isGlobalConfigFile(cfg.ProjectRoot, cfg.ConfigDir) {
 		return security.Rule{}, false
 	}
-	return security.ProjectConfigRule(cfg.ProjectRoot, cfg.WorkspaceDir)
+	return security.ProjectConfigRule(projectRootPaths(cfg.ProjectRoot, cfg.WorkspaceDir))
+}
+
+// projectRootPaths spells the symlink-resolved Project root root and the workspace as the session
+// names it, for the guard that reads no disk: the workspace resolved through a link or junction
+// (platform.RealPath) when that differs, and the root spelled through the workspace's own
+// unresolved prefix — the folder the workspace climbs to as many levels as its resolved form climbs
+// to root — kept only when the file system resolves it to root. A workspace that is itself a link
+// climbs to some other folder (its link's parent), which keeps no spelling, so a home above it is
+// never mistaken for the Project root. A workspace that cannot be resolved adds no spelling.
+func projectRootPaths(root, workspace string) security.ProjectRootPaths {
+	paths := security.ProjectRootPaths{Root: root, Workspace: workspace}
+	if root == "" || workspace == "" {
+		return paths
+	}
+	realWorkspace, err := platform.RealPath(workspace)
+	if err != nil || realWorkspace == workspace {
+		return paths
+	}
+	paths.RealWorkspace = realWorkspace
+	linked := workspace
+	for realWorkspace != root {
+		parent := filepath.Dir(realWorkspace)
+		if parent == realWorkspace {
+			return paths
+		}
+		realWorkspace, linked = parent, filepath.Dir(linked)
+	}
+	if linked == root {
+		return paths
+	}
+	if resolved, err := platform.RealPath(linked); err == nil && resolved == root {
+		paths.LinkedRoot = linked
+	}
+	return paths
 }
 
 // projectConfigDirName and configFileName spell where a config file lives under a Project root

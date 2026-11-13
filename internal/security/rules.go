@@ -3,6 +3,7 @@ package security
 import (
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -283,9 +284,9 @@ func DefaultDangerousRules() []Rule {
 const ProjectConfigRuleID = "write-project-config"
 
 // ProjectConfigRule builds the Tier-1 refusal that keeps the tools off the Project config (ADR 0096
-// §5): writing, moving or deleting `<projectRoot>/.apogee/config.yaml`, and deleting, moving or
-// replacing `<projectRoot>/.apogee` itself, is refused in every mode without a look. ok is false —
-// no rule — when projectRoot is empty: a workspace that is the user's home resolves to no Project
+// §5): writing, moving or deleting `<paths.Root>/.apogee/config.yaml`, and deleting, moving or
+// replacing `<paths.Root>/.apogee` itself, is refused in every mode without a look. ok is false —
+// no rule — when paths.Root is empty: a workspace that is the user's home resolves to no Project
 // root, and the home's `~/.apogee` stays the forced look `write-apogee-control-plane` asks
 // (ADR 0049 §4), never a boundary. The host also builds none when the Project config IS the global
 // config file; that symlink question is the caller's, since this package reads no disk for it.
@@ -293,19 +294,21 @@ const ProjectConfigRuleID = "write-project-config"
 // The pattern is built from the absolute root rather than spelled once, because RE2 has no
 // lookbehind and a static `\.apogee/config\.yaml` would capture `~/.apogee` too. It matches a
 // whole token (whitespace on both sides, an optional trailing `/`) spelled from the absolute root
-// or, relative to workspaceDir, bare or `./`-led when the root is the workspace and as the `../`
+// — resolved, and through the workspace's own link or junction when paths.LinkedRoot names it —
+// or, relative to the workspace, bare or `./`-led when the root is the workspace and as the `../`
 // chain that climbs to it when the root is above (the Project root is the workspace or one of its
-// ancestors) — so a nested repository's own `vendor/x/.apogee/config.yaml` and `.apogee/skills/`
-// never match. The rule reads the project-config write view (Rule.ProjectConfigView): git
-// commands, git_commit's staged files and a cp's sources are not writes there, which is what keeps
-// `git add .apogee/config.yaml` and `cp .apogee/config.yaml bak.yaml` ordinary — the Adoption
-// fingerprint, not this refusal, is what guards the file's content, and the refusal is the
-// footgun layer over it (a python_exec line that opens the file is out of its reach).
-func ProjectConfigRule(projectRoot, workspaceDir string) (Rule, bool) {
-	if projectRoot == "" {
+// ancestors), that climb counted from the workspace as written and as resolved — so a nested
+// repository's own `vendor/x/.apogee/config.yaml` and `.apogee/skills/` never match. The rule
+// reads the project-config write view (Rule.ProjectConfigView): git commands, git_commit's staged
+// files and a cp's sources are not writes there, which is what keeps `git add .apogee/config.yaml`
+// and `cp .apogee/config.yaml bak.yaml` ordinary — the Adoption fingerprint, not this refusal, is
+// what guards the file's content, and the refusal is the footgun layer over it (a python_exec line
+// that opens the file is out of its reach).
+func ProjectConfigRule(paths ProjectRootPaths) (Rule, bool) {
+	if paths.Root == "" {
 		return Rule{}, false
 	}
-	pattern := `(?:^|\s)(?:` + strings.Join(projectRootSpellings(projectRoot, workspaceDir), "|") +
+	pattern := `(?:^|\s)(?:` + strings.Join(projectRootSpellings(paths), "|") +
 		`)\.apogee(?:/config\.yaml)?/?(?:\s|$)`
 	return Rule{
 		ID:     ProjectConfigRuleID,
@@ -319,29 +322,74 @@ func ProjectConfigRule(projectRoot, workspaceDir string) (Rule, bool) {
 	}, true
 }
 
+// ProjectRootPaths is a Project root and the workspace it is judged from, in every spelling a tool
+// call may name them by. The host fills it — this package reads no disk — so the spellings that
+// only the file system can vouch for (a link or junction on the way to the workspace) arrive here
+// already checked.
+type ProjectRootPaths struct {
+	// Root is the Project root, symlink-resolved; empty is no Project root.
+	Root string
+	// LinkedRoot is Root spelled through the workspace's own unresolved prefix — the folder the
+	// workspace's spelling climbs to — when that differs from Root and resolves to it; empty
+	// otherwise.
+	LinkedRoot string
+	// Workspace is the workspace as the session spells it; empty is no relative spelling.
+	Workspace string
+	// RealWorkspace is Workspace symlink-resolved, when that differs from Workspace; empty
+	// otherwise.
+	RealWorkspace string
+}
+
 // projectRootSpellings returns the regexp prefixes, each ending in `/` (or empty, for the bare
-// relative spelling), a path under projectRoot may be written with in the normalized text the guard
-// inspects: the absolute root, and the relative spellings from workspaceDir when it is the root or
-// below it.
-func projectRootSpellings(projectRoot, workspaceDir string) []string {
-	spellings := []string{regexp.QuoteMeta(strings.TrimRight(normalize(projectRoot), "/")) + "/"}
-	if workspaceDir == "" {
-		return spellings
+// relative spelling), a path under the Project root may be written with in the normalized text the
+// guard inspects: the absolute root in each of its spellings, and the relative spellings from the
+// workspace — as written and as resolved — when it is the root or below it. A duplicate spelling is
+// listed once.
+func projectRootSpellings(paths ProjectRootPaths) []string {
+	var spellings []string
+	add := func(prefixes ...string) {
+		for _, prefix := range prefixes {
+			if !slices.Contains(spellings, prefix) {
+				spellings = append(spellings, prefix)
+			}
+		}
 	}
-	rel, err := filepath.Rel(workspaceDir, projectRoot)
+	for _, root := range []string{paths.Root, paths.LinkedRoot} {
+		if root != "" {
+			add(regexp.QuoteMeta(strings.TrimRight(normalize(root), "/")) + "/")
+		}
+	}
+	climbs := []struct{ from, to string }{
+		{paths.Workspace, paths.Root},
+		{paths.Workspace, paths.LinkedRoot},
+		{paths.RealWorkspace, paths.Root},
+	}
+	for _, c := range climbs {
+		if c.from != "" && c.to != "" {
+			add(relativeRootSpellings(c.from, c.to)...)
+		}
+	}
+	return spellings
+}
+
+// relativeRootSpellings returns the relative prefixes that name root from workspace: bare and
+// `./`-led when they are the same folder, the `../` chain and its `./`-led form when root is an
+// ancestor of workspace, and none otherwise.
+func relativeRootSpellings(workspace, root string) []string {
+	rel, err := filepath.Rel(workspace, root)
 	if err != nil {
-		return spellings
+		return nil
 	}
 	if rel == "." {
-		return append(spellings, "", `\./`)
+		return []string{"", `\./`}
 	}
 	for _, segment := range strings.Split(rel, string(filepath.Separator)) {
 		if segment != ".." {
-			return spellings
+			return nil
 		}
 	}
 	climb := regexp.QuoteMeta(filepath.ToSlash(rel)) + "/"
-	return append(spellings, climb, `\./`+climb)
+	return []string{climb, `\./` + climb}
 }
 
 // MergeDangerousRules is the config-merge seam ADR 0012 fixes, fed by the `dangerous-rules:` key

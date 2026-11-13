@@ -3513,6 +3513,67 @@ func TestProjectConfigControlPlaneJudgesTheRealTools(t *testing.T) {
 	}
 }
 
+// TestProjectConfigControlPlaneGuardsALinkedRoot drives the refusal through a real symbolic link:
+// with the workspace reached through a linked prefix (the Project root resolved, the workspace as
+// the session spells it), write_file at the config is refused through the resolved root, the root
+// as the workspace spells it and the `../` climb, as the write tool receives each path; and a
+// workspace that is itself a link refuses the climb while the home config above it keeps its look.
+func TestProjectConfigControlPlaneGuardsALinkedRoot(t *testing.T) {
+	t.Parallel()
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(base, "real", "proj")
+	realWorkspace := filepath.Join(root, "sub")
+	if err := os.MkdirAll(realWorkspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(base, "real"), filepath.Join(base, "link")); err != nil {
+		t.Skipf("no symbolic links here: %v", err)
+	}
+	if err := os.Symlink(realWorkspace, filepath.Join(base, "ws")); err != nil {
+		t.Fatal(err)
+	}
+	linkedPrefix := filepath.Join(base, "link", "proj", "sub")
+	linkedWorkspace := filepath.Join(base, "ws")
+
+	cases := []struct {
+		name      string
+		workspace string
+		path      string
+		wantRule  string
+	}{
+		{"the resolved root", linkedPrefix, filepath.Join(root, ".apogee", "config.yaml"), security.ProjectConfigRuleID},
+		{"the root as the workspace spells it", linkedPrefix, filepath.Join(base, "link", "proj", ".apogee", "config.yaml"), security.ProjectConfigRuleID},
+		{"the climb to the root", linkedPrefix, "../.apogee/config.yaml", security.ProjectConfigRuleID},
+		{"the climb, dot-led", linkedPrefix, "./../.apogee/config.yaml", security.ProjectConfigRuleID},
+		{"the workspace's own folder", linkedPrefix, ".apogee/config.yaml", ""},
+		{"a linked workspace's resolved climb", linkedWorkspace, "../.apogee/config.yaml", security.ProjectConfigRuleID},
+		{"a linked workspace's home config keeps its look", linkedWorkspace, "~/.apogee/config.yaml", "write-apogee-control-plane"},
+		{"the folder above a linked workspace is not the root", linkedWorkspace, filepath.Join(base, ".apogee", "config.yaml"), ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			guard := guardsFor(domain.Config{ProjectRoot: root, WorkspaceDir: tc.workspace, ConfigDir: t.TempDir()}).Dangerous
+			tool := tools.NewWriteFile(tc.workspace)
+			args, err := json.Marshal(map[string]string{"path": tc.path, "content": "allow: {}"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			call := domain.ToolCall{ID: "c1", Tool: tool.Name(), Arguments: args}
+
+			d := guard.Inspect(call, tool, nil)
+
+			if d.RuleID != tc.wantRule {
+				t.Errorf("Inspect(%q) = tier %d rule %q; want rule %q", tc.path, d.Tier, d.RuleID, tc.wantRule)
+			}
+		})
+	}
+}
+
 // TestProjectConfigControlPlaneIsBuiltOnlyForAProjectConfig pins when the engine builds no refusal:
 // no Project root, a Project root whose `.apogee/` links to the apogee home, and one whose
 // `config.yaml` links to the global config file — the last two are the global file under another

@@ -138,7 +138,13 @@ NOTES (2026-11-13): the two Linux stat-error cases (unreadable `.apogee/`, non-d
 **Commit:** `fix(config): read the project layer under a junction and announce an unreadable one`
 Depends on items 1, 3.
 
-## 5. Tier-1 project-config guard covers both root spellings
+## 5. Tier-1 project-config guard covers both root spellings — ✅ DONE (2026-11-13)
+
+NOTES (2026-11-13): `ProjectConfigRule(projectRoot, workspaceDir)` became `ProjectConfigRule(security.ProjectRootPaths)` (Root, LinkedRoot, Workspace, RealWorkspace); `internal/agent/construct.go` `projectRootPaths` fills it with `platform.RealPath`, walking the resolved workspace and its written spelling up in step to the root and keeping the linked root only when it resolves to the root.
+
+NOTES (2026-11-13): internal/agent/dispatch_test.go (not in **Files:**) carries the real-symlink case, `TestProjectConfigControlPlaneGuardsALinkedRoot`, since the disk resolution lives in internal/agent; it skips where symbolic links cannot be made.
+
+NOTES (2026-11-13): from a workspace that is itself a link, `../.apogee/config.yaml` is refused through the resolved climb even though the same text, joined lexically, names the folder above the link — the Tier-1 side errs strict there, per the plan's resolved-climb instruction.
 
 **What:**
 **Goal:** a write to `.apogee/config.yaml` through the workspace's own (link or junction) spelling of a Project root above the workspace is refused by the Tier-1 project-config rule, as a write through the resolved spelling already is.
