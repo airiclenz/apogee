@@ -162,6 +162,8 @@ func writeSettingsFixture(t *testing.T, path, body string) {
 type fakeMCPSession struct {
 	tools   []apogee.Tool
 	skipped []mcp.Denied
+	// truncated is what the session's discovery cut short, as *mcp.Client.Truncated reports it.
+	truncated []mcp.Truncation
 	// closeGate, when set, holds Close until it is closed: a server slow to shut down.
 	closeGate chan struct{}
 
@@ -209,8 +211,9 @@ func (f *fakeMCPSession) lostChannel() chan struct{} {
 	return f.lost
 }
 
-func (f *fakeMCPSession) Tools() []apogee.Tool  { return f.tools }
-func (f *fakeMCPSession) Skipped() []mcp.Denied { return f.skipped }
+func (f *fakeMCPSession) Tools() []apogee.Tool        { return f.tools }
+func (f *fakeMCPSession) Skipped() []mcp.Denied       { return f.skipped }
+func (f *fakeMCPSession) Truncated() []mcp.Truncation { return f.truncated }
 
 // Retire records that the session's tools were switched off.
 func (f *fakeMCPSession) Retire() {

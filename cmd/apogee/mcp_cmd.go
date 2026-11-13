@@ -480,7 +480,9 @@ func findMCPServer(servers []mcp.ServerConfig, name string) (mcp.ServerConfig, b
 // a server whose dial still fails for want of a login (a refresh the authorization server rejected)
 // is offered one and dialled again — at most once per server, so the loop always ends. Each offer
 // asks on stderr while it is still a safe place to write: declined, or with stdin not a terminal, the
-// launch aborts with the error naming `apogee mcp login <name>`. A repo server the connect skipped
+// launch aborts with the error naming `apogee mcp login <name>`. A server whose tool list discovery
+// cut short connects as any other and is announced, naming each cause (announceTruncatedMCP). A repo
+// server the connect skipped
 // for a moved pin does not abort the launch and holds no entry: it is announced and the entry asked
 // about again (announceSkippedMCP), and the session starts on the rest of the set. Its failed state,
 // the skip's cause in it, is returned in the seed-only list, in config order, for the MCP holder to
@@ -526,6 +528,7 @@ func (w *rootWiring) connectMCPServers(ctx context.Context) ([]mcpEntry, []apoge
 			seed = append(seed, failed)
 			continue
 		}
+		w.announceTruncatedMCP(client.Truncated())
 		entries = append(entries, mcpEntry{config: server, session: client})
 	}
 	w.announceSkippedMCP(skipped)
@@ -552,6 +555,16 @@ func connectStartupServer(
 		return nil, err
 	}
 	return mcp.ConnectWith(ctx, host, servers, guard, workspace)
+}
+
+// announceTruncatedMCP says, as one startup notice per server, each server whose tool list the
+// startup connect's discovery cut short — at the page or tool cap, or by skipping a tool whose schema
+// is over the size cap — naming the server and each cause (mcpTruncatedClause). The server is
+// connected on the tools it did surface; a reload says the same as a clause on its landed note.
+func (w *rootWiring) announceTruncatedMCP(cut []mcp.Truncation) {
+	for _, t := range cut {
+		w.announce(tui.Notice{Text: "apogee: mcp server " + t.Name + " — " + mcpTruncatedClause(t), Loud: true})
+	}
 }
 
 // announceSkippedMCP says, as a startup notice, each repo server the startup connect skipped because

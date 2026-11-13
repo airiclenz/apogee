@@ -1011,7 +1011,7 @@ func (f *mcpFold) add(name string, result mcpDialResult, isAdmitted bool) {
 		}
 		f.next[name] = result.entry
 		f.needsSwap = true
-		f.outcomes = append(f.outcomes, mcpLanded(name, wasLive))
+		f.outcomes = append(f.outcomes, mcpLanded(name, wasLive, result.entry.session.Truncated()))
 	}
 }
 
@@ -1180,7 +1180,9 @@ func (m *liveMCP) installLocked(entries map[string]mcpEntry, order []string) {
 type mcpOutcome struct {
 	// note is `mcp <server> reconnected`, `mcp <server> connected`,
 	// `mcp reconnect failed: <server>: … — previous connection kept`, `mcp connect failed: <server>: …`
-	// or `mcp server <server> disconnected — its endpoint is denied`.
+	// or `mcp server <server> disconnected — its endpoint is denied`. A landed dial whose tool list
+	// discovery cut short carries `— tool list cut short: …` after its sentence (mcpLanded,
+	// adr-0109-amend-1113).
 	note string
 	// rowFailure is `<server>: …` for a failed dial, empty otherwise.
 	rowFailure string
@@ -1188,12 +1190,18 @@ type mcpOutcome struct {
 	err error
 }
 
-// mcpLanded is the outcome of a dial that answered: wasLive says whether it replaced a session.
-func mcpLanded(server string, wasLive bool) mcpOutcome {
+// mcpLanded is the outcome of a dial that answered: wasLive says whether it replaced a session, and
+// cut is what its discovery cut short (mcp.Client.Truncated), whose clause (mcpTruncatedClause)
+// follows the sentence so the reload says what the startup notice would have.
+func mcpLanded(server string, wasLive bool, cut []mcp.Truncation) mcpOutcome {
+	note := "mcp " + server + " connected"
 	if wasLive {
-		return mcpOutcome{note: "mcp " + server + " reconnected"}
+		note = "mcp " + server + " reconnected"
 	}
-	return mcpOutcome{note: "mcp " + server + " connected"}
+	for _, t := range cut {
+		note += " — " + mcpTruncatedClause(t)
+	}
+	return mcpOutcome{note: note}
 }
 
 // mcpFailed is the outcome of a dial that did not answer: wasLive says whether the server's old
@@ -1287,6 +1295,13 @@ func (e mcpRowError) Unwrap() []error {
 		causes = append(causes, outcome.err)
 	}
 	return causes
+}
+
+// mcpTruncatedClause is the clause for ONE server whose tool list discovery cut short: each cause in
+// internal/mcp's own words (mcp.Truncation.Causes), so the numbers are the caps that applied —
+// `tool list cut short: stopped at 512 tools, skipped 2 tools with a schema over 64 KiB`.
+func mcpTruncatedClause(t mcp.Truncation) string {
+	return "tool list cut short: " + strings.Join(t.Causes(), ", ")
 }
 
 // mcpSkipClause is the sentence for ONE repo server a connect skipped for a moved pin, worded from

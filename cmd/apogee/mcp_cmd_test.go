@@ -891,6 +891,69 @@ func TestStartupSkipsARepoServerWhosePinMoved(t *testing.T) {
 	}
 }
 
+// A server whose tool list the startup discovery cuts short — past the tool cap, with one tool
+// skipped for its schema — still connects on the tools it surfaced, and one loud startup notice names
+// the server and each cause.
+func TestStartupAnnouncesAnMCPToolListCutShort(t *testing.T) {
+	t.Parallel()
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "many", Version: "v0.0.1"}, nil)
+	handler := func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "ok"}}}, nil
+	}
+	// "fat" sorts before every "tool-NNN", so it is met before the tool cap stops discovery.
+	fatSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"text": map[string]any{"type": "string", "description": strings.Repeat("d", 65<<10)},
+		},
+	}
+	server.AddTool(&mcpsdk.Tool{Name: "fat", InputSchema: fatSchema}, handler)
+	for i := 0; i < 513; i++ {
+		server.AddTool(&mcpsdk.Tool{Name: fmt.Sprintf("tool-%03d", i), InputSchema: map[string]any{"type": "object"}}, handler)
+	}
+	srv := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
+	t.Cleanup(func() {
+		srv.CloseClientConnections()
+		srv.Close()
+	})
+	many := mcp.ServerConfig{Name: "many", Transport: mcp.TransportStreamableHTTP, Endpoint: srv.URL + "/mcp"}
+	w := startupWiring(t, testMCPLoginDeps(t, &scriptedInput{}, &bytes.Buffer{}, false), many)
+
+	err := w.wireSession(context.Background())
+
+	if err != nil {
+		t.Fatalf("wireSession: %v, want the launch to go on with the cut-short server connected", err)
+	}
+	if !hasMCPTool(w, "tool-000") {
+		t.Error("the cut-short server's surfaced tools are missing; it connects on the tools it surfaced")
+	}
+	want := "apogee: mcp server many — tool list cut short: stopped at 512 tools, skipped 1 tool with a schema over 64 KiB"
+	if len(w.startupNotices) != 1 || w.startupNotices[0].Text != want || !w.startupNotices[0].Loud {
+		t.Errorf("startup notices = %+v, want exactly one loud %q", w.startupNotices, want)
+	}
+}
+
+// A reconnect whose dial lands on a cut-short tool list says so on that server's own transcript
+// note, as a clause after the ADR 0109 sentence, naming each cause.
+func TestReconnectNotesAnMCPToolListCutShort(t *testing.T) {
+	t.Parallel()
+	fixture := newMCPFixtureWith(nil, "", func(servers []mcp.ServerConfig) (mcpSession, error) {
+		cut := []mcp.Truncation{{Name: servers[0].Name, IsPageCapped: true, OversizeSchemas: 2}}
+		return &fakeMCPSession{truncated: cut}, nil
+	})
+
+	outcomes, err := requestAndDrainMCP(t, fixture.set, []mcp.ServerConfig{stdioServer("docs", "docs-mcp")},
+		fixture.tools, &applySettingSpy{})
+
+	if err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+	want := []string{"mcp docs connected — tool list cut short: stopped at 64 pages, skipped 2 tools with a schema over 64 KiB"}
+	if got := outcomeNotes(outcomes); !slices.Equal(got, want) {
+		t.Errorf("notes = %q, want %q", got, want)
+	}
+}
+
 // A repo server whose pinned script cannot be read when the startup dial checks its pin is skipped
 // as a moved pin is, not fatal: the launch goes on with the global server connected, a startup
 // notice names the server and the failed check — never "proposed again", since the entry is not —

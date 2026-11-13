@@ -1358,7 +1358,7 @@ func TestListServerTools_CapsPagesAndTools(t *testing.T) {
 
 	t.Run("at most 512 tools, the oversize schema skipped", func(t *testing.T) {
 		t.Parallel()
-		tools := listFromInProcessServer(t, 10, addTools)
+		tools, cut := discoverFromInProcessServer(t, 10, addTools)
 
 		if len(tools) != maxMCPToolsPerServer {
 			t.Fatalf("surfaced %d tools; want the cap of %d", len(tools), maxMCPToolsPerServer)
@@ -1368,16 +1368,53 @@ func TestListServerTools_CapsPagesAndTools(t *testing.T) {
 				t.Errorf("the tool with a %d-byte schema was surfaced; want it skipped", 65<<10)
 			}
 		}
+		want := Truncation{Name: "many", IsToolCapped: true, OversizeSchemas: 1}
+		if cut != want {
+			t.Errorf("truncation = %+v, want %+v", cut, want)
+		}
+		wantCauses := []string{"stopped at 512 tools", "skipped 1 tool with a schema over 64 KiB"}
+		if got := cut.Causes(); !slices.Equal(got, wantCauses) {
+			t.Errorf("causes = %q, want %q", got, wantCauses)
+		}
 	})
 
 	t.Run("at most 64 pages", func(t *testing.T) {
 		t.Parallel()
-		tools := listFromInProcessServer(t, 1, addTools)
+		tools, cut := discoverFromInProcessServer(t, 1, addTools)
 
 		// 64 pages of one tool each, the first of them the skipped "fat", so the page cap
 		// shows as one tool fewer.
 		if want := maxMCPToolListPages - 1; len(tools) != want {
 			t.Fatalf("surfaced %d tools from one-tool pages; want %d (the page cap of %d, less the skipped tool)", len(tools), want, maxMCPToolListPages)
+		}
+		want := Truncation{Name: "many", IsPageCapped: true, OversizeSchemas: 1}
+		if cut != want {
+			t.Errorf("truncation = %+v, want %+v", cut, want)
+		}
+		wantCauses := []string{"stopped at 64 pages", "skipped 1 tool with a schema over 64 KiB"}
+		if got := cut.Causes(); !slices.Equal(got, wantCauses) {
+			t.Errorf("causes = %q, want %q", got, wantCauses)
+		}
+	})
+
+	t.Run("exactly 512 tools over exactly 64 full pages is not cut short", func(t *testing.T) {
+		t.Parallel()
+		// 512 tools at 8 a page: the last page asked for is full, so it meets both caps at once —
+		// and the server has nothing more to give.
+		tools, cut := discoverFromInProcessServer(t, maxMCPToolsPerServer/maxMCPToolListPages, func(server *mcpsdk.Server) {
+			handler := func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+				return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "ok"}}}, nil
+			}
+			for i := 0; i < maxMCPToolsPerServer; i++ {
+				server.AddTool(&mcpsdk.Tool{Name: fmt.Sprintf("tool-%03d", i), InputSchema: map[string]any{"type": "object"}}, handler)
+			}
+		})
+
+		if len(tools) != maxMCPToolsPerServer {
+			t.Fatalf("surfaced %d tools; want all %d", len(tools), maxMCPToolsPerServer)
+		}
+		if cut.IsCut() || len(cut.Causes()) != 0 {
+			t.Errorf("truncation = %+v (causes %q), want none for a list discovered whole", cut, cut.Causes())
 		}
 	})
 }
@@ -1409,6 +1446,14 @@ func TestListServerTools_ClipsOversizeDescription(t *testing.T) {
 // "many".
 func listFromInProcessServer(t *testing.T, pageSize int, addTools func(*mcpsdk.Server)) []domain.Tool {
 	t.Helper()
+	tools, _ := discoverFromInProcessServer(t, pageSize, addTools)
+	return tools
+}
+
+// discoverFromInProcessServer is listFromInProcessServer that also returns the Truncation
+// listServerTools reports, for a test about a list cut short.
+func discoverFromInProcessServer(t *testing.T, pageSize int, addTools func(*mcpsdk.Server)) ([]domain.Tool, Truncation) {
+	t.Helper()
 	ctx := context.Background()
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "many", Version: "v0.0.1"}, &mcpsdk.ServerOptions{PageSize: pageSize})
 	addTools(server)
@@ -1425,11 +1470,11 @@ func listFromInProcessServer(t *testing.T, pageSize int, addTools func(*mcpsdk.S
 	}
 	t.Cleanup(func() { _ = session.Close() })
 
-	tools, err := listServerTools(ctx, "many", false, nil, session, nil)
+	tools, cut, err := listServerTools(ctx, "many", false, nil, session, nil)
 	if err != nil {
 		t.Fatalf("listServerTools: %v", err)
 	}
-	return tools
+	return tools, cut
 }
 
 // findTool returns the surfaced tool with the given name, failing the test if it is absent —

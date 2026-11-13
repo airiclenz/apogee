@@ -262,7 +262,13 @@ NOTES (2026-11-13): the new test was confirmed to discriminate — with the Wait
 **Commit:** `fix(update): give the staged version check a slow-box backstop`
 **Closes:** update-version-check-deadline
 
-## 11. MCP discovery announces a cut-short tool list
+## 11. MCP discovery announces a cut-short tool list — ✅ DONE (2026-11-13)
+
+NOTES (2026-11-13): the clauses pluralise the schema skip: one tool reads `skipped 1 tool with a schema over 64 KiB`, more read `skipped <n> tools …`, as the Goal words it.
+
+NOTES (2026-11-13): the Truncation flags are named `IsPageCapped` / `IsToolCapped` (coding-standards boolean prefix), with `OversizeSchemas int`; the clauses are rendered by `mcp.Truncation.Causes` so the cap numbers come from the constants. The startup notice is `Loud`, like the pin-skip notice beside it.
+
+NOTES (2026-11-13): docs/manual/configuration.md is left to item 12, whose goal owns the MCP fixed-limits paragraph and quotes these clauses. Its per-server note list (~:931) does not yet mention the cut-short clause, and item 12 can fold that in.
 
 **What:**
 **Goal:** when tool discovery for one server stops at the page cap or tool cap, or skips tools whose schema exceeds the byte cap, the client reports it and apogee shows one startup/reload notice per server naming the server and each cause (`stopped at 64 pages`, `stopped at 512 tools`, `skipped <n> tools with a schema over 64 KiB`); discovery itself is unchanged.

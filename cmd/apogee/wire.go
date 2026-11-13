@@ -435,7 +435,8 @@ type settingsSkills interface {
 }
 
 // mcpSession is one server's connected-MCP surface liveMCP drives: the tools the server advertises,
-// whether the connect skipped it for a moved pin (reported as the server's failed dial), the switch
+// whether the connect skipped it for a moved pin (reported as the server's failed dial), whether its
+// discovery cut the tool list short (a clause on the server's landed note, mcpLanded), the switch
 // that refuses every one of its tools at once while the session stays open (Retire — a removal or a
 // deny takes effect on the keystroke, ADR 0109 decision 5), and the teardown that ends the connection,
 // run off the Update loop, and the signal that the connection ended on its own (Lost, closed once and
@@ -445,6 +446,7 @@ type settingsSkills interface {
 type mcpSession interface {
 	Tools() []apogee.Tool
 	Skipped() []mcp.Denied
+	Truncated() []mcp.Truncation
 	Retire()
 	Close() error
 	Lost() <-chan struct{}

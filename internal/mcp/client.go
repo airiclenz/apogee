@@ -47,6 +47,7 @@ type Client struct {
 	sessions []liveSession  // one per connected server, in config order
 	tools    []domain.Tool  // surfaced server tools, in (server, tool) order
 	skipped  []Denied       // Project servers left undialled for a moved pin, in config order
+	cut      []Truncation   // servers whose tool list discovery cut short, in config order
 	retired  atomic.Bool    // set by Retire (and Close); every surfaced tool reads it before a call
 	watchers sync.WaitGroup // one watch goroutine per tracked session; Close waits for them all
 	lost     lostSignal     // fires the first time a session ends while the Client is neither retired nor closed
@@ -315,11 +316,14 @@ func (c *Client) connectOne(ctx context.Context, host Host, cfg ServerConfig, gu
 	}
 	c.track(liveSession{session: session, cmd: cmd, td: td, cancel: cancel}, redactor)
 
-	tools, err := listServerTools(ctx, cfg.Name, cfg.Project, &c.retired, session, redactor)
+	tools, cut, err := listServerTools(ctx, cfg.Name, cfg.Project, &c.retired, session, redactor)
 	if err != nil {
 		return err
 	}
 	c.tools = append(c.tools, tools...)
+	if cut.IsCut() {
+		c.cut = append(c.cut, cut)
+	}
 	return nil
 }
 
@@ -383,9 +387,9 @@ func (c *Client) LostCause() error {
 // "an MCP server's response is read with no size cap" for discovery. A server that never ends
 // its cursor chain, advertises tools without end, or hands one tool a schema the size of a book
 // would otherwise grow the registry (and the model's tool menu) without bound. Past either list
-// cap discovery stops and the capped list is returned SILENTLY: Connect returns tools and errors,
-// and its one report path, Client.Skipped, carries whole servers left undialled for a moved pin —
-// there is no Client report or notice path to carry a "cut short" line. A surfaced
+// cap discovery stops and the capped list is returned; a list cut short — at either cap, or by a
+// tool skipped for its schema — is reported through Client.Truncated, which the host announces
+// naming the server and each cause (Truncation.Causes). A surfaced
 // tool's description is not a skip bound: newServerTool clips it at maxMCPToolDescriptionBytes
 // (tool.go).
 const (
@@ -398,11 +402,55 @@ const (
 	maxMCPToolSchemaBytes = 64 << 10
 )
 
+// Truncation is one server whose tool list discovery cut short: the alias its tools are surfaced
+// under and each cause. A cap counts only when the server had more to give: the tool cap when a
+// tool remained on the page or a further page was offered, the page cap when the last page asked
+// for still offered a cursor — so a server advertising exactly maxMCPToolsPerServer tools, or
+// exactly maxMCPToolListPages full pages, is not cut short.
+type Truncation struct {
+	// Name is the server's configured alias.
+	Name string
+	// IsPageCapped is set when discovery stopped at maxMCPToolListPages with a further page offered.
+	IsPageCapped bool
+	// IsToolCapped is set when discovery stopped at maxMCPToolsPerServer with a further tool offered.
+	IsToolCapped bool
+	// OversizeSchemas counts the tools skipped for a schema over maxMCPToolSchemaBytes.
+	OversizeSchemas int
+}
+
+// IsCut reports whether t names any cause: false for the zero report of a list discovered whole.
+func (t Truncation) IsCut() bool {
+	return t.IsPageCapped || t.IsToolCapped || t.OversizeSchemas > 0
+}
+
+// Causes returns each cause as the clause a notice prints, in the order page cap, tool cap,
+// skipped schemas: `stopped at 64 pages`, `stopped at 512 tools`,
+// `skipped <n> tools with a schema over 64 KiB` (`1 tool` in the singular). Empty when t is not cut.
+func (t Truncation) Causes() []string {
+	var causes []string
+	if t.IsPageCapped {
+		causes = append(causes, fmt.Sprintf("stopped at %d pages", maxMCPToolListPages))
+	}
+	if t.IsToolCapped {
+		causes = append(causes, fmt.Sprintf("stopped at %d tools", maxMCPToolsPerServer))
+	}
+	if t.OversizeSchemas > 0 {
+		noun := "tools"
+		if t.OversizeSchemas == 1 {
+			noun = "tool"
+		}
+		causes = append(causes, fmt.Sprintf("skipped %d %s with a schema over %d KiB",
+			t.OversizeSchemas, noun, maxMCPToolSchemaBytes>>10))
+	}
+	return causes
+}
+
 // listServerTools pages through a server's advertised tools and surfaces each as a serverTool
 // bound to the live session. It follows the SDK's cursor pagination so a server advertising more
 // than one page is fully discovered, up to maxMCPToolListPages pages and maxMCPToolsPerServer
 // tools. A tool with an empty name from the server is skipped (it could never be addressed)
 // rather than failing the whole server, and so is one whose schema exceeds maxMCPToolSchemaBytes.
+// The Truncation it returns says which of those bounds cut the list short (zero when none did).
 // redactor cuts the server's endpoint from a list error and is handed to every surfaced tool for
 // its own call errors; nil for stdio. project is the server's ServerConfig.Project, carried on every
 // surfaced tool for the Allow rule match. retired is the owning Client's retire switch, shared by
@@ -414,17 +462,18 @@ func listServerTools(
 	retired *atomic.Bool,
 	session *mcpsdk.ClientSession,
 	redactor *security.OriginRedactor,
-) ([]domain.Tool, error) {
+) ([]domain.Tool, Truncation, error) {
 	var (
 		out    []domain.Tool
 		cursor string
 	)
+	cut := Truncation{Name: serverAlias}
 	for page := 0; page < maxMCPToolListPages; page++ {
 		res, err := session.ListTools(ctx, &mcpsdk.ListToolsParams{Cursor: cursor})
 		if err != nil {
-			return nil, fmt.Errorf("mcp: list tools from server %q: %w", serverAlias, redactor.RedactErr(err))
+			return nil, Truncation{}, fmt.Errorf("mcp: list tools from server %q: %w", serverAlias, redactor.RedactErr(err))
 		}
-		for _, t := range res.Tools {
+		for i, t := range res.Tools {
 			if t == nil || strings.TrimSpace(t.Name) == "" {
 				continue
 			}
@@ -432,19 +481,23 @@ func listServerTools(
 			tool.project = project
 			tool.retired = retired
 			if len(tool.schema) > maxMCPToolSchemaBytes {
+				cut.OversizeSchemas++
 				continue
 			}
 			out = append(out, tool)
 			if len(out) == maxMCPToolsPerServer {
-				return out, nil
+				cut.IsToolCapped = i < len(res.Tools)-1 || res.NextCursor != ""
+				return out, cut, nil
 			}
 		}
 		if res.NextCursor == "" {
-			break
+			return out, cut, nil
 		}
 		cursor = res.NextCursor
 	}
-	return out, nil
+	// Every page asked for ended on a cursor: the server had another page to give.
+	cut.IsPageCapped = true
+	return out, cut, nil
 }
 
 // Tools returns the tools surfaced from every connected server, in (server, tool) discovery
@@ -471,6 +524,18 @@ func (c *Client) Skipped() []Denied {
 	}
 	out := make([]Denied, len(c.skipped))
 	copy(out, c.skipped)
+	return out
+}
+
+// Truncated returns the servers whose tool list this connect's discovery cut short — at the page or
+// tool cap, or by skipping a tool whose schema is over the size cap — each with its causes, in config
+// order. Empty when every server's list was discovered whole. The slice is a fresh copy, as Tools' is.
+func (c *Client) Truncated() []Truncation {
+	if c == nil || len(c.cut) == 0 {
+		return nil
+	}
+	out := make([]Truncation, len(c.cut))
+	copy(out, c.cut)
 	return out
 }
 

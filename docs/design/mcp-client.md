@@ -127,9 +127,16 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   `[mcp description truncated at 8192 bytes]` — a description within the cap is kept unchanged,
   and the empty-description stand-in is unaffected; `listServerTools` asks for at most
   `maxMCPToolListPages` (64) pages and surfaces at most `maxMCPToolsPerServer` (512) tools — past
-  either it stops and returns the capped list silently, `Connect` having no report path but tools
-  and errors — and skips a tool whose normalised schema exceeds `maxMCPToolSchemaBytes` (64 KiB)
-  as it skips one with no name.
+  either it stops and returns the capped list — and skips a tool whose normalised schema exceeds
+  `maxMCPToolSchemaBytes` (64 KiB) as it skips one with no name. A list cut short is reported, never
+  silent (2026-11-13): `Client.Truncated() []Truncation` names each such server with its causes
+  (`Truncation.Causes`: `stopped at 64 pages`, `stopped at 512 tools`,
+  `skipped <n> tools with a schema over 64 KiB`). A cap counts only when the server had more to
+  give — the tool cap when a tool remained on the page or a further cursor was offered, the page cap
+  when the 64th page still offered a cursor — so a server advertising exactly 512 tools reports
+  nothing. The composition root announces it as one loud startup notice per server
+  (`apogee: mcp server <name> — tool list cut short: …`) and, on a reload, as a clause on that
+  server's landed note (`mcp <name> connected — tool list cut short: …`, `adr-0109-amend-1113`).
 - **An HTTP server's configured headers are validated before any connect** (2026-10-03).
   `ServerConfig.Headers` (literal values) and `ServerConfig.HeadersEnv` (header → the NAME of an
   environment variable holding the value) are the `headers:` / `headers-env:` keys, on the webhook
@@ -222,7 +229,8 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   stdio process — or process tree — leaks. The one exception is a Project server whose pin's `Admit`
   refuses it (`*domain.PinMovedError` — a pinned file moved, or the files could not be checked at
   all): it is refused before anything launches, the rest of the set still connects, and the skip is
-  reported through `Client.Skipped() []Denied`. The config re-read that skip cues proposes a changed
+  reported through `Client.Skipped() []Denied`; a server whose tool list discovery cut short connects
+  and is reported through `Client.Truncated() []Truncation` (§ caps above). The config re-read that skip cues proposes a changed
   server again and drops an unreadable one with its refused notice. `workspaceRoot` is the exec fence a stdio server's
   command is measured against (§2). Zero configs returns a **dormant** Client (no sessions, no tools, a no-op
   Close) — a host without MCP pays nothing. Every server's headers must pass `ValidateHeaders` and
