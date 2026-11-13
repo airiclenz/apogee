@@ -3,6 +3,8 @@ package projectroot
 import (
 	"os"
 	"path/filepath"
+
+	"github.com/airiclenz/apogee/internal/platform"
 )
 
 // configDirName is the per-project folder that marks a Project root: it holds the Project config
@@ -80,13 +82,15 @@ func walkToProjectRoot(start, realHome string) (root string, found bool) {
 	}
 }
 
-// realPath renders path absolute and symlink-resolved; it fails when any component is missing.
+// realPath renders path absolute and link-resolved through platform.RealPath, so a workspace
+// reached through a Windows junction resolves like one reached through a symlink; it fails when
+// any component is missing.
 func realPath(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
 	}
-	return filepath.EvalSymlinks(abs)
+	return platform.RealPath(abs)
 }
 
 // realPathOrClean is realPath for the home guard, falling back to the cleaned absolute spelling so

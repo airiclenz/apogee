@@ -68,7 +68,15 @@ NOTES (2026-11-13): no CHANGELOG entry — the resolver has no caller until item
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run TestRealPath ./internal/platform/`
 **Commit:** `feat(platform): add a junction-crossing RealPath resolver`
 
-## 2. Project root and adoption key resolve through junctions
+## 2. Project root and adoption key resolve through junctions — ✅ DONE (2026-11-13)
+
+NOTES (2026-11-13): projectroot_test.go and store_test.go left unchanged — the plan's Tests ask only that TestResolveSymlinkedWorkspace and TestRecordIsNamedByTheFullDigestOfTheResolvedRoot still pass unchanged, and they do; the two _windows_test.go files are new (they did not exist at the base).
+
+NOTES (2026-11-13): each new Windows test file carries its own makeJunction/longTempDir helpers (platform's makeJunction/tempDir are unexported test helpers of another package); longTempDir resolves t.TempDir through platform.RealPath as the item's regression guard asks.
+
+NOTES (2026-11-13): the adoption Windows test also asserts the junction spelling and the root's own spelling share one record and one config lock (EvalSymlinks upper-cases the drive letter, as GetFinalPathNameByHandle reports it) — the same claim the existing symlink test makes; it has not run on Windows yet (item 6 wires the CI leg).
+
+NOTES (2026-11-13): CLOSES lists junction-project-root because the item's Goal says it fixes it; items 3 and 4 complete the issue's remaining paths (projectwrite, layer reads), so it should close only once those land.
 
 **What:**
 **Goal:** `projectroot.Resolve` finds a root above a workspace that sits under a junction, and the adoption store opens and names a record for such a root, with every existing adoption key byte-identical for non-junction roots. Fixes `junction-project-root` (project layer silently lost; adopt hard-errors `adoption store: resolve Project root`).

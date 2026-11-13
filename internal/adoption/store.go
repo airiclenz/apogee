@@ -141,7 +141,9 @@ func ConfigLockPath(dir, projectRoot string) (string, error) {
 
 // key resolves projectRoot to the absolute, symlink-free path a record is keyed on and returns it
 // with its full hex SHA-256 — the record's file name, which leaks neither the project's name nor
-// its location.
+// its location. The resolution is platform.RealPath: filepath.EvalSymlinks wherever that succeeds,
+// so every key it produced is unchanged, and the final path name for a root under a Windows
+// junction, where EvalSymlinks fails.
 func key(projectRoot string) (root, digest string, err error) {
 	if projectRoot == "" {
 		return "", "", errors.New("apogee: adoption store: no Project root is known")
@@ -150,7 +152,7 @@ func key(projectRoot string) (root, digest string, err error) {
 	if err != nil {
 		return "", "", fmt.Errorf("apogee: adoption store: resolve Project root %q: %w", projectRoot, err)
 	}
-	root, err = filepath.EvalSymlinks(abs)
+	root, err = platform.RealPath(abs)
 	if err != nil {
 		return "", "", fmt.Errorf("apogee: adoption store: resolve Project root %q: %w", projectRoot, err)
 	}
