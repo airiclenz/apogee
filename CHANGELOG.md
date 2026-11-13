@@ -11,6 +11,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.35.3] — 2026-11-13
+
 - **A Project root reached through a Windows junction is found, and can be adopted.** The Project root walk and the adoption store now resolve paths through one junction-crossing resolver (`filepath.EvalSymlinks` first; when that fails on a path that exists, the final path name Windows reports), so a workspace under an NTFS junction finds the `.apogee/` above it instead of silently losing the project layer, and adopting such a root no longer fails with `adoption store: resolve Project root`. Every existing adoption record keeps its name: a root `EvalSymlinks` already resolved is keyed exactly as before.
 - **A project setting or rule saves under a Project root reached through a Windows junction.** The Project config writer now resolves the Project root, the config and the home folder through the same junction-crossing resolver, so a `/settings` save to this project or an "Always in this project…" answer under an NTFS junction writes the junction target's `.apogee/config.yaml` instead of refusing with `resolve Project root`; a config that resolves outside the Project root is still refused.
 - **Fixed — a Project config under a Windows junction is read.** A project `.apogee/config.yaml` reached through an NTFS junction is now layered instead of skipped; a project file that is there but cannot be stat'ed or resolved costs the one `the project layer is skipped` line instead of being dropped in silence (a missing file still says nothing); and a junctioned `~/.apogee` is recognised as the global home, so it is never layered over itself and `sessions.watch-homes` still refuses it.
