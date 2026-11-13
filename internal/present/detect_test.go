@@ -280,6 +280,44 @@ func TestAdvertiseHostUsesTheRealProbe(t *testing.T) {
 	}
 }
 
+// The hint's gesture is decided by the terminal's own name, matched exactly as each terminal
+// spells it: a known linkifier is a click, Terminal.app is a copy, and everything apogee cannot
+// name — tmux, a plain SSH session that forwards no TERM_PROGRAM, a near-miss spelling — is unknown.
+func TestLinkGesture(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		vars map[string]string
+		want Gesture
+	}{
+		{name: "Zed spells itself lowercase", vars: map[string]string{"TERM_PROGRAM": "zed"}, want: GestureClick},
+		{name: "VS Code", vars: map[string]string{"TERM_PROGRAM": "vscode"}, want: GestureClick},
+		{name: "iTerm2", vars: map[string]string{"TERM_PROGRAM": "iTerm.app"}, want: GestureClick},
+		{name: "WezTerm", vars: map[string]string{"TERM_PROGRAM": "WezTerm"}, want: GestureClick},
+		{name: "kitty is named by TERM", vars: map[string]string{"TERM": "xterm-kitty"}, want: GestureClick},
+		{name: "Terminal.app copies", vars: map[string]string{"TERM_PROGRAM": "Apple_Terminal"}, want: GestureCopy},
+		{
+			name: "tmux hides the outer terminal",
+			vars: map[string]string{"TERM_PROGRAM": "tmux", "TERM": "tmux-256color"},
+			want: GestureUnknown,
+		},
+		{name: "a plain SSH session forwards no TERM_PROGRAM", vars: map[string]string{"TERM": "xterm-256color"}, want: GestureUnknown},
+		{name: "the match is exact, not case-folded", vars: map[string]string{"TERM_PROGRAM": "Zed"}, want: GestureUnknown},
+		{name: "a blank TERM_PROGRAM is unset", vars: map[string]string{"TERM_PROGRAM": "  "}, want: GestureUnknown},
+		{name: "an empty environment", want: GestureUnknown},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := LinkGesture(envFrom(tc.vars)); got != tc.want {
+				t.Errorf("LinkGesture(%v) = %d, want %d", tc.vars, got, tc.want)
+			}
+		})
+	}
+}
+
 // Every detector takes its environment injected, so a caller that has none to give (a
 // non-interactive embedder) must get the conservative answer rather than a panic.
 func TestDetectorsTolerateANilEnv(t *testing.T) {
@@ -293,6 +331,9 @@ func TestDetectorsTolerateANilEnv(t *testing.T) {
 	}
 	if !HasDesktop("darwin", nil) {
 		t.Error("HasDesktop(\"darwin\", nil) = false, want true")
+	}
+	if got := LinkGesture(nil); got != GestureUnknown {
+		t.Errorf("LinkGesture(nil) = %d, want %d", got, GestureUnknown)
 	}
 	if got := advertiseHost(nil, "", func() string { return "" }); got != loopbackHost {
 		t.Errorf("advertiseHost(nil, \"\") = %q, want %q", got, loopbackHost)

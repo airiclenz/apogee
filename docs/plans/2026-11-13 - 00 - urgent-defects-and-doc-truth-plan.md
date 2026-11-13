@@ -176,7 +176,15 @@ Depends on item 2.
 Depends on items 2, 3, 4.
 **Closes:** junction-project-root
 
-## 7. The open-link hint tells the truth per terminal
+## 7. The open-link hint tells the truth per terminal — ✅ DONE (2026-11-13)
+
+NOTES (2026-11-13): internal/tui/render.go needed no change — the gesture rides on presentedView (stamped from transcript.gesture in addPresented and replay, never written to the session wire), so renderPresentedBlock's existing call site carries it without a new parameter.
+
+NOTES (2026-11-13): consequential edit — internal/present/server.go: made necessary by the hint no longer promising a cmd+click in every terminal (DocServer comment said the URL is "one cmd+click away").
+
+NOTES (2026-11-13): the `cmd+click` mentions in internal/tui/doc.go and internal/tui/toolview.go quote ADR 0019's rung-0 text, not the hint, and stay as written.
+
+NOTES (2026-11-13): the manual tells Terminal.app users to turn off View → Allow Mouse Reporting (⌘R) if a drag does not select — the workaround the issue's reporter used; the owner-ratified hint wording is unchanged.
 
 **What:**
 **Goal:** the presented-document status line reads `cmd+click to open` under a known linkifying terminal (`TERM_PROGRAM` of `zed`, vscode, iTerm.app, WezTerm, or kitty via `TERM=xterm-kitty`), `drag to select and copy` under `TERM_PROGRAM=Apple_Terminal`, and `cmd+click to open · drag to copy` otherwise; the opened and degraded wordings are unchanged; the manual's §Showing a finished document says what Terminal.app users get.

@@ -2,6 +2,7 @@ package present
 
 import (
 	"net"
+	"slices"
 	"strings"
 )
 
@@ -86,6 +87,59 @@ func HasDesktop(goos string, env func(string) string) bool {
 	default:
 		return false
 	}
+}
+
+// Gesture names what the user's terminal lets them do with a raw path or URL apogee prints in the
+// transcript — the hint that closes a presentation entry is worded from it, so the hint never
+// promises a click the terminal does not deliver.
+//
+// Its zero value is GestureUnknown on purpose: a terminal apogee cannot name (most SSH sessions,
+// anything inside tmux), a Driver that never asked, and a test that set nothing all get the wording
+// that is true either way.
+type Gesture int
+
+const (
+	// GestureUnknown: the terminal could not be named, so the hint offers both gestures and lets
+	// the user pick the one their terminal has.
+	GestureUnknown Gesture = iota
+	// GestureClick: a terminal known to linkify plain-text paths and URLs (Zed, VS Code, iTerm2,
+	// WezTerm, kitty), where a cmd+click opens them.
+	GestureClick
+	// GestureCopy: macOS Terminal.app, whose cmd+click does nothing while apogee holds mouse
+	// reporting, so the only gesture that works is selecting the text and copying it.
+	GestureCopy
+)
+
+// appleTerminal is the TERM_PROGRAM value macOS Terminal.app sets.
+const appleTerminal = "Apple_Terminal"
+
+// kittyTerm is the TERM value kitty sets. kitty is named by TERM rather than TERM_PROGRAM because
+// TERM is the variable it sets for itself (and the one its ssh kitten carries to a remote box).
+const kittyTerm = "xterm-kitty"
+
+// linkifyingTermPrograms are the TERM_PROGRAM values of the terminals known to make a plain-text
+// path or URL cmd+clickable. The values are matched exactly, as each terminal spells its own: Zed
+// sets a lowercase "zed" (ADR 0019 context), VS Code "vscode", iTerm2 "iTerm.app" and WezTerm
+// "WezTerm".
+var linkifyingTermPrograms = []string{"zed", "vscode", "iTerm.app", "WezTerm"}
+
+// LinkGesture reports which gesture opens or keeps a printed path or URL in the terminal env
+// describes (pass os.Getenv in production): GestureClick under a known linkifying TERM_PROGRAM or
+// TERM=xterm-kitty, GestureCopy under TERM_PROGRAM=Apple_Terminal, and GestureUnknown otherwise —
+// which is what tmux (TERM_PROGRAM=tmux) and a plain SSH session (TERM_PROGRAM not forwarded) read
+// as, whatever terminal sits outside them. A nil env reads as an empty environment.
+//
+// Like Locality it is a heuristic about the user's terminal, never a security decision: getting it
+// wrong costs a hint's accuracy, and the path is printed either way.
+func LinkGesture(env func(string) string) Gesture {
+	program := lookup(env, "TERM_PROGRAM")
+	if program == appleTerminal {
+		return GestureCopy
+	}
+	if slices.Contains(linkifyingTermPrograms, program) || lookup(env, "TERM") == kittyTerm {
+		return GestureClick
+	}
+	return GestureUnknown
 }
 
 // AdvertiseHost returns the host part of the URL the doc server advertises — the address at

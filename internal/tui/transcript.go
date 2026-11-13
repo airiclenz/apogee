@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/present"
 )
 
 // ----------------------------------------------------------------------------
@@ -53,6 +54,12 @@ type transcript struct {
 	// fact about the RUN rather than about the conversation, so reset preserves it as it does debug.
 	// The zero value shortens nothing, which is what a hand-built test transcript gets.
 	ws workspaceRoot
+	// gesture is what this run's terminal does with a printed path or URL (present.LinkGesture),
+	// read once at construction from the environment and stamped onto every presentation entry
+	// (addPresented, replay), whose closing hint is worded from it. Like ws it is a fact about the
+	// RUN, so reset preserves it. The zero value is present.GestureUnknown, whose wording offers both
+	// gestures — what a hand-built test transcript and any Driver that never set it get.
+	gesture present.Gesture
 	// taskListOpen is the state a NEW task-list card is seeded with — the one fold preference every
 	// header-folding card shares (toolView.collapsesToHeader), whose record is the Model's
 	// Options.UI.TaskListOpen and whose FACT is each entry's own expanded flag. It lives here for ws's
@@ -536,6 +543,11 @@ type presentedView struct {
 	Location string               // the served URL (rung 2); empty on every other rung
 	Method   domain.PresentMethod // the rung reached, which the closing status line words
 	Reason   string               // why a tried rung did not deliver; empty when none was
+	// Gesture is what the user's terminal does with the printed path or URL, which the closing
+	// status line words when no rung above the baseline delivered. It is stamped from
+	// [transcript.gesture] as the entry is placed or replayed, never recorded: it is a fact about the
+	// terminal showing the entry, so a resumed session words it for the terminal it resumed in.
+	Gesture present.Gesture
 }
 
 // startupView is the presentation model of the one-time start-up box (entryStartup only): the
@@ -1087,6 +1099,7 @@ func (t *transcript) addPresented(msg presentedMsg) {
 			Location: stripEscapes(msg.Location),
 			Method:   msg.Method,
 			Reason:   clipDetail(stripEscapes(msg.Reason)),
+			Gesture:  t.gesture,
 		},
 	}, runRef{depth: msg.Depth, spawn: msg.SpawnCallID}))
 }
@@ -1131,7 +1144,8 @@ func (t *transcript) refreshStartup(v startupView) {
 
 // reset returns the transcript to its empty state — no committed entries and no in-progress
 // assistant buffer — while preserving the debug flag (a hidden view toggle, not conversation), the
-// workspace root (a fact about the run, which /clear does not move) and the task-list fold
+// workspace root and the terminal's link gesture (facts about the run, which /clear does not move)
+// and the task-list fold
 // preference (a fact about the human, which a new session inherits).
 // It is the /clear + /new "start a new session" primitive: the caller re-seeds the one-time
 // start-up box with addStartup so the fresh view matches a launch. It does NOT touch the engine's
@@ -1150,7 +1164,7 @@ func (t *transcript) reset() {
 	// render would find index 3 occupied and hand back the previous session's paint (paintcache.go).
 	t.paints.clear()
 	t.touch()
-	// t.debug, t.ws, t.taskListOpen, t.toolsOpen, t.toolsFoldOver and t.now are deliberately
+	// t.debug, t.ws, t.gesture, t.taskListOpen, t.toolsOpen, t.toolsFoldOver and t.now are deliberately
 	// preserved across a session reset.
 }
 
@@ -1170,6 +1184,9 @@ func (t *transcript) replay(entries []entry) {
 	for i := at; i < len(t.entries); i++ {
 		if t.entries[i].tool.collapsesToHeader {
 			t.setExpanded(i, t.taskListOpen)
+		}
+		if t.entries[i].kind == entryPresented {
+			t.entries[i].presented.Gesture = t.gesture
 		}
 	}
 }
@@ -1357,8 +1374,10 @@ func (t *transcript) prefixThrough(index int) []entry {
 // did not deliver says so and states that the path still stands — the entry is the one thing the
 // ladder can always promise, so the wording never leaves the user wondering whether anything
 // happened. Everything else is a hint about what to do next: an opened document needs none beyond
-// the fact, and a path or a URL is one cmd+click away in every terminal that linkifies (Zed,
-// VS Code, iTerm2, WezTerm, kitty).
+// the fact, and a path or a URL gets the gesture the user's terminal actually has (v.Gesture) — a
+// cmd+click in a terminal that linkifies (Zed, VS Code, iTerm2, WezTerm, kitty), a select-and-copy
+// in macOS Terminal.app, whose cmd+click does nothing while apogee holds mouse reporting, and both
+// where the terminal could not be named (tmux, most SSH sessions).
 func presentedStatus(v presentedView) string {
 	if v.Reason != "" {
 		return v.Reason + " — path shown"
@@ -1366,8 +1385,22 @@ func presentedStatus(v presentedView) string {
 	if v.Method == domain.PresentOpened {
 		return "opened on your machine"
 	}
-	return "cmd+click to open"
+	switch v.Gesture {
+	case present.GestureClick:
+		return clickHint
+	case present.GestureCopy:
+		return copyHint
+	default:
+		return eitherHint
+	}
 }
+
+// The three wordings of the open-link hint, one per [present.Gesture] (presentedStatus).
+const (
+	clickHint  = "cmd+click to open"
+	copyHint   = "drag to select and copy"
+	eitherHint = "cmd+click to open · drag to copy"
+)
 
 // apply folds one engine Event into the transcript (the C6 rule). The switch covers the
 // eleven transcript-rendered variants of the fifteen-variant Event set, so the rendered set

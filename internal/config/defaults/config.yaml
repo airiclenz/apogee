@@ -1001,7 +1001,11 @@ update-check: true
 #
 # Whatever these keys say, the document's workspace-relative PATH is always printed in the
 # transcript: that is the one rung that is never wrong, and most terminals (Zed, VS Code, iTerm2,
-# WezTerm, kitty) make it cmd/ctrl+clickable. Above that baseline:
+# WezTerm, kitty) make it cmd/ctrl+clickable. The hint under it says the gesture your terminal
+# has: "cmd+click to open" in those terminals, "drag to select and copy" in macOS Terminal.app
+# (where cmd+click does nothing while apogee holds the mouse), and "cmd+click to open · drag to
+# copy" wherever the terminal cannot be named — inside tmux and over plain SSH, whatever the
+# outer terminal. Above that baseline:
 #
 #   - running on your own desktop → apogee opens the document in the associated application
 #     (HTML in your default browser). This is the `auto-open` key below. Only documents get
@@ -1009,8 +1013,8 @@ update-check: true
 #     .command, a .desktop) is left as a path in the transcript, for you to open deliberately.
 #   - running over SSH (a devbox, a VM, a container) → apogee serves browser-renderable documents
 #     (.html/.htm/.svg/.pdf) from a small built-in server and prints the URL beside the path, so
-#     one cmd+click opens it in the browser on YOUR machine. It never auto-opens on the remote
-#     box — there is no display there to open into.
+#     one cmd+click (or a copy) opens it in the browser on YOUR machine. It never auto-opens on
+#     the remote box — there is no display there to open into.
 #
 # The built-in server hands out ONE random-token URL per presented document (no directory
 # listing, no other file reachable), re-reads the file per request, starts only when a document

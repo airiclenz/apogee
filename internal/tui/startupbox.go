@@ -7,7 +7,8 @@ import (
 // renderPresentedBlock renders a presented document (ADR 0019, rung 0) — the one block that is
 // deliberately NOT shaped like a tool card, because a deliverable is the point of the work and
 // not plumbing. It leads with the ▤ marker and the document's title where the model gave one,
-// then the workspace-relative path, then the served URL if there is one, then a dim status line:
+// then the workspace-relative path, then the served URL if there is one, then a dim status line —
+// here as a terminal that linkifies words it; the gesture follows the terminal (presentedStatus):
 //
 //	▤ Architecture review
 //	  docs/review.html

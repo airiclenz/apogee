@@ -3259,6 +3259,18 @@ viewers have rendered blank under a sandbox. Apogee never auto-opens
 on the remote box: there is no display there to open into. If a rung fails, the
 transcript says so and falls back to the path.
 
+The dim line under the path and URL names the gesture your terminal has. In a terminal
+that makes them clickable — Zed, VS Code, iTerm2, WezTerm, kitty — it reads
+`cmd+click to open`. In macOS **Terminal.app** it reads `drag to select and copy`:
+cmd+click on a printed path or URL does nothing there while apogee runs, so select it with
+a drag and paste it where you need it — if the drag does not select, turn off
+**View → Allow Mouse Reporting** (⌘R) while you copy.
+Where apogee cannot name the terminal it reads `cmd+click to open · drag to copy`, and
+that includes inside **tmux** (which reports itself as `TERM_PROGRAM=tmux`) and over a
+**plain SSH** session (which does not forward `TERM_PROGRAM`), whatever terminal sits
+outside them. The terminal is read once, when apogee starts; a document apogee has
+opened for you just says `opened on your machine`.
+
 The built-in server hands out one random-token URL per presented document — no directory
 listing, no other file reachable — re-reads the file per request, starts only when a
 document is actually served, and stops when apogee exits. Five **file-only** keys tune

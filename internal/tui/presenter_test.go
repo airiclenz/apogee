@@ -648,24 +648,59 @@ func TestTheTwoExtensionSetsCrossOnlyOnActiveContent(t *testing.T) {
 func TestPresentedEntryRendering(t *testing.T) {
 	t.Parallel()
 
+	served := presentedMsg{
+		Title:    "Architecture review",
+		Path:     "docs/review.html",
+		Location: "http://192.168.64.2:51234/d/deadbeef/review.html",
+		Method:   domain.PresentServed,
+	}
+	servedWith := func(status string) []string {
+		return []string{
+			"▤ Architecture review",
+			"  docs/review.html",
+			"  http://192.168.64.2:51234/d/deadbeef/review.html",
+			"  " + status,
+		}
+	}
+
 	tests := []struct {
-		name string
-		msg  presentedMsg
-		want []string
+		name    string
+		gesture present.Gesture
+		msg     presentedMsg
+		want    []string
 	}{
 		{
+			// The transcript's gesture left unset — no terminal named, another Driver, this test —
+			// is the unknown terminal, whose hint offers both gestures.
 			name: "titled and served",
-			msg: presentedMsg{
-				Title:    "Architecture review",
-				Path:     "docs/review.html",
-				Location: "http://192.168.64.2:51234/d/deadbeef/review.html",
-				Method:   domain.PresentServed,
-			},
+			msg:  served,
+			want: servedWith("cmd+click to open · drag to copy"),
+		},
+		{
+			name:    "a linkifying terminal is told to click",
+			gesture: present.GestureClick,
+			msg:     served,
+			want:    servedWith("cmd+click to open"),
+		},
+		{
+			name:    "Terminal.app is told to copy",
+			gesture: present.GestureCopy,
+			msg:     served,
+			want:    servedWith("drag to select and copy"),
+		},
+		{
+			name:    "an unnamed terminal is offered both",
+			gesture: present.GestureUnknown,
+			msg:     served,
+			want:    servedWith("cmd+click to open · drag to copy"),
+		},
+		{
+			name:    "an opened document needs no gesture whatever the terminal",
+			gesture: present.GestureCopy,
+			msg:     presentedMsg{Path: "docs/review.html", Method: domain.PresentOpened},
 			want: []string{
-				"▤ Architecture review",
-				"  docs/review.html",
-				"  http://192.168.64.2:51234/d/deadbeef/review.html",
-				"  cmd+click to open",
+				"▤ docs/review.html",
+				"  opened on your machine",
 			},
 		},
 		{
@@ -709,7 +744,7 @@ func TestPresentedEntryRendering(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			tr := &transcript{}
+			tr := &transcript{gesture: tc.gesture}
 			tr.addPresented(tc.msg)
 			if got := plainRender(tr); got != strings.Join(tc.want, "\n") {
 				t.Errorf("rendered:\n%s\nwant:\n%s", got, strings.Join(tc.want, "\n"))

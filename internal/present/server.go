@@ -102,7 +102,8 @@ var errClosed = errors.New("present: doc server is closed")
 // DocServer is rung 2 of the presentation ladder (ADR 0019): the embedded HTTP server that makes
 // a presented document reachable from the USER'S machine when Apogee runs on another one — the
 // SSH-remoted devbox case, where an opener would open into a display nobody is watching but a URL
-// printed in the transcript is one cmd+click away from the user's own browser.
+// printed in the transcript is one cmd+click (or, where the terminal does not linkify, one copy)
+// away from the user's own browser.
 //
 // It is a CAPABILITY-TOKEN ALLOWLIST, NOT A FILE SERVER. Nothing is reachable until Serve grants
 // it: each presented file gets a fresh random token and is answerable at exactly one URL path,

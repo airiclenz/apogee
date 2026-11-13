@@ -19,6 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/notice"
+	"github.com/airiclenz/apogee/internal/present"
 	"github.com/airiclenz/apogee/internal/sidepanel"
 	"github.com/airiclenz/apogee/internal/skills"
 )
@@ -830,6 +831,11 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// on the Model because the fold that records a call reaches no Model, and reset preserves it —
 	// /clear opens a new session in the same workspace.
 	m.transcript.ws = newWorkspaceRoot(opts.Workspace)
+
+	// Name the gesture this terminal has for a printed path or URL, once, for the same reasons: the
+	// presentation entry that words its hint from it is placed and replayed where no Model is in
+	// sight, and /clear runs in the same terminal (present.LinkGesture).
+	m.transcript.gesture = present.LinkGesture(os.Getenv)
 
 	// Seed the shared task-list fold from the same Options, for the same reason and with the same
 	// preservation: the card is added by a fold that reaches no Model, and /clear keeps the human's
