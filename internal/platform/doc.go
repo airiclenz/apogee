@@ -41,7 +41,7 @@
 //
 // # The files, one line each
 //
-// Thirty files, in six groups: the shell/path Host every OS-touching caller reads, the
+// Thirty-three files, in six groups: the shell/path Host every OS-touching caller reads, the
 // Confiner backends, the process-tree teardown every spawner reuses (with the Windows
 // pseudoconsole launcher built on it), the console-output codepage, the per-machine identity,
 // and the single-instance lock. The Windows label mechanism is a module of its own beside them
@@ -56,7 +56,10 @@
 // host. platform_posix.go and platform_windows.go are the build-tagged selectors saying which
 // rule set Current returns; only the Windows one carries anything of its own — the OS
 // long-path resolver that lets Contains expand an 8.3 short name instead of refusing to
-// compare it.
+// compare it. realpath.go is RealPath, the one real-path resolver: filepath.EvalSymlinks
+// whenever that succeeds, and otherwise the per-OS fallback — realpath_windows.go points it at
+// the final path name of an open handle, which crosses an NTFS junction EvalSymlinks fails on,
+// and realpath_other.go leaves it nil, so on POSIX RealPath is EvalSymlinks alone.
 //
 // The Confiner selectors. confiner_darwin.go and confiner_other.go are three-line per-OS
 // choices of NewConfiner and NewReportConfiner — seatbelt, and the deny-all stub.

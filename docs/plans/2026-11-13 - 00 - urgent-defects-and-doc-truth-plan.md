@@ -46,7 +46,15 @@
 - 11: guard folded (supersedes ADR 0109 decision 8's fixed note set and its 2026-11-07 amendment; docs/design/mcp-client.md:129-131 "returns the capped list silently")
 - 12: guard folded (writer decision; reviewer verdict SAFE)
 
-## 1. A junction-crossing real-path resolver in internal/platform
+## 1. A junction-crossing real-path resolver in internal/platform — ✅ DONE (2026-11-13)
+
+NOTES (2026-11-13): the fallback seam `realPathFallback` is declared per OS (realpath_windows.go = finalPathName, which already opens the path itself; realpath_other.go = nil) rather than in realpath.go, per the item's regression guard; RealPath consults it only when evalSymlinks fails AND os.Lstat finds the path, otherwise it returns evalSymlinks' error unchanged.
+
+NOTES (2026-11-13): doc.go's file count updated "Thirty" -> "Thirty-three"; the three realpath files are mapped inside the existing Host-abstraction group (no new group).
+
+NOTES (2026-11-13): the portable symlink case skips on Windows only when os.Symlink is refused (no Developer Mode/elevation); the junction case in realpath_windows_test.go needs no privilege.
+
+NOTES (2026-11-13): no CHANGELOG entry — the resolver has no caller until items 2–4 wire it in; those items carry the user-visible entry.
 
 **What:**
 **Goal:** `internal/platform` exports one resolver, `RealPath(p string) (string, error)`, that returns the same result as `filepath.EvalSymlinks` whenever that succeeds, and on Windows resolves a path that crosses an NTFS junction to its final path (no `\\?\` prefix) when `EvalSymlinks` fails and the path exists; on POSIX it is `EvalSymlinks` alone.
