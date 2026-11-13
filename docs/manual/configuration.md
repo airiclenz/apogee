@@ -935,8 +935,9 @@ connection and its tools untouched. The dials run in the background, so the scre
 status line shows `reconnecting MCP…` while a dial runs between turns, a slow or dead server holds back none of
 the others, and quitting cancels the dials rather than waiting on them. Each server's tools join
 at the next idle moment, mid-turn dials included, and each outcome arrives as a transcript note of
-its own: `mcp docs reconnected` (or `mcp docs connected` for a new server), `mcp reconnect failed:
-docs: … — previous connection kept`, or `mcp connect failed: docs: …`. Those notes are not the only
+its own: `mcp docs reconnected` (or `mcp docs connected` for a new server, either one ending in
+`— tool list cut short: …` when discovery hit a fixed limit above), `mcp reconnect failed: docs: …
+— previous connection kept`, or `mcp connect failed: docs: …`. Those notes are not the only
 place to look: [`/mcp`](commands.md) reports every server's transport, source, state, tool count and
 the cause of its last failure, and the side panel's [`mcp` section](#the-side-panel) shows itself
 while a server is dialling, failed or disconnected. A server that dies mid-session — its process
