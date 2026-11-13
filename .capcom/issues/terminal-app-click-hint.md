@@ -1,10 +1,12 @@
 ---
 title: The 'cmd+click to open' hint is false in macOS Terminal.app
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-11-13 - 00 - urgent-defects-and-doc-truth-plan
 created: 2026-11-12T14:31:49Z
+closed: 2026-11-13T11:14:35Z
+reason: resolved by 2026-11-13 - 00 - urgent-defects-and-doc-truth-plan (archived at 14fe8a72), item 7
 ---
 
 Found 2026-11-12 during the `served-pdf-csp-sandbox` browser check, with apogee v0.35.0 in macOS Terminal.app (Darwin 27.2).

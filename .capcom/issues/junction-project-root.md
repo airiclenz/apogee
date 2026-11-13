@@ -1,11 +1,13 @@
 ---
 title: Project root under a Windows junction breaks project config and adoption
-status: open
+status: done
 type: bug
 priority: 2
 labels: [windows]
 plan: 2026-11-13 - 00 - urgent-defects-and-doc-truth-plan
 created: 2026-11-11T20:14:10Z
+closed: 2026-11-13T11:14:35Z
+reason: resolved by 2026-11-13 - 00 - urgent-defects-and-doc-truth-plan (archived at 14fe8a72), items 1-6
 ---
 
 On Windows, `filepath.EvalSymlinks` fails with `ERROR_PATH_NOT_FOUND` for any path that passes under an NTFS junction (Go >= 1.23, `winsymlink=1`; golang/go#82447, #63703). Several project-config paths resolve the Project root with it and so fail or degrade for a workspace that sits under a junction:
