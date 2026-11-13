@@ -220,7 +220,15 @@ NOTES (2026-11-13): the gitactions bite was confirmed by reverting the denylist 
 **Commit:** `fix(security): refuse a repo-local gpg.ssh.defaultKeyCommand`
 **Closes:** git-ssh-keycommand-denylist
 
-## 9. The adoption pane says what the pin does not cover
+## 9. The adoption pane says what the pin does not cover — ✅ DONE (2026-11-13)
+
+NOTES (2026-11-13): re-derived from "the faint hook is a popupSpec field the picker spec sets": the picker offering reaches popupSpec through listContent (internal/tui/listsurface.go — listContent and its popupSpec composition), so the new bodyFaintTail count rides offering → listContent → popupSpec; cmd/apogee/project_cmd.go needed no edit, since printProjectQuestion renders tui.AdoptionQuestion's lines, which now end with the disclosure.
+
+NOTES (2026-11-13): the faint hook is a count (popupSpec.bodyFaintTail: the body's closing wrapped lines painted th.statusFaint, applied after wrap and elision, a kept tail line staying faint); the adoption pane states it from wrapBodyLine at its own inner width (Model.adoptionBodyFaintTail).
+
+NOTES (2026-11-13): consequential edit — docs/manual/configuration.md: made necessary by the pane's new closing line (the manual's list of what the pane shows).
+
+NOTES (2026-11-13): consequential edit — internal/tui/popup.go (module header comment): made necessary by bodyFaintTail ("bodyLead … the one styled run" no longer true).
 
 **What:**
 **Goal:** every adoption prompt for a repo MCP server or reaction shows the dim line `not pinned: anything it reads or runs beyond these` under `pinned files:`, or on its own when no file is pinned, in the TUI pane and the CLI adopt render; `docs/layout/user-questions-layout.md` §Adoption pane specifies it; ADR 0104 carries a dated amendment recording the disclosure and rejecting manifest pinning and root-tree hashing.

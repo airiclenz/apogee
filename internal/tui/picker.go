@@ -238,6 +238,9 @@ type pickerOffering struct {
 	// pinned fields (adoptionbody.go) — composed per frame at the pane's width. nil, and a func that
 	// answers "", draw none.
 	body func(Model) string
+	// bodyFaintTail is how many of the body's closing lines are painted faint — the adoption pane's
+	// unpinned disclosure (listContent.bodyFaintTail). nil paints none.
+	bodyFaintTail func(Model) int
 	// answers says the rows are the answers to the question the body asks (listContent.answers):
 	// they wrap whole rather than elide, and the body gives up its lines before any of them does —
 	// on a window too short for them wrapped, their glosses are cut before a label leaves it.
@@ -418,6 +421,8 @@ func init() {
 			accept:  Model.acceptAdoption,
 			body:    Model.adoptionBody,
 			answers: true,
+			// The disclosure closing the body is painted faint after the wrap.
+			bodyFaintTail: Model.adoptionBodyFaintTail,
 		},
 		pickerGitActions: {
 			title:   Model.gitActionsPickerTitle,
@@ -1501,6 +1506,9 @@ func (m Model) pickerListContent() (listContent, bool) {
 	}
 	if offering.body != nil {
 		c.body = offering.body(m)
+	}
+	if offering.bodyFaintTail != nil {
+		c.bodyFaintTail = offering.bodyFaintTail(m)
 	}
 	return c.statingFilter(m.picker.filter.value(), pickerOfferings[m.picker.kind].noun, len(rows)), true
 }

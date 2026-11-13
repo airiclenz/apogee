@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -127,6 +128,7 @@ func TestAdoptionPaneShowsARepoServerBody(t *testing.T) {
 			"pinned files:",
 			"  - hook.js",
 			"  - tools/docs-server.js",
+			"not pinned: anything it reads or runs beyond these",
 			"",
 			"  adopt    — it runs here until the entry or a pinned file changes",
 			"❯ not now  — it stays inert; the offer comes back at the next start-up",
@@ -155,6 +157,8 @@ func TestAdoptionPaneShowsARepoServerBody(t *testing.T) {
 			"pinned files:",
 			"  - tools/docs-server.js",
 			"  - tools/hooks/trace-every-call.js",
+			"not pinned: anything it reads or runs beyond",
+			"  these",
 			"",
 			"  adopt    — it runs here until the entry or a",
 			"           pinned file changes",
@@ -201,7 +205,130 @@ func TestAdoptionPaneShowsTheReaskReason(t *testing.T) {
 		"",
 		"pinned files:",
 		"  - scripts/fmt.sh",
+		adoptionUnpinned,
 	})
+}
+
+// An entry that names no project file still says what its pin leaves out: the disclosure stands
+// as a part of its own, one blank line under the last field — an `endpoint:` server and a
+// `gate:`-only reaction, which spawn nothing, as much as a stdio one.
+func TestAdoptionPaneDisclosesTheUnpinnedWithoutPinnedFiles(t *testing.T) {
+	t.Parallel()
+	httpServer := domain.Proposal{
+		Kind:        domain.ProposalMCPServer,
+		Handle:      "remote",
+		Text:        `{"name":"remote"}`,
+		Fingerprint: "remote-pin-1",
+		Fields: []domain.ProposalField{
+			{Label: "transport", Values: []string{"streamable-http"}},
+			{Label: "endpoint", Values: []string{"https://mcp.example.com/v1"}},
+		},
+	}
+	gateOnly := domain.Proposal{
+		Kind:        domain.ProposalReaction,
+		Handle:      "review",
+		Text:        `{"id":"review"}`,
+		Fingerprint: "review-pin-1",
+		Fields: []domain.ProposalField{
+			{Label: "gate", Shape: domain.ProposalGroup, Fields: []domain.ProposalField{
+				{Label: "url", Values: []string{"https://hooks.example.com/apogee/gate"}},
+			}},
+		},
+	}
+	for _, tc := range []struct {
+		name     string
+		proposal domain.Proposal
+		want     []string
+	}{
+		{"an endpoint server", httpServer, []string{
+			"endpoint: https://mcp.example.com/v1",
+			"",
+			adoptionUnpinned,
+			"",
+			"  adopt    — it runs here until the entry or a pinned file changes",
+		}},
+		{"a gate-only reaction", gateOnly, []string{
+			"  url: https://hooks.example.com/apogee/gate",
+			"",
+			adoptionUnpinned,
+			"",
+			"  adopt    — it runs here until the entry or a pinned file changes",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, frame := adoptionFrame(t, 80, 60, tc.proposal)
+
+			if strings.Contains(frame, adoptionPinnedFilesLabel+":") {
+				t.Errorf("an entry naming no file draws a pinned-files part:\n%s", frame)
+			}
+			assertPaneRuns(t, frame, tc.want)
+		})
+	}
+}
+
+// The disclosure is painted faint, and only it: the body handed to the popup stays plain text for
+// its wrap, and the faint is laid on after it — on each wrapped line of the disclosure at fifty
+// columns, never on the pinned files above it.
+func TestAdoptionPanePaintsTheUnpinnedLineFaint(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		width int
+		faint []string
+	}{
+		{"eighty columns", 80, []string{adoptionUnpinned}},
+		{"fifty columns", 50, []string{"not pinned: anything it reads or runs beyond", "  these"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m, _ := adoptionFrame(t, tc.width, 60, docsServer)
+			if !colorActive(m.th) {
+				t.Skip("no ANSI styling in this environment")
+			}
+
+			if body := m.adoptionBody(); strings.Contains(body, "\x1b") {
+				t.Fatalf("the body handed to the popup carries an escape; its wrap cannot measure it: %q", body)
+			}
+			if got := m.adoptionBodyFaintTail(); got != len(tc.faint) {
+				t.Errorf("faint tail = %d, want the disclosure's %d wrapped lines", got, len(tc.faint))
+			}
+			view := m.View().Content
+			for _, line := range tc.faint {
+				if want := m.th.statusFaint.Render(line); !strings.Contains(view, want) {
+					t.Errorf("the disclosure line %q is not painted faint (%q):\n%q", line, want, view)
+				}
+			}
+			if faint := m.th.statusFaint.Render("  - tools/docs-server.js"); strings.Contains(view, faint) {
+				t.Errorf("a pinned file is painted faint like the disclosure:\n%q", view)
+			}
+		})
+	}
+}
+
+// A window too short for the whole body keeps its last line under the marker — the disclosure —
+// and that kept line is still the faint one; the marker is faint as ever and the head is prose.
+func TestAdoptionPaneKeepsTheUnpinnedLineFaintWhenElided(t *testing.T) {
+	t.Parallel()
+	th := newTestModel(t).th
+	if !colorActive(th) {
+		t.Skip("no ANSI styling in this environment")
+	}
+	blackFill := lipgloss.NewStyle().Background(th.surface)
+	body := strings.Join([]string{"transport: stdio", "command: node", "args:", "  - a", adoptionUnpinned}, "\n")
+
+	lines, hidden := popupBodyLines(th, body, "", 1, 3, 70, blackFill)
+
+	if hidden != 3 || len(lines) != 3 {
+		t.Fatalf("lines = %q, hidden = %d; want the head, the marker and the tail with 3 hidden", lines, hidden)
+	}
+	if want := blackFill.Render(th.popupBody.Render("transport: stdio")); lines[0] != want {
+		t.Errorf("head = %q, want plain prose %q", lines[0], want)
+	}
+	if want := blackFill.Render(th.statusFaint.Render(adoptionUnpinned)); lines[2] != want {
+		t.Errorf("kept tail = %q, want the disclosure faint %q", lines[2], want)
+	}
 }
 
 // A first proposal carries no reason, and an Allow rule's pane has no body at all: its title is the
@@ -217,6 +344,9 @@ func TestAdoptionPaneBodyIsOnlyAStructuredEntrys(t *testing.T) {
 	}
 	if body := m.adoptionBody(); body != "" {
 		t.Errorf("an Allow rule's body = %q, want none", body)
+	}
+	if strings.Contains(rule, adoptionUnpinned) || m.adoptionBodyFaintTail() != 0 {
+		t.Errorf("an Allow rule's pane says what a pin leaves out; it pins its rule whole:\n%s", rule)
 	}
 	assertPaneRuns(t, rule, []string{
 		"allow `go test` without asking in this project?",

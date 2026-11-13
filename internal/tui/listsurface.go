@@ -655,6 +655,8 @@ type listContent struct {
 	// spinner is the spinner frame a pane still loading leads its one row with (popupLoading): set,
 	// the row is painted as the loading row (popupRowLoading) with the frame's own run.
 	spinner popupSpinner
+	// bodyFaintTail is how many of body's closing lines are painted faint (popupSpec.bodyFaintTail).
+	bodyFaintTail int
 }
 
 // statingFilter folds a filtering pane's filter STATE into c, the last step of composing it: the
@@ -789,6 +791,8 @@ func (m Model) listSpec(c listContent) (popupSpec, bool) {
 		scrollbar:   m.popupScrollbarOn(),
 		rowKinds:    kinds,
 		spinner:     c.spinner,
+		// The body's closing lines a pane paints faint, after the wrap.
+		bodyFaintTail: c.bodyFaintTail,
 	}, true
 }
 

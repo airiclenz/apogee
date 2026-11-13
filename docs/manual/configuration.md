@@ -415,7 +415,8 @@ server's transport, its command and arguments or its endpoint, its `env:` entrie
 `KEY=VALUE`, its `env-allowlist:` (or `not set — the platform floor only`), its `headers:`, the
 **names** of the variables its `headers-env:` and `client-secret-env:` send, its `auth:`,
 `client-id:` and `issuer:`; a reaction's `run:`, `advise:` and `gate:` actions, argv, webhook or MCP tool; and every project
-file the pin holds. A long value wraps and is never cut; a body too tall for the window gives up
+file the pin holds, closed by a dim `not pinned: anything it reads or runs beyond these` (below,
+"What adopting a script means"). A long value wraps and is never cut; a body too tall for the window gives up
 lines, counted, before any answer does, and `apogee project adopt` prints it whole. What is pinned:
 
 - **The fields that decide what runs or where data goes.** A server is pinned whole — every field

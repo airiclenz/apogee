@@ -73,8 +73,9 @@ import (
 //     separators survive), each segment is word-wrapped to the inner budget,
 //     and the flattened block is capped at spec.maxBodyRows — negative = uncapped, ZERO = no body
 //     rows at all, the same sense maxRows carries. Its first line may open with a LABEL
-//     (popupSpec.bodyLead) the module paints as a heading, which is the one styled run inside a
-//     block that is otherwise prose. Past a positive cap the last row becomes an explicit faint
+//     (popupSpec.bodyLead) the module paints as a heading, and its closing lines may be painted
+//     faint (popupSpec.bodyFaintTail) — the styled runs inside a block that is otherwise prose.
+//     Past a positive cap the last row becomes an explicit faint
 //     "… (+N more lines)" marker counting the hidden lines, so the body never
 //     exceeds its cap and truncation is never silent. wrapText is ANSI-unaware, so body arrives
 //     PLAIN and escape-stripped — the module wraps first and styles after.
@@ -317,6 +318,13 @@ const popupFailureWord = "failed"
 // line plain where truncation took it, so the styling can never claim a label the pane is not
 // showing.
 //
+// bodyFaintTail is how many of the body's closing lines — counted on the body as wrapped, before
+// any elision — are painted faint (th.statusFaint) rather than as prose: the adoption pane's own
+// closing remark about what its pin does not cover. Like bodyLead it is applied after the wrap and
+// the truncation, so the body the module wraps stays plain text its measure can trust, and a line
+// the window elided is painted by nobody. The caller states the count at the width it wrapped for;
+// zero, every other pane, paints none.
+//
 // spinner is the spinner's current frame a popupRowLoading row leads with (popupSpinner): the row's
 // cell carries the frame as plain text, so the module measures and lays it out like any other cell,
 // and the painter draws the frame's own styled run in that text's place. The zero value is every pane
@@ -327,6 +335,7 @@ type popupSpec struct {
 	titleInBorder bool
 	body          string
 	bodyLead      string
+	bodyFaintTail int
 	maxBodyRows   int
 	rows          []popupRow
 	rowKinds      []popupRowKind
@@ -509,7 +518,7 @@ func renderPopupPlaced(th theme, spec popupSpec, width int) (string, popupPlacem
 	// fit changes what that row says: a pane granted no body rows and no row window reports those
 	// elisions on its title, the one row it still has (popupTitleLine). Composing in the other order
 	// would mean either a silent drop or a fifth row the frame has not got.
-	body, hiddenBody := popupBodyLines(th, spec.body, spec.bodyLead, spec.maxBodyRows, inner, blackFill)
+	body, hiddenBody := popupBodyLines(th, spec.body, spec.bodyLead, spec.bodyFaintTail, spec.maxBodyRows, inner, blackFill)
 	block := popupRowLines(th, spec, inner, blackFill)
 
 	// The two counts merge into the ONE marker the title row can seat: a hidden body block and a
@@ -1474,13 +1483,22 @@ func popupWrappedRowHeights(th theme, rows []popupRow, width int) []int {
 //
 // lead is the spec's bodyLead: the run at the front of the FIRST line the module paints as a heading
 // rather than as prose. It is styled after the wrap and after the truncation, never before, so the
-// label is bolded only where the line the pane is drawing still opens with it.
-func popupBodyLines(th theme, body, lead string, maxBodyRows, inner int, blackFill lipgloss.Style) ([]string, int) {
+// label is bolded only where the line the pane is drawing still opens with it. faintTail is the
+// spec's bodyFaintTail: the count of the wrapped block's closing lines painted faint, styled at the
+// same step, so a kept tail line keeps its faint and an elided one is painted by nobody.
+func popupBodyLines(th theme, body, lead string, faintTail, maxBodyRows, inner int, blackFill lipgloss.Style) ([]string, int) {
 	if body == "" {
 		return nil, 0
 	}
 
 	wrapped := popupBodyWrapped(th, body, inner)
+	faintFrom := len(wrapped) - faintTail
+	bodyStyle := func(at int) lipgloss.Style {
+		if at >= faintFrom {
+			return th.statusFaint
+		}
+		return th.popupBody
+	}
 
 	if maxBodyRows == 0 {
 		// A window with nothing left to spend on prose (popupBudget), not an invitation to show all
@@ -1503,11 +1521,11 @@ func popupBodyLines(th theme, body, lead string, maxBodyRows, inner int, blackFi
 	out := make([]string, 0, len(wrapped)+1+len(tail))
 	for i, ln := range wrapped {
 		line := truncateToWidth(th, ln, inner)
-		if i == 0 {
+		if i == 0 && i < faintFrom {
 			out = append(out, blackFill.Render(popupBodyLeadLine(th, line, lead)))
 			continue
 		}
-		out = append(out, blackFill.Render(th.popupBody.Render(line)))
+		out = append(out, blackFill.Render(bodyStyle(i).Render(line)))
 	}
 	if marker != "" {
 		out = append(out, blackFill.Render(th.statusFaint.Render(truncateToWidth(th, marker, inner))))
@@ -1515,8 +1533,9 @@ func popupBodyLines(th theme, body, lead string, maxBodyRows, inner int, blackFi
 	// The tail rows stand BELOW the marker, so the block reads as what it is: the head, the count of
 	// what is missing, and then the end of the block — never as one continuous run of lines with a
 	// gap the reader is not told about.
-	for _, ln := range tail {
-		out = append(out, blackFill.Render(th.popupBody.Render(truncateToWidth(th, ln, inner))))
+	tailFrom := len(wrapped) + hidden
+	for i, ln := range tail {
+		out = append(out, blackFill.Render(bodyStyle(tailFrom+i).Render(truncateToWidth(th, ln, inner))))
 	}
 	return out, hidden
 }

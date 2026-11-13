@@ -491,7 +491,7 @@ func TestProjectCmdAdoptsARepoReaction(t *testing.T) {
 		"proposes 1 entry:",
 		"  use reaction `fmt` in this project?\n",
 		"\n    run:\n      - notify-send\n      - a1\n",
-		"      - a10\n  adopt? [y]es / [n]ot now / [r]eject: ",
+		"      - a10\n\n    not pinned: anything it reads or runs beyond these\n  adopt? [y]es / [n]ot now / [r]eject: ",
 		"Adopted 1, rejected 0, left 0 proposed.",
 	} {
 		if !strings.Contains(out, want) {
@@ -500,6 +500,9 @@ func TestProjectCmdAdoptsARepoReaction(t *testing.T) {
 	}
 	if strings.Contains(out, "more lines") {
 		t.Errorf("the body was bounded; a terminal prints it whole:\n%s", out)
+	}
+	if strings.Contains(out, "\x1b") {
+		t.Errorf("the terminal render carries an escape; the disclosure prints plain:\n%q", out)
 	}
 	adopted := layeredProposals(t, home, workspace).Adopted
 	if len(adopted) != 1 || adopted[0].Kind != apogee.ProposalReaction || adopted[0].Handle != "fmt" {

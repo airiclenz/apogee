@@ -15,7 +15,8 @@ import (
 // 0104 §2–§4) VERBATIM: the values exactly as the file spells them, so the human rules on the bytes
 // that will run rather than on a summary of them. The body is read in parts one blank line apart —
 // the re-ask reason, what the entry runs or where it connects, what it carries (a server), each
-// action (a reaction), and the pinned files — each part a run of labelled fields.
+// action (a reaction), and the pinned files — each part a run of labelled fields — closed by a faint
+// line saying what the pin leaves out (adoptionUnpinned).
 //
 // The pane's own words start at column zero and no line that starts with the file's text ever
 // does: a scalar follows its label on the label's line, and every list element, map line and
@@ -48,6 +49,11 @@ const adoptionChangedTail = " changed since you adopted it"
 // adoptionPinnedFilesLabel heads the part naming every project file whose content the pin holds.
 const adoptionPinnedFilesLabel = "pinned files"
 
+// adoptionUnpinned closes every server's and reaction's body: the pin holds the entry and the files
+// it names, never what the program reads or runs on its own (ADR 0104 amendment of 2026-11-13). It
+// is the pane's own words, so it starts at column zero, and the pane paints it faint.
+const adoptionUnpinned = "not pinned: anything it reads or runs beyond these"
+
 // adoptionHang is how far a continuation, an element or a map line hangs in from its label.
 const adoptionHang = 2
 
@@ -73,6 +79,16 @@ func (m Model) adoptionBody() string {
 	return strings.Join(wrapped, "\n")
 }
 
+// adoptionBodyFaintTail is how many of the body's closing lines the pane paints faint: the unpinned
+// disclosure as it wraps at the pane's width (popupSpec.bodyFaintTail). The body itself stays plain
+// text, because the popup's wrap measures it without reading escapes. A pane with no body has none.
+func (m Model) adoptionBodyFaintTail() int {
+	if len(m.picker.adoption) == 0 || !isStructured(m.picker.adoption[0]) {
+		return 0
+	}
+	return len(wrapBodyLine(m.th, unpinnedLine(), popupInnerWidth(m.th, m.slotWidth())))
+}
+
 // AdoptionQuestion is the adoption pane's question about p as a terminal asks it (`apogee project
 // adopt`): the pane's title, and its body in the pane's parts and spellings, one line apiece —
 // neither wrapped, since a terminal wraps its own lines, nor bounded, since the terminal is where
@@ -93,17 +109,20 @@ func AdoptionQuestion(p domain.Proposal) (title string, body []string) {
 const unboundedValue = 0
 
 // proposalBodyLines is p's body as its parts, one blank line apart: the re-ask reason, the fields
-// in the parts their kind groups them into, and the pinned files. Each value keeps at most maxLines
-// of its own lines around a marker (boundValue); unboundedValue keeps them all.
+// in the parts their kind groups them into, and the pinned files closed by the unpinned disclosure
+// — which stands as a part of its own when no file is pinned. Each value keeps at most maxLines of
+// its own lines around a marker (boundValue); unboundedValue keeps them all.
 func proposalBodyLines(p domain.Proposal, maxLines int) []bodyLine {
 	var parts [][]bodyLine
 	if len(p.Changed) > 0 {
 		parts = append(parts, []bodyLine{{text: changedReason(p.Changed), hang: adoptionHang}})
 	}
 	parts = append(parts, fieldParts(p, maxLines)...)
+	var pinned []bodyLine
 	if len(p.Files) > 0 {
-		parts = append(parts, listField(adoptionPinnedFilesLabel, p.Files, 0, maxLines))
+		pinned = listField(adoptionPinnedFilesLabel, p.Files, 0, maxLines)
 	}
+	parts = append(parts, append(pinned, unpinnedLine()))
 	var lines []bodyLine
 	for i, part := range parts {
 		if i > 0 {
@@ -112,6 +131,12 @@ func proposalBodyLines(p domain.Proposal, maxLines int) []bodyLine {
 		lines = append(lines, part...)
 	}
 	return lines
+}
+
+// unpinnedLine is the disclosure that closes the body (adoptionUnpinned), its continuation hung two
+// cells in like every other sentence of the pane's own.
+func unpinnedLine() bodyLine {
+	return bodyLine{text: adoptionUnpinned, hang: adoptionHang}
 }
 
 // changedReason is the re-ask reason: each field and then each pinned file that moved, named.

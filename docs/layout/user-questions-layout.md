@@ -235,13 +235,25 @@ parts, one blank line apart, each part a run of labelled fields:
   `args:` lists its own entries one level further in. `on:`, `timeout:`, `enabled:` and `workspace:` are not
   shown: they are parameters that change without asking (ADR 0104 §2), and a pane that drew them
   would claim a pin they do not have.
-- **Pinned files**, last: under `pinned files:`, the path (relative to the Project root,
+- **Pinned files**, after the fields: under `pinned files:`, the path (relative to the Project root,
   slash-separated) of every project file whose content the pin holds — each in-root regular file an
   argv element, the program included, or an `env:` value names, by one search over its whole text,
   its words, the part after a word's `=` and its path-list elements (`--require=./hook.js` names
   `hook.js`). The digest is not drawn; the
   label says what it means, and the adopt row's gloss says what moves it. An entry that names no
-  project file draws no such part.
+  project file draws no `pinned files:` label and no list — but it still draws the line below.
+- **What the pin does not cover**, closing every server's and reaction's body: the dim line
+  `not pinned: anything it reads or runs beyond these`, directly under the last pinned file, or a
+  part of its own, one blank line under the last field, when no file is pinned. The pin holds the
+  entry and the files it names, not what the program reads or runs on its own — a launcher's
+  `package.json` or `Makefile`, an imported module, a directory it walks — so an edit there does not
+  ask again, and the pane says so rather than letting the human assume it would (ADR 0104 amendment
+  of 2026-11-13). It is the pane's own words, so it starts at column zero and wraps two spaces in;
+  it is drawn faint, the styling laid on after the wrap, and it is the body's last line, so a window
+  too short for the whole body keeps it under the marker. Every server and reaction pane draws it —
+  an `endpoint:` server and a `gate:`-only reaction, which spawn nothing, included — and an Allow
+  rule's pane, which has no body, does not. `apogee project adopt` prints it plain, as the body's
+  last line.
 
 **How a value is spelled.** A field with one scalar value reads on one line, `label: value`. A list
 — `args:`, `env:`, `env-allowlist:`, an argv action — hangs under its label, one element per line
@@ -343,6 +355,7 @@ file the program never names:
 │ pinned files:                                                                │
 │   - hook.js                                                                  │
 │   - tools/docs-server.js                                                     │
+│ not pinned: anything it reads or runs beyond these                           │
 │                                                                              │
 │   adopt    — it runs here until the entry or a pinned file changes           │
 │ ❯ not now  — it stays inert; the offer comes back at the next start-up       │
@@ -371,6 +384,7 @@ A reaction adopted earlier whose script has since been edited — the reason lin
 │                                                                              │
 │ pinned files:                                                                │
 │   - scripts/fmt.sh                                                           │
+│ not pinned: anything it reads or runs beyond these                           │
 │                                                                              │
 │   adopt    — it runs here until the entry or a pinned file changes           │
 │ ❯ not now  — it stays inert; the offer comes back at the next start-up       │
@@ -380,8 +394,8 @@ A reaction adopted earlier whose script has since been edited — the reason lin
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
-**At fifty columns.** The title is cut, the reason sentence and the `env-allowlist:` fact wrap two
-spaces in, the `env:` value wraps at its space, after `--require`, and continues under its own `- `,
+**At fifty columns.** The title is cut, the reason sentence, the `env-allowlist:` fact and the
+unpinned disclosure wrap two spaces in, the `env:` value wraps at its space, after `--require`, and continues under its own `- `,
 and the glosses wrap under the gloss column. No value here runs past the height bound, so every one
 is still on the screen in full:
 
@@ -407,6 +421,8 @@ is still on the screen in full:
 │ pinned files:                                  │
 │   - tools/docs-server.js                       │
 │   - tools/hooks/trace-every-call.js            │
+│ not pinned: anything it reads or runs beyond   │
+│   these                                        │
 │                                                │
 │   adopt    — it runs here until the entry or a │
 │            pinned file changes                 │
@@ -433,4 +449,6 @@ auth: oauth
 client-id: apogee-docs
 client-secret-env: DOCS_CLIENT_SECRET
 issuer: https://login.example.com/realms/docs
+
+not pinned: anything it reads or runs beyond these
 ```
