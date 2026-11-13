@@ -397,7 +397,10 @@ func resolveProjectRoot(workspace string, notify func(string)) string {
 // readProjectLayer reads the project file at path and checks it alone, answering the layer and
 // whether there is one to merge. No file, the global file itself reached through another name, and
 // a file that states nothing are no layer, silently; every other way the file can fail is one
-// notice naming its path. Unknown keys are announced against the project path, and the global-only
+// notice naming its path — a stat error other than not-exist (an unreadable `.apogee/`, a
+// component that is not a folder) and a file that exists but cannot be resolved among them. The
+// path resolves through projectRealPath, the resolver the Project config writer uses, so a file
+// under a Windows NTFS junction is read like one under a symbolic link. Unknown keys are announced against the project path, and the global-only
 // keys it states are named in one notice and dropped before the checks, so a key the layer ignores
 // cannot also cost it the keys it honours. Its `mcp-servers:` and `reactions:` entries are taken
 // out of that check and judged one by one once it passes (repoMCPServers, repoReactionConfigs), so
@@ -407,10 +410,14 @@ func readProjectLayer(path, globalPath string, readFile func(string) ([]byte, er
 	if path == "" {
 		return projectLayer{}, false
 	}
-	resolved, err := filepath.EvalSymlinks(path)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
+	if _, err := os.Stat(path); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			notify(fmt.Sprintf(projectSkippedNotice, path, err))
+		}
 		return projectLayer{}, false
+	}
+	resolved, err := projectRealPath(path)
+	switch {
 	case err != nil:
 		notify(fmt.Sprintf(projectSkippedNotice, path, err))
 		return projectLayer{}, false
@@ -461,18 +468,32 @@ func readProjectLayer(path, globalPath string, readFile func(string) ([]byte, er
 		len(layer.servers) > 0 || len(layer.reactions) > 0
 }
 
-// sameConfigFile reports whether the symlink-resolved project file is the global config file —
-// a Project root whose `.apogee/` is the apogee home, or links to it — so the global file is never
-// layered over itself. The global path is compared symlink-resolved where it exists.
+// sameConfigFile reports whether the resolved project file is the global config file — a Project
+// root whose `.apogee/` is the apogee home, or links or junctions to it — so the global file is
+// never layered over itself. Equal spellings are the same file; otherwise the two are compared by
+// file identity (os.SameFile), which holds whatever symbolic links or junctions either path passes
+// through. A global file that does not exist is no file the project's can be.
 func sameConfigFile(resolvedProject, globalPath string) bool {
 	if globalPath == "" {
 		return false
 	}
-	global := filepath.Clean(globalPath)
-	if resolved, err := filepath.EvalSymlinks(globalPath); err == nil {
-		global = resolved
+	if filepath.Clean(globalPath) == resolvedProject {
+		return true
 	}
-	return resolvedProject == global
+	return sameFileIdentity(resolvedProject, globalPath)
+}
+
+// sameFileIdentity reports whether a and b both exist and are one file or folder (os.SameFile).
+func sameFileIdentity(a, b string) bool {
+	aInfo, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bInfo, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(aInfo, bInfo)
 }
 
 // checkProjectLayer decodes the project-capable part of the project file ALONE and runs the checks

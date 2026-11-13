@@ -115,7 +115,15 @@ NOTES (2026-11-13): execpin.go's realPathOrSelf still calls filepath.EvalSymlink
 **Commit:** `fix(config): write Project config under a junctioned root`
 Depends on item 1.
 
-## 4. Project layer reads under a junction, and says so when it cannot
+## 4. Project layer reads under a junction, and says so when it cannot — ✅ DONE (2026-11-13)
+
+NOTES (2026-11-13): sameConfigFile and samePath share one new helper, sameFileIdentity (layer.go: os.Stat + os.SameFile, as agent/construct.go sameFile does); sameConfigFile keeps a cleaned-spelling equality short-circuit before it.
+
+NOTES (2026-11-13): consequential edit — internal/config/projectwrite.go: made necessary by readProjectLayer now resolving through projectRealPath, whose doc comment named the Project config writer as its only user
+
+NOTES (2026-11-13): consequential edit — docs/manual/configuration.md: made necessary by readProjectLayer now announcing a file that is there but cannot be stat'ed or resolved; the skipped-layer sentence names that case
+
+NOTES (2026-11-13): the two Linux stat-error cases (unreadable `.apogee/`, non-directory component) also passed on the base code, whose EvalSymlinks reported them; they guard the new stat-first order. The forced-resolve case is the one that fails on the base.
 
 **What:**
 **Goal:** the project layer loads when `.apogee/config.yaml` sits under a junction; a layer file that exists but cannot be resolved produces the existing `projectSkippedNotice` instead of a silent skip; a truly missing file stays silent; identity checks recognise a junctioned `~/.apogee` as the global home.

@@ -1,9 +1,11 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -739,5 +741,134 @@ func TestOverlayProjectOfferWithoutAProjectFileIsEmpty(t *testing.T) {
 	}
 	if !reflect.DeepEqual(overlaid, base) {
 		t.Errorf("overlay = %+v\nwant the base %+v", overlaid, base)
+	}
+}
+
+// readProjectLayerNotices runs readProjectLayer over the Project config of projectRoot, answering
+// whether it took a layer and every notice the read produced.
+func readProjectLayerNotices(t *testing.T, globalPath, projectRoot string) (bool, []string) {
+	t.Helper()
+
+	var notices []string
+	_, ok := readProjectLayer(projectFilePath(projectRoot), globalPath, os.ReadFile,
+		func(n string) { notices = append(notices, n) })
+	return ok, notices
+}
+
+// assertOneSkippedNotice fails the test unless notices is exactly one skipped-layer line naming
+// path and want.
+func assertOneSkippedNotice(t *testing.T, notices []string, path, want string) {
+	t.Helper()
+
+	if len(notices) != 1 {
+		t.Fatalf("notices = %q; want one skipped-layer line", notices)
+	}
+	for _, part := range []string{path, want, "the project layer is skipped"} {
+		if !strings.Contains(notices[0], part) {
+			t.Errorf("notice = %q; want it to contain %q", notices[0], part)
+		}
+	}
+}
+
+// A project file that exists but the resolver cannot resolve is announced, never skipped in
+// silence. Not parallel: it swaps the package's projectRealPath seam.
+func TestReadProjectLayerAnnouncesAFileItCannotResolve(t *testing.T) {
+	globalPath, projectRoot := layerFixture(t, "workflow-retries: 2\n", "workflow-retries: 9\n")
+	previous := projectRealPath
+	projectRealPath = func(string) (string, error) {
+		return "", errors.New("forced resolve failure")
+	}
+	t.Cleanup(func() { projectRealPath = previous })
+
+	ok, notices := readProjectLayerNotices(t, globalPath, projectRoot)
+
+	if ok {
+		t.Error("readProjectLayer took a layer it could not resolve")
+	}
+	assertOneSkippedNotice(t, notices, projectFilePath(projectRoot), "forced resolve failure")
+}
+
+// A stat error other than not-exist — an `.apogee/` the user cannot search, a path component that
+// is a file — is announced: the file may well be there.
+func TestReadProjectLayerAnnouncesAStatErrorOtherThanNotExist(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits and ENOTDIR; Windows reports a file component as not-exist")
+	}
+	cases := map[string]func(t *testing.T, projectRoot string){
+		"unreadable .apogee": func(t *testing.T, projectRoot string) {
+			if os.Geteuid() == 0 {
+				t.Skip("root reads a folder whatever its mode")
+			}
+			dir := filepath.Join(projectRoot, projectConfigDirName)
+			if err := os.Chmod(dir, 0o000); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+		},
+		"non-directory component": func(t *testing.T, projectRoot string) {
+			dir := filepath.Join(projectRoot, projectConfigDirName)
+			if err := os.RemoveAll(dir); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(dir, []byte("not a folder\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, arrange := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			globalPath, projectRoot := layerFixture(t, "workflow-retries: 2\n", "workflow-retries: 9\n")
+			arrange(t, projectRoot)
+
+			ok, notices := readProjectLayerNotices(t, globalPath, projectRoot)
+
+			if ok {
+				t.Error("readProjectLayer took a layer it could not stat")
+			}
+			assertOneSkippedNotice(t, notices, projectFilePath(projectRoot), "")
+		})
+	}
+}
+
+// A project file that is not there is no layer, and says nothing.
+func TestReadProjectLayerIsSilentForAMissingFile(t *testing.T) {
+	t.Parallel()
+	globalPath, projectRoot := layerFixture(t, "workflow-retries: 2\n", "")
+
+	ok, notices := readProjectLayerNotices(t, globalPath, projectRoot)
+
+	if ok {
+		t.Error("readProjectLayer took a layer from a missing file")
+	}
+	if len(notices) != 0 {
+		t.Errorf("notices = %q; want none for a missing project file", notices)
+	}
+}
+
+// The identity check compares files, not spellings: a hard link to the global file is the global
+// file, a different file is not, and a global file that does not exist matches nothing.
+func TestSameConfigFileComparesFileIdentity(t *testing.T) {
+	t.Parallel()
+	globalPath, projectRoot := layerFixture(t, "workflow-retries: 2\n", "workflow-retries: 2\n")
+	projectPath := projectFilePath(projectRoot)
+	hardLink := filepath.Join(filepath.Dir(projectPath), "linked.yaml")
+	if err := os.Link(globalPath, hardLink); err != nil {
+		t.Skipf("hard links unavailable: %v", err)
+	}
+
+	if !sameConfigFile(hardLink, globalPath) {
+		t.Errorf("sameConfigFile(%q, %q) = false; want a hard link to be the global file", hardLink, globalPath)
+	}
+	if sameConfigFile(projectPath, globalPath) {
+		t.Errorf("sameConfigFile(%q, %q) = true; want two files with equal bytes kept apart", projectPath, globalPath)
+	}
+	missing := filepath.Join(filepath.Dir(globalPath), "absent.yaml")
+	if sameConfigFile(projectPath, missing) {
+		t.Errorf("sameConfigFile(%q, %q) = true; want a missing global file to match nothing", projectPath, missing)
+	}
+	if sameConfigFile(projectPath, "") {
+		t.Errorf("sameConfigFile(%q, \"\") = true; want no global path to match nothing", projectPath)
 	}
 }

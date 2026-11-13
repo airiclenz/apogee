@@ -42,7 +42,8 @@ const (
 // projectRealPath is the resolver the Project config writer runs both sides of every comparison
 // through — the Project root, the config and the home folder — so a root reached through a Windows
 // NTFS junction resolves to the same spelling as the files under it, and the containment check's
-// filepath.Rel never compares a final path with a path as written. It is a variable so a test can
+// filepath.Rel never compares a final path with a path as written. The project layer's reader
+// (readProjectLayer) resolves the file it reads through it too. It is a variable so a test can
 // force a resolve failure; nothing else assigns it.
 var projectRealPath = platform.RealPath
 

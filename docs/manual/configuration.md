@@ -353,7 +353,8 @@ Precedence for the keys a project may set is flag, then environment, then the Pr
 then `~/.apogee/config.yaml`, then the default — none of those keys has a flag or a variable today,
 so in practice the project file outranks the global one and nothing else. The project file is
 never migrated, and it can never stop a start: an unknown key in it is reported against its own
-path, and a file that does not parse, or a value its key refuses, costs one line naming the file
+path, and a file that does not parse, one that is there but cannot be read, or a value its key
+refuses, costs one line naming the file
 (`apogee: project config <path>: …; the project layer is skipped`) and the session runs on the
 global config alone. [`/settings`](commands.md#the-settings-screen--settings) marks a value the
 project supplied `(project)`, and [`apogee probe config`](probe.md), run in the project, shows the

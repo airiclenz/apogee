@@ -420,15 +420,14 @@ func (s SessionSettings) ValidateHost(ownHome string) error {
 	return nil
 }
 
-// samePath says whether two absolute paths name one directory: equal once cleaned, or equal once
-// every symbolic link in both is resolved. A path that does not exist is compared as written.
+// samePath says whether two absolute paths name one directory: equal once cleaned, or one folder
+// by file identity (os.SameFile), whatever symbolic links or Windows NTFS junctions either passes
+// through. A path that does not exist is compared as written.
 func samePath(a, b string) bool {
 	if filepath.Clean(a) == filepath.Clean(b) {
 		return true
 	}
-	realA, errA := filepath.EvalSymlinks(a)
-	realB, errB := filepath.EvalSymlinks(b)
-	return errA == nil && errB == nil && realA == realB
+	return sameFileIdentity(a, b)
 }
 
 // ResolveShareGroup answers the gid `sessions.share-group:` names on this machine, or the startup
