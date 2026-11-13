@@ -56,10 +56,11 @@
 // host. platform_posix.go and platform_windows.go are the build-tagged selectors saying which
 // rule set Current returns; only the Windows one carries anything of its own — the OS
 // long-path resolver that lets Contains expand an 8.3 short name instead of refusing to
-// compare it. realpath.go is RealPath, the one real-path resolver: filepath.EvalSymlinks
-// whenever that succeeds, and otherwise the per-OS fallback — realpath_windows.go points it at
-// the final path name of an open handle, which crosses an NTFS junction EvalSymlinks fails on,
-// and realpath_other.go leaves it nil, so on POSIX RealPath is EvalSymlinks alone.
+// compare it. realpath.go is RealPath, the one real-path resolver: filepath.EvalSymlinks,
+// unless that fails or answers with a path that still crosses a junction, when the per-OS
+// fallback answers instead — realpath_windows.go points it at the final path name of an open
+// handle, which crosses an NTFS junction EvalSymlinks fails on or leaves in place, and
+// realpath_other.go leaves it nil, so on POSIX RealPath is EvalSymlinks alone.
 //
 // The Confiner selectors. confiner_darwin.go and confiner_other.go are three-line per-OS
 // choices of NewConfiner and NewReportConfiner — seatbelt, and the deny-all stub.

@@ -112,7 +112,7 @@ func TestRealPathFallback(t *testing.T) {
 					return tc.fallback(p)
 				}
 			}
-			swapRealPathSeams(t, func(string) (string, error) { return "", errUnderJunction }, fallback)
+			swapRealPathSeams(t, func(string) (string, error) { return "", errUnderJunction }, fallback, nil)
 
 			got, err := RealPath(tc.path)
 
@@ -129,17 +129,84 @@ func TestRealPathFallback(t *testing.T) {
 	}
 }
 
-// swapRealPathSeams installs resolve and fallback as RealPath's two resolvers for the rest of
-// the test and restores the package's own when it ends.
+// TestRealPathResolvedThroughAJunction drives the branch a path that IS a Windows junction takes
+// from any host: evalSymlinks succeeds with the junction's own spelling, the junction check sees
+// it, and the fallback's answer wins. A path with no junction, or a fallback that cannot answer,
+// keeps the evalSymlinks answer. It does not run in parallel because it rewrites package state.
+func TestRealPathResolvedThroughAJunction(t *testing.T) {
+	const (
+		junctionSpelling   = `C:\link`
+		resolvedByFallback = `C:\target`
+	)
+
+	tests := []struct {
+		name       string
+		crosses    bool
+		fallback   func(string) (string, bool)
+		want       string
+		wantCalled bool
+	}{
+		{
+			name:       "a junction resolves through the fallback",
+			crosses:    true,
+			fallback:   func(string) (string, bool) { return resolvedByFallback, true },
+			want:       resolvedByFallback,
+			wantCalled: true,
+		},
+		{
+			name:       "a fallback that cannot answer keeps the evalSymlinks answer",
+			crosses:    true,
+			fallback:   func(string) (string, bool) { return "", false },
+			want:       junctionSpelling,
+			wantCalled: true,
+		},
+		{
+			name:     "a path with no junction never reaches the fallback",
+			fallback: func(string) (string, bool) { return resolvedByFallback, true },
+			want:     junctionSpelling,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			swapRealPathSeams(t,
+				func(string) (string, error) { return junctionSpelling, nil },
+				func(p string) (string, bool) {
+					called = true
+					return tc.fallback(p)
+				},
+				func(string) bool { return tc.crosses },
+			)
+
+			got, err := RealPath(junctionSpelling)
+
+			if err != nil {
+				t.Fatalf("RealPath(%q): %v", junctionSpelling, err)
+			}
+			if got != tc.want {
+				t.Errorf("RealPath(%q) = %q; want %q", junctionSpelling, got, tc.want)
+			}
+			if called != tc.wantCalled {
+				t.Errorf("fallback called = %v; want %v", called, tc.wantCalled)
+			}
+		})
+	}
+}
+
+// swapRealPathSeams installs resolve and fallback as RealPath's two resolvers, and crosses as
+// its junction check, for the rest of the test, and restores the package's own when it ends.
 func swapRealPathSeams(
 	t *testing.T,
 	resolve func(string) (string, error),
 	fallback func(string) (string, bool),
+	crosses func(string) bool,
 ) {
 	t.Helper()
-	savedResolve, savedFallback := evalSymlinks, realPathFallback
-	t.Cleanup(func() { evalSymlinks, realPathFallback = savedResolve, savedFallback })
-	evalSymlinks, realPathFallback = resolve, fallback
+	savedResolve, savedFallback, savedCrosses := evalSymlinks, realPathFallback, crossesJunction
+	t.Cleanup(func() {
+		evalSymlinks, realPathFallback, crossesJunction = savedResolve, savedFallback, savedCrosses
+	})
+	evalSymlinks, realPathFallback, crossesJunction = resolve, fallback, crosses
 }
 
 // canonicalTempDir is t.TempDir with its own links resolved, so an expected path built under it
