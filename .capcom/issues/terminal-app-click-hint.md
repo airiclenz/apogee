@@ -3,6 +3,7 @@ title: The 'cmd+click to open' hint is false in macOS Terminal.app
 status: open
 type: bug
 priority: 3
+plan: 2026-11-13 - 00 - urgent-defects-and-doc-truth-plan
 created: 2026-11-12T14:31:49Z
 ---
 

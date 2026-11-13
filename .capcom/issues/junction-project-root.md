@@ -4,6 +4,7 @@ status: open
 type: bug
 priority: 2
 labels: [windows]
+plan: 2026-11-13 - 00 - urgent-defects-and-doc-truth-plan
 created: 2026-11-11T20:14:10Z
 ---
 
