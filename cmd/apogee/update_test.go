@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -308,6 +309,34 @@ func TestUpdate_StagedVersionMismatch_KeepsInstalledBinary(t *testing.T) {
 
 	if err == nil || !strings.Contains(err.Error(), "not v0.2.0") {
 		t.Fatalf("apogee update --yes error = %v, want the version mismatch reported", err)
+	}
+	requireFileContent(t, exePath, installedBinary)
+	requireOnlyFile(t, exePath)
+}
+
+// A staged binary that does not answer --version within the timeout fails the update with the
+// timeout named, and a child it forked holding the output pipe does not keep the update waiting
+// for that child. Serial for the same ETXTBSY reason.
+func TestUpdate_StagedVersionTimeout_KeepsInstalledBinary(t *testing.T) {
+	skipWithoutShellStub(t)
+	const childSleep = 30 * time.Second
+	hangingBinary := []byte("#!/bin/sh\nsleep " + strconv.Itoa(int(childSleep.Seconds())) + " &\nwait\n")
+	release := newReleaseServer(t, updateTestLatest, hangingBinary)
+	exePath := installedExecutable(t)
+	deps := archiveUpdateDeps(release, exePath, "", false)
+	deps.stagedVersionTimeout = testtime.Fixed(time.Second)
+
+	started := time.Now()
+	_, err := runUpdateCommand(t, deps, "--yes")
+	elapsed := time.Since(started)
+
+	want := "the downloaded binary did not answer --version within 1s; the installed binary is unchanged"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("apogee update --yes error = %v, want it to contain %q", err, want)
+	}
+	if limit := testtime.Fixed(childSleep / 2); elapsed >= limit {
+		t.Errorf("apogee update returned after %s, want well before the forked child's %s sleep ends (< %s)",
+			elapsed, childSleep, limit)
 	}
 	requireFileContent(t, exePath, installedBinary)
 	requireOnlyFile(t, exePath)

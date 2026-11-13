@@ -244,7 +244,11 @@ NOTES (2026-11-13): consequential edit — internal/tui/popup.go (module header 
 **Commit:** `fix(tui): disclose what the adoption pin leaves unpinned`
 **Closes:** adoption-pane-unpinned-reads
 
-## 10. The staged-binary version check waits on a slow box
+## 10. The staged-binary version check waits on a slow box — ✅ DONE (2026-11-13)
+
+NOTES (2026-11-13): the output-pipe wait delay is `min(timeout, 10s)` (const `maxStagedVersionWaitDelay`) rather than a fixed value, so the test's 1 s timeout keeps the run near 2 s while production keeps a 10 s grace past the 5-minute deadline; the new field is set explicitly in newUpdateCommand and zero is also treated as the default, so `archiveUpdateDeps` stays unchanged.
+
+NOTES (2026-11-13): the new test was confirmed to discriminate — with the WaitDelay line removed it fails after 30.0 s (the forked child's sleep).
 
 **What:**
 **Goal:** `apogee update` gives the downloaded binary's `--version` check a 5-minute backstop, reports a timeout as `the downloaded binary did not answer --version within 5m0s; the installed binary is unchanged`, and a held output pipe cannot outlive the deadline. Fixes a slow-box violation (a cold first exec under load failed the update as "did not run").

@@ -30,9 +30,16 @@ import (
 	"github.com/airiclenz/apogee/internal/update"
 )
 
-// stagedVersionTimeout bounds the staged binary's `--version` run, so a binary that hangs fails
-// the update instead of holding it forever.
-const stagedVersionTimeout = 30 * time.Second
+// defaultStagedVersionTimeout bounds the staged binary's `--version` run, so a binary that hangs
+// fails the update instead of holding it forever. It is a backstop, not a performance budget: a
+// cold first exec of a freshly written binary on a loaded, throttled box can take far longer than
+// a healthy run, and a slow machine must make the update slower, never failed.
+const defaultStagedVersionTimeout = 5 * time.Minute
+
+// maxStagedVersionWaitDelay caps how long the staged binary's output pipe may stay open once its
+// run has ended or timed out: a child it forked can hold the pipe long after the binary itself is
+// gone, and the update must not wait on that child.
+const maxStagedVersionWaitDelay = 10 * time.Second
 
 // updateStagingPattern names the directory the new binary is staged in. It sits beside the
 // executable so the swap is a rename on one file system, never a copy across two.
@@ -60,6 +67,9 @@ type updateDeps struct {
 	// goos and goarch name the release archive downloaded: the running platform's.
 	goos   string
 	goarch string
+	// stagedVersionTimeout bounds the staged binary's `--version` run; zero means
+	// defaultStagedVersionTimeout.
+	stagedVersionTimeout time.Duration
 }
 
 // updateFlags are the command's two switches.
@@ -81,6 +91,8 @@ func newUpdateCommand() *cobra.Command {
 		stdin:      os.Stdin,
 		goos:       runtime.GOOS,
 		goarch:     runtime.GOARCH,
+
+		stagedVersionTimeout: defaultStagedVersionTimeout,
 	})
 }
 
@@ -205,7 +217,7 @@ func replaceExecutable(ctx context.Context, deps updateDeps, exePath, latest str
 	if err != nil {
 		return fmt.Errorf("apogee update: %w", err)
 	}
-	if err := verifyStagedVersion(ctx, stagedPath, latest); err != nil {
+	if err := verifyStagedVersion(ctx, stagedPath, latest, deps.stagedVersionTimeout); err != nil {
 		return err
 	}
 	return swapExecutable(stagedPath, exePath)
@@ -213,12 +225,24 @@ func replaceExecutable(ctx context.Context, deps updateDeps, exePath, latest str
 
 // verifyStagedVersion runs `<stagedPath> --version` and requires its output to name latest, so a
 // binary that cannot start on this host, or is not the release asked for, is never swapped in.
-func verifyStagedVersion(ctx context.Context, stagedPath, latest string) error {
-	ctx, cancel := context.WithTimeout(ctx, stagedVersionTimeout)
+// The run is bounded by timeout (zero means defaultStagedVersionTimeout), and its output pipe by a
+// short wait delay past that, so a forked child holding the pipe cannot outlive the deadline.
+func verifyStagedVersion(ctx context.Context, stagedPath, latest string, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = defaultStagedVersionTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	output, err := exec.CommandContext(ctx, stagedPath, "--version").CombinedOutput()
+	cmd := exec.CommandContext(ctx, stagedPath, "--version")
+	cmd.WaitDelay = min(timeout, maxStagedVersionWaitDelay)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
+		// The inner context names the timeout: exec reports a killed process, not why it was killed.
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("apogee update: the downloaded binary did not answer --version within %s; "+
+				"the installed binary is unchanged", timeout)
+		}
 		return fmt.Errorf("apogee update: the downloaded binary did not run: %w", err)
 	}
 	if !strings.Contains(string(output), latest) {
