@@ -61,8 +61,8 @@ it prints `apogee v0.25.0 is up to date` and exits 0. Otherwise it asks
 
 Any failure before the swap leaves your installed binary exactly as it was. Without `--yes` the
 command needs a terminal to ask on: with stdin piped or redirected it refuses and exits 1, so a
-script states its intent with `--yes`. `--check` reports `apogee v0.24.11 → v0.25.0 is available`
-and downloads and writes nothing.
+script states its intent with `--yes`. `--check` reports
+`apogee v0.24.11 → v0.25.0 is available — run: apogee update` and downloads and writes nothing.
 
 The directory the binary lives in must be writable by you — the new binary is staged there so the
 swap is a rename. On Linux and macOS the rename replaces the binary in one step. Windows does not

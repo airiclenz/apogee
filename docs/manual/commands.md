@@ -732,7 +732,7 @@ instead of that resolution — `mode:` and `confine-to-workspace:` show what apo
 right now — and the rows are re-derived at every paint, not read once when the pane opens, so a
 `shift+tab` or a `/confine off` is already on the row whenever the pane paints, and
 the `mode:` list opens on the rung you are actually on. The conversation gives way
-entirely while the pane is up, because sixty-odd keys are a screen to read rather
+entirely while the pane is up, because some ninety keys are a screen to read rather
 than a choice to scan: `↑/↓` move the `❯`, a fixed two-line `Description:` header above the
 list says what the key under the cursor is for, and `esc` closes the pane and hands the
 transcript back. Section labels stand in white above the rows they open, the row being typed

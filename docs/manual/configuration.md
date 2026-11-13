@@ -911,14 +911,21 @@ your [`url-safety:`](#what-the-network-tools-may-reach--url-safety) lists, with 
 origin is reached over the endpoint's pinned connection. A client secret goes only to the
 authorization server `issuer:` pins.
 
-**Fixed limits.** Three bounds hold for every server, and none has a key. A tool call that has not
+**Fixed limits.** Six bounds hold for every server, and none has a key. A tool call that has not
 answered after **5 minutes** ends as an error result, `mcp: call timed out after 5m0s`, that the
 model can route around; the Turn carries on, and cancelling the Turn still stops the call at once.
 A tool description past **8 KiB** is clipped and marked `[mcp description truncated at 8192
 bytes]`, so one server cannot flood the tool menu every request carries. And one message from a
 server — a stdio JSON value, an SSE event or a plain JSON reply body — past **4 MiB** fails the
 read with `apogee: mcp message exceeds the 4 MiB limit`; many small messages pass whatever their
-total, so a long-lived SSE stream is never cut.
+total, so a long-lived SSE stream is never cut. Discovering a server's tools asks for at most
+**64 pages** of its tool list and surfaces at most **512 tools**, and a tool whose input schema is
+past **64 KiB** is skipped, so a server that never ends its list cannot grow the tool menu without
+bound. A list cut short is never silent: the server connects on the tools it did surface, and apogee
+says so as a startup notice naming the server and each cause — `apogee: mcp server <name> — tool
+list cut short: stopped at 512 tools, skipped 2 tools with a schema over 64 KiB` (`stopped at 64
+pages` for the page cap, `1 tool` in the singular) — or, on a reload, as the same clause after that
+server's `mcp <name> connected` (or `reconnected`) note.
 
 The block is file-only (no flag, no environment variable) and it is **live**: save the file — or use
 `⏎` on the `mcp-servers:` row in [`/settings`](commands.md#the-settings-screen--settings), which
@@ -2164,7 +2171,7 @@ extra request, taught that format, came back with a call it parses — and never
 where no listed format reads the model's call, the report quotes the call the model wrote, and that
 shape is what you write `tool-call-pattern:` and `tool-call-example:` from ([how the probe picks
 the format](probe.md)). Editing this block while a session runs swaps the parser on the spot: it is not one
-of the seventeen keys, listed at the top of this page, that wait for the next start.
+of the nineteen keys, listed at the top of this page, that wait for the next start.
 
 ## Keeping the session store bounded — `sessions:`
 

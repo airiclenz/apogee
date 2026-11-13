@@ -284,7 +284,9 @@ NOTES (2026-11-13): docs/manual/configuration.md is left to item 12, whose goal 
 **Commit:** `feat(mcp): announce a tool list cut short by a discovery cap`
 **Closes:** mcp-discovery-cap-silent
 
-## 12. Manual corrections from the refocus
+## 12. Manual corrections from the refocus — ✅ DONE (2026-11-13)
+
+NOTES (2026-11-13): configuration.md's "Fixed limits" lead now says "Six bounds" (was "Three"), because the paragraph now also lists the three discovery caps; the notice clauses are quoted from internal/mcp Truncation.Causes and cmd/apogee mcpTruncatedClause/announceTruncatedMCP/mcpLanded as item 11 shipped them.
 
 **What:**
 **Goal:** `docs/manual/configuration.md` names nineteen next-start keys wherever it counts them; `docs/manual/commands.md` describes `/settings` as covering some ninety keys; `docs/manual/updating.md` quotes the full `--check` line including `— run: apogee update`; configuration.md's MCP fixed-limits paragraph lists the page, tool and schema caps and says apogee announces a cut-short list.
