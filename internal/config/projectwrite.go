@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/airiclenz/apogee/internal/adoption"
+	"github.com/airiclenz/apogee/internal/platform"
 )
 
 // The Project config writer (ADR 0096 §4). apogee writes `<Project root>/.apogee/config.yaml` only
@@ -37,6 +38,13 @@ const (
 	projectDirPerm  os.FileMode = 0o755
 	projectFilePerm os.FileMode = 0o644
 )
+
+// projectRealPath is the resolver the Project config writer runs both sides of every comparison
+// through — the Project root, the config and the home folder — so a root reached through a Windows
+// NTFS junction resolves to the same spelling as the files under it, and the containment check's
+// filepath.Rel never compares a final path with a path as written. It is a variable so a test can
+// force a resolve failure; nothing else assigns it.
+var projectRealPath = platform.RealPath
 
 // editProject runs one config-write transaction against the Project config of projectRoot, holding
 // a lock kept under workspacesDir (the binary's `~/.apogee/workspaces`). The file and its folder are
@@ -105,7 +113,7 @@ func (c projectCreated) undo() {
 // claim — a real folder and a regular file, neither a symlink — inside the Project root, which must
 // not be the user's home (whose `.apogee/` is the global config).
 func prepareProjectFile(projectRoot, path string) (projectCreated, error) {
-	root, err := filepath.EvalSymlinks(projectRoot)
+	root, err := projectRealPath(projectRoot)
 	if err != nil {
 		return projectCreated{}, fmt.Errorf("apogee: cannot write the project config: resolve Project root %q: %w",
 			projectRoot, err)
@@ -188,7 +196,7 @@ func createEmptyFile(path string) error {
 // belt to the per-entry symlink checks' braces, should the folders above `.apogee/` move under the
 // write.
 func insideRoot(root, path string) error {
-	resolved, err := filepath.EvalSymlinks(path)
+	resolved, err := projectRealPath(path)
 	if err != nil {
 		return fmt.Errorf("apogee: cannot write the project config: resolve %q: %w", path, err)
 	}
@@ -207,7 +215,7 @@ func isHome(root string) bool {
 	if err != nil || home == "" {
 		return false
 	}
-	if resolved, err := filepath.EvalSymlinks(home); err == nil {
+	if resolved, err := projectRealPath(home); err == nil {
 		home = resolved
 	}
 	return filepath.Clean(home) == root

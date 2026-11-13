@@ -92,7 +92,15 @@ NOTES (2026-11-13): CLOSES lists junction-project-root because the item's Goal s
 **Commit:** `fix(projectroot): resolve the Project root and adoption key across junctions`
 Depends on item 1.
 
-## 3. Project config writes work under a junction
+## 3. Project config writes work under a junction — ✅ DONE (2026-11-13)
+
+NOTES (2026-11-13): the config-side seam is `projectRealPath` (projectwrite.go, wraps platform.RealPath); `evalSymlinks` stays resolveWriteTarget's alone. The Linux seam test (TestProjectWriteRefusesARootTheResolverCannotResolve) swaps it inline, non-parallel with t.Cleanup, as forceResolveFailure does — forceResolveFailure itself swaps the other seam.
+
+NOTES (2026-11-13): the Windows tests carry their own longTempDir/junctionOrSkip helpers (the outside-root case junctions `.apogee/` to a sibling folder and checks both insideRoot directly and editProject end to end); they have not run on Windows yet — item 6 wires the CI leg.
+
+NOTES (2026-11-13): CLOSES repeats junction-project-root — item 4 completes the issue's layer-read path, so it should close only once that lands.
+
+NOTES (2026-11-13): execpin.go's realPathOrSelf still calls filepath.EvalSymlinks; left alone as outside this item's Files (the layer-read/guard items own the read side).
 
 **What:**
 **Goal:** saving a project setting and adopting under a junctioned Project root succeeds, and the containment check refuses a path outside the root exactly as before. Fixes the write half of `junction-project-root`.

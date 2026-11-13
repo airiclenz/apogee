@@ -256,6 +256,28 @@ func TestProjectWriteRefusesAMissingRoot(t *testing.T) {
 	}
 }
 
+// Not parallel: it swaps the package's projectRealPath seam.
+func TestProjectWriteRefusesARootTheResolverCannotResolve(t *testing.T) {
+	root, workspaces := projectWriteFixture(t)
+	previous := projectRealPath
+	projectRealPath = func(string) (string, error) {
+		return "", errors.New("forced resolve failure")
+	}
+	t.Cleanup(func() { projectRealPath = previous })
+
+	var seen []byte
+	err := editProject(root, workspaces, appendSplice("use-project-skills: false\n", &seen), acceptAll)
+	if err == nil {
+		t.Fatal("editProject wrote under a Project root it could not resolve")
+	}
+	if want := "apogee: cannot write the project config: resolve Project root"; !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want it to contain %q", err, want)
+	}
+	if got := treeOf(t, root); len(got) != 0 {
+		t.Errorf("a refused write left %v in the repository", got)
+	}
+}
+
 // Not parallel: it points HOME at the fixture.
 func TestProjectWriteRefusesTheHomeFolder(t *testing.T) {
 	root, workspaces := projectWriteFixture(t)
