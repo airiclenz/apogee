@@ -218,9 +218,10 @@ jobs:
         with:
           go-version-file: go.mod
       - name: go test (race, ConPTY packages)
-        # These five trees, plus the Windows-tagged tests of `internal/session` in the third
-        # step, rather than `./...`: the rest of the suite is Linux-shaped (the
-        # landlock battery, the PTY drivers), while the Windows half of the product is the
+        # These seven trees, plus the Windows-tagged tests of `internal/session` and the
+        # junction tests of `internal/config` in the last two steps, rather than `./...`:
+        # the rest of the suite is Linux-shaped (the landlock battery, the PTY drivers),
+        # while the Windows half of the product is the
         # confinement backend — `internal/platform` carries `winlabel`'s walk — whose tests
         # label the runner's own disk, throwaway by construction, and the ConPTY Console in
         # `internal/console`, whose Windows-tagged tests open a pseudoconsole both
@@ -240,23 +241,30 @@ jobs:
         # `cmd/release` is here because a release may be cut from a Windows host: its tests
         # prove the release program's paths, archives and rendered manifests on Windows too.
         #
+        # `internal/projectroot` and `internal/adoption` are here because a Project root and
+        # its Adoption record key resolve through an NTFS junction like a symlink: their
+        # Windows-tagged tests reach the root through a junction and prove the walk and the
+        # record's name come out the same as through the real path.
+        #
         # -race needs cgo, which the runner's MinGW gcc satisfies. Should it ever fail to
         # link here, drop -race from this one job and say so in this comment — the C-20
         # race test then rests on its own iteration count alone.
         #
-        # The five trees run as two steps, and a third runs `internal/session`'s Windows
-        # tests. `internal/platform` and `internal/console` are the
-        # ConPTY-heavy packages: each runs 50-iteration cmd.exe/conhost loops, and run side by
-        # side they share the runner's 4 vCPU and starve each other's pseudoconsoles. This
+        # The seven trees run as two steps; a third runs `internal/session`'s Windows tests
+        # and a fourth `internal/config`'s junction tests. `internal/platform` and
+        # `internal/console` are the ConPTY-heavy packages: each runs 50-iteration
+        # cmd.exe/conhost loops, and run side by side they share the runner's 4 vCPU and
+        # starve each other's pseudoconsoles. This
         # step runs them one at a time (`-p 1`), with `-timeout 30m` for the serial wall time.
-        # The three light trees run in the next step, which carries `if: ${{ !cancelled() }}`
+        # The five light trees run in the next step, which carries `if: ${{ !cancelled() }}`
         # so a ConPTY failure here still reports their results in the same run.
         run: go test -race -count=1 -p 1 -timeout 30m ./internal/platform/... ./internal/console/...
       - name: go test (race, remaining trees)
-        # `internal/probe`, `internal/auditsplit` and `cmd/release`: see the step above for why
-        # each is here. `!cancelled()` runs this step even when the ConPTY step failed.
+        # `internal/probe`, `internal/auditsplit`, `cmd/release`, `internal/projectroot` and
+        # `internal/adoption`: see the step above for why each is here. `!cancelled()` runs
+        # this step even when the ConPTY step failed.
         if: ${{ !cancelled() }}
-        run: go test -race -count=1 ./internal/probe/... ./internal/auditsplit/... ./cmd/release/...
+        run: go test -race -count=1 ./internal/probe/... ./internal/auditsplit/... ./cmd/release/... ./internal/projectroot/... ./internal/adoption/...
       - name: go test (race, session Windows tests)
         # `internal/session`'s `//go:build windows` tests: the record save retrying through a
         # reader's sharing violation, and the Event journal an owner removes while a watcher
@@ -267,3 +275,13 @@ jobs:
         # runs this step even when an earlier step failed.
         if: ${{ !cancelled() }}
         run: go test -race -count=1 -v -run 'TestWindows|TestAtomicWriteRetries' ./internal/session/
+      - name: go test (race, config junction tests)
+        # `internal/config`'s tests of a Project config read and written under a junctioned
+        # Project root, and of the global config written through a junction: every
+        # `//go:build windows` test in the package carries `Junction` in its name, and the
+        # `ProjectWrite` and `ReadProjectLayer` tests beside them skip what POSIX alone
+        # can arrange. Only those run, because the rest of `internal/config` has never been
+        # proven on Windows. A new Windows-tagged test here takes a name this filter
+        # matches. `!cancelled()` runs this step even when an earlier step failed.
+        if: ${{ !cancelled() }}
+        run: go test -race -count=1 -run 'Junction|ProjectWrite|ReadProjectLayer' ./internal/config/

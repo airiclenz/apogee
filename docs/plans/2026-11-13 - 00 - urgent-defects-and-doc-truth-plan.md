@@ -159,7 +159,7 @@ NOTES (2026-11-13): from a workspace that is itself a link, `../.apogee/config.y
 **Commit:** `fix(security): guard both spellings of a linked Project root`
 Depends on item 2.
 
-## 6. Windows CI runs the junction tests
+## 6. Windows CI runs the junction tests — ✅ DONE (2026-11-13)
 
 **What:**
 **Goal:** the `test-windows` job in `.github/workflows/ci.yml` runs `internal/platform`, `internal/projectroot`, `internal/adoption`, and the junction tests of `internal/config` (`-run`-filtered like the existing `internal/session` step).
