@@ -3258,7 +3258,7 @@ web pages its reader may run, so those are left as a path as well; `.docx`, `.xl
 carries no macro. Over SSH — a
 devbox, a VM, a container — browser-renderable documents (`.html`, `.htm`, `.svg`,
 `.pdf`) are served from a small built-in server and the URL is printed beside the path,
-so one cmd+click opens the document in the browser on *your* machine; that rung keeps the
+so one cmd+click (or a copy) opens the document in the browser on *your* machine; that rung keeps the
 web formats precisely because a served response *can* carry a policy, and every document
 it serves is answered with `nosniff` and, except a `.pdf`, under `default-src 'none'` and
 a bare `sandbox`; a PDF, which cannot carry the meta refresh a sandbox stops, gets only
