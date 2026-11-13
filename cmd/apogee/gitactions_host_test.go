@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -618,5 +621,40 @@ func TestGitActionsHostRefusedRepositoryRunsNoBranchVerb(t *testing.T) {
 		if rec.ran(verb) {
 			t.Errorf("a refused repository ran `git %s`", verb)
 		}
+	}
+}
+
+// TestGitActionsHostRebaseRefusesAnSshSigningKeyCommand pins the signing route into an
+// unconfined run: the rebase passes no --no-gpg-sign, so a repository that plants
+// commit.gpgsign=true, gpg.format=ssh and gpg.ssh.defaultKeyCommand would have git run that
+// command to find a key. The repository must be refused by name before any rebase, and the
+// planted command must never run. gitexec keeps HOME, so the never-ran assertion is what bites on
+// a box whose operator config sets no signing key.
+func TestGitActionsHostRebaseRefusesAnSshSigningKeyCommand(t *testing.T) {
+	t.Parallel()
+	requireGitForStatusHost(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("the planted key command is a POSIX shell script; the refusal it pins is platform-independent")
+	}
+	remote, clone := statusHostClone(t)
+	identifyFixture(t, clone)
+	divergeFromUpstream(t, remote, clone, "local.txt")
+	marker := filepath.Join(t.TempDir(), "keycommand.ran")
+	script := "#!/bin/sh\n: > \"" + marker + "\"\necho 'key::ssh-ed25519 AAAA'\n"
+	if err := os.WriteFile(filepath.Join(clone, "x"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write the key command: %v", err)
+	}
+	writeFixtureFile(t, clone, filepath.Join(".git", "info", "exclude"), "x\n")
+	gitFixture(t, clone, "config", "commit.gpgsign", "true")
+	gitFixture(t, clone, "config", "gpg.format", "ssh")
+	gitFixture(t, clone, "config", "gpg.ssh.defaultKeyCommand", "./x")
+
+	_, err := gitActionsHost{}.Rebase(context.Background(), clone)
+
+	if err == nil || !strings.Contains(err.Error(), "gpg.ssh.defaultkeycommand") {
+		t.Errorf("Rebase = %v, want the command-config refusal naming gpg.ssh.defaultkeycommand", err)
+	}
+	if _, statErr := os.Stat(marker); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Errorf("the repository's ssh signing-key command ran (stat marker: %v)", statErr)
 	}
 }

@@ -983,13 +983,13 @@ var gitReadSubcommands = map[string]bool{
 
 // GitCommandConfigNameSource is the one source string behind every "config name whose VALUE is
 // a program git executes" pattern: an sshCommand, an editor, a pager, an askpass, a filter or
-// merge or diff driver, a credential helper, a gpg.program, a proxy command. internal/gitexec
-// anchors it as its CommandConfigName — the repo-local probe that costs a repository its git
-// tools — and hands that string to git's --get-regexp verbatim, so it must stay POSIX-ERE
-// compatible: plain ( ) groups, no (?: and no (?i). It lives here because gitexec imports
-// security, never the reverse; a name it matches is spelled lowercase, so a caller lowers what
-// it matches first.
-const GitCommandConfigNameSource = `core\.(sshcommand|editor|pager|askpass|gitproxy|alternaterefscommand)|sequence\.editor|diff\.external|diff\..*\.(command|textconv)|merge\..*\.driver|mergetool\..*\.cmd|difftool\..*\.cmd|filter\..*\.(clean|smudge|process)|credential\.helper|credential\..*\.helper|gpg\.program|gpg\..*\.program|uploadpack\.packobjectshook|remote\..*\.proxy|pager\..*`
+// merge or diff driver, a credential helper, a gpg.program, an ssh signing-key command, a proxy
+// command. internal/gitexec anchors it as its CommandConfigName — the repo-local probe that costs
+// a repository its git tools — and hands that string to git's --get-regexp verbatim, so it must
+// stay POSIX-ERE compatible: plain ( ) groups, no (?: and no (?i). It lives here because gitexec
+// imports security, never the reverse; a name it matches is spelled lowercase, so a caller lowers
+// what it matches first.
+const GitCommandConfigNameSource = `core\.(sshcommand|editor|pager|askpass|gitproxy|alternaterefscommand)|sequence\.editor|diff\.external|diff\..*\.(command|textconv)|merge\..*\.driver|mergetool\..*\.cmd|difftool\..*\.cmd|filter\..*\.(clean|smudge|process)|credential\.helper|credential\..*\.helper|gpg\.program|gpg\..*\.program|gpg\.ssh\.defaultkeycommand|uploadpack\.packobjectshook|remote\..*\.proxy|pager\..*`
 
 // GitCommandConfigName is the shell write view's superset of gitexec's CommandConfigName: the
 // same names plus the keys git runs, or reads more config through, without being asked — the

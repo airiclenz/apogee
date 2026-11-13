@@ -199,7 +199,11 @@ NOTES (2026-11-13): the manual tells Terminal.app users to turn off View → All
 **Commit:** `fix(tui): say a gesture that works in the open-link hint per terminal`
 **Closes:** terminal-app-click-hint
 
-## 8. Repo-local gpg.ssh.defaultKeyCommand is refused
+## 8. Repo-local gpg.ssh.defaultKeyCommand is refused — ✅ DONE (2026-11-13)
+
+NOTES (2026-11-13): the `-run 'RefusesRepoLocalCommandConfig|CommandConfig'` line for internal/security matches no test there ("no tests to run"); the new key is pinned through a real git probe in internal/gitexec (`TestCommandConfigRefusal_NamesTheSshSigningKeyCommand`) and the shell write view's `TestShellWriteViewJudgesWhatTheCommandWrites` was run as well and passes.
+
+NOTES (2026-11-13): the gitactions bite was confirmed by reverting the denylist entry: the new Rebase test then fails with the planted `./x` having run on this box.
 
 **What:**
 **Goal:** a repository whose local config sets `gpg.ssh.defaultKeyCommand` is refused by the git command-config denylist like every other command-running key, for both the git tool and the git actions host (the Rebase action's `rebase @{u}` included). Fixes an unconfined command run found in the 2026-11-10 audit follow-up.

@@ -1942,6 +1942,7 @@ func TestGit_RefusesRepoLocalCommandConfig(t *testing.T) {
 		{key: "merge.foo.driver", value: "payload %O %A %B", canonical: "merge.foo.driver"},
 		{key: "pager.status", value: "payload", canonical: "pager.status"},
 		{key: "remote.origin.proxy", value: "payload", canonical: "remote.origin.proxy"},
+		{key: "gpg.ssh.defaultKeyCommand", value: "./payload", canonical: "gpg.ssh.defaultkeycommand"},
 	} {
 		t.Run(tc.key, func(t *testing.T) {
 			root := gitRepo(t)

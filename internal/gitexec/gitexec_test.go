@@ -245,6 +245,23 @@ func TestCapture_ReprobesAfterAMidSessionInit(t *testing.T) {
 	}
 }
 
+// TestCommandConfigRefusal_NamesTheSshSigningKeyCommand pins that the probe, run through a real
+// git's --get-regexp, refuses a repository whose own config names gpg.ssh.defaultKeyCommand: git
+// runs that program to find a signing key whenever an ssh-format signed commit has no
+// user.signingKey, so a planted commit.gpgsign=true would run it on the next rebase.
+func TestCommandConfigRefusal_NamesTheSshSigningKeyCommand(t *testing.T) {
+	gitPath := realGit(t)
+	root := t.TempDir()
+	runRealGit(t, gitPath, root, "init", "-b", "main")
+	appendToConfig(t, root, "[gpg \"ssh\"]\n\tdefaultKeyCommand = ./x\n")
+
+	res := captureStatus(t, gitPath, root)
+
+	if want := gitexec.CommandConfigRefusal([]string{"gpg.ssh.defaultkeycommand"}); res.CombinedOutput != want {
+		t.Errorf("Capture = %q, want the refusal %q", res.CombinedOutput, want)
+	}
+}
+
 // TestCapture_ReprobesWhenAnAbsentIncludeAppears pins two things at once: the probe follows
 // includes at all (a scoped `git config` read follows none unless asked), and a missing include
 // — which git skips silently — is watched from the start, so the file the model creates later
