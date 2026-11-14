@@ -1,9 +1,11 @@
 ---
 title: smoke's goproxy check does not pin GO111MODULE
-status: open
+status: done
 type: bug
 priority: 3
 created: 2026-11-14T10:48:03Z
+closed: 2026-11-14T21:08:04Z
+reason: "Resolved by plan 2026-11-14 - 00 - git-remote-program-keys-plan item 4 (archived at 3187dcdc): goProxyEnv pins GO111MODULE=on, test asserts it, smoke Long help reflowed."
 ---
 
 Deferred from the v1-placeholder-retraction run (plan `docs/plans/archived/2026-11-05 - 00 - v1-placeholder-retraction-plan.md`, item 5).

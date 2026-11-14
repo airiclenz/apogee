@@ -1,10 +1,12 @@
 ---
 title: Repo-local remote/url/submodule git keys run a program unconfined
-status: open
+status: done
 type: bug
 priority: 2
 labels: [security]
 created: 2026-11-14T10:11:00Z
+closed: 2026-11-14T21:08:04Z
+reason: "Resolved by plan 2026-11-14 - 00 - git-remote-program-keys-plan (archived at 3187dcdc): remote.<n>.vcs refused by the gitexec probe; shell write view judges uploadpack/receivepack, protocol allow, ext:: rewrites and ! submodule updates as control-plane writes; ADR 0049 amend-1114."
 ---
 
 From docs/reviews/code-audit-2026-11-10.md (Medium, "Git command-config denylist omits keys that make git run a program"); the only finding of that audit with no issue. The repo-local denylist `security.GitCommandConfigNameSource` (internal/security/shellwrites.go:992), enforced by internal/gitexec/gitexec.go, does not match `remote.<n>.uploadpack` / `receivepack` / `vcs`, `url.<x>.insteadOf` (an `ext::` rewrite), `protocol.<x>.allow`, or `submodule.<n>.update=!cmd`. `hardeningOptions` blanks only `core.hooksPath` and `core.fsmonitor`. Sibling of git-ssh-keycommand-denylist (closed 2026-11-13).
