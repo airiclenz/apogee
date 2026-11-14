@@ -512,7 +512,9 @@ func subcommand(args []string) string {
 // global-scope guards), where git compiles it with regcomp; the probe itself lists every key and
 // re-checks each against this compiled form. That source is [security.GitCommandConfigNameSource]: the
 // shell write view builds its own [security.GitCommandConfigName] from it — the same names PLUS
-// core.hookspath, core.fsmonitor, interactive.difffilter and the include paths, because a
+// core.hookspath, core.fsmonitor, interactive.difffilter, the include paths and the
+// program-reaching remote/url/protocol/submodule keys (remote.<n>.uploadpack/receivepack,
+// protocol.allow, protocol.ext.allow, ext:: url rewrites, submodule.<n>.update), because a
 // `git config` line that sets one is a write into .git/config whatever the hardening options do
 // to it afterwards — and this package imports security, never
 // the reverse, so the one string lives there.

@@ -1002,8 +1002,24 @@ const GitCommandConfigNameSource = `core\.(sshcommand|editor|pager|askpass|gitpr
 // same, run by the operator's next ordinary git, and that is what this pattern judges. alias.*
 // stays out: git runs an alias only when it is typed. A git-boolean core.fsmonitor value is
 // exempt in gitConfigWritesCommandKey, which reads the value this pattern cannot see.
+//
+// The suffix also names the remote, url, protocol and submodule keys that reach a program on a
+// transport or a submodule run: remote.<n>.uploadpack and remote.<n>.receivepack (the program
+// run on the far side of a local or ssh transport), protocol.allow and protocol.ext.allow (which
+// open the ext:: transport, whose URL is a command line), a url.<base>.insteadof or
+// url.<base>.pushinsteadof whose base is an ext:: URL (the only rewrite that names a program —
+// a URL-form helper name cannot carry a slash), and submodule.<n>.update (a `!` value is a
+// command). They stay out of the probe source because the git hosts neutralise each per verb —
+// `-c protocol.ext.allow=never`, `--upload-pack=git-upload-pack`, `--receive-pack=git-receive-pack`,
+// `-c submodule.recurse=false` with `--recurse-submodules=no` — but the operator's next ordinary
+// git honours them. Benign values stay clear in gitConfigWritesCommandKey: a protocol.allow or
+// protocol.ext.allow of `never` hardens rather than opens, and a submodule.<n>.update mode that
+// does not start with `!` (none, rebase, merge, checkout) names no program. Other
+// protocol.<x>.allow names and non-ext:: rewrites never match.
 var GitCommandConfigName = regexp.MustCompile(`^(` + GitCommandConfigNameSource +
-	`|core\.hookspath|core\.fsmonitor|interactive\.difffilter|include\.path|includeif\..*\.path)$`)
+	`|core\.hookspath|core\.fsmonitor|interactive\.difffilter|include\.path|includeif\..*\.path` +
+	`|remote\..*\.(uploadpack|receivepack)|url\.ext::.*\.(insteadof|pushinsteadof)` +
+	`|protocol\.allow|protocol\.ext\.allow|submodule\..*\.update)$`)
 
 // gitConfigReadForms are the `git config` options under which the invocation only reads a
 // value and writes no config file.
@@ -1410,24 +1426,59 @@ func gitTargets(operands []string) []string {
 // the name's case) into the repository's own config: no operand directs the write at another
 // file (gitConfigOtherFileOptions), none makes it a read (gitConfigReadForms). A core.fsmonitor
 // whose value word is a git boolean is no such write: `true` turns on git's builtin daemon and
-// `false` turns the hook off, so neither names a program in the workspace.
+// `false` turns the hook off, so neither names a program in the workspace. Likewise a
+// protocol.allow or protocol.ext.allow set to `never` hardens the transport rather than opening
+// it, and a submodule.<n>.update set to a mode that does not start with `!` runs no command. A
+// removal form (gitConfigRemovalForms) carries a value-pattern, not a value, so those two
+// exemptions never clear it: removing any such key stays a write.
 func gitConfigWritesCommandKey(operands []string) bool {
 	matched := false
+	removal := false
 	for i, w := range operands {
 		option, _, _ := strings.Cut(w, "=")
 		if gitConfigOtherFileOptions[option] || gitConfigReadForms[option] {
 			return false
 		}
+		if gitConfigRemovalForms[w] {
+			removal = true
+			continue
+		}
 		name := strings.ToLower(w)
 		if !GitCommandConfigName.MatchString(name) {
 			continue
 		}
-		if name == "core.fsmonitor" && i+1 < len(operands) && gitBooleans[strings.ToLower(operands[i+1])] {
+		if i+1 < len(operands) && gitConfigValueIsBenign(name, operands[i+1], removal) {
 			continue
 		}
 		matched = true
 	}
 	return matched
+}
+
+// gitConfigValueIsBenign reports whether setting the command-valued key name to value names no
+// program: a git-boolean core.fsmonitor, a protocol.allow or protocol.ext.allow of `never`, or a
+// submodule.<n>.update mode without a leading `!`. Under a removal form value is a value-pattern,
+// so only the core.fsmonitor exemption — which predates the removal rule — still reads it.
+func gitConfigValueIsBenign(name, value string, removal bool) bool {
+	if name == "core.fsmonitor" {
+		return gitBooleans[strings.ToLower(value)]
+	}
+	if removal {
+		return false
+	}
+	if name == "protocol.allow" || name == "protocol.ext.allow" {
+		return strings.ToLower(value) == "never"
+	}
+	if strings.HasPrefix(name, "submodule.") && strings.HasSuffix(name, ".update") {
+		return !strings.HasPrefix(strings.TrimSpace(value), "!")
+	}
+	return false
+}
+
+// gitConfigRemovalForms are the `git config` words that remove a key rather than set it: the
+// --unset options and the `unset` subcommand. A word after the key is then a value-pattern.
+var gitConfigRemovalForms = map[string]bool{
+	"--unset": true, "--unset-all": true, "unset": true,
 }
 
 // gitBooleans are the value spellings git reads as a boolean (git-config(1), "boolean"), lowered:
