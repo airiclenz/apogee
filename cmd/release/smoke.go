@@ -27,6 +27,22 @@ const (
 	vcsModifiedSetting = "vcs.modified"
 )
 
+// goProxyURL is the public Go module proxy that `go install …@latest` resolves the release from.
+const goProxyURL = "https://proxy.golang.org"
+
+// goProxyEnv pins the go command to the public proxy and to what this host's go has: no
+// GOFLAGS, workspace, private-module or checksum-database exemption of the user's may route the
+// lookup around proxy.golang.org, and GOTOOLCHAIN=local keeps it from downloading a toolchain.
+var goProxyEnv = []string{
+	"GOPROXY=" + goProxyURL,
+	"GOFLAGS=",
+	"GOWORK=off",
+	"GOPRIVATE=",
+	"GONOPROXY=",
+	"GONOSUMDB=",
+	"GOTOOLCHAIN=local",
+}
+
 // scoopArchitectures pairs each Scoop manifest architecture key with the Windows archive's
 // GOARCH whose hash it carries.
 var scoopArchitectures = []struct {
@@ -87,7 +103,8 @@ func newSmokeCommand(commands runner) *cobra.Command {
 		Use:   "smoke [vX.Y.Z] [--dist-dir D]",
 		Short: "Check a published release from the outside",
 		Long: "smoke proves a published release is usable: the tag is on origin and annotated;\n" +
-			"with --dist-dir, that build's SHA256SUMS equals the published one; the six archives\n" +
+			"proxy.golang.org serves the version and does not mark it retracted (an @latest that\n" +
+			"resolves to another version only warns); with --dist-dir, that build's SHA256SUMS equals the published one; the six archives\n" +
 			"download and match SHA256SUMS; every binary's build stamp names the tagged commit; the\n" +
 			"host's archive holds a binary reporting the version; where apogee is installed with\n" +
 			"Homebrew, `brew upgrade apogee` moves it onto the version; and the Scoop bucket's\n" +
@@ -131,6 +148,7 @@ func runSmoke(ctx context.Context, commands runner, output io.Writer, options sm
 	run := &smokeRun{commands: commands, output: output, options: options, version: version, workDir: workDir}
 	_, _ = fmt.Fprintf(output, "smoke: %s %s\n", apogeeRepo, version)
 	run.checkTag(ctx)
+	run.checkGoProxy(ctx)
 	run.checkDistSums(ctx)
 	run.checkAssets(ctx)
 	run.checkBuildStamps(ctx)
@@ -215,6 +233,51 @@ func (r *smokeRun) checkTag(ctx context.Context) {
 		r.fail("%s on %s is a lightweight tag; a release tag must be annotated", tag, remoteName)
 	default:
 		r.fail("tag %s points at a %q object, not an annotated tag", tag, kind)
+	}
+}
+
+// checkGoProxy requires proxy.golang.org to serve the version without marking it retracted —
+// the release `go install` resolves. It runs in workDir, outside any module. An @latest that
+// resolves to another version only warns: the proxy caches @latest for a while, and smoke never
+// polls. A host without go skips.
+func (r *smokeRun) checkGoProxy(ctx context.Context) {
+	module := modulePath + "@" + r.version.String()
+	r.step("goproxy: %s serves %s, not retracted", goProxyURL, module)
+	listed, err := r.commands.run(ctx, r.workDir, goProxyEnv, "go", "list", "-m", "-json", "-retracted", module)
+	if err != nil {
+		if isMissingTool(err) {
+			r.skip("go is not installed: %v", err)
+			return
+		}
+		r.fail("go list -m %s: %v", module, err)
+		return
+	}
+	var info struct {
+		Version   string
+		Retracted []string
+	}
+	if err := json.Unmarshal([]byte(listed), &info); err != nil {
+		r.fail("go list -m %s printed no module JSON: %v", module, err)
+		return
+	}
+	if info.Retracted != nil {
+		r.fail("%s marks %s retracted: %s", goProxyURL, module, strings.Join(info.Retracted, "; "))
+		return
+	}
+	r.pass("%s serves %s, not retracted", goProxyURL, module)
+
+	latest, err := r.commands.run(ctx, r.workDir, goProxyEnv, "go", "list", "-m", modulePath+"@latest")
+	if err != nil {
+		r.warn("could not resolve %s@latest: %v", modulePath, err)
+		return
+	}
+	fields := strings.Fields(latest)
+	if len(fields) == 0 {
+		r.warn("go list -m %s@latest printed nothing", modulePath)
+		return
+	}
+	if resolved := fields[len(fields)-1]; resolved != r.version.String() {
+		r.warn("%s@latest resolves to %s, not %s — the proxy may still be caching an older @latest", modulePath, resolved, r.version)
 	}
 }
 

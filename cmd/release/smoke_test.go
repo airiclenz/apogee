@@ -5,6 +5,7 @@ import (
 	"context"
 	"debug/buildinfo"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -30,6 +32,8 @@ const (
 	smokeReadBucket  = "gh api repos/airiclenz/scoop-bucket/contents/bucket/apogee.json --jq .content"
 	smokeLatest      = "gh release view --repo airiclenz/apogee --json tagName --jq .tagName"
 	smokeRevParse    = "git rev-parse --verify v0.24.11^{commit}"
+	smokeGoList      = "go list -m -json -retracted github.com/airiclenz/apogee@v0.24.11"
+	smokeGoLatest    = "go list -m github.com/airiclenz/apogee@latest"
 )
 
 // smokeFake answers smoke's commands the way git, gh, brew and the released binaries would over
@@ -57,13 +61,18 @@ type smokeFake struct {
 	// release's tag.
 	manifest string
 	latest   string
+	// retracted is the rationale proxy.golang.org gives for retracting the version, nil for a
+	// version it does not mark retracted; proxyLatest is the version its @latest resolves to.
+	retracted   []string
+	proxyLatest string
 	// failing makes a command line fail with the error.
 	failing map[string]error
 }
 
 // newSmokeFake is a release published in full: the annotated tag is on origin and fetched, the
 // six archives and SHA256SUMS are on the release, every binary carries the tag's commit, brew
-// is installed and upgrades onto the version, and the bucket's manifest names it.
+// is installed and upgrades onto the version, the bucket's manifest names it, and the Go module
+// proxy serves it unretracted as @latest.
 func newSmokeFake(t *testing.T) *smokeFake {
 	t.Helper()
 	releaseDir := publishedRelease(t)
@@ -82,6 +91,7 @@ func newSmokeFake(t *testing.T) *smokeFake {
 		brewReports:   "apogee " + publishVersion,
 		manifest:      manifest,
 		latest:        publishVersion,
+		proxyLatest:   publishVersion,
 		failing:       map[string]error{},
 	}
 }
@@ -151,8 +161,23 @@ func (f *smokeFake) respond(call recordedCall) (string, error) {
 		return base64.StdEncoding.EncodeToString([]byte(f.manifest)) + "\n", nil
 	case line == smokeLatest:
 		return f.latest + "\n", nil
+	case line == smokeGoList:
+		return f.goListJSON()
+	case line == smokeGoLatest:
+		return modulePath + " " + f.proxyLatest + "\n", nil
 	}
 	return "", fmt.Errorf("unexpected command %q", line)
+}
+
+// goListJSON is what `go list -m -json -retracted` prints for the version: a Retracted field
+// only when the proxy marks it retracted.
+func (f *smokeFake) goListJSON() (string, error) {
+	module := map[string]any{"Path": modulePath, "Version": publishVersion, "Time": "2026-11-05T10:00:00Z"}
+	if f.retracted != nil {
+		module["Retracted"] = f.retracted
+	}
+	raw, err := json.MarshalIndent(module, "", "\t")
+	return string(raw) + "\n", err
 }
 
 // download copies the release's asset name into dir, as `gh release download --dir` would.
@@ -239,6 +264,7 @@ func TestSmokeChecks(t *testing.T) {
 		"every check passes": {
 			wantResults: [][2]string{
 				{"PASS", "annotated tag v0.24.11 on origin"},
+				{"PASS", "https://proxy.golang.org serves github.com/airiclenz/apogee@v0.24.11, not retracted"},
 				{"PASS", "SHA256SUMS in"},
 				{"PASS", "6 assets downloaded, all checksums match"},
 				{"PASS", "6 assets carry vcs.revision 81eec1b3ac7d = the tag"},
@@ -246,43 +272,84 @@ func TestSmokeChecks(t *testing.T) {
 				{"PASS", "brew's apogee reports \"apogee v0.24.11\""},
 				{"PASS", "bucket at 0.24.11, both Windows hashes match SHA256SUMS"},
 			},
-			wantTally: "7 passed, 0 failed, 0 skipped",
+			wantTally: "8 passed, 0 failed, 0 skipped",
 		},
 		"no tag on origin": {
 			adjust:      func(fake *smokeFake, _ *smokeOptions) { fake.tagKind = "" },
 			wantResults: [][2]string{{"FAIL", "origin has no tag v0.24.11"}},
-			wantTally:   "6 passed, 1 failed, 0 skipped",
+			wantTally:   "7 passed, 1 failed, 0 skipped",
 		},
 		"lightweight tag": {
 			adjust:      func(fake *smokeFake, _ *smokeOptions) { fake.tagKind = "commit" },
 			wantResults: [][2]string{{"FAIL", "v0.24.11 on origin is a lightweight tag"}},
-			wantTally:   "6 passed, 1 failed, 0 skipped",
+			wantTally:   "7 passed, 1 failed, 0 skipped",
 		},
 		"origin's tags cannot be listed": {
 			adjust: func(fake *smokeFake, _ *smokeOptions) {
 				fake.failing[smokeListTag] = errors.New("not a git repository")
 			},
 			wantResults: [][2]string{{"SKIP", "could not list origin's tags"}},
-			wantTally:   "6 passed, 0 failed, 1 skipped",
+			wantTally:   "7 passed, 0 failed, 1 skipped",
 		},
 		"tag type unreadable": {
 			adjust: func(fake *smokeFake, _ *smokeOptions) {
 				fake.failing[smokeTagType] = errors.New("gh: authentication required")
 			},
 			wantResults: [][2]string{{"SKIP", "gh could not read its type"}},
-			wantTally:   "6 passed, 0 failed, 1 skipped",
+			wantTally:   "7 passed, 0 failed, 1 skipped",
+		},
+		"the proxy marks the version retracted": {
+			adjust: func(fake *smokeFake, _ *smokeOptions) {
+				fake.retracted = []string{"Accidental tag: v1.8.0 was never a release."}
+			},
+			wantResults: [][2]string{{"FAIL", "https://proxy.golang.org marks github.com/airiclenz/apogee@v0.24.11 retracted: Accidental tag"}},
+			wantTally:   "7 passed, 1 failed, 0 skipped",
+		},
+		"the proxy marks the version retracted without a rationale": {
+			adjust:      func(fake *smokeFake, _ *smokeOptions) { fake.retracted = []string{} },
+			wantResults: [][2]string{{"FAIL", "github.com/airiclenz/apogee@v0.24.11 retracted"}},
+			wantTally:   "7 passed, 1 failed, 0 skipped",
+		},
+		"the proxy's @latest lags": {
+			adjust: func(fake *smokeFake, _ *smokeOptions) { fake.proxyLatest = "v0.24.10" },
+			wantResults: [][2]string{
+				{"PASS", "serves github.com/airiclenz/apogee@v0.24.11, not retracted"},
+				{"warning", "github.com/airiclenz/apogee@latest resolves to v0.24.10, not v0.24.11"},
+			},
+			wantTally: "8 passed, 0 failed, 0 skipped",
+		},
+		"the proxy's @latest cannot be resolved": {
+			adjust: func(fake *smokeFake, _ *smokeOptions) {
+				fake.failing[smokeGoLatest] = errors.New("go list -m: exit status 1: go: module lookup disabled")
+			},
+			wantResults: [][2]string{{"warning", "could not resolve github.com/airiclenz/apogee@latest"}},
+			wantTally:   "8 passed, 0 failed, 0 skipped",
+		},
+		"go list fails": {
+			adjust: func(fake *smokeFake, _ *smokeOptions) {
+				fake.failing[smokeGoList] = errors.New("exit status 1: go: github.com/airiclenz/apogee@v0.24.11: invalid version: unknown revision v0.24.11")
+			},
+			wantResults: [][2]string{{"FAIL", "go list -m github.com/airiclenz/apogee@v0.24.11: exit status 1: go: github.com/airiclenz/apogee@v0.24.11: invalid version: unknown revision"}},
+			wantTally:   "7 passed, 1 failed, 0 skipped",
+		},
+		"go is not installed": {
+			adjust: func(fake *smokeFake, _ *smokeOptions) {
+				fake.failing[smokeGoList] = fmt.Errorf("go: %w", &exec.Error{Name: "go", Err: exec.ErrNotFound})
+			},
+			wantResults: [][2]string{{"SKIP", "go is not installed"}},
+			wantTally:   "7 passed, 0 failed, 1 skipped",
 		},
 		"no local build to compare": {
 			adjust:      func(_ *smokeFake, options *smokeOptions) { options.distDir = "" },
 			wantResults: [][2]string{{"SKIP", "no --dist-dir"}},
-			wantTally:   "6 passed, 0 failed, 1 skipped",
+			wantTally:   "7 passed, 0 failed, 1 skipped",
 		},
 		"local build differs from the published sums": {
 			adjust: func(fake *smokeFake, options *smokeOptions) {
 				options.distDir = otherBuild(t, fake.releaseDir, "apogee_0.24.11_linux_arm64.tar.gz")
 			},
 			wantResults: [][2]string{{"FAIL", "differs from the published one for apogee_0.24.11_linux_arm64.tar.gz"}},
-			wantTally:   "6 passed, 1 failed, 0 skipped",
+			wantTally:   "7 passed, 1 failed, 0 skipped",
 		},
 		"an asset does not match SHA256SUMS": {
 			adjust: func(fake *smokeFake, _ *smokeOptions) { fake.corrupt = "apogee_0.24.11_darwin_arm64.tar.gz" },
@@ -291,7 +358,7 @@ func TestSmokeChecks(t *testing.T) {
 				{"SKIP", "the assets did not all download and verify"},
 				{"PASS", "the released binary reports"},
 			},
-			wantTally: "5 passed, 1 failed, 1 skipped",
+			wantTally: "6 passed, 1 failed, 1 skipped",
 		},
 		"the release has no SHA256SUMS": {
 			adjust: func(fake *smokeFake, _ *smokeOptions) {
@@ -302,7 +369,7 @@ func TestSmokeChecks(t *testing.T) {
 				{"FAIL", "no SHA256SUMS asset on release v0.24.11"},
 				{"SKIP", "the host's archive apogee_0.24.11_linux_amd64.tar.gz did not download"},
 			},
-			wantTally: "2 passed, 1 failed, 4 skipped",
+			wantTally: "3 passed, 1 failed, 4 skipped",
 		},
 		"gh is not installed": {
 			adjust: func(fake *smokeFake, _ *smokeOptions) {
@@ -311,12 +378,12 @@ func TestSmokeChecks(t *testing.T) {
 				fake.failing[smokeReadBucket] = notFound
 			},
 			wantResults: [][2]string{{"SKIP", "gh is not installed"}},
-			wantTally:   "1 passed, 0 failed, 6 skipped",
+			wantTally:   "2 passed, 0 failed, 6 skipped",
 		},
 		"tag not fetched into the local clone": {
 			adjust:      func(fake *smokeFake, _ *smokeOptions) { fake.isTagLocal = false },
 			wantResults: [][2]string{{"SKIP", "tag v0.24.11 is not in the local clone"}},
-			wantTally:   "6 passed, 0 failed, 1 skipped",
+			wantTally:   "7 passed, 0 failed, 1 skipped",
 		},
 		"binaries built from another commit": {
 			adjust: func(fake *smokeFake, _ *smokeOptions) { fake.revision = "0123456789abcdef0123456789abcdef01234567" },
@@ -324,17 +391,17 @@ func TestSmokeChecks(t *testing.T) {
 				{"FAIL", "asset apogee_0.24.11_linux_amd64.tar.gz was built from 0123456789abcdef"},
 				{"FAIL", "asset apogee_0.24.11_windows_arm64.zip was built from 0123456789abcdef"},
 			},
-			wantTally: "6 passed, 6 failed, 0 skipped",
+			wantTally: "7 passed, 6 failed, 0 skipped",
 		},
 		"binaries without a revision": {
 			adjust:      func(fake *smokeFake, _ *smokeOptions) { fake.revision = "" },
 			wantResults: [][2]string{{"FAIL", "carries no vcs.revision"}},
-			wantTally:   "6 passed, 6 failed, 0 skipped",
+			wantTally:   "7 passed, 6 failed, 0 skipped",
 		},
 		"binaries without build information": {
 			adjust:      func(fake *smokeFake, _ *smokeOptions) { fake.isUnstamped = true },
 			wantResults: [][2]string{{"FAIL", "carries no build information"}},
-			wantTally:   "6 passed, 6 failed, 0 skipped",
+			wantTally:   "7 passed, 6 failed, 0 skipped",
 		},
 		"binaries built from a modified tree": {
 			adjust: func(fake *smokeFake, _ *smokeOptions) { fake.modified = "true" },
@@ -342,44 +409,44 @@ func TestSmokeChecks(t *testing.T) {
 				{"warning", "asset apogee_0.24.11_darwin_amd64.tar.gz was built from a modified tree"},
 				{"PASS", "6 assets carry vcs.revision"},
 			},
-			wantTally: "7 passed, 0 failed, 0 skipped",
+			wantTally: "8 passed, 0 failed, 0 skipped",
 		},
 		"the host's binary reports another version": {
 			adjust:      func(fake *smokeFake, _ *smokeOptions) { fake.binaryVersion = "v0.24.10" },
 			wantResults: [][2]string{{"FAIL", "the released binary reports \"apogee v0.24.10"}},
-			wantTally:   "6 passed, 1 failed, 0 skipped",
+			wantTally:   "7 passed, 1 failed, 0 skipped",
 		},
 		"no release archive for the host": {
 			adjust:      func(_ *smokeFake, options *smokeOptions) { options.goos = "freebsd" },
 			wantResults: [][2]string{{"SKIP", "no release archive is built for this host (freebsd/amd64)"}},
-			wantTally:   "6 passed, 0 failed, 1 skipped",
+			wantTally:   "7 passed, 0 failed, 1 skipped",
 		},
 		"Homebrew is not installed": {
 			adjust:      func(fake *smokeFake, _ *smokeOptions) { fake.brew = "missing" },
 			wantResults: [][2]string{{"SKIP", "Homebrew is not installed on this host"}},
-			wantTally:   "6 passed, 0 failed, 1 skipped",
+			wantTally:   "7 passed, 0 failed, 1 skipped",
 		},
 		"apogee is not installed through Homebrew": {
 			adjust:      func(fake *smokeFake, _ *smokeOptions) { fake.brew = "absent" },
 			wantResults: [][2]string{{"SKIP", "apogee is not installed through Homebrew here"}},
-			wantTally:   "6 passed, 0 failed, 1 skipped",
+			wantTally:   "7 passed, 0 failed, 1 skipped",
 		},
 		"brew upgrade leaves the old version": {
 			adjust:      func(fake *smokeFake, _ *smokeOptions) { fake.brewReports = "apogee v0.24.10" },
 			wantResults: [][2]string{{"FAIL", "brew's apogee reports \"apogee v0.24.10\", not v0.24.11"}},
-			wantTally:   "6 passed, 1 failed, 0 skipped",
+			wantTally:   "7 passed, 1 failed, 0 skipped",
 		},
 		"the bucket's manifest is unreadable": {
 			adjust:      func(fake *smokeFake, _ *smokeOptions) { fake.manifest = "" },
 			wantResults: [][2]string{{"SKIP", "the bucket's manifest bucket/apogee.json in airiclenz/scoop-bucket is unreadable"}},
-			wantTally:   "6 passed, 0 failed, 1 skipped",
+			wantTally:   "7 passed, 0 failed, 1 skipped",
 		},
 		"the manifest's hashes are prefixed and upper-case": {
 			adjust: func(fake *smokeFake, _ *smokeOptions) {
 				fake.manifest = prefixHashes(t, fake.manifest, fake.releaseDir)
 			},
 			wantResults: [][2]string{{"PASS", "both Windows hashes match"}},
-			wantTally:   "7 passed, 0 failed, 0 skipped",
+			wantTally:   "8 passed, 0 failed, 0 skipped",
 		},
 		"a manifest hash does not match": {
 			adjust: func(fake *smokeFake, _ *smokeOptions) {
@@ -390,17 +457,17 @@ func TestSmokeChecks(t *testing.T) {
 				fake.manifest = strings.Replace(fake.manifest, hash, strings.Repeat("0", 64), 1)
 			},
 			wantResults: [][2]string{{"FAIL", "the bucket's arm64 hash is"}},
-			wantTally:   "6 passed, 1 failed, 0 skipped",
+			wantTally:   "7 passed, 1 failed, 0 skipped",
 		},
 		"the manifest is not JSON": {
 			adjust:      func(fake *smokeFake, _ *smokeOptions) { fake.manifest = "{" },
 			wantResults: [][2]string{{"FAIL", "is not valid JSON"}},
-			wantTally:   "6 passed, 1 failed, 0 skipped",
+			wantTally:   "7 passed, 1 failed, 0 skipped",
 		},
 		"the bucket is behind the latest release": {
 			adjust:      func(fake *smokeFake, _ *smokeOptions) { fake.manifest = `{"version": "0.24.10"}` },
 			wantResults: [][2]string{{"FAIL", "not the latest release 0.24.11"}},
-			wantTally:   "6 passed, 1 failed, 0 skipped",
+			wantTally:   "7 passed, 1 failed, 0 skipped",
 		},
 		"the bucket has moved past an older release": {
 			adjust: func(fake *smokeFake, _ *smokeOptions) {
@@ -408,7 +475,7 @@ func TestSmokeChecks(t *testing.T) {
 				fake.latest = "v0.24.12"
 			},
 			wantResults: [][2]string{{"SKIP", "v0.24.11 is not the latest release (v0.24.12)"}},
-			wantTally:   "6 passed, 0 failed, 1 skipped",
+			wantTally:   "7 passed, 0 failed, 1 skipped",
 		},
 		"the latest release cannot be read": {
 			adjust: func(fake *smokeFake, _ *smokeOptions) {
@@ -416,7 +483,7 @@ func TestSmokeChecks(t *testing.T) {
 				fake.failing[smokeLatest] = errors.New("gh: HTTP 502")
 			},
 			wantResults: [][2]string{{"SKIP", "the latest release could not be read"}},
-			wantTally:   "6 passed, 0 failed, 1 skipped",
+			wantTally:   "7 passed, 0 failed, 1 skipped",
 		},
 	}
 	for name, tc := range cases {
@@ -443,6 +510,37 @@ func TestSmokeChecks(t *testing.T) {
 				t.Errorf("smoke error = %v, want an error: %t", result.err, isFailing)
 			}
 		})
+	}
+}
+
+// TestSmokeGoProxyPinsTheProxyOutsideTheCheckout pins how the goproxy check runs go list: against
+// proxy.golang.org with no GOFLAGS, workspace, private-module exemption or toolchain download,
+// and from smoke's own scratch directory — never the checkout, whose go.mod would make the query
+// a lookup inside a module.
+func TestSmokeGoProxyPinsTheProxyOutsideTheCheckout(t *testing.T) {
+	t.Parallel()
+	fake := newSmokeFake(t)
+	var checkout string
+
+	result := runTestSmoke(t, fake, func(options *smokeOptions) { checkout = options.dir })
+
+	calls := result.commands.recorded("go")
+	if len(calls) != 2 {
+		t.Fatalf("smoke ran go %d times, want the exact version and @latest: %v", len(calls), calls)
+	}
+	wantEnv := []string{
+		"GOPROXY=https://proxy.golang.org", "GOFLAGS=", "GOWORK=off", "GOPRIVATE=", "GONOPROXY=",
+		"GONOSUMDB=", "GOTOOLCHAIN=local",
+	}
+	for _, call := range calls {
+		for _, pin := range wantEnv {
+			if !slices.Contains(call.env, pin) {
+				t.Errorf("go %v ran without %s in its env %v", call.args, pin, call.env)
+			}
+		}
+		if call.dir == "" || call.dir == checkout {
+			t.Errorf("go %v ran in %q, want smoke's scratch directory, not the checkout %q", call.args, call.dir, checkout)
+		}
 	}
 }
 

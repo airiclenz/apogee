@@ -368,7 +368,11 @@ cutting anything.
 **The smoke test.** `go run ./cmd/release smoke [vX.Y.Z]` (or
 `make release-smoke [VERSION=vX.Y.Z]`) runs on its own too, against any published release,
 and it is the check that catches a release nobody can install. It checks that the tag is
-on `origin` and annotated rather than lightweight; with `--dist-dir` (which `publish` passes
+on `origin` and annotated rather than lightweight; that proxy.golang.org — where
+`go install …@latest` resolves the release — serves the version and does not mark it
+retracted (`go list -m -json -retracted`, run outside any module with `GOPROXY` pinned; an
+`@latest` that still resolves to another version only warns, since the proxy caches it for a
+while); with `--dist-dir` (which `publish` passes
 its own build to), that the local build's `SHA256SUMS` equals the published one; that all
 six published assets download and match the release's own `SHA256SUMS`; that each of those
 binaries carries the tagged commit in its embedded build stamp — the checksums only prove
@@ -382,7 +386,7 @@ Windows archives' hashes exactly as the release's `SHA256SUMS` does. Only the la
 belongs in the bucket, so smoking an older tag skips that check, naming the bucket's
 version, rather than failing it; the winget half has no such check, since its pull request
 merges on winget's schedule, not the release's. Every check whose tool or input is missing —
-`gh`, Homebrew, an archive for this host, a bucket it cannot read — says `SKIP` and names
+`go`, `gh`, Homebrew, an archive for this host, a bucket it cannot read — says `SKIP` and names
 it, so a partial run is never mistaken for a pass. A binary built from a modified tree only
 warns — untracked files flip that flag.
 

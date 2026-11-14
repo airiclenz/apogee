@@ -147,7 +147,11 @@ The item yields to runPublish's documented contract "refuses before changing any
 **Acceptance:** `go vet ./cmd/release/ && GOMEMLIMIT=2GiB go test -race -count=1 ./cmd/release/`
 **Commit:** `feat(release): publish places the self-retracting placeholder tag`
 
-## 5. smoke checks the Go module proxy
+## 5. smoke checks the Go module proxy — ✅ DONE (2026-11-14)
+
+NOTES (2026-11-14): the env pins also clear GOPRIVATE and GONOPROXY (not in the item's list): either one naming the module would route the lookup around proxy.golang.org; TestSmokeGoProxyPinsTheProxyOutsideTheCheckout pins all seven.
+NOTES (2026-11-14): a failing or empty `@latest` lookup only warns (the item names only the lagging case); the `@latest` lookup runs only after the exact-version check passed. An extra case pins a `Retracted` field present but empty (`[]`) as a failure.
+NOTES (2026-11-14): docs/manual/building.md's smoke-test paragraph names the new check and `go` among the tools whose absence skips (step 6: user-facing behaviour changed).
 
 **What:** Depends on item 2.
 **Goal:** `smoke vX` reports a `goproxy` check: `go list -m -json -retracted github.com/airiclenz/apogee@vX` against proxy.golang.org must succeed and not mark vX retracted, else fail. `go list -m github.com/airiclenz/apogee@latest` differing from vX is a warn naming both, never a fail.
