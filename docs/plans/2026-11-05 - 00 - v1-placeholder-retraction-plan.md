@@ -166,7 +166,9 @@ NOTES (2026-11-14): docs/manual/building.md's smoke-test paragraph names the new
 **Acceptance:** `go vet ./cmd/release/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSmoke' ./cmd/release/`
 **Commit:** `feat(release): smoke checks the release on the Go module proxy`
 
-## 6. Offline rehearsal test of the retraction scheme
+## 6. Offline rehearsal test of the retraction scheme — ✅ DONE (2026-11-14)
+
+NOTES (2026-11-14): the rehearsal is two tests sharing the `TestRetractionScheme` prefix (`_ProxyStates_LatestResolves`, `_BurnedVersions_CarryRetracted`) per the Go test-naming standard; the Acceptance `-run 'TestRetractionScheme'` selects both. The exec env also pins `GO111MODULE=on` beyond the plan's list, so an inherited GO111MODULE=off cannot change the query. Verified the test discriminates: a placeholder whose go.mod omits itself from the retract block fails three subtests (`@latest` = v1.8.1).
 
 **What:** Recast at the regression check (2026-11-05). Depends on items 1 and 2.
 **Goal:** A committed test in `internal/update` proves Go's own resolution against local file proxies, from the live go.mod retract block and the immutable v1.8.0 range block.
