@@ -188,7 +188,9 @@ NOTES (2026-11-14): the rehearsal is two tests sharing the `TestRetractionScheme
 **Acceptance:** `GOMEMLIMIT=2GiB go test -count=1 -run 'TestRetractionScheme' -v ./internal/update/`
 **Commit:** `test(update): rehearse the placeholder retraction offline`
 
-## 7. ADR 0107 and the v1 criteria issue
+## 7. ADR 0107 and the v1 criteria issue — ✅ DONE (2026-11-14)
+
+NOTES (2026-11-14): v1-release-criteria's Acceptance also names closing `v1-placeholder-retraction` and publishing the 0.x bridge release (ADR 0107 Decision 3), and lets the owner record any of the three named issues as non-blocking instead of closing it; the issue is filed open, type task, priority 3, with no deps.
 
 **What:**
 **Goal:** ADR 0107 records the numbering decision, and ADR 0001 names it. A capcom issue holds the v1 criteria and the stability promise. `capcom check` is clean.

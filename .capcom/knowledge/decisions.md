@@ -108,6 +108,7 @@ title: "apogee's decision records: one Note per record, with each of its section
 - `adr-0104` — Project config execution keys are adoption-gated entries
 - `adr-0105` — A server entry may name fallback servers, and a failed seat falls over one-way
 - `adr-0106` — Pointer shapes on hover are OSC 22, probe-gated and off by default
+- `adr-0107` — v1.0.0 is cut with a self-retracting placeholder above the burned v1.x numbers
 - `adr-0108` — Footer git actions are the user's own act
 - `adr-0109` — Every MCP server has its own connection lifecycle
 - `adr-0112` — Auto's fence closes same-user spawning sockets where the backend can, and discloses the rest as write-class

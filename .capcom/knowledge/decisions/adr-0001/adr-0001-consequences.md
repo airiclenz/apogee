@@ -43,3 +43,10 @@ title: ADR 0001 consequences
   > restarted at v0.x on 2026-07-23, the v1 tags were deleted, and `go.mod` carries
   > `retract [v1.0.0, v1.8.0]` so `@latest` resolves to the current 0.x release. Versioning is
   > deliberately 0.x while pre-production — `AGENTS.md`, "Distribution", and `VERSION`.)
+
+  > **Amended 2026-11-05 (`docs/plans/2026-11-05 - 00 - v1-placeholder-retraction-plan.md`).**
+  > The range retraction above is replaced (ADR 0107). go.mod retracts only the burned v1.x
+  > versions by name — v1.1.0, v1.7.0, v1.8.0 and the placeholder v1.8.1, the list
+  > `internal/update` owns — and every other v1.x number, v1.0.0 included, is releasable. Because
+  > Go reads retractions from the highest version's go.mod and v1.8.0's still retracts the whole
+  > range, v1.0.0 is cut with the self-retracting placeholder tagged on its own commit.
