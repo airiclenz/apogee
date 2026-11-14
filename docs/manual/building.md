@@ -308,22 +308,22 @@ cutting anything.
    `make release-status [VERSION=vX.Y.Z]`). Read-only apart from fetching `origin`, it
    reports the release gate, the baseline — the latest published release and the commits
    since — and the highest release tag (the burned versions set aside), then probes each
-   publish step (tag, release,
-   placeholder, homebrew, scoop, winget, smoke) for the version as `done`, `pending`, `setup-pending` or
-   `unknown`. The version defaults to `VERSION`; a bare `X.Y.Z` reads as `vX.Y.Z`. It exits
-   0 when the gate clears and 1 when it is blocked or a check could not run. The gate is
-   green CI, not a local `make check`. Its gate commit is `HEAD` with the trailing commits
-   peeled off whose every path is `CHANGELOG.md`, `VERSION` or one `ci.yml`'s push `paths`
-   filter skips — a release's own two commits, any per-feature micro-bumps, and prose CI
-   never runs on (issues, plans, reviews). A path the filter takes back, such as
-   `.capcom/knowledge/decisions/adr-0098.md` or `graphics/demo/stage/**`, stops the peel, as
-   does a merge or an empty commit. It clears when the tree is clean, the gate commit is on
-   `origin/main`, `origin/main` is contained in `HEAD`, and `ci.yml` has a successful run for
-   the gate commit or for a peeled commit `origin/main` already contains (a push runs CI on
-   its head alone, so a feature pushed with its micro-bump leaves the green run on the bump,
-   and a prose-only push runs none, so the green run below it clears the gate). The gate
-   keeps its own copy of the filter, and a drift test fails when it and `ci.yml` disagree.
-   There is no bypass: red CI, flaky or not, blocks the release until it is fixed.
+   publish step (tag, release, placeholder, homebrew, scoop, winget, smoke) for the version
+   as `done`, `pending`, `setup-pending` or `unknown`. The version defaults to `VERSION`; a
+   bare `X.Y.Z` reads as `vX.Y.Z`. It exits 0 when the gate clears and 1 when it is blocked
+   or a check could not run. The gate is green CI, not a local `make check`. Its gate
+   commit is `HEAD` with the trailing commits peeled off whose every path is `CHANGELOG.md`,
+   `VERSION` or one `ci.yml`'s push `paths` filter skips — a release's own two commits,
+   any per-feature micro-bumps, and prose CI never runs on (issues, plans, reviews). A
+   path the filter takes back, such as `.capcom/knowledge/decisions/adr-0098.md` or
+   `graphics/demo/stage/**`, stops the peel, as does a merge or an empty commit. It clears
+   when the tree is clean, the gate commit is on `origin/main`, `origin/main` is contained
+   in `HEAD`, and `ci.yml` has a successful run for the gate commit or for a peeled commit
+   `origin/main` already contains (a push runs CI on its head alone, so a feature pushed
+   with its micro-bump leaves the green run on the bump, and a prose-only push runs none,
+   so the green run below it clears the gate). The gate keeps its own copy of the filter,
+   and a drift test fails when it and `ci.yml` disagree. There is no bypass: red CI, flaky
+   or not, blocks the release until it is fixed.
 2. **Make the two release commits: `go run ./cmd/release prepare vX.Y.Z`.** It makes exactly
    two **local** commits and pushes nothing: `chore(release): cut vX.Y.Z`, which gives every
    bullet under `## [Unreleased]` its `## [X.Y.Z] — YYYY-MM-DD` heading, then
