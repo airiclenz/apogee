@@ -84,7 +84,9 @@ internal/security/dangerous_test.go — TestShellWriteViewJudgesWhatTheCommandWr
 
 **Commit:** `fix(security): judge remote, url, protocol and submodule program keys as git control-plane writes`
 
-## 3. ADR 0049 amendment: the key list widens
+## 3. ADR 0049 amendment: the key list widens — ✅ DONE (2026-11-14)
+
+NOTES (2026-11-14): the amendment also records item 2's removal-form rule (`--unset`/`--unset-all`/`unset` stay writes, the new value exemptions skipped) and the plan's out-of-scope `mergetool/difftool.<tool>.path` call, so the record matches the shipped `gitConfigValueIsBenign`.
 
 **What:** record items 1–2 as a dated amendment to ADR 0049 (the key list in `adr-0049-amend-1103` changes).
 **Regression guard.** the amendment lists item 2's final suffix exactly as decided above, including the submodule value exemption, and says so in its Goal. `capcom know add` requires `--title`: run `capcom know add --id adr-0049-amend-1114 --parent adr-0049 --title "ADR 0049 amendment of 2026-11-14: ..." --body-file -`.
