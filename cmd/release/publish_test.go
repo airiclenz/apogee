@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/update"
 )
 
 // The release the publish tests cut, the checkout's top level they clone, and the poll timing
@@ -33,6 +35,8 @@ var mutatingCommands = []string{
 	"git fetch --quiet --tags",
 	"git clone",
 	"git checkout",
+	"git tag -a",
+	"git tag --delete",
 	"go build",
 	"gh release create",
 	"gh release upload",
@@ -67,6 +71,10 @@ type publishFake struct {
 	staleDownloads []string
 	// channels is the tap, the bucket and the komac and gh installs the channel steps meet.
 	channels fakeChannels
+	// cloneTags is what `git tag --list <burned versions>` prints in the build clone: the burned
+	// versions' tags the clone holds. headGoMod is go.mod at HEAD.
+	cloneTags string
+	headGoMod string
 
 	mu             sync.Mutex
 	isPushed       bool
@@ -105,6 +113,12 @@ func (f *publishFake) respond(call recordedCall) (string, error) {
 	switch command := call.name + " " + strings.Join(args, " "); {
 	case command == "git show HEAD:VERSION":
 		return f.headVersion + "\n", nil
+	case command == "git show HEAD:go.mod":
+		return f.headGoMod, nil
+	case command == "git tag --list "+strings.Join(update.RetractedVersions(), " "):
+		return f.cloneTags, nil
+	case call.name == "git" && len(args) > 1 && args[0] == "tag" && args[1] == "--delete":
+		return "", nil
 	case command == "git push origin HEAD:main":
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -405,7 +419,7 @@ func TestPublishFirstRunConvergesTheTagThenTheRelease(t *testing.T) {
 	if result.pauses != 2 {
 		t.Errorf("paused %d times, want 2: the tag appears on the third poll after the push", result.pauses)
 	}
-	for _, want := range []string{"tag      done  done by this run", "release  done  done by this run"} {
+	for _, want := range []string{"tag done done by this run", "release done done by this run", "placeholder done not needed: v0.24.11 is below v1.0.0"} {
 		if !hasRow(result.output, want) {
 			t.Errorf("output lacks %q:\n%s", want, result.output)
 		}
@@ -572,6 +586,239 @@ func TestPublishRefusesARetractedVersionBeforeAnyProbe(t *testing.T) {
 				t.Errorf("issued %d commands, want none", len(commands.calls))
 			}
 		})
+	}
+}
+
+// placeholderRelease is the release the placeholder tests publish: v1.0.0, which ranks below the
+// placeholder and so needs it.
+const placeholderRelease = "v1.0.0"
+
+// runPlaceholderPublish runs publish of placeholderRelease from a clean checkout whose VERSION
+// and go.mod at HEAD are the bump to it and goMod: nothing is tagged or released yet, and origin's
+// placeholder tag is placeholderObject (fakeRemote's field of that name).
+func runPlaceholderPublish(t *testing.T, goMod, placeholderObject string, isDryRun bool) (*fakeRunner, string, error) {
+	t.Helper()
+	fake := newPublishFake()
+	fake.headVersion = placeholderRelease
+	fake.headGoMod = goMod
+	fake.repo.remote.placeholderObject = placeholderObject
+	commands := fake.runner()
+	notesPath := filepath.Join(t.TempDir(), "notes.md")
+	writeTestFile(t, notesPath, "- A release.\n")
+	options := publishOptions{dir: t.TempDir(), version: placeholderRelease, notesFile: notesPath, isDryRun: isDryRun}
+	var output bytes.Buffer
+
+	err := runPublish(t.Context(), commands, &output, options)
+
+	return commands, output.String(), err
+}
+
+// TestPublishPlansThePlaceholderForAReleaseBelowIt pins a dry run of v1.0.0: the placeholder step
+// is pending, and the plan names the go.mod check, the tag and the push.
+func TestPublishPlansThePlaceholderForAReleaseBelowIt(t *testing.T) {
+	t.Parallel()
+
+	commands, output, err := runPlaceholderPublish(t, preparedGoMod, "", true)
+
+	if err != nil {
+		t.Fatalf("publish --dry-run failed: %v\n%s", err, output)
+	}
+	for _, row := range [][]string{
+		{"placeholder", "pending", "origin has no tag " + testPlaceholder},
+		{"placeholder", "check that go.mod at v1.0.0 retracts exactly the burned versions, then tag v1.0.0's commit with the annotated placeholder v1.8.1 and push it to origin"},
+	} {
+		if !hasRow(output, row...) {
+			t.Errorf("output lacks the row %q:\n%s", row, output)
+		}
+	}
+	if mutating := mutatingLines(commands); len(mutating) > 0 {
+		t.Errorf("issued mutating commands %q, want none", mutating)
+	}
+}
+
+// TestPublishRefusesAPlaceholderGoModAtHead pins the refusal made before any change: a release
+// that needs the placeholder, whose go.mod at HEAD — the commit CI will tag — does not retract
+// exactly the burned versions, is refused, since the placeholder would not retract itself.
+func TestPublishRefusesAPlaceholderGoModAtHead(t *testing.T) {
+	t.Parallel()
+	cases := map[string]struct {
+		goMod     string
+		wantError string
+	}{
+		"the old range":           {goMod: "module example.com/apogee\n\nretract [v1.0.0, v1.8.0]\n", wantError: "go.mod retracts [v1.0.0, v1.8.0]"},
+		"lacking the placeholder": {goMod: "module example.com/apogee\n\nretract (\n\tv1.1.0\n\tv1.7.0\n\tv1.8.0\n)\n", wantError: "go.mod retracts v1.1.0, v1.7.0, v1.8.0"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			commands, output, err := runPlaceholderPublish(t, tc.goMod, "", false)
+
+			want := "v1.0.0 needs the placeholder tag v1.8.1, but at HEAD " + tc.wantError
+			if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "nothing was changed") {
+				t.Fatalf("publish error = %v, want one naming %q and saying nothing was changed", err, want)
+			}
+			if mutating := mutatingLines(commands); len(mutating) > 0 {
+				t.Errorf("issued mutating commands %q, want none", mutating)
+			}
+			if !strings.Contains(output, "steps") {
+				t.Errorf("the step table was not printed:\n%s", output)
+			}
+		})
+	}
+}
+
+// TestPublishRefusesALightweightPlaceholderOnOrigin pins that a lightweight placeholder tag on
+// origin leaves the step unknown, so publish refuses before any change rather than skip or move it.
+func TestPublishRefusesALightweightPlaceholderOnOrigin(t *testing.T) {
+	t.Parallel()
+
+	commands, _, err := runPlaceholderPublish(t, preparedGoMod, "commit", false)
+
+	want := "could not tell where the placeholder step stands: v1.8.1 on origin is a lightweight tag"
+	if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "nothing was changed") {
+		t.Fatalf("publish error = %v, want one naming %q and saying nothing was changed", err, want)
+	}
+	if mutating := mutatingLines(commands); len(mutating) > 0 {
+		t.Errorf("issued mutating commands %q, want none", mutating)
+	}
+}
+
+// placeholderFake answers the placeholder step's commands for placeholderRelease: its tag is local
+// only once fetched, as on a run that found the tag step done in a checkout that lacks it.
+type placeholderFake struct {
+	// goMod is go.mod at the release's tag.
+	goMod string
+	// localKind is what `git cat-file -t` prints for a local placeholder tag, "" for none;
+	// localCommit is the commit it resolves to.
+	localKind   string
+	localCommit string
+
+	mu        sync.Mutex
+	isFetched bool
+}
+
+// respond answers one command.
+func (f *placeholderFake) respond(call recordedCall) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	releaseRef := "refs/tags/" + placeholderRelease
+	switch command := call.name + " " + strings.Join(call.args, " "); command {
+	case "git fetch --quiet origin " + releaseRef + ":" + releaseRef:
+		f.isFetched = true
+		return "", nil
+	case "git show " + placeholderRelease + ":go.mod":
+		if !f.isFetched {
+			return "", errors.New("exit status 128: fatal: invalid object name '" + placeholderRelease + "'")
+		}
+		return f.goMod, nil
+	case "git tag --list " + testPlaceholder:
+		if f.localKind == "" {
+			return "", nil
+		}
+		return testPlaceholder + "\n", nil
+	case "git cat-file -t refs/tags/" + testPlaceholder:
+		return f.localKind + "\n", nil
+	case "git rev-parse --verify " + testPlaceholder + "^{commit}":
+		return f.localCommit + "\n", nil
+	case "git rev-parse --verify " + placeholderRelease + "^{commit}":
+		return bumpCommit + "\n", nil
+	case "git tag -a " + testPlaceholder + " -m " + testPlaceholder + " " + placeholderRelease + "^{commit}",
+		"git push origin refs/tags/" + testPlaceholder:
+		return "", nil
+	default:
+		return "", fmt.Errorf("unexpected command %s", command)
+	}
+}
+
+// TestConvergePlaceholder pins the placeholder step's convergence: it fetches the release tag
+// before reading go.mod at it, refuses a go.mod that does not retract exactly the burned
+// versions, tags the release's commit and pushes the tag — pushing as it is a placeholder a
+// failed push left on that commit, and never moving or replacing one found anywhere else.
+func TestConvergePlaceholder(t *testing.T) {
+	t.Parallel()
+	tagged := "git tag -a " + testPlaceholder + " -m " + testPlaceholder + " " + placeholderRelease + "^{commit}"
+	fetched := "git fetch --quiet origin refs/tags/" + placeholderRelease + ":refs/tags/" + placeholderRelease
+	pushed := "git push origin refs/tags/" + testPlaceholder
+	cases := map[string]struct {
+		fake         *placeholderFake
+		wantError    string
+		wantMutating []string
+	}{
+		"placeholder pending": {
+			fake:         &placeholderFake{goMod: preparedGoMod},
+			wantMutating: []string{fetched, tagged, pushed},
+		},
+		"go.mod at the tag lacking the placeholder": {
+			fake:         &placeholderFake{goMod: "module example.com/apogee\n\nretract (\n\tv1.1.0\n\tv1.7.0\n\tv1.8.0\n)\n"},
+			wantError:    "refusing to tag the placeholder v1.8.1 on v1.0.0: at v1.0.0 go.mod retracts v1.1.0, v1.7.0, v1.8.0",
+			wantMutating: []string{fetched},
+		},
+		"local placeholder left by a failed push": {
+			fake:         &placeholderFake{goMod: preparedGoMod, localKind: gitObjectTag, localCommit: bumpCommit},
+			wantMutating: []string{fetched, pushed},
+		},
+		"local placeholder on another commit": {
+			fake:         &placeholderFake{goMod: preparedGoMod, localKind: gitObjectTag, localCommit: featureCommit},
+			wantError:    "the local tag v1.8.1 is on 200000000000, not on v1.0.0's commit 300000000000; publish never moves a placeholder tag",
+			wantMutating: []string{fetched},
+		},
+		"local lightweight placeholder": {
+			fake:         &placeholderFake{goMod: preparedGoMod, localKind: "commit", localCommit: bumpCommit},
+			wantError:    "the local tag v1.8.1 is a lightweight tag; publish never replaces a placeholder tag",
+			wantMutating: []string{fetched},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			commands := &fakeRunner{respond: tc.fake.respond}
+			run := &publishRun{
+				commands: commands,
+				output:   io.Discard,
+				options:  publishOptions{dir: t.TempDir()},
+				version:  mustVersion(t, placeholderRelease),
+			}
+
+			err := convergePlaceholder(t.Context(), run)
+
+			if tc.wantError == "" && err != nil {
+				t.Fatalf("convergePlaceholder failed: %v", err)
+			}
+			if tc.wantError != "" && (err == nil || !strings.Contains(err.Error(), tc.wantError)) {
+				t.Fatalf("convergePlaceholder error = %v, want one naming %q", err, tc.wantError)
+			}
+			if mutating := mutatingLines(commands); !slices.Equal(mutating, tc.wantMutating) {
+				t.Errorf("mutating commands = %q, want %q", mutating, tc.wantMutating)
+			}
+		})
+	}
+}
+
+// TestPublishBuildsWithoutTheBurnedTags pins that the release step deletes every burned version's
+// tag from its clone before the build: go build stamps a binary's version from a tag on its
+// commit, and the placeholder tag on the release's own commit would win over the release's.
+func TestPublishBuildsWithoutTheBurnedTags(t *testing.T) {
+	t.Parallel()
+	fake := newPublishFake()
+	fake.cloneTags = "v1.1.0\nv1.7.0\nv1.8.0\n"
+
+	result := runTestPublish(t, fake, false)
+
+	if result.err != nil {
+		t.Fatalf("publish failed: %v\n%s", result.err, result.output)
+	}
+	lines := commandLines(result.commands)
+	deleted := lineIndex(lines, "git tag --delete v1.1.0 v1.7.0 v1.8.0")
+	built := lineIndex(lines, "go build")
+	if deleted < 0 || built < deleted {
+		t.Errorf("the burned tags are deleted at command %d and the build starts at %d: the deletion must come first; commands: %q",
+			deleted, built, lines)
+	}
+	checkedOut := slices.IndexFunc(result.commands.calls, func(call recordedCall) bool { return call.name == "git" && call.args[0] == "checkout" })
+	if deleted >= 0 && checkedOut >= 0 && result.commands.calls[deleted].dir != result.commands.calls[checkedOut].dir {
+		t.Errorf("the burned tags are deleted in %s, want the build clone %s",
+			result.commands.calls[deleted].dir, result.commands.calls[checkedOut].dir)
 	}
 }
 

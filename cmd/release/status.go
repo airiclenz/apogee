@@ -63,10 +63,10 @@ func newStatusCommand(commands runner) *cobra.Command {
 			"VERSION or paths ci.yml's push filter skips) on origin/main, origin/main contained in\n" +
 			"HEAD, and a successful ci.yml run — naming each condition that blocks it; the baseline\n" +
 			"(the latest published release and the commits since); and the highest release tag. It\n" +
-			"probes each publish step (tag, release, homebrew, scoop, winget, smoke) for the version:\n" +
-			"done, pending, setup-pending or unknown. The version defaults to VERSION, whose steps are\n" +
-			"probed only when it is above the baseline; a bare X.Y.Z reads as vX.Y.Z. It exits 0 when\n" +
-			"the gate clears and 1 when it is blocked or a check or probe could not run.",
+			"probes each publish step (tag, release, placeholder, homebrew, scoop, winget, smoke) for\n" +
+			"the version: done, pending, setup-pending or unknown. The version defaults to VERSION,\n" +
+			"whose steps are probed only when it is above the baseline; a bare X.Y.Z reads as vX.Y.Z.\n" +
+			"It exits 0 when the gate clears and 1 when it is blocked or a check or probe could not run.",
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) > 1 {
 				return fmt.Errorf("status takes at most one version, got %d arguments", len(args))

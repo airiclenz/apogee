@@ -110,7 +110,12 @@ NOTES (2026-11-14): docs/manual/building.md:62-67 still describes the script tag
 **Acceptance:** `bash -n .github/scripts/version-bump.sh && make actionlint && GOMEMLIMIT=2GiB go test -count=1 -run 'TestRepo' ./cmd/release/`
 **Commit:** `feat(ci): tag-on-version-bump refuses the burned version list`
 
-## 4. publish places the self-retracting placeholder tag
+## 4. publish places the self-retracting placeholder tag — ✅ DONE (2026-11-14)
+
+NOTES (2026-11-14): probeTag's body moved into a shared probeAnnotatedTag(step, role, tag) that probePlaceholder reuses; probeTag's details are unchanged (its lightweight wording passes role "release").
+NOTES (2026-11-14): the clone's burned-tag deletion is `git tag --list <burned…>` then `git tag --delete <listed…>` (a bare `git tag -d` of an absent tag exits 1); "git tag --delete" joins "git tag -a" in mutatingCommands. Scratch-verified with go1.26.11: a module with annotated v1.0.0 and v1.8.1 on one commit builds with `go version -m` reading v1.8.1; after `git tag --delete v1.8.1` it reads v1.0.0.
+NOTES (2026-11-14): the v1.0.0 converge cases (fetch→tag→push order, "tag step done, vX not local", local P from a failed push, local P on another commit, a lightweight local P, go.mod at vX lacking P) call convergePlaceholder directly over a dedicated placeholderFake; the HEAD:go.mod refusal, the dry-run plan and the lightweight-P-on-origin refusal go through runPublish with version v1.0.0. A lightweight local placeholder is refused, a case the item did not list.
+NOTES (2026-11-14): TestProbesNeverReadAFailedCallAsDone now probes each step with its own runner over v0.24.11 and v1.0.0, skipping smoke and a placeholder that issued no command; TestStatusTextNamesTheBlockingConditions' step rows switched to hasRow.
 
 **What:** Recast at the regression check (2026-11-05). Depends on item 2.
 **Goal:** `publish vX` runs a `placeholder` step between `release` and `homebrew`. The placeholder P is the highest of `update.RetractedVersions()`. The step is pending only when v1.0.0 <= vX < P and vX is not burned; otherwise it is done ("not needed: <reason>") with no command issued. Inside that window it is done when origin already holds P as an annotated tag; otherwise converging it creates annotated tag P on vX's commit and pushes it. Before it does, it refuses unless `git show vX:go.mod` retracts exactly the burned list, and never moves an existing P.

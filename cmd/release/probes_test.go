@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/update"
 )
 
 // The errors gh fails with, copied from real runs: a GitHub 404 (a missing path or repository),
@@ -16,6 +18,9 @@ const (
 	ghEmptyRepository = "exit status 1: gh: This repository is empty. (HTTP 404)"
 	ghNoRelease       = "exit status 1: release not found"
 )
+
+// testPlaceholder is the placeholder tag: the highest burned version.
+const testPlaceholder = "v1.8.1"
 
 // testFormula is the head of the tap's formula, copied from airiclenz/homebrew-tap at v0.24.11.
 const testFormula = `class Apogee < Formula
@@ -42,8 +47,10 @@ var releaseAssetsV02411 = []string{
 // whose one-time setup is still pending.
 type fakeRemote struct {
 	// tagObject is the type of the version's tag on origin: "" for no tag, "tag" for an
-	// annotated one, "commit" for a lightweight one.
-	tagObject string
+	// annotated one, "commit" for a lightweight one. placeholderObject is the same for the
+	// placeholder tag, testPlaceholder.
+	tagObject         string
+	placeholderObject string
 	// release is what `gh release view <tag> --json assets` prints, "" for no release.
 	release string
 	// formula is the tap's formula, "" for none.
@@ -70,17 +77,21 @@ func (r fakeRemote) respond(call recordedCall) (string, error) {
 		return fail("cannot run")
 	}
 	args := call.args
+	tagObject := r.tagObject
+	if slices.Contains(args, "refs/tags/"+testPlaceholder) || slices.Contains(args, "repos/"+apogeeRepo+"/git/ref/tags/"+testPlaceholder) {
+		tagObject = r.placeholderObject
+	}
 	switch {
 	case call.name == "git" && len(args) == 4 && args[0] == "ls-remote":
-		if r.tagObject == "" {
+		if tagObject == "" {
 			return "", nil
 		}
 		return "81eec1b3ac7d27f7ef38fe2368b59b89cbd8832b\t" + args[3] + "\n", nil
 	case call.name == "gh" && len(args) == 4 && args[0] == "api" && strings.HasPrefix(args[1], "repos/"+apogeeRepo+"/git/ref/tags/"):
-		if r.tagObject == "" {
+		if tagObject == "" {
 			return fail(ghNotFound)
 		}
-		return r.tagObject + "\n", nil
+		return tagObject + "\n", nil
 	case call.name == "gh" && len(args) == 5 && args[0] == "release" && args[1] == "view" && args[4] == "assets":
 		if r.release == "" {
 			return fail(ghNoRelease)
@@ -231,6 +242,24 @@ func TestProbesReportEachState(t *testing.T) {
 			wantState: statePending, wantDetail: "no AiricLenz.Apogee 0.24.1 manifest"},
 		"winget pull requests unreadable": {probe: probeWinget, remote: fakeRemote{wingetListing: wingetListing("0.24.10"), failing: "gh pr list"},
 			wantState: stateUnknown, wantDetail: "could not list the open microsoft/winget-pkgs pull requests"},
+		"placeholder below v1.0.0": {probe: probePlaceholder, remote: fakeRemote{tagObject: "tag"},
+			wantState: stateDone, wantDetail: "not needed: v0.24.11 is below v1.0.0"},
+		"placeholder above itself": {probe: probePlaceholder, version: "v1.9.0", remote: fakeRemote{tagObject: "tag"},
+			wantState: stateDone, wantDetail: "not needed: v1.9.0 is above the placeholder v1.8.1"},
+		"placeholder for a burned version": {probe: probePlaceholder, version: "v1.8.0",
+			wantState: stateDone, wantDetail: "not needed: v1.8.0 is a burned version"},
+		"placeholder for itself": {probe: probePlaceholder, version: testPlaceholder,
+			wantState: stateDone, wantDetail: "not needed: v1.8.1 is a burned version"},
+		"placeholder absent, release tagged": {probe: probePlaceholder, version: "v1.0.0", remote: fakeRemote{tagObject: "tag"},
+			wantState: statePending, wantDetail: "origin has no tag v1.8.1"},
+		"placeholder pending for v1.7.1": {probe: probePlaceholder, version: "v1.7.1",
+			wantState: statePending, wantDetail: "origin has no tag v1.8.1"},
+		"placeholder annotated": {probe: probePlaceholder, version: "v1.0.0", remote: fakeRemote{placeholderObject: "tag"},
+			wantState: stateDone, wantDetail: "annotated tag v1.8.1 on origin"},
+		"placeholder lightweight": {probe: probePlaceholder, version: "v1.0.0", remote: fakeRemote{placeholderObject: "commit"},
+			wantState: stateUnknown, wantDetail: "v1.8.1 on origin is a lightweight tag; a placeholder tag must be annotated"},
+		"placeholder ls-remote fails": {probe: probePlaceholder, version: "v1.0.0", remote: fakeRemote{placeholderObject: "tag", failing: "git ls-remote"},
+			wantState: stateUnknown, wantDetail: "could not list origin's tags"},
 		"smoke": {probe: probeSmoke, remote: fakeRemote{tagObject: "tag", release: allAssets}, wantState: statePending, wantDetail: "publish runs it last"},
 	}
 	for name, tc := range cases {
@@ -250,6 +279,45 @@ func TestProbesReportEachState(t *testing.T) {
 	}
 }
 
+// TestPlaceholderIsTheHighestBurnedVersion pins the placeholder to the top of the burned list
+// internal/update owns, so the placeholder outranks every burned version it lifts a release over.
+func TestPlaceholderIsTheHighestBurnedVersion(t *testing.T) {
+	t.Parallel()
+
+	got := placeholderVersion()
+
+	if got.String() != testPlaceholder {
+		t.Errorf("placeholder = %s, want %s", got, testPlaceholder)
+	}
+	for _, burned := range update.RetractedVersions() {
+		if mustVersion(t, burned).compare(got) > 0 {
+			t.Errorf("burned version %s outranks the placeholder %s", burned, got)
+		}
+	}
+}
+
+// TestPlaceholderProbeRunsNothingOutsideItsWindow pins that the placeholder probe issues no
+// command for a version that does not need the placeholder: a 0.x release, a burned version and
+// one above the placeholder are done without asking origin anything.
+func TestPlaceholderProbeRunsNothingOutsideItsWindow(t *testing.T) {
+	t.Parallel()
+	for _, version := range []string{"v0.24.11", "v1.1.0", testPlaceholder, "v1.9.0"} {
+		t.Run(version, func(t *testing.T) {
+			t.Parallel()
+			commands := fakeRemote{}.runner()
+
+			step := probePlaceholder(t.Context(), commands, ".", mustVersion(t, version))
+
+			if step.State != stateDone || !strings.HasPrefix(step.Detail, "not needed: ") {
+				t.Errorf("step = %s %q, want done, not needed", step.State, step.Detail)
+			}
+			if len(commands.calls) > 0 {
+				t.Errorf("issued %d commands, want none", len(commands.calls))
+			}
+		})
+	}
+}
+
 // TestProbeStepsRunsEveryStepInPublishOrder pins the step list status reports and publish walks.
 func TestProbeStepsRunsEveryStepInPublishOrder(t *testing.T) {
 	t.Parallel()
@@ -260,26 +328,34 @@ func TestProbeStepsRunsEveryStepInPublishOrder(t *testing.T) {
 	for _, step := range steps {
 		names = append(names, step.Name)
 	}
-	want := []string{"tag", "release", "homebrew", "scoop", "winget", "smoke"}
+	want := []string{"tag", "release", "placeholder", "homebrew", "scoop", "winget", "smoke"}
 	if !slices.Equal(names, want) {
 		t.Errorf("steps = %q, want %q", names, want)
 	}
 }
 
 // TestProbesNeverReadAFailedCallAsDone pins that a probe whose every command cannot run — gh
-// missing, git unauthenticated — reports unknown, never done (smoke, which runs nothing, aside).
+// missing, git unauthenticated — reports unknown, never done (smoke, which runs nothing, aside,
+// and the placeholder where the version does not need it, as it then runs nothing either).
 func TestProbesNeverReadAFailedCallAsDone(t *testing.T) {
 	t.Parallel()
-	commands := &fakeRunner{respond: func(recordedCall) (string, error) {
-		return "", errors.New(`exec: "gh": executable file not found in $PATH`)
-	}}
+	for _, version := range []string{"v0.24.11", "v1.0.0"} {
+		t.Run(version, func(t *testing.T) {
+			t.Parallel()
+			for _, publish := range publishSteps {
+				commands := &fakeRunner{respond: func(recordedCall) (string, error) {
+					return "", errors.New(`exec: "gh": executable file not found in $PATH`)
+				}}
 
-	for _, step := range probeSteps(t.Context(), commands, ".", mustVersion(t, "v0.24.11")) {
-		if step.Name == stepSmoke {
-			continue
-		}
-		if step.State != stateUnknown {
-			t.Errorf("step %s = %s %q, want unknown", step.Name, step.State, step.Detail)
-		}
+				step := publish.probe(t.Context(), commands, ".", mustVersion(t, version))
+
+				if step.Name == stepSmoke || (step.Name == stepPlaceholder && len(commands.calls) == 0) {
+					continue
+				}
+				if step.State != stateUnknown {
+					t.Errorf("step %s = %s %q, want unknown", step.Name, step.State, step.Detail)
+				}
+			}
+		})
 	}
 }

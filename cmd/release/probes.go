@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/update"
 )
 
 // The repositories and paths the publish steps write to, and so the ones their probes read.
@@ -24,13 +26,17 @@ const (
 
 // The publish steps, by the name status and publish report them under.
 const (
-	stepTag      = "tag"
-	stepRelease  = "release"
-	stepHomebrew = "homebrew"
-	stepScoop    = "scoop"
-	stepWinget   = "winget"
-	stepSmoke    = "smoke"
+	stepTag         = "tag"
+	stepRelease     = "release"
+	stepPlaceholder = "placeholder"
+	stepHomebrew    = "homebrew"
+	stepScoop       = "scoop"
+	stepWinget      = "winget"
+	stepSmoke       = "smoke"
 )
+
+// firstMajorRelease is v1.0.0, the lowest release the placeholder tag is placed for.
+var firstMajorRelease = releaseVersion{major: 1}
 
 // stepState is where a publish step stands for one version.
 type stepState string
@@ -72,6 +78,7 @@ type publishStep struct {
 var publishSteps = []publishStep{
 	{name: stepTag, probe: probeTag},
 	{name: stepRelease, probe: probeRelease},
+	{name: stepPlaceholder, probe: probePlaceholder},
 	{name: stepHomebrew, probe: probeHomebrew},
 	{name: stepScoop, probe: probeScoop},
 	{name: stepWinget, probe: probeWinget},
@@ -94,27 +101,75 @@ func probeSteps(ctx context.Context, commands runner, dir string, version releas
 // lightweight tag carries no message and is not what a release is cut from, so it is unknown,
 // never done.
 func probeTag(ctx context.Context, commands runner, dir string, version releaseVersion) stepReport {
-	tag := version.String()
+	return probeAnnotatedTag(ctx, commands, dir, stepTag, "release", version.String())
+}
+
+// probePlaceholder reports where the placeholder tag stands for version. The placeholder is the
+// highest burned version ([placeholderVersion]); tagged on a release's commit, whose go.mod
+// retracts it, it makes the module proxy's @latest resolve to that release, which would otherwise
+// rank below the burned versions. Only a release from v1.0.0 up to the placeholder, itself not
+// burned, needs it: every other version is done ("not needed") without a command being run. For
+// one that needs it, the step is done only when origin holds the placeholder as an annotated tag;
+// a lightweight one is unknown, as for the release tag.
+func probePlaceholder(ctx context.Context, commands runner, dir string, version releaseVersion) stepReport {
+	placeholder := placeholderVersion()
+	if reason, isNeeded := placeholderNeed(version, placeholder); !isNeeded {
+		return stepReport{Name: stepPlaceholder, State: stateDone, Detail: "not needed: " + reason}
+	}
+	return probeAnnotatedTag(ctx, commands, dir, stepPlaceholder, "placeholder", placeholder.String())
+}
+
+// probeAnnotatedTag reports the step name done when origin holds tag as an annotated tag, pending
+// when origin has no such tag, and unknown otherwise; role names the tag in the lightweight case.
+func probeAnnotatedTag(ctx context.Context, commands runner, dir, name, role, tag string) stepReport {
 	listed, err := commands.run(ctx, dir, nil, "git", "ls-remote", "--tags", remoteName, "refs/tags/"+tag)
 	if err != nil {
-		return unknownStep(stepTag, "could not list %s's tags: %v", remoteName, err)
+		return unknownStep(name, "could not list %s's tags: %v", remoteName, err)
 	}
 	if strings.TrimSpace(listed) == "" {
-		return stepReport{Name: stepTag, State: statePending, Detail: fmt.Sprintf("%s has no tag %s", remoteName, tag)}
+		return stepReport{Name: name, State: statePending, Detail: fmt.Sprintf("%s has no tag %s", remoteName, tag)}
 	}
 
 	kind, err := commands.run(ctx, dir, nil, "gh", "api", "repos/"+apogeeRepo+"/git/ref/tags/"+tag, "--jq", ".object.type")
 	if err != nil {
-		return unknownStep(stepTag, "could not read the type of tag %s: %v", tag, err)
+		return unknownStep(name, "could not read the type of tag %s: %v", tag, err)
 	}
 	switch strings.TrimSpace(kind) {
 	case "tag":
-		return stepReport{Name: stepTag, State: stateDone, Detail: fmt.Sprintf("annotated tag %s on %s", tag, remoteName)}
+		return stepReport{Name: name, State: stateDone, Detail: fmt.Sprintf("annotated tag %s on %s", tag, remoteName)}
 	case "commit":
-		return unknownStep(stepTag, "%s on %s is a lightweight tag; a release tag must be annotated", tag, remoteName)
+		return unknownStep(name, "%s on %s is a lightweight tag; a %s tag must be annotated", tag, remoteName, role)
 	default:
-		return unknownStep(stepTag, "tag %s points at a %q object, not an annotated tag", tag, strings.TrimSpace(kind))
+		return unknownStep(name, "tag %s points at a %q object, not an annotated tag", tag, strings.TrimSpace(kind))
 	}
+}
+
+// placeholderVersion is the placeholder tag: the highest of the burned versions internal/update
+// owns, which every release's go.mod retracts, the placeholder among them.
+func placeholderVersion() releaseVersion {
+	burned := update.RetractedVersions()
+	placeholder, err := parseReleaseVersion(burned[len(burned)-1])
+	if err != nil {
+		// The list is compiled in, ascending and in vX.Y.Z form; a parse failure here is a
+		// defect of this program.
+		panic(fmt.Sprintf("the highest burned version %q: %v", burned[len(burned)-1], err))
+	}
+	return placeholder
+}
+
+// placeholderNeed reports whether version needs the placeholder tag and, when it does not, why:
+// the placeholder lifts only the v1.x releases that rank below it, so a release below v1.0.0 or
+// above the placeholder never needs it, and a burned version is never published.
+func placeholderNeed(version, placeholder releaseVersion) (string, bool) {
+	switch {
+	case version.compare(firstMajorRelease) < 0:
+		return fmt.Sprintf("%s is below %s", version, firstMajorRelease), false
+	case update.IsRetracted(version.String()):
+		return fmt.Sprintf("%s is a burned version", version), false
+	case version.compare(placeholder) > 0:
+		return fmt.Sprintf("%s is above the placeholder %s", version, placeholder), false
+	}
+	return "", true
 }
 
 // probeRelease reports the GitHub release done only when it carries every asset a release ships:

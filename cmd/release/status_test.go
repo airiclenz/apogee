@@ -71,12 +71,13 @@ func TestStatusReportsTheGateBaselineAndHighestTag(t *testing.T) {
 		t.Errorf("report = %s\nwant     %s", gotJSON, wantJSON)
 	}
 
-	// Nothing is published for v0.24.14 and no channel's one-time setup has landed.
+	// Nothing is published for v0.24.14, a 0.x release needs no placeholder tag, and no channel's
+	// one-time setup has landed.
 	var states []string
 	for _, step := range steps {
 		states = append(states, step.Name+" "+string(step.State))
 	}
-	wantStates := []string{"tag pending", "release pending", "homebrew pending", "scoop setup-pending", "winget setup-pending", "smoke pending"}
+	wantStates := []string{"tag pending", "release pending", "placeholder done", "homebrew pending", "scoop setup-pending", "winget setup-pending", "smoke pending"}
 	if !slices.Equal(states, wantStates) {
 		t.Errorf("steps = %q, want %q", states, wantStates)
 	}
@@ -190,7 +191,7 @@ func TestStatusFailsOnAStepItCouldNotProbe(t *testing.T) {
 	if !report.Gate.IsOK {
 		t.Errorf("gate failures = %q, want a cleared gate", report.Gate.Failures)
 	}
-	if len(report.Steps) != len(publishSteps) || report.Steps[2].State != stateUnknown {
+	if len(report.Steps) != len(publishSteps) || report.Steps[3].State != stateUnknown {
 		t.Errorf("steps = %+v, want homebrew unknown", report.Steps)
 	}
 }
@@ -324,11 +325,18 @@ func TestStatusTextNamesTheBlockingConditions(t *testing.T) {
 		"gate         BLOCKED at 200000000000",
 		"- the working tree is not clean",
 		"\nsteps\n",
-		"  tag       pending        origin has no tag v0.24.14\n",
-		"  scoop     setup-pending  no airiclenz/scoop-bucket repository yet\n",
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("output lacks %q:\n%s", want, output)
+		}
+	}
+	for _, row := range [][]string{
+		{"tag", "pending", "origin has no tag v0.24.14"},
+		{"placeholder", "done", "not needed: v0.24.14 is below v1.0.0"},
+		{"scoop", "setup-pending", "no airiclenz/scoop-bucket repository yet"},
+	} {
+		if !hasRow(output, row...) {
+			t.Errorf("output lacks the step row %q:\n%s", row, output)
 		}
 	}
 }

@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/airiclenz/apogee/internal/update"
 )
 
 // How long publish waits for the CI-made tag after pushing, and how often it looks. The
@@ -87,11 +89,13 @@ type publishAction struct {
 
 // publishActions are the steps publish converges, in the order it runs them; each one's probe
 // is the publishSteps entry of the same name, so what status reports done is what publish skips.
-// The channel steps (channels.go) run after the release, whose SHA256SUMS they render from, and
-// the smoke step (smoke.go) runs last, over everything the others published.
+// The placeholder step runs after the release, so the assets are built before the placeholder
+// tag is on origin; the channel steps (channels.go) run after the release, whose SHA256SUMS they
+// render from, and the smoke step (smoke.go) runs last, over everything the others published.
 var publishActions = []publishAction{
 	{name: stepTag, describe: describeTag, converge: convergeTag},
 	{name: stepRelease, describe: describeRelease, converge: convergeRelease},
+	{name: stepPlaceholder, describe: describePlaceholder, converge: convergePlaceholder},
 	{name: stepHomebrew, describe: describeHomebrew, converge: convergeHomebrew},
 	{name: stepScoop, describe: describeScoop, converge: convergeScoop},
 	{name: stepWinget, describe: describeWinget, converge: convergeWinget, doneDetail: wingetSubmittedDetail},
@@ -121,13 +125,18 @@ func newPublishCommand(commands runner) *cobra.Command {
 			"a half-finished release is resumed by running it again. While the tag is not on origin\n" +
 			"it refuses unless the release gate clears and VERSION at HEAD reads the version; it\n" +
 			"then pushes HEAD to main and waits (--tag-timeout) for the CI-made annotated tag — it\n" +
-			"never creates one. The release step builds the archives in a fresh clone at the tag\n" +
-			"and creates the GitHub release, or uploads only the assets it lacks after checking the\n" +
-			"rebuilt sums against its SHA256SUMS. The homebrew and scoop steps render the formula\n" +
-			"and the manifest from the release's SHA256SUMS and commit `apogee X.Y.Z` straight to\n" +
-			"the tap and the bucket, pushing only when the file changes; the winget step submits\n" +
-			"the manifest update with komac (GITHUB_TOKEN, else `gh auth token`), which merges\n" +
-			"later. A channel whose one-time setup is pending is skipped and named, and the run\n" +
+			"never creates the release tag. The release step builds the archives in a fresh clone at\n" +
+			"the tag, with the burned versions' tags deleted there, and creates the GitHub release,\n" +
+			"or uploads only the assets it lacks after checking the rebuilt sums against its\n" +
+			"SHA256SUMS. For a release from v1.0.0 up to the placeholder (the highest burned\n" +
+			"version), the placeholder step tags the release's commit with the annotated placeholder\n" +
+			"and pushes it, after checking that go.mod at the tag retracts exactly the burned\n" +
+			"versions, so `go install …@latest` resolves to the release; it is the one tag publish\n" +
+			"creates, and it never moves one that exists. The homebrew and scoop steps render the\n" +
+			"formula and the manifest from the release's SHA256SUMS and commit `apogee X.Y.Z`\n" +
+			"straight to the tap and the bucket, pushing only when the file changes; the winget step\n" +
+			"submits the manifest update with komac (GITHUB_TOKEN, else `gh auth token`), which\n" +
+			"merges later. A channel whose one-time setup is pending is skipped and named, and the run\n" +
 			"still succeeds. Last, the smoke step checks the published release from the outside, as\n" +
 			"the smoke verb does, comparing its SHA256SUMS with this run's build when it made one; a\n" +
 			"failed check fails the run. It never prompts or reads stdin, and exits 1 after\n" +
@@ -173,6 +182,9 @@ func runPublish(ctx context.Context, commands runner, output io.Writer, options 
 	gate := fmt.Sprintf("not checked: %s is on %s, so the release converges from remote state", version, remoteName)
 	if steps[0].State != stateDone {
 		gate, refusals = run.checkPushable(ctx, refusals)
+		if isPending(steps, stepPlaceholder) {
+			refusals = run.checkHeadRetractions(ctx, refusals)
+		}
 	}
 	for _, step := range steps {
 		if step.State == stateUnknown {
@@ -259,6 +271,26 @@ func (r *publishRun) checkPushable(ctx context.Context, refusals []error) (strin
 	return gate, refusals
 }
 
+// checkHeadRetractions refuses, before anything changes, a release that needs the placeholder tag
+// while go.mod at HEAD — the commit the CI workflow will tag — does not retract exactly the burned
+// versions: the placeholder tagged there would not retract itself, and `go install …@latest`
+// would resolve to it. The placeholder step checks go.mod at the tag again before it tags.
+func (r *publishRun) checkHeadRetractions(ctx context.Context, refusals []error) []error {
+	goMod, err := r.commands.run(ctx, r.options.dir, nil, "git", "show", "HEAD:"+goModFile)
+	if err != nil {
+		return append(refusals, fmt.Errorf("read %s at HEAD: %w", goModFile, err))
+	}
+	if err := checkRetractKept([]byte(goMod)); err != nil {
+		return append(refusals, fmt.Errorf("%s needs the placeholder tag %s, but at HEAD %w", r.version, placeholderVersion(), err))
+	}
+	return refusals
+}
+
+// isPending reports whether the step named name is pending among steps.
+func isPending(steps []stepReport, name string) bool {
+	return slices.ContainsFunc(steps, func(step stepReport) bool { return step.Name == name && step.State == statePending })
+}
+
 // checkNotesFile requires the notes file to be readable and to hold some text, and returns its
 // absolute path.
 func checkNotesFile(notesFile string) (string, error) {
@@ -310,7 +342,8 @@ func describeTag(run *publishRun) string {
 
 // convergeTag pushes HEAD to main when origin/main is behind it, waits for the tag-on-version-bump
 // workflow to tag the bump, and then requires that tag annotated and on the commit that set
-// VERSION. It never creates a tag: the workflow is the one tagger.
+// VERSION. It never creates the release tag: the workflow is the one tagger of releases, and the
+// placeholder step's tag is the only one publish creates.
 func convergeTag(ctx context.Context, run *publishRun) error {
 	dir := run.options.dir
 	isPushed, err := isAncestor(ctx, run.commands, dir, "HEAD", remoteMain)
@@ -468,11 +501,115 @@ func buildReleaseAssets(ctx context.Context, run *publishRun, workDir string) (s
 		return "", fmt.Errorf("%s at tag %s reads %s, not %s", versionFile, tag, bare, bareRelease(run.version))
 	}
 
+	if err := dropBurnedTags(ctx, run.commands, sourceDir); err != nil {
+		return "", err
+	}
+
 	outDir := filepath.Join(workDir, defaultOutDir)
 	if err := runDist(ctx, run.commands, run.output, distOptions{sourceDir: sourceDir, outDir: outDir}); err != nil {
 		return "", fmt.Errorf("build the %s assets: %w", tag, err)
 	}
 	return outDir, nil
+}
+
+// dropBurnedTags deletes every burned version's tag from the build clone at sourceDir. go build
+// stamps a binary's module version from a tag on the commit it builds, and the placeholder tag —
+// a burned version — sits on the release's own commit and wins over it: left in the clone,
+// `go version -m` on the built binary would read the placeholder, not the release.
+func dropBurnedTags(ctx context.Context, commands runner, sourceDir string) error {
+	listArgs := append([]string{"tag", "--list"}, update.RetractedVersions()...)
+	listed, err := commands.run(ctx, sourceDir, nil, "git", listArgs...)
+	if err != nil {
+		return fmt.Errorf("list the burned versions' tags in the clone: %w", err)
+	}
+	present := strings.Fields(listed)
+	if len(present) == 0 {
+		return nil
+	}
+	if _, err := commands.run(ctx, sourceDir, nil, "git", append([]string{"tag", "--delete"}, present...)...); err != nil {
+		return fmt.Errorf("delete the burned versions' tags %s in the clone: %w", strings.Join(present, ", "), err)
+	}
+	return nil
+}
+
+// describePlaceholder says what the placeholder step does.
+func describePlaceholder(run *publishRun) string {
+	placeholder := placeholderVersion()
+	return fmt.Sprintf("check that %s at %s retracts exactly the burned versions, then tag %s's commit with the annotated placeholder %s and push it to %s",
+		goModFile, run.version, run.version, placeholder, remoteName)
+}
+
+// convergePlaceholder places the placeholder tag on the release's commit and pushes it. It fetches
+// the release tag first — a run that found the tag step done may not have it locally — and refuses
+// unless go.mod at the tag retracts exactly the burned versions, the placeholder among them, so
+// the placeholder retracts itself. A local placeholder that a failed push left on the release's
+// commit is pushed as it is; one anywhere else is refused, never moved.
+func convergePlaceholder(ctx context.Context, run *publishRun) error {
+	dir := run.options.dir
+	tag := run.version.String()
+	placeholder := placeholderVersion().String()
+	ref := "refs/tags/" + tag
+	if _, err := run.commands.run(ctx, dir, nonInteractiveEnv, "git", "fetch", "--quiet", remoteName, ref+":"+ref); err != nil {
+		return fmt.Errorf("fetch tag %s: %w", tag, err)
+	}
+
+	goMod, err := run.commands.run(ctx, dir, nil, "git", "show", tag+":"+goModFile)
+	if err != nil {
+		return fmt.Errorf("read %s at %s: %w", goModFile, tag, err)
+	}
+	if err := checkRetractKept([]byte(goMod)); err != nil {
+		return fmt.Errorf("refusing to tag the placeholder %s on %s: at %s %w", placeholder, tag, tag, err)
+	}
+
+	isLocal, err := hasLocalPlaceholder(ctx, run, placeholder)
+	if err != nil {
+		return err
+	}
+	if !isLocal {
+		if _, err := run.commands.run(ctx, dir, nil, "git", "tag", "-a", placeholder, "-m", placeholder, tag+"^{commit}"); err != nil {
+			return fmt.Errorf("tag %s with the placeholder %s: %w", tag, placeholder, err)
+		}
+	}
+	if _, err := run.commands.run(ctx, dir, nonInteractiveEnv, "git", "push", remoteName, "refs/tags/"+placeholder); err != nil {
+		return fmt.Errorf("push the placeholder tag %s to %s: %w", placeholder, remoteName, err)
+	}
+	return nil
+}
+
+// hasLocalPlaceholder reports whether the checkout already holds the placeholder tag, as a failed
+// push leaves it, and refuses one that is not an annotated tag on the release's commit: publish
+// never moves or replaces a placeholder.
+func hasLocalPlaceholder(ctx context.Context, run *publishRun, placeholder string) (bool, error) {
+	dir := run.options.dir
+	tag := run.version.String()
+	listed, err := run.commands.run(ctx, dir, nil, "git", "tag", "--list", placeholder)
+	if err != nil {
+		return false, fmt.Errorf("list the local tag %s: %w", placeholder, err)
+	}
+	if strings.TrimSpace(listed) == "" {
+		return false, nil
+	}
+
+	kind, err := run.commands.run(ctx, dir, nil, "git", "cat-file", "-t", "refs/tags/"+placeholder)
+	if err != nil {
+		return false, fmt.Errorf("read the type of the local tag %s: %w", placeholder, err)
+	}
+	if strings.TrimSpace(kind) != gitObjectTag {
+		return false, fmt.Errorf("the local tag %s is a lightweight tag; publish never replaces a placeholder tag", placeholder)
+	}
+	placed, err := revParse(ctx, run.commands, dir, placeholder)
+	if err != nil {
+		return false, fmt.Errorf("resolve the local tag %s: %w", placeholder, err)
+	}
+	released, err := revParse(ctx, run.commands, dir, tag)
+	if err != nil {
+		return false, fmt.Errorf("resolve tag %s: %w", tag, err)
+	}
+	if placed != released {
+		return false, fmt.Errorf("the local tag %s is on %s, not on %s's commit %s; publish never moves a placeholder tag",
+			placeholder, short(placed), tag, short(released))
+	}
+	return true, nil
 }
 
 // checkPublishedSums downloads the release's SHA256SUMS and requires every uploaded archive's
