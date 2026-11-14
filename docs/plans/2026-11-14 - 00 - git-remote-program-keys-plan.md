@@ -37,7 +37,7 @@
 - 2 (re-check): guard folded — a `protocol.allow` / `protocol.ext.allow` value of `never` is exempt (clear rows in both test tables); Tests say clear rows name no `.git/config`.
 - 2 (re-check): decided — removal forms (`--unset`/`--unset-all`/`unset`) stay judged as writes for every key, no new exemption; one test row pins `git config --unset remote.origin.uploadpack` as naming `.git/config`.
 
-## 1. Refuse a repo-local remote.<n>.vcs
+## 1. Refuse a repo-local remote.<n>.vcs — ✅ DONE (2026-11-14)
 
 **What:** fix: the gitexec command-config denylist misses `remote.<n>.vcs`, so a planted helper name runs unconfined on the git actions host's fetch.
 **Goal:** `security.GitCommandConfigNameSource` matches `remote.<n>.vcs` (any remote name, lowered); the git tool and the git actions host refuse a repository carrying it, naming the key, and a planted `git-remote-<vcs>` never runs.

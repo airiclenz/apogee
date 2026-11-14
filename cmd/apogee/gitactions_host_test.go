@@ -658,3 +658,37 @@ func TestGitActionsHostRebaseRefusesAnSshSigningKeyCommand(t *testing.T) {
 		t.Errorf("the repository's ssh signing-key command ran (stat marker: %v)", statErr)
 	}
 }
+
+// TestGitActionsHostFetchRefusesARemoteHelper pins the remote-helper route into an unconfined
+// fetch: a repository that sets remote.origin.vcs to a slashed name has git run
+// git-remote-<vcs> resolved against the working tree, which a fetch's --upload-pack and
+// transport options do not stop. The repository must be refused by name before any fetch, and
+// the planted helper must never run.
+func TestGitActionsHostFetchRefusesARemoteHelper(t *testing.T) {
+	t.Parallel()
+	requireGitForStatusHost(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("the planted remote helper is a POSIX shell script; the refusal it pins is platform-independent")
+	}
+	_, clone := statusHostClone(t)
+	marker := filepath.Join(t.TempDir(), "helper.ran")
+	helper := filepath.Join(clone, "git-remote-a", "b")
+	if err := os.MkdirAll(filepath.Dir(helper), 0o755); err != nil {
+		t.Fatalf("create the helper directory: %v", err)
+	}
+	script := "#!/bin/sh\n: > \"" + marker + "\"\n"
+	if err := os.WriteFile(helper, []byte(script), 0o755); err != nil {
+		t.Fatalf("write the remote helper: %v", err)
+	}
+	writeFixtureFile(t, clone, filepath.Join(".git", "info", "exclude"), "git-remote-a/\n")
+	gitFixture(t, clone, "config", "remote.origin.vcs", "a/b")
+
+	_, err := gitActionsHost{}.Fetch(context.Background(), clone)
+
+	if err == nil || !strings.Contains(err.Error(), "remote.origin.vcs") {
+		t.Errorf("Fetch = %v, want the command-config refusal naming remote.origin.vcs", err)
+	}
+	if _, statErr := os.Stat(marker); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Errorf("the repository's remote helper ran (stat marker: %v)", statErr)
+	}
+}

@@ -496,9 +496,10 @@ func subcommand(args []string) string {
 
 // CommandConfigName matches every config name whose VALUE is a program git executes — an
 // sshCommand, an editor, a pager, an askpass, a filter or merge or diff driver, a credential
-// helper, a gpg.program, a proxy command. A key that merely SELECTS one of those (a
-// filter.<driver>.required, a .gitattributes attribute) names no program and runs nothing on its
-// own, so it is deliberately absent.
+// helper, a gpg.program, a proxy command, a remote helper (remote.<name>.vcs, which git runs as
+// git-remote-<vcs> and resolves against the working directory when the name holds a slash). A
+// key that merely SELECTS one of those (a filter.<driver>.required, a .gitattributes attribute)
+// names no program and runs nothing on its own, so it is deliberately absent.
 //
 // Two classes are deliberately absent for their own reasons. core.hooksPath and core.fsmonitor
 // are neutralised by hardeningOptions above, so refusing them as well would cost a repository

@@ -262,6 +262,22 @@ func TestCommandConfigRefusal_NamesTheSshSigningKeyCommand(t *testing.T) {
 	}
 }
 
+// TestCommandConfigRefusal_NamesTheRemoteHelper pins the remote-helper route: git runs
+// git-remote-<vcs> for a remote whose vcs is set, and resolves a slashed name against the working
+// directory, so a repository naming one is refused by that key.
+func TestCommandConfigRefusal_NamesTheRemoteHelper(t *testing.T) {
+	gitPath := realGit(t)
+	root := t.TempDir()
+	runRealGit(t, gitPath, root, "init", "-b", "main")
+	appendToConfig(t, root, "[remote \"origin\"]\n\tvcs = a/b\n")
+
+	res := captureStatus(t, gitPath, root)
+
+	if want := gitexec.CommandConfigRefusal([]string{"remote.origin.vcs"}); res.CombinedOutput != want {
+		t.Errorf("Capture = %q, want the refusal %q", res.CombinedOutput, want)
+	}
+}
+
 // TestCapture_ReprobesWhenAnAbsentIncludeAppears pins two things at once: the probe follows
 // includes at all (a scoped `git config` read follows none unless asked), and a missing include
 // — which git skips silently — is watched from the start, so the file the model creates later

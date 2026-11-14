@@ -52,8 +52,9 @@ var gitFetchVerb = []string{
 }
 
 // gitFetchArgs is the footer's background fetch: [gitQuietConfig] and [gitTransportConfig] ahead
-// of [gitFetchVerb]. Together they widen gitexec's command-config refusal — which does not cover
-// remote.<name>.uploadpack or the ext:: transport — for this verb only.
+// of [gitFetchVerb]. Together they widen gitexec's command-config refusal for this verb only:
+// that refusal covers a remote helper (remote.<name>.vcs) but not remote.<name>.uploadpack or the
+// ext:: transport, which these options neutralise per verb instead.
 var gitFetchArgs = slices.Concat(gitQuietConfig, gitTransportConfig, gitFetchVerb)
 
 // gitNoPromptEnv is the environment every call carries, the git actions host's included. GIT_OPTIONAL_LOCKS=0 keeps status from

@@ -16,9 +16,9 @@
 //     PATH-scoped environment ([SafeEnv]). [DiffHardeningArgs] closes the read-path diff drivers
 //     the inspection tools would otherwise execute.
 //   - A repository whose OWN config names a program git would execute — a credential helper, a
-//     filter driver, an sshCommand — gets no git call at all ([CommandConfigName],
-//     [CommandConfigRefusal]); the operator's global config is on the other side of that trust
-//     boundary and still applies. The probe behind the refusal is memoised per
+//     filter driver, an sshCommand, a remote helper — gets no git call at all
+//     ([CommandConfigName], [CommandConfigRefusal]); the operator's global config is on the other
+//     side of that trust boundary and still applies. The probe behind the refusal is memoised per
 //     (git binary, root, environment) and re-probed when the config's files change — the scope
 //     files, HEAD and every include they name are fingerprinted and re-stat-ed on each call. A
 //     root no repository reaches is never memoised, so a mid-session `git init` is seen. A probe
