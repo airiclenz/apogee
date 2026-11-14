@@ -23,23 +23,40 @@ read_version() {  # missing file or missing commit yields empty, never a failed 
   git show "$1:VERSION" 2>/dev/null | tr -d ' \t\r\n' || true
 }
 
-# The retracted v1.0.0–v1.8.0 series (go.mod's `retract [v1.0.0, v1.8.0]`; cmd/release
-# keeps the same bounds). A tag inside it ships already retracted, and Go reads the
-# retraction from the highest version's go.mod, so a tag whose go.mod has lost the line
-# brings the series back. Both are refused here, as `go run ./cmd/release prepare` refuses
-# them before the push. A refusal is an `::error::` annotation, not a failed step, so the
-# other bumps in the same push are still tagged; TestRepoKeepsTheRetractLineAndAReleasableVersion
-# turns CI red on that commit.
-retract_line='retract [v1.0.0, v1.8.0]'
+# The burned v1.x versions (internal/update's RetractedVersions, which go.mod's retract block
+# lists and cmd/release refuses; TestRepoVersionBumpScriptBurnsTheSameList fails when this line
+# drifts from it). A tag on a burned number ships already retracted, and Go reads retractions from
+# the highest version's go.mod, so a tag whose go.mod retracts anything but exactly this list
+# either brings a burned number back or retracts a releasable one. Both are refused here, as
+# `go run ./cmd/release prepare` refuses them before the push. A refusal is an `::error::`
+# annotation, not a failed step, so the other bumps in the same push are still tagged;
+# TestRepoKeepsTheRetractLineAndAReleasableVersion turns CI red on that commit.
+burned='v1.1.0 v1.7.0 v1.8.0 v1.8.1'
 
-is_retracted() {  # $1 is vMAJOR.MINOR.PATCH
-  local major minor patch
-  IFS=. read -r major minor patch <<< "${1#v}"
-  [ "$major" = 1 ] && { [ "$minor" -lt 8 ] || { [ "$minor" = 8 ] && [ "$patch" = 0 ]; }; }
+is_burned() {  # $1 is vMAJOR.MINOR.PATCH
+  case " $burned " in *" $1 "*) return 0 ;; esac
+  return 1
 }
 
-keeps_retract_line() {  # $1 is a commit
-  git show "$1:go.mod" 2>/dev/null | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -qxF "$retract_line"
+# Every entry the go.mod at commit $1 retracts, one per line in file order: a version or a range
+# as written. It reads the forms prepare's checkRetractKept reads — one-line `retract vX`
+# directives and `retract ( … )` blocks, comments stripped first — so a go.mod prepare accepts is
+# never refused here. A missing go.mod retracts nothing.
+retractions() {
+  git show "$1:go.mod" 2>/dev/null | awk '
+    { sub(/\/\/.*/, ""); sub(/^[ \t\r]+/, ""); sub(/[ \t\r]+$/, "") }
+    in_block { if ($0 == ")") in_block = 0; else if ($0 != "") print; next }
+    /^retract([[ \t(]|$)/ {
+      argument = substr($0, length("retract") + 1)
+      sub(/^[ \t]+/, "", argument)
+      if (argument == "(") in_block = 1
+      else if (argument != "") print argument
+    }
+  ' || true
+}
+
+retracts_the_burned_list() {  # $1 is a commit; the same set as $burned, ignoring order and repeats
+  [ "$(retractions "$1" | sort -u)" = "$(tr ' ' '\n' <<< "$burned" | sort -u)" ]
 }
 
 # EVERY commit in the pushed range that changed VERSION, oldest first — not the push
@@ -53,10 +70,11 @@ for target in $(git log --first-parent --reverse --format=%H "$range" -- VERSION
   [ -n "$new" ] && [ "$new" != "$old" ] || continue
   if ! printf '%s' "$new" | grep -qE '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
     echo "::error::VERSION at ${target} reads '${new}', not a vX.Y.Z value — refusing to tag"
-  elif is_retracted "$new"; then
-    echo "::error::VERSION at ${target} reads ${new}, inside the retracted v1.0.0–v1.8.0 series — refusing to tag"
-  elif ! keeps_retract_line "$target"; then
-    echo "::error::go.mod at ${target} has lost the '${retract_line}' line — refusing to tag ${new}"
+  elif is_burned "$new"; then
+    echo "::error::VERSION at ${target} reads ${new}, a burned version (${burned}) — refusing to tag"
+  elif ! retracts_the_burned_list "$target"; then
+    found="$(retractions "$target" | awk 'NR > 1 { printf ", " } { printf "%s", $0 }')"
+    echo "::error::go.mod at ${target} retracts ${found:-nothing}, not exactly the burned versions (${burned}) — refusing to tag ${new}"
   else
     bumps="${bumps:+$bumps }${target}=${new}"
   fi

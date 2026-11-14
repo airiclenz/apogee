@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -216,5 +217,28 @@ func TestRepoKeepsTheRetractLineAndAReleasableVersion(t *testing.T) {
 	}
 	if err := checkNotRetracted(version); err != nil {
 		t.Errorf("%s: %v", versionFile, err)
+	}
+}
+
+// TestRepoVersionBumpScriptBurnsTheSameList is the drift guard on CI's tagger: the `burned=` line
+// of .github/scripts/version-bump.sh names exactly the burned versions internal/update owns, in its
+// order. The script cannot import the list, and a refusal there is only an annotation, so without
+// this a list that drifted would leave a releasable bump untagged, or tag a burned one, with CI green.
+func TestRepoVersionBumpScriptBurnsTheSameList(t *testing.T) {
+	t.Parallel()
+	const scriptPath = "../../.github/scripts/version-bump.sh"
+
+	script, err := os.ReadFile(filepath.FromSlash(scriptPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	burnedLine := regexp.MustCompile(`(?m)^burned='([^']*)'$`)
+	matches := burnedLine.FindAllSubmatch(script, -1)
+	if len(matches) != 1 {
+		t.Fatalf("%s has %d `burned='…'` lines, want exactly one", scriptPath, len(matches))
+	}
+
+	if got, want := strings.Fields(string(matches[0][1])), update.RetractedVersions(); !slices.Equal(got, want) {
+		t.Errorf("%s burns %q, want exactly %q", scriptPath, got, want)
 	}
 }

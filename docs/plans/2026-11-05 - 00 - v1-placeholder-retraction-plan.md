@@ -90,7 +90,11 @@ NOTES (2026-11-14): the go.mod comment, which Go shows as the retraction rationa
 **Acceptance:** `go vet ./cmd/release/ && GOMEMLIMIT=2GiB go test -race -count=1 ./cmd/release/`
 **Commit:** `feat(release): retract an exact list of burned versions, not a range`
 
-## 3. CI tagging script refuses the burned list
+## 3. CI tagging script refuses the burned list — ✅ DONE (2026-11-14)
+
+NOTES (2026-11-14): `keeps_retract_line` became two helpers rather than one: `retractions` (an awk pass over `git show <sha>:go.mod` mirroring `goModRetractions` — comments stripped, CR trimmed, one-line and block forms, `retract(`/`retract[` openers, a range kept as one entry) and `retracts_the_burned_list` (set comparison via `sort -u`, ignoring order and repeats, as `checkRetractKept` does); `is_retracted` became `is_burned`. The go.mod refusal names what the commit retracts, as prepare's message does.
+NOTES (2026-11-14): scratch-repo run (mawk 1.3.4, the box's awk): v1.0.0, v1.2.0, v1.8.2 tagged; v1.1.0 and v1.8.1 refused as burned; old range, missing v1.8.1, commented-out block, a range inside the block and a commit without go.mod refused; one-line `retract vX` directives (tab-separated and commented included), CRLF go.mod and the live go.mod tagged. The drift test was mutation-checked (dropping v1.8.1 from `burned=` fails it).
+NOTES (2026-11-14): docs/manual/building.md:62-67 still describes the script tagging neither "a version inside the series" nor a go.mod "without the line" — left for item 8, whose Files and rule grep own that paragraph.
 
 **What:** Depends on item 2. Items 2 and 3 land in the same push — the run pushes once at closeout and never between them.
 **Goal:** `.github/scripts/version-bump.sh` refuses to tag a burned `VERSION` or a bump whose go.mod retract block is not exactly the burned list. A drift test fails when the script's list and `update.RetractedVersions()` differ.
