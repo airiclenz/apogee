@@ -32,11 +32,13 @@ const goProxyURL = "https://proxy.golang.org"
 
 // goProxyEnv pins the go command to the public proxy and to what this host's go has: no
 // GOFLAGS, workspace, private-module or checksum-database exemption of the user's may route the
-// lookup around proxy.golang.org, and GOTOOLCHAIN=local keeps it from downloading a toolchain.
+// lookup around proxy.golang.org, GO111MODULE=on keeps an inherited GO111MODULE=off from failing
+// `go list -m`, and GOTOOLCHAIN=local keeps it from downloading a toolchain.
 var goProxyEnv = []string{
 	"GOPROXY=" + goProxyURL,
 	"GOFLAGS=",
 	"GOWORK=off",
+	"GO111MODULE=on",
 	"GOPRIVATE=",
 	"GONOPROXY=",
 	"GONOSUMDB=",
@@ -104,14 +106,14 @@ func newSmokeCommand(commands runner) *cobra.Command {
 		Short: "Check a published release from the outside",
 		Long: "smoke proves a published release is usable: the tag is on origin and annotated;\n" +
 			"proxy.golang.org serves the version and does not mark it retracted (an @latest that\n" +
-			"resolves to another version only warns); with --dist-dir, that build's SHA256SUMS equals the published one; the six archives\n" +
-			"download and match SHA256SUMS; every binary's build stamp names the tagged commit; the\n" +
-			"host's archive holds a binary reporting the version; where apogee is installed with\n" +
-			"Homebrew, `brew upgrade apogee` moves it onto the version; and the Scoop bucket's\n" +
-			"manifest names the version and both Windows archives' hashes. A check whose tool or\n" +
-			"input is missing prints SKIP and never counts as a pass. The version defaults to\n" +
-			"VERSION; a bare X.Y.Z reads as vX.Y.Z. It exits 1 when any check fails. publish runs\n" +
-			"it as its last step.",
+			"resolves to another version only warns); with --dist-dir, that build's SHA256SUMS\n" +
+			"equals the published one; the six archives download and match SHA256SUMS; every\n" +
+			"binary's build stamp names the tagged commit; the host's archive holds a binary\n" +
+			"reporting the version; where apogee is installed with Homebrew, `brew upgrade apogee`\n" +
+			"moves it onto the version; and the Scoop bucket's manifest names the version and\n" +
+			"both Windows archives' hashes. A check whose tool or input is missing prints SKIP\n" +
+			"and never counts as a pass. The version defaults to VERSION; a bare X.Y.Z reads as\n" +
+			"vX.Y.Z. It exits 1 when any check fails. publish runs it as its last step.",
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) > 1 {
 				return fmt.Errorf("smoke takes at most one version, got %d arguments", len(args))

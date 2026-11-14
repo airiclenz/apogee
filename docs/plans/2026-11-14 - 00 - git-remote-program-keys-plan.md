@@ -104,7 +104,9 @@ NOTES (2026-11-14): the amendment also records item 2's removal-form rule (`--un
 
 **Commit:** `docs(decisions): ADR 0049 amendment — remote, url, protocol and submodule program keys`
 
-## 4. smoke's goproxy check pins GO111MODULE
+## 4. smoke's goproxy check pins GO111MODULE — ✅ DONE (2026-11-14)
+
+NOTES (2026-11-14): the CHANGELOG heading carries an amendment to the existing goproxy-check entry rather than a new entry, per the item's regression guard.
 
 **What:** fix: `goProxyEnv` (cmd/release/smoke.go) does not pin `GO111MODULE`, so an inherited `GO111MODULE=off` fails `go list -m` and the goproxy check reports FAIL; the smoke command's Long help has one 133-column line.
 **Regression guard.** the item's CHANGELOG sidecar entry amends the existing [Unreleased] line (CHANGELOG.md, goproxy check env pins) to include GO111MODULE rather than adding a separate contradictory line. The Long-help width rule counts the string content ("text"), not source columns, and an Acceptance command checks it.

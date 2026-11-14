@@ -514,9 +514,9 @@ func TestSmokeChecks(t *testing.T) {
 }
 
 // TestSmokeGoProxyPinsTheProxyOutsideTheCheckout pins how the goproxy check runs go list: against
-// proxy.golang.org with no GOFLAGS, workspace, private-module exemption or toolchain download,
-// and from smoke's own scratch directory — never the checkout, whose go.mod would make the query
-// a lookup inside a module.
+// proxy.golang.org in module mode with no GOFLAGS, workspace, private-module exemption or
+// toolchain download, and from smoke's own scratch directory — never the checkout, whose go.mod
+// would make the query a lookup inside a module.
 func TestSmokeGoProxyPinsTheProxyOutsideTheCheckout(t *testing.T) {
 	t.Parallel()
 	fake := newSmokeFake(t)
@@ -529,8 +529,8 @@ func TestSmokeGoProxyPinsTheProxyOutsideTheCheckout(t *testing.T) {
 		t.Fatalf("smoke ran go %d times, want the exact version and @latest: %v", len(calls), calls)
 	}
 	wantEnv := []string{
-		"GOPROXY=https://proxy.golang.org", "GOFLAGS=", "GOWORK=off", "GOPRIVATE=", "GONOPROXY=",
-		"GONOSUMDB=", "GOTOOLCHAIN=local",
+		"GOPROXY=https://proxy.golang.org", "GOFLAGS=", "GOWORK=off", "GO111MODULE=on", "GOPRIVATE=",
+		"GONOPROXY=", "GONOSUMDB=", "GOTOOLCHAIN=local",
 	}
 	for _, call := range calls {
 		for _, pin := range wantEnv {
