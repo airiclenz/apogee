@@ -549,11 +549,11 @@ func TestPublishRefusesBeforeChangingAnything(t *testing.T) {
 }
 
 // TestPublishRefusesARetractedVersionBeforeAnyProbe pins that publish names no command at all for
-// a version in the retracted series. The v1.8.0 tag still exists on origin, so a probe would read
-// its tag step as done and converge a release onto it.
+// a burned version. Burned tags such as v1.8.0 still exist on origin, so a probe would read its tag
+// step as done and converge a release onto it.
 func TestPublishRefusesARetractedVersionBeforeAnyProbe(t *testing.T) {
 	t.Parallel()
-	for _, version := range []string{"v1.0.0", "v1.8.0"} {
+	for _, version := range []string{"v1.1.0", "v1.8.1"} {
 		t.Run(version, func(t *testing.T) {
 			t.Parallel()
 			commands := newPublishFake().runner()
@@ -564,7 +564,7 @@ func TestPublishRefusesARetractedVersionBeforeAnyProbe(t *testing.T) {
 
 			err := runPublish(t.Context(), commands, &output, options)
 
-			want := version + " lies in the retracted v1.0.0 to v1.8.0 series"
+			want := version + " is a burned version"
 			if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "nothing was changed") {
 				t.Fatalf("publish error = %v, want one naming %q and saying nothing was changed", err, want)
 			}

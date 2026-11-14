@@ -3,8 +3,11 @@ package main
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/update"
 )
 
 // versionPattern is the one release-version shape apogee tags: `vMAJOR.MINOR.PATCH`, decimal
@@ -13,13 +16,12 @@ import (
 // the shipped binary would read as malformed.
 var versionPattern = regexp.MustCompile(`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
 
-// retractedLow and retractedHigh bound the deleted v1.x series go.mod retracts
-// (`retract [v1.0.0, v1.8.0]`). Those tags outrank every 0.x release numerically, so the highest
-// tag must be found with them set aside. internal/update keeps the same bounds unexported.
-var (
-	retractedLow  = releaseVersion{major: 1, minor: 0, patch: 0}
-	retractedHigh = releaseVersion{major: 1, minor: 8, patch: 0}
-)
+// retractKeyword opens a go.mod retract directive, either one line (`retract v1.1.0`) or a
+// parenthesised block with one entry per line.
+const retractKeyword = "retract"
+
+// goModComment starts a go.mod comment, which runs to the end of its line.
+const goModComment = "//"
 
 // releaseVersion is a parsed release version.
 type releaseVersion struct {
@@ -65,43 +67,106 @@ func (v releaseVersion) compare(other releaseVersion) int {
 	return v.patch - other.patch
 }
 
-// isRetracted reports whether v lies inside the retracted [v1.0.0, v1.8.0] series.
-func (v releaseVersion) isRetracted() bool {
-	return v.compare(retractedLow) >= 0 && v.compare(retractedHigh) <= 0
-}
-
-// retractDirective is the go.mod line that retracts the series, built from the same bounds.
-func retractDirective() string {
-	return fmt.Sprintf("retract [%s, %s]", retractedLow, retractedHigh)
-}
-
-// checkNotRetracted refuses a version inside the retracted series. Such a release ships already
-// retracted: `go install …@latest` and the update check both pass over it, so nobody is offered
-// it, and the number cannot be taken back.
+// checkNotRetracted refuses a burned version, one of the exact list internal/update owns
+// ([update.RetractedVersions]). Such a release ships already retracted: `go install …@latest` and
+// the update check both pass over it, so nobody is offered it, and the number cannot be taken back.
+// Every other v1.x number, v1.0.0 included, is releasable.
 func checkNotRetracted(version releaseVersion) error {
-	if !version.isRetracted() {
+	if !update.IsRetracted(version.String()) {
 		return nil
 	}
-	return fmt.Errorf("%s lies in the retracted %s to %s series, which no release may reuse",
-		version, retractedLow, retractedHigh)
+	return fmt.Errorf("%s is a burned version (%s), which no release may reuse",
+		version, strings.Join(update.RetractedVersions(), ", "))
 }
 
-// checkRetractKept refuses a go.mod that has lost the retract directive. Go reads a retraction
-// from the go.mod of the highest version, so a release above v1.8.0 without the line would bring
-// the retracted series back; the line stays for every release, so its loss is caught early.
+// checkRetractKept refuses a go.mod whose retractions are not exactly the burned versions. Go
+// reads a retraction from the go.mod of the highest version, so every release carries the whole
+// list: a release that lost an entry would bring that burned version back, and one that kept the
+// old `[v1.0.0, v1.8.0]` range would retract every unburned v1.x release with it. Both forms Go
+// accepts are read — one-line `retract vX` directives and `retract ( … )` blocks — with comments
+// stripped and order and repeats ignored; any range, or any other set of versions, is refused,
+// naming the block go.mod must carry.
 func checkRetractKept(goMod []byte) error {
-	directive := retractDirective()
-	for line := range strings.Lines(string(goMod)) {
-		if strings.TrimSpace(line) == directive {
-			return nil
-		}
+	retracted := goModRetractions(goMod)
+	found := slices.Clone(retracted)
+	slices.Sort(found)
+	found = slices.Compact(found)
+	burned := update.RetractedVersions()
+	slices.Sort(burned)
+	if slices.Equal(found, burned) {
+		return nil
 	}
-	return fmt.Errorf("%s has lost the %q line", goModFile, directive)
+
+	description := "nothing"
+	if len(retracted) > 0 {
+		description = strings.Join(retracted, ", ")
+	}
+	return fmt.Errorf("%s retracts %s, not exactly the burned versions; it must carry:\n%s",
+		goModFile, description, retractBlock())
+}
+
+// goModRetractions returns every entry go.mod's retract directives name, in file order: a
+// version as written (`v1.1.0`), a range as written (`[v1.0.0, v1.8.0]`). Comments are stripped
+// first, so a commented-out directive names nothing. It reads both one-line directives and
+// parenthesised blocks; any other line is skipped.
+func goModRetractions(goMod []byte) []string {
+	var entries []string
+	isInBlock := false
+	for line := range strings.Lines(string(goMod)) {
+		text, _, _ := strings.Cut(line, goModComment)
+		text = strings.TrimSpace(text)
+		if isInBlock {
+			if text == ")" {
+				isInBlock = false
+			} else if text != "" {
+				entries = append(entries, text)
+			}
+			continue
+		}
+
+		argument, isDirective := retractArgument(text)
+		if !isDirective || argument == "" {
+			continue
+		}
+		if argument == "(" {
+			isInBlock = true
+			continue
+		}
+		entries = append(entries, argument)
+	}
+	return entries
+}
+
+// retractArgument returns what follows the retract keyword on a comment-stripped, trimmed go.mod
+// line — `(` for a block opener, otherwise the version or range — and false when the line is not a
+// retract directive.
+func retractArgument(text string) (string, bool) {
+	rest, isFound := strings.CutPrefix(text, retractKeyword)
+	if !isFound {
+		return "", false
+	}
+	if rest != "" && !strings.ContainsAny(rest[:1], " \t([") {
+		// A longer word that merely starts with "retract" is not the directive.
+		return "", false
+	}
+	return strings.TrimSpace(rest), true
+}
+
+// retractBlock is the go.mod block that retracts exactly the burned versions, one per line in
+// ascending order, as the repository's own go.mod carries it.
+func retractBlock() string {
+	var block strings.Builder
+	block.WriteString(retractKeyword + " (\n")
+	for _, version := range update.RetractedVersions() {
+		block.WriteString("\t" + version + "\n")
+	}
+	block.WriteString(")")
+	return block.String()
 }
 
 // highestReleaseTag returns the highest release tag in tags — one tag per line, as
-// `git tag --list` prints them — setting aside the retracted v1.x series and every tag that is
-// not exactly `vX.Y.Z`. It returns "" when no tag qualifies.
+// `git tag --list` prints them — setting aside the burned v1.x versions, which outrank every 0.x
+// release numerically, and every tag that is not exactly `vX.Y.Z`. It returns "" when no tag qualifies.
 func highestReleaseTag(tags string) string {
 	var highest releaseVersion
 	isFound := false
@@ -110,7 +175,7 @@ func highestReleaseTag(tags string) string {
 			continue
 		}
 		candidate, err := parseReleaseVersion(tag)
-		if err != nil || candidate.isRetracted() {
+		if err != nil || update.IsRetracted(candidate.String()) {
 			continue
 		}
 		if !isFound || candidate.compare(highest) > 0 {

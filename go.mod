@@ -3,11 +3,21 @@ module github.com/airiclenz/apogee
 go 1.26.11
 
 // v1.x was an accidental pre-production series; the project restarted at v0.x
-// (2026-07-23). proxy.golang.org retains the deleted v1.x tags immutably and
-// resolves `@latest` (and pkg.go.dev's "Latest") from the highest one, so the
-// retraction has to travel in a version above v1.7.0 — v1.8.0 exists only to
-// carry this block and retracts itself.
-retract [v1.0.0, v1.8.0]
+// (2026-07-23). The Go module proxy and checksum database keep what they once
+// served, so the numbers below are burned: no release may reuse them, and every
+// other v1.x number, v1.0.0 included, stays releasable. Go reads retractions
+// from the go.mod of a module's highest version, and v1.8.0's immutable go.mod
+// still retracts the whole [v1.0.0, v1.8.0] range. So the highest burned number,
+// v1.8.1, is a placeholder: `publish` tags it on v1.0.0's commit, where it carries
+// this block above v1.8.0 and retracts itself. A bad placeholder is recovered by
+// appending the next v1.8.x. The list is internal/update's RetractedVersions;
+// the release tool refuses a go.mod that retracts anything else.
+retract (
+	v1.1.0
+	v1.7.0
+	v1.8.0
+	v1.8.1
+)
 
 require (
 	charm.land/bubbles/v2 v2.1.0

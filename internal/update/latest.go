@@ -1,9 +1,11 @@
 // Package update asks GitHub whether a newer apogee release has been published.
 //
 // It is the only package that holds apogee's own update traffic, and cmd/apogee is the only
-// package that reaches it: the embeddable engine stays wire-silent (ADR 0031). The request goes to
-// apogee's fixed release URL, never to a model-chosen one, so it does not pass through
-// security.URLGuard, which guards model-driven requests.
+// package that reaches it for that traffic: the embeddable engine stays wire-silent (ADR 0031).
+// cmd/release, the release tool, imports only the burned-version list ([RetractedVersions],
+// [IsRetracted]), so the releases it refuses are the ones the update check never announces. The
+// request goes to apogee's fixed release URL, never to a model-chosen one, so it does not pass
+// through security.URLGuard, which guards model-driven requests.
 //
 // [Latest] reads the newest published release's tag from the redirect GitHub answers
 // `HEAD /releases/latest` with — no API call, so no API rate limit — and [Newer] orders that tag

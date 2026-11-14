@@ -63,7 +63,12 @@ NOTES (2026-11-14): heads-up for item 2 — the package doc in latest.go says "c
 **Acceptance:** `go vet ./internal/update/ && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/update/`
 **Commit:** `feat(update): own the exact list of burned v1.x versions`
 
-## 2. Release tool and go.mod switch from the range to the list
+## 2. Release tool and go.mod switch from the range to the list — ✅ DONE (2026-11-14)
+
+NOTES (2026-11-14): consequential edit — internal/update/latest.go: made necessary by cmd/release importing internal/update; the package doc now says cmd/apogee is the only package that reaches it for update traffic, and that cmd/release imports only the burned-version list (carried as the run's DECISION from item 1's handoff).
+NOTES (2026-11-14): `checkRetractKept` reads retractions through a new `goModRetractions` helper (file order, comments stripped, one-line and block forms) and compares the set ignoring order and repeats; `retractBlock()` builds the expected block for the refusal message. The repo drift test keeps its name `TestRepoKeepsTheRetractLineAndAReleasableVersion` (item 3's `-run 'TestRepo'` and Read-first name it) and pins the live go.mod to the list in order and as one block.
+NOTES (2026-11-14): renamed `TestCheckNotRetractedRefusesTheWholeSeriesOnly` → `TestCheckNotRetractedRefusesTheBurnedVersionsOnly` and `TestHighestReleaseTagOrdersNumericallyAndSetsAsideTheRetractedSeries` → `…SetsAsideTheBurnedVersions`; added `TestCheckRetractKeptAcceptsTheBurnedListOnly` (block, one-line, mixed, range, missing, extra, commented-out forms). `TestPrepareRefuses` keeps a v1.8.0 case beside the plan's v1.1.0 and v1.8.1, and gains a no-directive/commented-out pair re-pinned to the new message.
+NOTES (2026-11-14): the go.mod comment, which Go shows as the retraction rationale, says `publish` tags v1.8.1 on v1.0.0's commit — behaviour item 4 adds in this same run.
 
 **What:** Depends on item 1.
 **Goal:** The live `go.mod` carries one `retract ( … )` block listing exactly `update.RetractedVersions()`, under a comment explaining the placeholder. `prepare` and `publish` refuse only burned versions. `prepare` refuses a `go.mod` whose retract block is not exactly that list. `highestReleaseTag` sets aside only burned tags.

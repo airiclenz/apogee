@@ -48,11 +48,12 @@ const (
 )
 
 // The tags and VERSION of the fixture checkout: v0.24.11 is the highest release tag, and the
-// retracted v1.x series outranks it numerically but must be set aside.
+// burned v1.x tags outrank it numerically but must be set aside.
 const (
-	preparedTags    = "v0.24.10\nv0.24.11\nv1.0.0\nv1.8.0\n"
+	preparedTags    = "v0.24.10\nv0.24.11\nv1.1.0\nv1.8.0\n"
 	preparedVersion = "v0.24.11\n"
-	preparedGoMod   = "module example.com/apogee\n\ngo 1.26\n\nretract [v1.0.0, v1.8.0]\n"
+	preparedGoMod   = "module example.com/apogee\n\ngo 1.26\n\n" +
+		"retract (\n\tv1.1.0\n\tv1.7.0\n\tv1.8.0\n\tv1.8.1\n)\n"
 )
 
 // prepareRepo answers prepare's git commands over a checkout in dir and records, at each
@@ -267,22 +268,30 @@ func TestPrepareRefuses(t *testing.T) {
 		"below the highest tag": {
 			version: "v0.24.9", wantError: "v0.24.9 is not above the highest release tag v0.24.11",
 		},
-		"the lowest retracted version": {
-			version: "v1.0.0", wantError: "v1.0.0 lies in the retracted v1.0.0 to v1.8.0 series",
+		"the lowest burned version": {
+			version: "v1.1.0", wantError: "v1.1.0 is a burned version (v1.1.0, v1.7.0, v1.8.0, v1.8.1)",
 		},
-		"a retracted version in the middle": {
-			version: "v1.4.2", wantError: "v1.4.2 lies in the retracted v1.0.0 to v1.8.0 series",
+		"the placeholder, the highest burned version": {
+			version: "v1.8.1", wantError: "v1.8.1 is a burned version (v1.1.0, v1.7.0, v1.8.0, v1.8.1)",
 		},
-		"the highest retracted version, whose tag exists": {
-			version: "v1.8.0", wantError: "v1.8.0 lies in the retracted v1.0.0 to v1.8.0 series",
+		"a burned version whose tag exists": {
+			version: "v1.8.0", wantError: "v1.8.0 is a burned version (v1.1.0, v1.7.0, v1.8.0, v1.8.1)",
 		},
-		"go.mod without the retract line": {
+		"go.mod without a retract directive": {
 			goMod:     "module example.com/apogee\n\ngo 1.26\n",
-			wantError: `go.mod has lost the "retract [v1.0.0, v1.8.0]" line`,
+			wantError: "go.mod retracts nothing, not exactly the burned versions; it must carry:\nretract (\n",
 		},
-		"go.mod with the retract line commented out": {
-			goMod:     "module example.com/apogee\n\n// retract [v1.0.0, v1.8.0]\n",
-			wantError: `go.mod has lost the "retract [v1.0.0, v1.8.0]" line`,
+		"go.mod with the retract block commented out": {
+			goMod:     "module example.com/apogee\n\n// retract (\n//\tv1.1.0\n// )\n",
+			wantError: "go.mod retracts nothing, not exactly the burned versions",
+		},
+		"go.mod still holding the old range": {
+			goMod:     "module example.com/apogee\n\nretract [v1.0.0, v1.8.0]\n",
+			wantError: "go.mod retracts [v1.0.0, v1.8.0], not exactly the burned versions",
+		},
+		"go.mod missing the placeholder": {
+			goMod:     "module example.com/apogee\n\nretract (\n\tv1.1.0\n\tv1.7.0\n\tv1.8.0\n)\n",
+			wantError: "go.mod retracts v1.1.0, v1.7.0, v1.8.0, not exactly the burned versions",
 		},
 		"a dirty working tree": {isDirty: true, wantError: "the working tree is not clean"},
 		"the tags cannot be listed": {
