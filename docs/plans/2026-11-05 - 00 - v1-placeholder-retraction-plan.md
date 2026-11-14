@@ -213,7 +213,12 @@ NOTES (2026-11-14): v1-release-criteria's Acceptance also names closing `v1-plac
 **Acceptance:** `capcom check && capcom know show "ADR 0107" && capcom show v1-release-criteria`
 **Commit:** `docs(decisions): ADR 0107 — v1.0.0 via a self-retracting placeholder`
 
-## 8. Docs, skill and package doc speak the list
+## 8. Docs, skill and package doc speak the list — ✅ DONE (2026-11-14)
+
+NOTES (2026-11-14): re-derived from the CHANGELOG bullet "Release tooling refuses the retracted v1.0.0–v1.8.0 numbers" sitting under [Unreleased] (CHANGELOG.md:14 at the header base): it shipped in v0.33.0 (now CHANGELOG.md:210, under `## [0.33.0]`), so it is a released, historical record and is left as written; the burned-list behaviour is described by items 2–5's [Unreleased] entries and this item's.
+NOTES (2026-11-14): CHANGELOG preamble for the closeout to apply (outside [Unreleased], so not an entry): replace "That release cannot be numbered v1.0.0 to v1.8.0: an accidental v1.x series used those numbers and `go.mod` retracts them." with "It never reuses a burned number: an accidental v1.x series left v1.1.0, v1.7.0 and v1.8.0 behind, and `go.mod` retracts those and v1.8.1, the placeholder that lets that release be v1.0.0 (ADR 0107)."
+NOTES (2026-11-14): building.md's runbook is a bold-paragraph "**Cutting v1.0.0.**" block with a numbered list (the section's own style; a `###` heading would have pulled the Windows-setup and later paragraphs under it); its links point at #releasing and #building-from-source. The go-install paragraph became a "**Burned versions.**" paragraph naming four guards (the script drift test `TestRepoVersionBumpScriptBurnsTheSameList` added); prepare's refusal list now names the burned and go.mod checks and "the highest release tag (the burned versions set aside)" in place of "the highest `v0.*` release tag".
+NOTES (2026-11-14): the skill's step 4 also stops on a v1.x `highestTag` while no v1.x release is published (stale local tags of the deleted series, which now outrank 0.x since only the burned versions are set aside) and asks the owner to run `git fetch --prune --prune-tags`; its Boundaries line and step 7's confirmation question name the placeholder tag.
 
 **What:** Depends on items 2, 4, 5 and 7.
 **Goal:** No non-archived text describes the retraction as the v1.0.0–v1.8.0 range, or says the first stable release cannot be v1.0.0. `docs/manual/building.md` carries a "Cutting v1.0.0" runbook: the bridge first; then `prepare`, then `publish` with its `placeholder` step, then `smoke`'s goproxy check; and the recovery. The release skill never proposes a burned version and skips burned minors (v1.0.x → v1.2.0).

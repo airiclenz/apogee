@@ -37,8 +37,10 @@
 //	ADR 0008  Tools are stateless across Turns; external effects are non-forkable
 //	ADR 0010  package layout: a domain core, an engine, and this thin root facade
 //
-// Stability: v0.x, no stability promise while pre-production. The first stable
-// release cannot be v1.0.0 to v1.8.0, which go.mod retracts; see ADR 0001.
+// Stability: v0.x, no stability promise while pre-production. go.mod retracts
+// the burned v1.x versions an accidental early series left behind (v1.1.0,
+// v1.7.0, v1.8.0, and v1.8.1, the placeholder): no release reuses them, and
+// every other v1.x number, v1.0.0 included, stays releasable; see ADR 0107.
 // Events and Moments are additively extensible — a new variant is a
 // minor bump (so consumers must treat the Event set and enums as open).
 package apogee

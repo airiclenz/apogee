@@ -39,7 +39,8 @@ The optional argument `vX.Y.Z` (a bare `X.Y.Z` reads the same) is a version
 - **No bypass.** A blocked gate stops the run, except the two entries step
   1a clears by pushing and waiting for green CI. You never tag, create a
   GitHub release, or commit to the tap or the bucket by hand — `publish`
-  does all of it, and the tag is made by CI, never by you or `publish`. The
+  does all of it. The release tag is made by CI, never by you or `publish`;
+  the one tag `publish` makes is the v1 placeholder (step 5). The
   one push you make yourself is step 1a's, of work already committed on
   main; the two `prepare` commits are pushed by `publish`.
 - **Ask with the host's user-question tool** (`ask_user`, `AskUserQuestion`,
@@ -142,18 +143,29 @@ and *Ask* again. Abort → stop; nothing has been written to the repository.
 
 ## 4 — Propose and confirm the version
 
-From `highestTag` `v0.M.P` (the retracted `v1.x` tags never count):
+From `highestTag` `vX.M.P` (the burned versions v1.1.0, v1.7.0, v1.8.0 and
+v1.8.1 — `internal/update`'s `RetractedVersions` — never count):
 
-- **minor** `v0.(M+1).0` when the notes carry a Breaking section or the
+- **minor** `vX.(M+1).0` when the notes carry a Breaking section or the
   inventory is feature-heavy (new features are the bulk of the rows);
-- otherwise **patch** `v0.M.(P+1)` — also the fallback when the inventory
+- otherwise **patch** `vX.M.(P+1)` — also the fallback when the inventory
   gives no clear answer.
+
+**Never propose a burned version.** A proposal that is burned skips past it:
+a minor bump takes the next minor whose `.0` is not burned (v1.0.x → v1.2.0,
+v1.6.x → v1.9.0), a patch the next unburned patch. Never propose a major bump
+yourself: v1.0.0 is the owner's choice. When the owner picks it, name the
+**Cutting v1.0.0** runbook in `docs/manual/building.md` §Releasing — the 0.x
+bridge release published first, `git fetch --prune --prune-tags` before
+`prepare`, and `publish`'s `placeholder` step — and *Ask* again to confirm. A
+`highestTag` of v1.x while no v1.x release has been published means local
+tags of the deleted v1.x series: stop and ask the owner to run
+`git fetch --prune --prune-tags`.
 
 An argument version replaces the proposal. *Ask* with the proposal first and
 the other size second, plus a free-text choice; the owner's answer is final.
-A version not strictly above `highestTag`, or one inside the retracted
-`v1.0.0`–`v1.8.0` series → say `prepare` will refuse it (and CI would not tag
-it) and *Ask* again. Never propose a version in that series.
+A version not strictly above `highestTag`, or a burned one → say `prepare`
+will refuse it (and CI would not tag it) and *Ask* again.
 
 ## 5 — Probe the channels and prepare
 
@@ -165,7 +177,13 @@ git log -2 --format=%s
 
 From the status JSON, name every `setup-pending` step (`publish` skips it
 and still succeeds; a later re-run converges it once the owner's one-time
-setup — e.g. the first `komac new` — is done) and every `unknown` one.
+setup — e.g. the first `komac new` — is done) and every `unknown` one. The
+`placeholder` step, between `release` and `homebrew`, is `pending` only for a
+release from v1.0.0 up to the placeholder (v1.8.1) while origin lacks the
+placeholder tag — v1.0.0 in practice — and reads `done` with
+`not needed: …` for every other version. When it is pending, say so:
+`publish` will tag the placeholder on the release's commit, so
+`go install …@latest` resolves to the release.
 `prepare` makes exactly two **local** commits and pushes nothing; a refusal
 writes nothing — relay it and stop.
 
@@ -193,7 +211,10 @@ does not read vX.Y.Z while the tag is pending — relay the reasons and stop
 (see *Abort*). Otherwise *Ask* exactly once: "Publish vX.Y.Z? This pushes
 main, waits for CI to tag it, creates the GitHub release and updates
 Homebrew, Scoop and winget. It cannot be undone." — options *publish* and
-*abort*. Anything but *publish* is abort.
+*abort*. When the dry run shows the `placeholder` step pending, the question
+also names it: "…, creates the GitHub release, tags the placeholder vP on its
+commit and updates Homebrew, Scoop and winget. …", with vP the placeholder the
+dry run names. Anything but *publish* is abort.
 
 ## 8 — Publish
 

@@ -54,17 +54,29 @@ either `sudo install -m 0755 ./apogee /usr/local/bin/apogee` or an explicit
 
 No clone at all? `go install github.com/airiclenz/apogee/cmd/apogee@main` builds and
 installs straight from the tip of `main` into your Go bin dir; `@latest` installs the
-current release, and `@<sha>` pins a commit. (The retired `v1.x` module versions that
-proxy.golang.org retains immutably are retracted in `go.mod`, so `@latest` no longer
-resolves to them.) The `retract [v1.0.0, v1.8.0]` block was published in the
-self-retracting `v1.8.0` tag, whose only job is that retraction. Go reads a retraction from
-the `go.mod` of the *highest* version, so it could not ride a 0.x tag. Keep the block in
-`go.mod`, and never publish a version above v1.8.0 without it. Three guards hold both rules:
-`go run ./cmd/release prepare` refuses a version inside the series or a `go.mod` without the
-line, and `publish` refuses a version inside it before any probe; the tag workflow
-(`.github/scripts/version-bump.sh`) tags neither; and
+current release, and `@<sha>` pins a commit. (An accidental early `v1.x` series left module
+versions that proxy.golang.org and the checksum database keep immutably; `go.mod` retracts
+the burned ones, so `@latest` never resolves to them.)
+
+**Burned versions.** v1.1.0, v1.7.0 and v1.8.0 — the three the checksum database holds —
+and v1.8.1, the placeholder, are burned
+([ADR 0107](../../.capcom/knowledge/decisions/adr-0107.md)): no release may reuse them, and
+every other v1.x number, v1.0.0 included, is releasable. `internal/update` owns the list
+(`RetractedVersions`), and `go.mod` carries it as one `retract ( … )` block naming exactly
+those four. Go reads retractions from the `go.mod` of a module's *highest* version, and the
+immutable `go.mod` of `v1.8.0` still retracts the whole old range, v1.0.0 included. So v1.0.0
+is cut with the placeholder: `publish` tags v1.8.1 on v1.0.0's own commit, where it outranks
+`v1.8.0`, carries the list and retracts itself, so `@latest` resolves to v1.0.0 (see
+[Cutting v1.0.0](#releasing)). The 1.x line skips the burned numbers: after a v1.0.x comes
+v1.1.1 or v1.2.0, after a v1.6.x comes v1.7.1 or higher, and the 1.8 line starts above the
+placeholder. Keep the block in `go.mod`, and never publish a release without it. Four guards
+hold both rules: `go run ./cmd/release prepare` refuses a burned version or a `go.mod` that
+does not retract exactly the list, and `publish` refuses a burned version before any probe;
+the tag workflow (`.github/scripts/version-bump.sh`) tags neither a burned version nor a bump
+whose `go.mod` does not retract exactly the list;
 `TestRepoKeepsTheRetractLineAndAReleasableVersion` in `cmd/release` turns CI red on a commit
-that drops the line or bumps `VERSION` into the series.
+whose `go.mod` drifts from the list or whose `VERSION` is burned; and
+`TestRepoVersionBumpScriptBurnsTheSameList` ties the script's list to `internal/update`'s.
 
 **Versions and tags.** The top-level `VERSION` file is the single source of truth for the
 release version — one line, carrying the leading `v` (`vX.Y.Z`); the `dist` step strips
@@ -295,8 +307,9 @@ cutting anything.
 1. **Check the gate: `go run ./cmd/release status [vX.Y.Z]`** (or
    `make release-status [VERSION=vX.Y.Z]`). Read-only apart from fetching `origin`, it
    reports the release gate, the baseline — the latest published release and the commits
-   since — and the highest release tag, then probes each publish step (tag, release,
-   homebrew, scoop, winget, smoke) for the version as `done`, `pending`, `setup-pending` or
+   since — and the highest release tag (the burned versions set aside), then probes each
+   publish step (tag, release,
+   placeholder, homebrew, scoop, winget, smoke) for the version as `done`, `pending`, `setup-pending` or
    `unknown`. The version defaults to `VERSION`; a bare `X.Y.Z` reads as `vX.Y.Z`. It exits
    0 when the gate clears and 1 when it is blocked or a check could not run. The gate is
    green CI, not a local `make check`. Its gate commit is `HEAD` with the trailing commits
@@ -316,9 +329,12 @@ cutting anything.
    bullet under `## [Unreleased]` its `## [X.Y.Z] — YYYY-MM-DD` heading, then
    `chore(version): bump version to vX.Y.Z` — the bump alone, last, so the tree the tag pins
    already carries the rollup. It refuses, writing nothing, when the version is not strictly
-   above the highest `v0.*` release tag, `VERSION` already reads it, the tree is dirty,
-   `[Unreleased]` is missing or empty, or `CHANGELOG.md` already has a heading for the
-   version. An aborted cut is undone with
+   above the highest release tag (the burned versions set aside), is itself burned,
+   `go.mod` does not retract exactly the burned versions, `VERSION` already reads it, the
+   tree is dirty, `[Unreleased]` is missing or empty, or `CHANGELOG.md` already has a heading
+   for the version. It reads the highest release tag from the clone's local tags, and a fetch
+   never prunes tags, so a clone that kept local tags of the deleted v1.x series sees one win:
+   run `git fetch --prune --prune-tags` before `prepare`. An aborted cut is undone with
    `git reset --keep HEAD~2`.
 3. **Publish: `go run ./cmd/release publish vX.Y.Z --notes-file <path>`.** Write the release
    notes to a file outside the repo, run it once with `--dry-run` — the gate and the probes,
@@ -328,12 +344,25 @@ cutting anything.
    - **tag** — while the tag is not on `origin`, it refuses unless the gate clears and
      `VERSION` at `HEAD` reads the version; it then pushes `HEAD` to `main`, where
      `tag-on-version-bump.yml` puts the **annotated** `vX.Y.Z` tag on the bump commit, and
-     waits for it (`--tag-timeout`, default 10m). It never creates a tag itself. Never move
-     or delete a tag afterwards.
+     waits for it (`--tag-timeout`, default 10m). It creates no release tag itself: CI makes
+     every release tag, and the placeholder below is the one tag `publish` makes
+     ([ADR 0098 amendment of 2026-11-05](../../.capcom/knowledge/decisions/adr-0098/adr-0098-amend-1105.md)).
+     Never move or delete a tag afterwards.
    - **release** — builds the six archives plus `SHA256SUMS` in a fresh `git clone` checked
      out at the tag, in a temporary directory and never in your checkout, and creates the
      GitHub Release with `gh release create --verify-tag`, titled with the tag and carrying
-     the notes file and all seven assets.
+     the notes file and all seven assets. It deletes the burned versions' tags from that
+     clone before the build, so the binaries' version stamp (`go version -m`) reads the
+     release, never the placeholder sitting on the same commit.
+   - **placeholder** — needed only by a release from v1.0.0 up to the placeholder, the
+     highest burned version (v1.8.1), and only while `origin` lacks the placeholder as an
+     annotated tag; every other release reports the step done (`not needed: <reason>`)
+     without running a command. It checks that `go.mod` at the release tag retracts exactly
+     the burned versions, then tags the annotated placeholder on the release's commit and
+     pushes it, so `go install …@latest` resolves to the release. It pushes a local
+     placeholder a failed push left on the release's commit, and never moves or replaces a
+     placeholder found anywhere else. A release that needs it is refused before anything
+     changes when `go.mod` at `HEAD` fails the same check.
    - **homebrew** and **scoop** — render the formula and the manifest whole from the
      templates in `cmd/release/templates/`, filling in the version and the hashes from the
      release's `SHA256SUMS`, and commit `apogee X.Y.Z` straight to `airiclenz/homebrew-tap`
@@ -389,6 +418,37 @@ merges on winget's schedule, not the release's. Every check whose tool or input 
 `go`, `gh`, Homebrew, an archive for this host, a bucket it cannot read — says `SKIP` and names
 it, so a partial run is never mistaken for a pass. A binary built from a modified tree only
 warns — untracked files flip that flag.
+
+**Cutting v1.0.0.** v1.0.0 is the one release that needs the placeholder
+([ADR 0107](../../.capcom/knowledge/decisions/adr-0107.md); see
+[Burned versions](#building-from-source)), and cutting it stays the owner's act. In order:
+
+1. **The bridge first.** Every installed release before the list-based update check refuses
+   the whole old v1.x range, v1.0.0 included, so it would never announce v1.0.0. Cut and
+   publish a 0.x release that carries the check (`internal/update`'s `IsRetracted`, which
+   refuses only the burned versions) the usual way, and give it time to reach the clients
+   that update, before v1.0.0.
+2. **Sync the tags: `git fetch --prune --prune-tags`.** `prepare` reads the highest release
+   tag from the local tags, so a local tag of the deleted v1.x series would outrank v1.0.0
+   and refuse it.
+3. **Prepare: `go run ./cmd/release prepare v1.0.0`.** Besides its usual checks it refuses
+   unless `go.mod` retracts exactly the burned versions, the placeholder among them.
+4. **Publish: `go run ./cmd/release publish v1.0.0 --notes-file <path>`,** `--dry-run`
+   first: its plan shows the `placeholder` step pending, tagging v1.8.1 on v1.0.0's commit.
+   For real, the steps run `tag`, `release`, `placeholder`, then the channels; a re-run
+   converges a failed placeholder push like any other step.
+5. **Check the proxy: `smoke`'s goproxy check.** `publish` runs `smoke` last, and its
+   goproxy check fails when proxy.golang.org reports v1.0.0 retracted. An `@latest` that
+   still resolves to the bridge only warns, since the proxy caches `@latest`: a later
+   `go run ./cmd/release smoke v1.0.0` confirms it, and nothing polls.
+
+**Recovery.** A placeholder placed wrongly — on another commit, or on a `go.mod` whose list
+does not name it — cannot be moved, deleted or re-tagged, because the proxy keeps what it
+served. Burn it instead: append the next unused v1.8.x (v1.8.2) to `RetractedVersions`, to
+`go.mod`'s block and to `.github/scripts/version-bump.sh`'s list (the drift tests fail until
+all three agree). It becomes the new placeholder, and the next release below it — a v1.0.x
+patch, say, cut from a commit whose `go.mod` carries the extended list — has `publish` tag it
+on that release's commit. Each wrong placeholder burns one more number; the list only grows.
 
 **One-time setup for the Windows channels.** `publish`'s scoop and winget steps publish into
 repositories that have to exist first, and the first winget submission is a different
