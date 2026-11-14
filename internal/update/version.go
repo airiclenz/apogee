@@ -2,6 +2,7 @@ package update
 
 import (
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -15,13 +16,13 @@ var releaseTagPattern = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.
 // carries no precedence: Newer drops it, so the full Version() string orders like BaseVersion().
 const buildMetadataSeparator = "+"
 
-// retractedLow and retractedHigh bound the deleted v1.x series that go.mod retracts
-// (`retract [v1.0.0, v1.8.0]`). Those tags outrank every 0.x release numerically, so a lookup that
-// ever surfaced one must not announce it as an upgrade.
-var (
-	retractedLow  = version{major: 1, minor: 0, patch: 0}
-	retractedHigh = version{major: 1, minor: 8, patch: 0}
-)
+// retractedVersions is the exact list of burned v1.x versions, ascending: the numbers
+// proxy.golang.org or sum.golang.org already hold for apogee, which no release may reuse and go.mod
+// retracts by name. The highest is the self-retracting placeholder tag that carries the retract
+// block above every other burned version; recovering from a bad placeholder appends the next v1.8.x
+// here. Every other v1.x number, v1.0.0 included, stays releasable. Those tags outrank every 0.x
+// release numerically, so a lookup that ever surfaced one must not announce it as an upgrade.
+var retractedVersions = []string{"v1.1.0", "v1.7.0", "v1.8.0", "v1.8.1"}
 
 // version is a parsed `vMAJOR.MINOR.PATCH` release tag.
 type version struct {
@@ -33,18 +34,34 @@ type version struct {
 // Newer reports whether latest is a strictly higher release than current, comparing the numeric
 // major, minor and patch fields in that order (so v0.10.0 outranks v0.9.0). Build metadata after a
 // `+` on either side is ignored. It answers false — never newer — when either value is malformed
-// (`dev`, an empty string, a pre-release tag) or when latest falls inside the retracted
-// [v1.0.0, v1.8.0] series.
+// (`dev`, an empty string, a pre-release tag) or when latest is one of the burned versions
+// [RetractedVersions] lists.
 func Newer(current, latest string) bool {
 	currentVersion, isCurrentValid := parseVersion(current)
 	latestVersion, isLatestValid := parseVersion(latest)
 	if !isCurrentValid || !isLatestValid {
 		return false
 	}
-	if latestVersion.isRetracted() {
+	if IsRetracted(latest) {
 		return false
 	}
 	return latestVersion.compare(currentVersion) > 0
+}
+
+// RetractedVersions returns the burned v1.x versions go.mod retracts, ascending. The slice is a
+// copy, so a caller may change it without touching the list.
+func RetractedVersions() []string {
+	return slices.Clone(retractedVersions)
+}
+
+// IsRetracted reports whether tag is exactly one of the burned versions [RetractedVersions]
+// lists. Build metadata after a `+` is dropped first; a malformed tag is never retracted.
+func IsRetracted(tag string) bool {
+	parsed, isValid := parseVersion(tag)
+	if !isValid {
+		return false
+	}
+	return slices.Contains(retractedVersions, parsed.String())
 }
 
 // parseVersion parses a release tag, dropping any build metadata first. The bool is false when
@@ -80,7 +97,7 @@ func (v version) compare(other version) int {
 	return v.patch - other.patch
 }
 
-// isRetracted reports whether v lies inside the retracted [v1.0.0, v1.8.0] series.
-func (v version) isRetracted() bool {
-	return v.compare(retractedLow) >= 0 && v.compare(retractedHigh) <= 0
+// String renders v as its canonical `vMAJOR.MINOR.PATCH` tag.
+func (v version) String() string {
+	return "v" + strconv.Itoa(v.major) + "." + strconv.Itoa(v.minor) + "." + strconv.Itoa(v.patch)
 }

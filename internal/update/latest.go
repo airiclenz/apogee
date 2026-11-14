@@ -7,8 +7,10 @@
 //
 // [Latest] reads the newest published release's tag from the redirect GitHub answers
 // `HEAD /releases/latest` with — no API call, so no API rate limit — and [Newer] orders that tag
-// against the running version. [Stage] downloads a release archive for `apogee update`, verifies
-// it against the release's SHA256SUMS and extracts its binary.
+// against the running version, never announcing one of the burned v1.x versions
+// [RetractedVersions] lists — the exact set go.mod retracts, which [IsRetracted] matches.
+// [Stage] downloads a release archive for `apogee update`, verifies it against the release's
+// SHA256SUMS and extracts its binary.
 package update
 
 import (

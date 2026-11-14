@@ -47,7 +47,11 @@
 - 6 (re-check): guard folded (`@latest` queries without `-retracted`; Goal reads a non-empty `Retracted` field, not a wording).
 - 8 (re-check): guard folded (the step-list rule covers every text listing publish's steps, building.md's included).
 
-## 1. internal/update owns the burned-version list
+## 1. internal/update owns the burned-version list — ✅ DONE (2026-11-14)
+
+NOTES (2026-11-14): consequential edit — internal/update/latest.go: made necessary by the new exported list; the package doc (which lives in latest.go, not version.go) now names `RetractedVersions` and `IsRetracted` beside `Newer`.
+NOTES (2026-11-14): added `TestIsRetracted` (exact match, build metadata dropped, malformed tags never retracted) and a build-metadata row in `TestNewer` beyond the plan's listed cases; `version` gained an unexported `String()` used by `IsRetracted`.
+NOTES (2026-11-14): heads-up for item 2 — the package doc in latest.go says "cmd/apogee is the only package that reaches it"; once cmd/release imports `update.IsRetracted`/`RetractedVersions`, that sentence needs to name cmd/release too.
 
 **What:**
 **Goal:** `internal/update` exports the burned list and a retraction predicate. `Newer` never announces a burned version, and does announce an unburned v1.x (v1.0.0, v1.2.0) above the current 0.x.
