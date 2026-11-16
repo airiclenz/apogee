@@ -13,3 +13,10 @@ created: 2026-09-03T18:40:50Z
   predicate); only the on-host UX observation of the notice stays untested (recorded so in
   [ADR 0020](.capcom/knowledge/decisions/adr-0020.md)'s
   consequences), verifiable only if such a host turns up.
+
+
+## Update 2026-11-15
+
+No action unless a Windows host older than build 17763 turns up. If one does: start apogee there
+in Auto and confirm the degradation notice appears. The decision itself is already table-tested
+(`TestBelowWindowsFloor`).
