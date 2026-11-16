@@ -26,3 +26,9 @@ func TestSeatbeltProbeNetwork(t *testing.T) {
 	t.Skip("seatbelt network escape-probe is macOS-only (sandbox-exec absent on " +
 		"non-darwin); deferred to an owner-run / CI macOS runner — see P3.3.")
 }
+
+func TestSeatbeltAllowsDevNullThroughTheFence(t *testing.T) {
+	t.Skip("seatbelt live /dev/null exemption probe is macOS-only (sandbox-exec absent on " +
+		"non-darwin); deferred to a CI macOS runner. The hermetic " +
+		"TestSeatbeltProfileAllowsDevNull in seatbelt_test.go runs on this host.")
+}

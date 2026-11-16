@@ -111,7 +111,9 @@ internal/platform/conpty_windows_test.go — pollJob, conptyTestTimeout, TestPse
 
 **Commit:** `test(platform): assert a contained process cannot break away from the Windows job`
 
-## 3. The seatbelt `/dev/null` exemption, live on macOS
+## 3. The seatbelt `/dev/null` exemption, live on macOS — ✅ DONE (2026-11-16)
+
+NOTES (2026-11-16): the darwin-local helper is named `runSeatbeltShellLine` rather than reusing the name `runConfinedShellLine`, so the two backend-specific helpers stay distinguishable by name; it is otherwise the landlock helper typed to `*seatbeltConfiner`, and the Linux helper is untouched.
 
 **What:**
 **Context:** capcom issue `macos-confined-live-run` (its `/dev/null` half only; the live session
