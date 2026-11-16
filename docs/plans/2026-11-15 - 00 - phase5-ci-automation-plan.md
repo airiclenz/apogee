@@ -72,7 +72,7 @@ internal/platform/landlock_linux_test.go — TestMain; internal/platform/platfor
 
 **Commit:** `test(platform): assert the single-instance lock is freed when its holder dies`
 
-## 2. A descendant cannot break away from the Windows teardown job
+## 2. A descendant cannot break away from the Windows teardown job — ✅ DONE (2026-11-16)
 
 **What:**
 **Context:** capcom issue `windows-job-breakaway`.
