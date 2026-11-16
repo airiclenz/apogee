@@ -18,7 +18,8 @@ import (
 // description and LockFileEx keys on the handle, so a second open() of the same path contends
 // with the first exactly as another process would (lock_unix.go, lock_windows.go). That is why
 // there is no helper-subprocess scaffolding below — it would test the same kernel behaviour
-// with more moving parts.
+// with more moving parts. The one deliberate exception is lock_holder_test.go: that the lock
+// is freed when its holder dies can only be shown by a holder process that actually dies.
 
 // lockPath returns a lock file path inside a temp directory of the test's own, so every test
 // contends only with itself and the set can run in parallel.

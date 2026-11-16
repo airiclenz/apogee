@@ -39,7 +39,7 @@ darwin tests that no CI has run before.
 - 3: guard folded (loud-skip twin in `seatbelt_notdarwin_test.go`); context line added (`macos-confined-live-run`).
 - 4: guard folded (runner and step Acceptance greps, Goal reworded to the real triggers, step comment corrected); context line added (`single-instance-lock-check`, `macos-confined-live-run`).
 
-## 1. The lock is freed when its holding process dies
+## 1. The lock is freed when its holding process dies — ✅ DONE (2026-11-16)
 
 **What:**
 **Context:** capcom issue `single-instance-lock-check` (the holder-dies half; its Windows contention
