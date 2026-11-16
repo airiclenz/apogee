@@ -1,0 +1,56 @@
+name: macOS
+
+# Runs the darwin side of the platform layer on a macOS runner: the seatbelt confinement
+# backend under live `sandbox-exec`, and the darwin paths of tests every OS runs. Before this
+# workflow no CI ran a darwin test; `make check` on a Linux box only cross-compiles them.
+#
+# A workflow of its own, not a job in ci.yml, on purpose: the release gate reads ci.yml's
+# runs alone (`ciWorkflow` in cmd/release/gate.go), so a red run here is visible but never
+# blocks a release cut while ci.yml is green. It does not weaken that gate — ci.yml stays
+# the release gate, with no bypass (ADR 0098).
+on:
+  push:
+    branches: [main]
+    # Skips a push that touches only prose no test reads. A shorter list than ci.yml's
+    # `paths` filter, and free to drift from it: this workflow gates nothing, so a run it
+    # skips costs only an early warning that the next code push brings anyway.
+    paths-ignore:
+      - '.capcom/issues/**'
+      - 'docs/plans/**'
+      - 'docs/handoffs/**'
+      - 'docs/reviews/**'
+      - 'CHANGELOG.md'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-macos:
+    name: macos tests
+    runs-on: macos-latest
+    steps:
+      # Actions are pinned by commit SHA with the release tag in the comment beside it.
+      # Bump by resolving the new tag's commit — never by editing the tag comment alone.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # This job runs Go tooling only and needs no git credential.
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: go test (race, platform and gitexec)
+        # These two trees rather than `./...`: they hold the darwin-tagged tests (the
+        # seatbelt live battery in internal/platform/seatbelt_darwin_test.go, plus its
+        # /dev/null exemption probe, the twin of the loud skip in
+        # seatbelt_notdarwin_test.go) and the darwin paths of tests every OS runs (the
+        # single-instance lock's holder test in lock_holder_test.go, and gitexec's ctime
+        # fileprint via ctime_darwin.go). The rest of the suite is Linux-shaped and runs in
+        # ci.yml.
+        #
+        # `-p 1` keeps the sandbox-exec batteries serial, so the two trees never contend
+        # for the runner's CPUs; `-timeout 30m` covers that serial wall time on a slow
+        # runner.
+        run: go test -race -count=1 -p 1 -timeout 30m ./internal/platform/... ./internal/gitexec/...

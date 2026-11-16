@@ -148,7 +148,10 @@ internal/platform/seatbelt_darwin.go — sandboxExecPresent; internal/platform/s
 
 **Commit:** `test(platform): probe the seatbelt /dev/null exemption under live sandbox-exec`
 
-## 4. A non-gating macOS workflow
+## 4. A non-gating macOS workflow — ✅ DONE (2026-11-16)
+
+NOTES (2026-11-16): Acceptance's `sh scripts/check-pins.sh` fails on this box because `sh` is dash and the script is bash (`#!/usr/bin/env bash`, arrays); ran it as `bash scripts/check-pins.sh` (ok, 16 pins in 4 files) — pre-existing, not this item's change.
+NOTES (2026-11-16): setup-go keeps its default cache key (go.sum, keyed by runner OS), so no `cache-dependency-path` is needed: no other job runs on macOS to share or collide with it.
 
 **What:**
 **Context:** capcom issues `single-instance-lock-check` and `macos-confined-live-run` (their macOS
