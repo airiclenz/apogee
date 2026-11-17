@@ -45,6 +45,21 @@ func TestProcessRunsCommandsTypedIntoTheConsoleOnWindows(t *testing.T) {
 	}
 }
 
+// TestProcessKeepsTheBlankLineAFreshCmdPaintsOnWindows is the live half of the rowBreakWriter
+// tests: cmd prints a blank line between its banner and its first prompt, which the pseudoconsole
+// paints as a cursor move, and the read must still show it. CRs are dropped before the check so a
+// pseudoconsole that writes the blank row as CR LF passes too.
+func TestProcessKeepsTheBlankLineAFreshCmdPaintsOnWindows(t *testing.T) {
+	t.Parallel()
+	process := startWindowsProcess(t, cmdSpec("cmd"))
+
+	output := strings.ReplaceAll(readWindowsUntil(t, process, ">"), "\r", "")
+
+	if !strings.Contains(output, "reserved.\n\n") {
+		t.Errorf("a fresh cmd read %q, want the banner, a blank line and the prompt on their own lines", output)
+	}
+}
+
 // TestProcessRecordsTheExitCodeOnWindows pins the exit code a Console reports once its command has
 // ended on its own.
 func TestProcessRecordsTheExitCodeOnWindows(t *testing.T) {

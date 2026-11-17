@@ -102,12 +102,19 @@ func newProcess() *Process {
 // and stderr alike here — the line-anchored signature, not the pipe path's stderr-only wiring, is
 // what keeps a quoted denial from killing it. The watch forwards every byte to the ring first, so
 // the model still reads the denial that killed it.
+//
+// On a terminal that skips rows with cursor moves (terminalSkipsRows), a rowBreakWriter stands
+// first in line, so the watch and the ring both see the line breaks the screen showed.
 func (p *Process) outputSink(confined bool) io.Writer {
-	if !confined {
-		return p.ring
+	var sink io.Writer = p.ring
+	if confined {
+		p.denial = platform.NewDenialKillWriter(p.ring, p.Kill)
+		sink = p.denial
 	}
-	p.denial = platform.NewDenialKillWriter(p.ring, p.Kill)
-	return p.denial
+	if terminalSkipsRows {
+		sink = newRowBreakWriter(sink, windowRows, windowCols)
+	}
+	return sink
 }
 
 // Read returns the output produced since the previous Read, with terminal control sequences
@@ -159,6 +166,9 @@ func (p *Process) DenialStopped() bool {
 func (p *Process) collectOutput(source io.Reader, collect io.Writer) {
 	defer close(p.readerDone)
 	_, _ = io.Copy(collect, source)
+	if rows, ok := collect.(*rowBreakWriter); ok {
+		_ = rows.flush()
+	}
 	p.ring.close()
 }
 

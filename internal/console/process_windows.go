@@ -16,6 +16,11 @@ import (
 	"github.com/airiclenz/apogee/internal/platform"
 )
 
+// terminalSkipsRows is true on Windows: a pseudoconsole paints its screen and skips empty rows
+// with a cursor move rather than writing newlines, so a Console's output goes through a
+// rowBreakWriter (rowbreaks.go).
+const terminalSkipsRows = true
+
 // terminal is the Windows half of a Process: the pseudoconsole (ConPTY) the command runs in, which
 // also holds the kill-on-close Job Object the command and every descendant live in.
 type terminal struct {

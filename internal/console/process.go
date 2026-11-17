@@ -15,6 +15,10 @@ import (
 	"github.com/airiclenz/apogee/internal/platform"
 )
 
+// terminalSkipsRows is false on POSIX: a pseudo-terminal passes the program's own newlines
+// through, so a Console's output needs no rowBreakWriter.
+const terminalSkipsRows = false
+
 // waitDelay bounds how long Wait blocks draining the pseudo-terminal after the process has been
 // killed, so a descendant holding the tty open cannot wedge a Console's teardown forever. It
 // matches the one-shot subprocess path's delay (internal/tools' §2.4 teardown).

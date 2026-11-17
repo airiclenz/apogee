@@ -31,7 +31,9 @@
 // — its output, unlike a pseudo-terminal's, does not end on its own. The command line is handed to
 // the launcher verbatim ([Spec.CommandLine]), and a confined Console runs under the restricted token
 // the caller's Prepare hook put on the command — one whose hook set no token is refused with
-// domain.ErrConfinementUnavailable before anything starts.
+// domain.ErrConfinementUnavailable before anything starts. A pseudoconsole also paints its
+// screen rather than streaming text, skipping empty rows with a cursor move instead of a newline;
+// the output passes through a rowBreakWriter that puts those newlines back before the stripping.
 //
 // How many, and whose. Above the process sits a [Registry]: the set of Consoles one engine holds,
 // each under a small id that is issued in order and never reused, so a stale id in a model's
@@ -62,6 +64,7 @@
 //   - process_windows.go — the Windows half: start under a pseudoconsole, write, kill, reap.
 //   - ring.go — the bounded drain-on-read buffer of unread output.
 //   - ansi.go — stripping the terminal control sequences out of what the model reads.
+//   - rowbreaks.go — the newlines a Windows pseudoconsole paints as cursor moves, put back.
 //   - registry.go — the engine's open Consoles: ids, owners, the cap, closing by owner.
 //   - context.go — the context seam a tool call reaches the registry through.
 package console

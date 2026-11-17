@@ -1,9 +1,11 @@
 ---
 title: Windows Console output loses line breaks ConPTY paints with cursor moves
-status: open
+status: done
 type: bug
 priority: 3
 created: 2026-11-17T10:04:29Z
+closed: 2026-11-17T10:30:58Z
+reason: "Fixed: on Windows a rowBreakWriter (internal/console/rowbreaks.go) inserts the newlines that ConPTY paints as row-skipping cursor moves; recorded-bytes tests run on every OS, a live Windows test checks the blank line in a fresh cmd, and POSIX output is unchanged (terminalSkipsRows=false)."
 ---
 
 On Windows, a Console's output loses line breaks that ConPTY paints with cursor movement instead of CR/LF. Seen 2026-11-17 on Windows 10.0.26300 (v0.35.3, owner-run `windows-conpty-console-check`): a fresh `cmd` Console read back as
@@ -28,3 +30,4 @@ where cmd prints a blank line between the banner and the prompt. Both the TUI's 
 ## Log
 
 - 2026-11-17 Airic Lenz: Second sample, 2026-11-17, same host: 'dir' in a fenced Console read back 'Volume Serial Number is CE0D-BB1C Directory of C:\Users\airic\Repos\apogee2026-11-17  10:41    <DIR>          .' — two newline+blank-line pairs lost. Every single newline between dir rows survived, and so did the blank line before the final prompt, which came after the output scrolled. Refined hypothesis: while ConPTY fills the first screen it skips empty rows with a cursor move (ESC[<r>;<c>H / ESC[<n>B) instead of CRLFs; once the buffer scrolls it emits real newlines. The fix must turn a row-advancing cursor move into the right number of newlines (blank rows included), not just one. The recorded-bytes test should cover both a first-screen and a scrolled output.
+- 2026-11-17 Airic Lenz: Confirmed by capturing raw ConPTY bytes from a fresh cmd: blank rows on the first screen are skipped with ESC[r;1H, real newlines appear only after the screen scrolls, and long lines wrap with no newline, so the column must be tracked too. Fix: internal/console/rowbreaks.go is a Windows-only writer in front of the ring. It inserts a newline for each row a cursor move skips past the lowest row the output has reached. Repaints add nothing.

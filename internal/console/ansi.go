@@ -13,7 +13,9 @@ const bell = 0x07
 // emits — CSI (ESC [ … final byte) and OSC (ESC ] … BEL or ST) — from s, so the text handed to a
 // model is what a human would SEE on the screen rather than the wire bytes that paint it. Colour,
 // cursor movement and window-title sequences all fall in those two families; a lone ESC that
-// starts neither is dropped on its own.
+// starts neither is dropped on its own. A cursor move strips to nothing; on a terminal that skips
+// rows with one (a Windows pseudoconsole), rowBreakWriter has already put the newlines it stands
+// for into the output ahead of it.
 //
 // An incomplete sequence — one whose final byte has not arrived, because the ring handed back a
 // chunk that ends mid-escape — costs only its ESC: the remaining bytes are emitted as text. That
@@ -58,6 +60,16 @@ func escapeSequenceLength(s string) int {
 // bytes (0x20–0x2f), then one final byte (0x40–0x7e) which ends it. Anything else means the
 // sequence is truncated or malformed and only the ESC is consumed.
 func csiLength(s string) int {
+	index := csiFinalIndex(s)
+	if index < len(s) && s[index] >= 0x40 && s[index] <= 0x7e {
+		return index + 1
+	}
+	return 1
+}
+
+// csiFinalIndex returns where a CSI sequence's final byte belongs: the index past ESC [ , its
+// parameter bytes and its intermediate bytes — len(s) when s ends before the final byte.
+func csiFinalIndex(s string) int {
 	index := 2
 	for index < len(s) && s[index] >= 0x30 && s[index] <= 0x3f {
 		index++
@@ -65,10 +77,24 @@ func csiLength(s string) int {
 	for index < len(s) && s[index] >= 0x20 && s[index] <= 0x2f {
 		index++
 	}
-	if index < len(s) && s[index] >= 0x40 && s[index] <= 0x7e {
-		return index + 1
+	return index
+}
+
+// escapeTruncated reports that s — which starts at an ESC — ends before the control sequence it
+// starts is complete: a lone ESC at the end, or a CSI or OSC whose final byte or terminator has
+// not arrived. A malformed sequence is not truncated: more bytes would not complete it.
+func escapeTruncated(s string) bool {
+	if len(s) < 2 {
+		return true
 	}
-	return 1
+	switch s[1] {
+	case '[':
+		return csiFinalIndex(s) == len(s)
+	case ']':
+		return oscLength(s) == 1
+	default:
+		return false
+	}
 }
 
 // oscLength measures an OSC sequence: ESC ] , then a payload, then either BEL or ST (ESC \).
