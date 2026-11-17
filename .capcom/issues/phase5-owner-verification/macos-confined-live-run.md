@@ -1,12 +1,14 @@
 ---
 title: Live Auto-confined deliverable run on macOS (seatbelt) + runtime smoke
-status: parked
+status: done
 type: task
 priority: 3
 labels: [macos, owner-run]
 plan: 2026-11-15 - 00 - phase5-ci-automation-plan
 aliases: [apogee-2uh.2]
 created: 2026-09-03T18:40:50Z
+closed: 2026-11-17T09:52:58Z
+reason: "Owner live run on a Mac (v0.35.3): an Auto session asked to install fonts outside the project was refused by the seatbelt sandbox. /dev/null half: TestSeatbeltAllowsDevNullThroughTheFence green in macos.yml run 43874453469 (1dab6b42)."
 ---
 
 - **Live Auto-confined deliverable run on macOS (seatbelt) + runtime smoke** — same shape; the

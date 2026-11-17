@@ -1,12 +1,14 @@
 ---
 title: Job-object breakaway assertion on Windows
-status: open
+status: done
 type: task
 priority: 3
 labels: [owner-run, windows]
 plan: 2026-11-15 - 00 - phase5-ci-automation-plan
 aliases: [apogee-2uh.4]
 created: 2026-09-03T18:40:51Z
+closed: 2026-11-17T09:52:58Z
+reason: TestTeardownJobRefusesBreakaway green in ci.yml test-windows (run 43852103958, 11a5698f, 2026-11-16).
 ---
 
 - **Job-object breakaway assertion on Windows** (folded here 2026-08-15 from the open-residuals

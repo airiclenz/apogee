@@ -1,11 +1,13 @@
 ---
 title: Live Auto-confined deliverable run on Windows
-status: parked
+status: done
 type: task
 priority: 3
 labels: [owner-run, windows]
 aliases: [apogee-2uh.1]
 created: 2026-09-03T18:40:50Z
+closed: 2026-11-17T09:52:58Z
+reason: "Owner live run on Windows (v0.35.3): a write outside the repo, both through a file tool and through a shell command, was refused under confinement."
 ---
 
 - **Live Auto-confined deliverable run on Windows** — the ADR 0020 backend is proven natively

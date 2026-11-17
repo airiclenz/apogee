@@ -1,12 +1,14 @@
 ---
 title: The advisory single-instance lock, on Windows and on macOS
-status: open
+status: done
 type: task
 priority: 3
 labels: [macos, owner-run, windows]
 plan: 2026-11-15 - 00 - phase5-ci-automation-plan
 aliases: [apogee-2uh.5]
 created: 2026-09-03T18:40:51Z
+closed: 2026-11-17T09:52:58Z
+reason: TestAcquireLockFreedWhenHolderDies green on Windows (ci.yml run 43852103958, 11a5698f) and macOS (macos.yml run 43874453469, 1dab6b42), 2026-11-16.
 ---
 
 - **The advisory single-instance lock, on Windows and on macOS** (folded here 2026-08-22 from the
