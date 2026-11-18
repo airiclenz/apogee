@@ -45,7 +45,11 @@
 - 1 (re-check): guard folded — the e2e reset is a typed `/panel width reset`, the watching double-click pinned at Model level on a stubbed clock; comment finder widened to `internal/tui/*.go`, `interject.go` in Files; Approach's conditional `showFlash` sentence deleted.
 - 4 (re-check): guard folded — the denied count has no fallback: flag set live in `absorbFailure` from the two engine denial prefixes, re-derived in `fromWireToolView` from `w.Details`; live and wire round-trip test.
 
-## 1. Side panel width works while watching
+## 1. Side panel width works while watching — ✅ DONE (2026-11-18)
+
+NOTES (2026-11-18): added a `panelVerb = "panel"` constant beside `panelWidthVerb` in sidepanel.go and used it in the command table's `/panel` row (command.go) as well as the new watch-gate helper `isWatchPanelWidth` (watch.go), since the verb name now carries meaning in two places.
+NOTES (2026-11-18): the watching double-click test enters the watch with `m.enterWatch(fixture.src)` on `doubleClickModel`'s model rather than `enterWatchOn`, which builds a fresh model and would drop the stubbed clock; `TestSidePanelCommandIsRefusedWhileWatching` now covers `/panel`, `/panel on` and `/panel pin tasks`.
+NOTES (2026-11-18): user docs still say `/panel` is unavailable while watching (docs/manual/commands.md, docs/manual/configuration.md) — left for item 2, which owns the docs.
 
 **What:** Recast at the regression check (2026-11-18).
 **Goal:** While a watch is active, a press on the side panel grip starts a drag that reflows live and writes `ui.side-panel.width` on release, a grip double-click resets it to the registry default of `ui.side-panel.width`, and `/panel width <n>` and `/panel width reset` run as outside a watch; a pin click and every other `/panel` form stay refused with `watchRefusedFlash`.

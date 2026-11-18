@@ -1233,12 +1233,13 @@ func (m Model) panelDoubleClicked(at time.Time) bool {
 // panelGripAt answers whether column x of a press already on the column ([Model.panelTargetAt]) is
 // its grip — the separator or the one cell right of it ([sidePanelGripWidth]), whatever the gutter
 // yields, so the lead pin cell is never one — and how far right of the separator it is.
-// While watching the grip is inert: the press is claimed as any column cell is, and starts nothing.
+// Watching changes nothing here: the width is the viewer's own preference, not the watched
+// session's, so the grip drags and resets while watching as it does outside one.
 // The overlay has no grip at all (ADR 0111 D7): the separator belongs to the docked column, and an
 // overlay the window cannot dock has no width a drag could set.
 func (m Model) panelGripAt(x int) (grab int, isGrip bool) {
 	grab = x - m.slotWidth()
-	if m.watch.isActive || m.panelOverlaid() || grab < 0 || grab >= sidePanelGripWidth {
+	if m.panelOverlaid() || grab < 0 || grab >= sidePanelGripWidth {
 		return 0, false
 	}
 	return grab, true
@@ -1605,9 +1606,11 @@ type panelArgs struct {
 // the syntax instead of quietly reporting as though nothing had been asked.
 const panelUsage = "usage: /panel | /panel on|off|auto | /panel pin|unpin|hide <section> | /panel width <n>|reset"
 
-// panelWidthVerb is the subcommand that sets `ui.side-panel.width`, and panelWidthReset the word that
-// takes it back to its default in place of a number of columns.
+// panelVerb is the side panel's command verb, read by the command table and the watch gate
+// ([isWatchPanelWidth]); panelWidthVerb is the subcommand that sets `ui.side-panel.width`, and
+// panelWidthReset the word that takes it back to its default in place of a number of columns.
 const (
+	panelVerb       = "panel"
 	panelWidthVerb  = "width"
 	panelWidthReset = "reset"
 )

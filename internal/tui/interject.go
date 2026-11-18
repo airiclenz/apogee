@@ -216,9 +216,9 @@ func (b *interjectBox) drainAll() []queuedInterjection {
 // the run it was opened on and a send there must not silently start an Exchange the reader thought
 // they were steering a delegate with. Everywhere else it submits.
 //
-// While watching, the line first meets watch mode's allow-list gate: only a view-only verb runs, and
-// anything else flashes and leaves the box as typed (watch.go) — except that an empty box resumes a
-// watch whose owner finished in the watcher's own home (resumeWatched).
+// While watching, the line first meets watch mode's allow-list gate: only a view-only verb or a
+// /panel width line runs, and anything else flashes and leaves the box as typed (watch.go) — except
+// that an empty box resumes a watch whose owner finished in the watcher's own home (resumeWatched).
 func (m Model) sendAtIdle() (tea.Model, tea.Cmd) {
 	if m.isWatchResumable() && strings.TrimSpace(m.input.Value()) == "" {
 		return m.resumeWatched()

@@ -84,7 +84,8 @@ const watchRefusedFlash = "read-only — you are watching this session; esc goes
 const watchRecordUnreadableNote = "the session record could not be read — showing the live events only"
 
 // watchVerbs is the view-only verb set that still runs while watching: each reads what the view
-// already holds and reaches neither the engine nor the session. Every other verb is refused.
+// already holds and reaches neither the engine nor the session. Beyond it only /panel's width forms
+// run ([isWatchPanelWidth]); every other verb is refused.
 var watchVerbs = map[string]bool{
 	"thinking": true,
 	"help":     true,
@@ -969,12 +970,29 @@ func (m Model) watchLegend() string {
 }
 
 // watchRefuses is the one allow-list gate every send and command meets while watching: only a
-// verb of the view-only set passes. Outside watch mode it refuses nothing.
+// verb of the view-only set, or a /panel width line ([isWatchPanelWidth]), passes. Outside watch
+// mode it refuses nothing.
 func (m Model) watchRefuses(parsed parsedInput) bool {
 	if !m.watch.isActive {
 		return false
 	}
-	return parsed.kind != kindCommand || !watchVerbs[parsed.command]
+	if parsed.kind != kindCommand {
+		return true
+	}
+	return !watchVerbs[parsed.command] && !isWatchPanelWidth(parsed)
+}
+
+// isWatchPanelWidth reports whether parsed is `/panel width <n>` or `/panel width reset`, the one
+// writing form a watch runs: `ui.side-panel.width` is the viewer's own layout, global and never the
+// watched session's (ADR 0111), as the grip's drag and double-click are. Bare /panel, `on|off|auto`
+// and `pin|unpin|hide` stay refused — and so does a line the grammar never parsed, the completion
+// menu's arg-less accept, whose zero panelArgs reads as the report.
+func isWatchPanelWidth(parsed parsedInput) bool {
+	if parsed.command != panelVerb {
+		return false
+	}
+	action := verbArgsOf[panelArgs](parsed).action
+	return action == panelSetWidth || action == panelResetWidth
 }
 
 // refuseWatchInput is the gate's answer: a flash, and the box left as the human typed it.

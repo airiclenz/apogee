@@ -3300,22 +3300,60 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 	})
 }
 
-// TestSidePanelSeparatorDragIsInertWhileWatching pins adr-0110-amend-1108 (c): watching another
-// session, a press on the separator is claimed as any column cell is and starts no drag.
-func TestSidePanelSeparatorDragIsInertWhileWatching(t *testing.T) {
+// TestSidePanelSeparatorDragResizesWhileWatching pins the grip live while watching another session:
+// the width is the viewer's own layout, never the watched session's, so a drag moves the separator
+// and the release writes `ui.side-panel.width` as it does outside a watch.
+func TestSidePanelSeparatorDragResizesWhileWatching(t *testing.T) {
 	t.Parallel()
 	m := enterWatchOn(t, watchEngine(), newWatchFixture(t, "watched", nil, 0))
 	m.opts.UI.SidePanelShow = domain.SidePanelShowAuto
+	spy := &settingsSpy{}
+	m.opts.Settings = spy.host(nil)
 	m = step(t, m, tea.WindowSizeMsg{Width: 200, Height: 30})
-	sep, stored := m.slotWidth(), m.opts.UI.SidePanelWidth
+	sep := m.slotWidth()
 
 	m = step(t, m, leftClick(sep, separatorRow))
 	m = step(t, m, leftDrag(sep-14, separatorRow))
 	m = step(t, m, leftRelease(sep-14, separatorRow))
 
-	if m.slotWidth() != sep || m.opts.UI.SidePanelWidth != stored || m.transcriptSel.active {
-		t.Errorf("slot %d, stored %d, selection %+v; want the separator unmoved at %d and nothing selected",
-			m.slotWidth(), m.opts.UI.SidePanelWidth, m.transcriptSel, sep)
+	if m.panelWidth() != draggedPanelWidth || m.slotWidth() != sep-14 {
+		t.Errorf("panel %d, slot %d; want %d and %d", m.panelWidth(), m.slotWidth(), draggedPanelWidth, sep-14)
+	}
+	if want := []string{domain.UIKeySidePanelWidth + "=" + strconv.Itoa(draggedPanelWidth)}; !slices.Equal(spy.writes, want) {
+		t.Errorf("writes %v, want %v", spy.writes, want)
+	}
+	if m.flash == watchRefusedFlash {
+		t.Error("the drag raised the watch refusal")
+	}
+}
+
+// TestSidePanelSeparatorDoubleClickResetsWhileWatching pins the grip's double-click live while
+// watching: two presses within panelDoubleClick reset `ui.side-panel.width` to the registry default
+// through the settings host's Reset, and start no drag.
+func TestSidePanelSeparatorDoubleClickResetsWhileWatching(t *testing.T) {
+	t.Parallel()
+	m, spy, resets, clock := doubleClickModel(t, nil)
+	m, cmd := m.enterWatch(newWatchFixture(t, "watched", nil, 0).src)
+	if !m.watch.isActive || cmd == nil {
+		t.Fatal("setup: enterWatch did not enter watch mode")
+	}
+	m = step(t, m, cmd())
+	sep := m.slotWidth()
+
+	m = pressSeparator(t, m, sep)
+	*clock = clock.Add(panelDoubleClick / 2)
+	m = step(t, m, leftClick(sep, separatorRow))
+	pressed := m.panelDrag
+
+	if pressed.active {
+		t.Errorf("the second press armed a drag %+v, want none", pressed)
+	}
+	if want := []string{domain.UIKeySidePanelWidth}; !slices.Equal(*resets, want) || len(spy.writes) != 0 {
+		t.Errorf("resets %v, writes %v; want %v and no write", *resets, spy.writes, want)
+	}
+	if m.panelWidth() != domain.DefaultSidePanelWidth || m.opts.UI.SidePanelWidth != 0 {
+		t.Errorf("panel %d, stored %d; want the default %d and the unset width 0",
+			m.panelWidth(), m.opts.UI.SidePanelWidth, domain.DefaultSidePanelWidth)
 	}
 }
 
@@ -3875,11 +3913,12 @@ func TestSidePanelCommandBareReports(t *testing.T) {
 	}
 }
 
-// TestSidePanelCommandIsRefusedWhileWatching pins /panel outside the watch verbs: a watch is
-// read-only, so each writing form flashes the refusal and the viewer's settings stay as they were.
+// TestSidePanelCommandIsRefusedWhileWatching pins /panel's non-width forms outside the watch
+// gate: a watch is read-only, so the show and section forms flash the refusal and the viewer's
+// settings stay as they were.
 func TestSidePanelCommandIsRefusedWhileWatching(t *testing.T) {
 	t.Parallel()
-	for _, line := range []string{"/panel on", "/panel width 40", "/panel width reset"} {
+	for _, line := range []string{"/panel", "/panel on", "/panel pin tasks"} {
 		t.Run(line, func(t *testing.T) {
 			t.Parallel()
 			m := enterWatchOn(t, watchEngine(), newWatchFixture(t, "watched", nil, 0))
@@ -3890,6 +3929,40 @@ func TestSidePanelCommandIsRefusedWhileWatching(t *testing.T) {
 
 			if m.flash != watchRefusedFlash || m.opts.UI != before {
 				t.Errorf("flash %q, settings %+v; want the refusal and %+v kept", m.flash, m.opts.UI, before)
+			}
+		})
+	}
+}
+
+// TestSidePanelWidthCommandAppliesWhileWatching pins `/panel width <n>|reset` inside the watch
+// gate: the width is the viewer's own layout, so each form sets it through the settings host as
+// outside a watch — the reset landing the registry default — and answers with the settings report.
+func TestSidePanelWidthCommandAppliesWhileWatching(t *testing.T) {
+	t.Parallel()
+	for _, form := range []string{"<n>", panelWidthReset} {
+		t.Run(form, func(t *testing.T) {
+			t.Parallel()
+			m := enterWatchOn(t, watchEngine(), newWatchFixture(t, "watched", nil, 0))
+			m.opts.UI.SidePanelShow = domain.SidePanelShowOn
+			m.opts.UI.SidePanelWidth = panelCommandWidth
+			spy := &settingsSpy{}
+			m.opts.Settings = spy.host(nil)
+			m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
+			line, want := panelWidthLine(t, form)
+
+			m = sendLine(t, m, line)
+
+			if m.flash == watchRefusedFlash {
+				t.Fatalf("%s raised the watch refusal", line)
+			}
+			if m.panelWidth() != want.width {
+				t.Errorf("panel width = %d, want %d", m.panelWidth(), want.width)
+			}
+			if !slices.Equal(spy.writes, want.writes) || !slices.Equal(spy.resets, want.resets) {
+				t.Errorf("writes %v, resets %v; want %v, %v", spy.writes, spy.resets, want.writes, want.resets)
+			}
+			if !noteHolding(m, "side panel: on — ") {
+				t.Errorf("no report of the settings in force:\n%s", plain(m.View()))
 			}
 		})
 	}

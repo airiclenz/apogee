@@ -256,7 +256,8 @@ func verbGrammar[T any](parse func([]string) (T, error)) func([]string) (any, er
 // the file and on the screen. Its grammar follows /skills' down to the posture: the report answers mid-run, and
 // both writing forms are idle-only like every other verb that writes config. It is not a watch verb
 // (watchVerbs): a watch runs only the verbs that read what the view already holds, and this one
-// writes config.
+// writes config — save its `width <n>|reset` form, which a watch runs ([isWatchPanelWidth]) because
+// the column's width is the viewer's own layout, never the watched session's.
 //
 // /settings opens the configuration pane (settings.go): every config key with the value this run
 // resolved for it, over the binary's declarative key registry (ADR 0035). Idle-only and modal like
@@ -330,7 +331,7 @@ func init() {
 		{name: "mcp", summary: "the MCP servers — transport, source, state and tools", whileRunning: true, noRecall: true, run: bareVerb(Model.runMCPCommand)},
 		{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true, touchesServer: true, run: tokenVerb(Model.runModelCommand)},
 		{name: "new", summary: "start a fresh conversation (same as /clear)", noRecall: true, run: bareVerb(Model.startNewSession)},
-		{name: "panel", summary: "set the side panel — on|off|auto, pin|unpin|hide <section>, or width <n>|reset (bare = report)", takesArgs: true, whileRunning: true, parseArgs: verbGrammar(parsePanel), run: typedVerb(Model.runPanelCommand)},
+		{name: panelVerb, summary: "set the side panel — on|off|auto, pin|unpin|hide <section>, or width <n>|reset (bare = report)", takesArgs: true, whileRunning: true, parseArgs: verbGrammar(parsePanel), run: typedVerb(Model.runPanelCommand)},
 		{name: "redo", summary: "put back what the last /undo removed (bare = preview)", takesArgs: true, parseArgs: verbGrammar(parseRedo), run: typedVerb(Model.runRedo)},
 		{name: "rename", summary: "rename this session (bare = ask the model)", takesArgs: true, run: tokenVerb(Model.runRename)},
 		{name: "schedule", summary: "run a prompt on a cycle (bare = list what is live)", takesArgs: true, whileRunning: true, run: restVerb(Model.runSchedule)},
