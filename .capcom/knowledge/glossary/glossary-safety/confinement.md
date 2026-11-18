@@ -16,7 +16,8 @@ is why that dir is the one target Apogee's own writers run on in every mode, Pla
 included (ADR 0012's second loosen, 2026-09-14) — for its own in-process write tools, **url-safety
 for its own network tools**, **and the argv Apogee builds itself for its own read-side git tools** (`git_status`,
 `git_log`, `git_diff_range`, `git_show` — the **RO-subproc** class: hooks and fsmonitor off, a repository whose
-config names a program git would run refused outright, a scrubbed child environment, nothing
+config names a program git would run refused outright — save a repo-local merge driver, which is neutralised
+on every call so that only a content merge is refused (ADR 0012, amendment 2026-11-18) — a scrubbed child environment, nothing
 written, so the call is bounded without a box). A third-party tool of any of those kinds, whose
 scoping Apogee cannot vouch for, gates instead of running unsupervised. It is a **capability
 matrix, not a one-bit flag**: each backend reports what it can enforce (`fs-write`, `network-egress`,

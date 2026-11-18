@@ -3341,7 +3341,9 @@ not found in /usr/bin, /bin, /usr/local/bin or /run/current-system/sw/bin`).
 **The hardened git reads run free in every mode, and no fence applies to them.**
 `git_status`, `git_log`, `git_diff_range` and `git_show` build every argument themselves, run with
 hooks and fsmonitor off, refuse a repository whose own config names a program git would
-run, and write nothing to your tree, index or repository — so they are read-only by
+run (a repo-local merge driver aside: that one is neutralised on every call, and only a content
+merge is refused — see [Git actions](commands.md#git-actions--git-and-the-footers-git-segment) for
+the footer's `git refused` marker and the global-config workaround), and write nothing to your tree, index or repository — so they are read-only by
 construction and behave like `read_file` on every rung: offered and run in Plan, no
 prompt in Ask-Before or Allow-Edits, and no box in Auto. `git_show` is the read-at-a-revision
 among them — a file as it was at a commit, branch or tag, rendered the way `read_file` renders

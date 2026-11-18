@@ -538,7 +538,9 @@ and `executeRun` installs the Confinement handle, so that child confines exactly
 call's would. Nothing about classification, gating or the lower rungs changes: on every other rung
 the child's bound is its **hardened argv** — apogee's own fixed `git add -A -- :(literal)<path>`,
 with the repository's command-valued config refused (`internal/gitexec`; a config probe that times
-out, wedges its drain or overruns the output cap refuses too, never passes) — which is
+out, wedges its drain or overruns the output cap refuses too, never passes; since 2026-11-18 a
+repo-local merge driver is neutralised with `-c merge.<x>.driver=` instead, and refuses only a
+content merge, which `git add` is not — ADR 0012 amendment 2026-11-18) — which is
 the blast radius `classWorkspaceWrite` already declares, so D5's "no Confine in the lower modes"
 stands. The runtime demote (D4) stays **Confine-only**: an unconfinable child here is the staging's
 own best-effort skip (a `(git staging skipped: …)` note), never a demote, because the file operation

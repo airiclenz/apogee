@@ -699,8 +699,17 @@ git's own message — and the footer's counts are read again at once, so they sh
 mode — choosing it is the approval — but through the same hardened git runner every other git apogee
 runs goes through: it never prompts (an ssh key not in your agent, or a remote that wants a typed
 password, fails with git's message in the note), and a repository apogee's git tools refuse — one
-whose own config names a command to run — stays refused: it shows no git segment, and `/git`
-answers `no git here — git actions need a workspace in a git repository apogee can act on`.
+whose own config names a command to run — stays refused: the footer's git segment reads
+`git refused` in the footer's error colour instead of the branch, the first time apogee sees the
+refusal it notes the refusal sentence, which names the key, followed by `Move the key to your
+global git config if you trust it.`, and `/git` (or a click on the marker) answers with that
+sentence instead of opening the picker. Moving the key to your global git config (`git config --global …`, then
+`git config --unset …` in the repository) lifts the refusal, since your global config is yours and
+still applies. A repository whose own config names only a merge driver (`merge.<x>.driver`, such
+as capcom's `capcom-log`) is not refused: apogee neutralises the driver on every git call, so the
+segment and every action work, and only `rebase onto upstream` — the one action that runs a
+content merge — is refused, with a note naming the key. Outside any git repository `/git` answers
+`no git here — git actions need a workspace in a git repository apogee can act on`.
 **Repository hooks never run** on these acts, so no `pre-push` runs on a push (a git-lfs upload
 included), no `post-merge` on a pull and no `post-checkout` on a switch; when you rely on a hook,
 run that git in a shell. Your global git config still applies.

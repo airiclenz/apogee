@@ -102,9 +102,13 @@ git config --global merge.capcom-log.name "capcom Log merge"
 git config --global merge.capcom-log.driver "capcom merge-driver %O %A %B %P %S %X %Y"
 ```
 
-Always `--global`, never repo-local. `capcom init --merge-driver` prints these lines without
-the flag, but apogee's git tools refuse to run in a repository whose own config defines a
-`merge.*.driver` (`internal/gitexec`, `CommandConfigRefusal`).
+Prefer `--global`. `capcom init --merge-driver` prints these lines without the flag, and a
+repo-local driver works for apogee too: its git calls neutralise every `merge.<x>.driver` the
+repository's own config defines, so the git tools, the footer and its actions keep working, and
+only a content merge apogee would run itself (the footer's `rebase onto upstream`) is refused with
+a sentence naming the key (`internal/gitexec`, `MergeDriverRefusal`). Your own `git merge` and
+`git rebase` in a shell honour either one; the global definition is the one that also follows you
+into a fresh clone.
 
 **The commit-msg hook.** Hooks live in the tracked `.githooks/` directory, not `.git/hooks/`.
 It holds one hook, `commit-msg`, which refuses any commit message carrying an AI attribution

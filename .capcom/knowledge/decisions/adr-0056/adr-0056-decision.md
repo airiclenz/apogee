@@ -186,7 +186,15 @@ command-config refusal — every repo-local key whose value is a program git exe
 §2.4 process-tree teardown), and it runs OUTSIDE the call's
 confinement box — apogee's own bookkeeping is not the model's command. The 2 s timeout,
 workspace-root cwd and silent-skip-on-any-failure contract above are unchanged; a fenced or
-refused git is simply one more failure that skips the check. **Amended 2026-09-23:** the silent-skip
+refused git is simply one more failure that skips the check.
+
+> **Amended 2026-11-18 (git-refusal-silent-footer).** "Every repo-local key whose value is a program
+> git executes" no longer holds for one key: a repo-local `merge.<x>.driver` is neutralised with
+> `-c merge.<x>.driver=` on every git call, the snapshot's included, and refuses only an argv whose
+> job is a content merge; every other command-valued key still refuses the repository. See
+> `adr-0012-amend-1118`.
+
+**Amended 2026-09-23:** the silent-skip
 rule above governs the tree-mutation snapshot only; it no longer governs the commit-secrets
 pre-check, which ADR 0080 had taken from this decision. That pre-check now runs under one 30 s
 budget (`commitSecretsTimeout`) across all four shadow runs, and an expired budget or a git
