@@ -4267,6 +4267,8 @@ func TestTranscriptWritersBumpTheGeneration(t *testing.T) {
 		{"setTaskListOpen", func(tr *transcript) { tr.setTaskListOpen(true) }},
 		{"setToolsOpen", func(tr *transcript) { tr.setToolsOpen(true) }},
 		{"setToolsFoldOver", func(tr *transcript) { tr.setToolsFoldOver(3) }},
+		{"setToolsAutoCollapse", func(tr *transcript) { tr.setToolsAutoCollapse(true) }},
+		{"setTurnLive", func(tr *transcript) { tr.setTurnLive(true) }},
 		{"setExpanded", func(tr *transcript) { tr.setExpanded(3, true) }},
 		{"toggleExpanded", func(tr *transcript) { tr.toggleExpanded(3) }},
 		{"setTypeExpanded", func(tr *transcript) { tr.setTypeExpanded(3, true) }},

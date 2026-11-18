@@ -947,12 +947,14 @@ func (m *Model) watchRunning() {
 }
 
 // watchIdle shows the watched run idle: its activity board falls and its thinking commits, as
-// finishWorker does for the watcher's own run.
+// finishWorker does for the watcher's own run — and its Turn's last umbrella settles, since a
+// watched Turn never reaches finishWorker (transcript.setTurnLive).
 func (m *Model) watchIdle() {
 	m.acts = nil
 	m.thinking.commitAll()
 	m.lastEsc = time.Time{}
 	m.state = stateIdle
+	m.transcript.setTurnLive(false)
 }
 
 // watchLegend is the prompt box's invitation while watching: once the owner has ended it carries

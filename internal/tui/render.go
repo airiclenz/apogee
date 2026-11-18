@@ -978,11 +978,13 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 	// over exactly them. Its per-entry state is in the paint key already: blockKey spans the
 	// whole umbrella and spanFlags packs both levels — a member's expanded at bit 0 and a run
 	// head's typeExpanded at bit 2 — so opening either level is a different key and a fresh
-	// paint (paintcache.go). Its FOLD is answered by its size (umbrellaFolded): a large umbrella —
-	// more type rows than the threshold (umbrellaIsLarge) — folds to its header line under the one
-	// shared preference (toolsOpen), a small one on its head entry's own flag, and both answers ride
-	// the block into the key (paintKey.large/folded) so a threshold edit, a preference flip or the
-	// head flag's move is a fresh paint too.
+	// paint (paintcache.go). Its FOLD is the one resolution umbrellaFoldBy states: under
+	// auto-collapse a settled, untouched umbrella is folded first; otherwise its size decides — a
+	// large umbrella, more type rows than the threshold (umbrellaIsLarge), folds to its header line
+	// under the one shared preference (toolsOpen), a small one on its head entry's own flag — and the
+	// resolved answer rides the block into the key (paintKey.large/folded), so a settle (a later
+	// entry, the Turn's end, a child's report), a threshold edit, a preference flip or the head
+	// flag's move is a fresh paint too.
 	if sup := toolSuperGroup(t.entries, head); len(sup) > 0 {
 		calls := sup.calls()
 		ins := root.appendInputs(buf[:0], t.entries[head:head+calls])

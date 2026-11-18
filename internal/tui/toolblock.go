@@ -145,9 +145,10 @@ const (
 //     rows' glyphs stand in — ▼ while the rows are showing and ▶ while the umbrella stands folded
 //     to its header line, nothing else on the row differing — and the header line is marked
 //     targetUmbrella whether small or large, open or shut, live or done, so a click or ⏎ there
-//     always has a fold to answer with. Which fold it is, the umbrella's SIZE says
-//     ([transcript.umbrellaFolded]): a LARGE one — more type rows than `ui.tools-fold-over`
-//     ([transcript.umbrellaIsLarge]) — follows the shared `ui.tools-open` preference, a SMALL one
+//     always has a fold to answer with. Which fold it is, [transcript.umbrellaFoldBy] says: under
+//     `ui.tools-auto-collapse` a SETTLED umbrella the reader has not touched is folded first;
+//     otherwise the umbrella's SIZE decides — a LARGE one, more type rows than `ui.tools-fold-over`
+//     ([transcript.umbrellaIsLarge]), follows the shared `ui.tools-open` preference, a SMALL one
 //     its head entry's own session-only flag; the painter asks only for the answer (fold.folded).
 //   - FOLDED, an umbrella paints its header line alone, its star live while a call in it is still
 //     open exactly as an open live header's is — nothing else on the line. The type-row and member

@@ -159,7 +159,13 @@ internal/tui/toolblock_test.go — TestUmbrellaHeaderBreaksDownByToolKind; cmd/a
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestE2EToolsUmbrella|TestE2EToolsFold|TestE2ESubAgentView' ./cmd/apogee/`
 **Commit:** `feat(tui): show the Group summary on every tools umbrella header`
 
-## 6. Derive settled and touched umbrellas and fold settled ones
+## 6. Derive settled and touched umbrellas and fold settled ones — ✅ DONE (2026-11-18)
+
+NOTES (2026-11-18): the one fold-resolution helper is `transcript.umbrellaFoldBy`, returning an `umbrellaFoldRule` (foldByNone / foldBySettled / foldByShared / foldByHead) so item 7's click and panel paths can branch on which rule holds the fold; `umbrellaFolded` switches on it. Settledness is `transcript.umbrellaSettled` (all calls done, and the first later entry at the run's depth or shallower is in the umbrella's own run; else top run: !turnLive, delegated run: its head done/finished via runHeadAt, falling back to !turnLive with no head).
+NOTES (2026-11-18): paintcache.go needed no code change — `paintKey.folded` already carries the resolved answer from resolveBlock, so a settle turns the key over (pinned by TestAutoCollapseSettleRepaints); only its comments were swept, as were render.go, toolblock.go and blocktarget.go.
+NOTES (2026-11-18): `transcript.reset` clears `turnLive` (not preserved like toolsOpen): clearWatchView builds the watch's fresh view from the watcher's transcript with state stateIdle, so a preserved flag from a running own Turn would hold the watched session's last umbrella open; /clear runs at idle. `toolsAutoCollapse` is preserved across reset like toolsOpen.
+NOTES (2026-11-18): no setters for `entry.umbrellaTouched` / `entry.umbrellaOwnFold` were added — writing them is item 7's; the touched tests set the fields directly.
+NOTES (2026-11-18): consequential edit — internal/tui/transcript_test.go: made necessary by the two new transcript setters (setToolsAutoCollapse, setTurnLive), added to TestTranscriptWritersBumpTheGeneration's writer enumeration.
 
 **What:**
 **Goal:** With the transcript's auto-collapse flag on, an umbrella whose calls are all done and that is followed by a later entry in its run (or whose Turn — in a run view, whose child — is no longer running) and that the reader has not touched renders folded, whatever its size and `ui.tools-open`; a live umbrella, the last entry of a running Turn, or a touched one folds as today. With the flag off, folding is exactly today's. The flag defaults off; nothing in the binary sets it yet.

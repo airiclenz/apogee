@@ -215,9 +215,12 @@ type paintKey struct {
 
 	// large and folded are a Tools umbrella's fold, and nothing else's: whether the umbrella has
 	// more type rows than the threshold ([transcript.umbrellaIsLarge]) and whether it stands shut to
-	// its header line — under the shared preference (transcript.toolsOpen) when large, on its head
-	// entry's own flag (entry.umbrellaFolded) when small, one answer either way
-	// ([transcript.umbrellaFolded], reaching the key as fold.folded). Neither rides spanFlags, the
+	// its header line — settled and untouched under auto-collapse first, else under the shared
+	// preference (transcript.toolsOpen) when large, on its head entry's own flag
+	// (entry.umbrellaFolded) when small, one RESOLVED answer either way
+	// ([transcript.umbrellaFoldBy], reaching the key as fold.folded). A settle moves it with no flag
+	// flipped on the umbrella's own entries — a later entry appended past it, the Turn's end — which
+	// is one more reason it is keyed as the answer rather than its inputs. Neither rides spanFlags, the
 	// small fold's head flag deliberately included: both are named as the facts the paint moves on
 	// rather than as the facts they are derived from, because the shared preference and the
 	// threshold move a LARGE umbrella's fold with no entry flag flipped and no entry appended — a
@@ -499,8 +502,9 @@ func blockKey(shape blockShape, ins []paintInput, th theme, width int, blink, li
 
 // umbrellaFold is a Tools umbrella's fold as the paint key names it and the painter draws it: large
 // says the umbrella has more type rows than the threshold ([transcript.umbrellaIsLarge]) — the
-// condition under which it obeys the shared preference rather than its own head flag — and folded
-// says whichever of the two it obeys has it shut to its header line ([transcript.umbrellaFolded]).
+// condition under which, unless auto-collapse holds it folded as settled, it obeys the shared
+// preference rather than its own head flag — and folded says whichever rule it obeys has it shut to
+// its header line ([transcript.umbrellaFoldBy], [transcript.umbrellaFolded]).
 // The painter draws folded alone — every umbrella's header wears the fold's ▶/▼ and is a fold
 // target whatever its size (renderSuperGroup) — while large names which fold that is, so the key
 // still turns over when a threshold or preference edit carries the umbrella across the line.
