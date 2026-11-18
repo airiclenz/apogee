@@ -66,7 +66,11 @@ cmd/apogee/e2e_sidepanel_drag_test.go — TestE2ESidePanelDragResizesAndPersists
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestE2ESidePanelDrag' ./cmd/apogee/`
 **Commit:** `fix(tui): let the side panel width change while watching a session`
 
-## 2. Record the watch-mode width rule in the ADR and docs
+## 2. Record the watch-mode width rule in the ADR and docs — ✅ DONE (2026-11-18)
+
+NOTES (2026-11-18): consequential edit — .capcom/knowledge/decisions/adr-0110/adr-0110-amend-1108.md: made necessary by adr-0110-amend-1118 superseding (c)'s watch-mode sentence; a dated `> **Amended 2026-11-18**` pointer blockquote under (c), as 1109b/1110 already do under (a), with (c)'s own text left as written.
+NOTES (2026-11-18): no CHANGELOG entry for this docs item — item 1's entry already announces the user-facing change.
+NOTES (2026-11-18): layout.md states no watch-mode panel rule, so it needed no edit; the side-panel-layout.md pin bullet ("a click on a pin glyph writes nothing … flashes the watch refusal") already held and stays as written.
 
 **What:** Depends on item 1.
 **Goal:** `adr-0110-amend-1118` exists, supersedes `adr-0110-amend-1108` (c)'s watch-mode sentence (width is the viewer's own preference, like a section fold; pins stay refused), and is named on ADR 0110's Status line and reading-order list; no doc states the drag or `/panel width` is inert or refused while watching.

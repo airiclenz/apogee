@@ -1522,8 +1522,10 @@ left; `esc`, or typing your next message, leaves the mode
 ([commands](commands.md)).
 
 **Watching and resuming.** [Watching](sessions.md#watching-a-live-session) a session paints that
-session's panel, drawn by your own window and setting; `/panel` is not available while you watch,
-and the separator does not drag. A
+session's panel, drawn by your own window and setting. The width is your own too: dragging the
+separator, its double-click and `/panel width <n>` or `/panel width reset` work while you watch,
+exactly as outside a watch. The other `/panel` forms and a click on a pin glyph are not available
+while you watch. A
 resumed session's panel shows its stored task list, changed files and usage; its sub-agents section
 starts empty. `/clear` empties the panel, except the mcp section: the servers stay connected across
 `/clear` and a resume, so their rows stay. While watching, the mcp section shows the watched

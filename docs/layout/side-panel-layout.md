@@ -306,8 +306,9 @@ When the shown sections need more rows than the slot has below the column's blan
 - A **double-click** on the grip (two presses within 500 ms, the first moving nothing) resets the
   width to the default 44 and starts no drag.
 - The hover shape over the grip is the default arrow: there is no resize cursor (ADR 0106 admits
-  only `default`, `text` and `pointer`). A drag starts nowhere else, and the grip is inert while
-  watching a session.
+  only `default`, `text` and `pointer`). A drag starts nowhere else. While watching a session the
+  grip, its drag and its double-click work as outside a watch: the width is the viewer's own, like a
+  fold (`adr-0110-amend-1118`).
 - A drag-select that starts in the transcript stops at the separator; one that starts in the panel
   away from the grip selects nothing in v1.
 
@@ -383,8 +384,9 @@ conversation gives the panel back to the top level.
   also opens the column as the overlay, in navigation mode with the cursor on its first stop
   ("Below the threshold: the overlay") — unless the column has no stop, when it only reports.
 - Each write is saved to the global config as a pin-glyph click or a separator drag is; a failed save keeps the change
-  for the session and says `not saved`. The report answers mid-run, the writing forms wait for idle,
-  and the command is refused while watching a session.
+  for the session and says `not saved`. The report answers mid-run and the writing forms wait for
+  idle. While watching a session only `/panel width <n>` and `/panel width reset` run, as outside a
+  watch; bare `/panel` and every other form are refused with the watch refusal flash.
 - No key shows or hides the panel or sets its width: the keyboard reaches the panel's stops through
   navigation mode ("Keyboard"; ADR 0111 supersedes ADR 0110 decision 8), and the width changes by a
   drag or `/panel width`.
