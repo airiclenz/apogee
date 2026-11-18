@@ -240,7 +240,11 @@ internal/stubllm/log.go — lastToolResultName (`tool_result` matches the LAST m
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestE2EToolsAutoCollapse' ./cmd/apogee/`
 **Commit:** `test(e2e): drive settled tool umbrella auto-collapse`
 
-## 10. Document the Group summary and the auto-collapse rule
+## 10. Document the Group summary and the auto-collapse rule — ✅ DONE (2026-11-18)
+
+NOTES (2026-11-18): no CHANGELOG entry — items 3, 5, 7 and 8 already carry the user-facing entries for the setting, the header and the collapse; this item only documents them.
+NOTES (2026-11-18): side-panel-layout.md mock-up redrawn with the umbrella folded to `✦ Read 1 file, edited 1 file +12 −4 ⋯ ▶` (settled, untouched); the left column's later rows move up two rows, the panel column and scroll-bar column unchanged.
+NOTES (2026-11-18): left as historical — tool-layout.md's dated 2026-09-03 note ("the umbrella's breakdown" tone) and the two addenda files themselves (adr-0035-addendum-0917/0918), which the amendment and ADR 0035's Status line name as partly superseded; docs/manual/commands.md's "click that folds or opens … a large Tools umbrella (ui.tools-open)" stays true and was not changed.
 
 **What:** Depends on item 9.
 **Goal:** `docs/layout/tool-layout.md` specifies the Group summary header (phrases, distinct counts, diffstat, failed/denied, live verb, width fallback) and the settled/touched auto-collapse rule; `docs/manual/configuration.md` explains `ui.tools-auto-collapse`; `adr-0035-amend-1118` records that auto-collapse sits above the size rule for settled umbrellas (partly superseding `adr-0035-addendum-0918`'s "size alone") and the three owner calls, named on ADR 0035's Status line and reading list; a **Group summary** glossary Note exists under `glossary-context` beside `tool-summary`.

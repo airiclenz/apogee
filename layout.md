@@ -1010,17 +1010,28 @@ preview of a checklist would fold away exactly the rows the reader keeps glancin
 state is ONE state shared by every task-list card in the transcript — a click on any of them, or
 `enter` at the block cursor, toggles them all — and it is remembered across sessions in
 `ui.task-list-open`. The `✦ Tools` umbrella is the second block that folds to its
-header, and every umbrella does (2026-09-18): it paints its counted header alone under a `▶`, or
-open under a `▼` over every type row, and a click on the header, or `enter` at the block cursor on
-it, flips it, the type rows and members a reader had opened surviving beneath the fold. Size alone
-decides whose state that flip is. A **large** umbrella — more type rows than `ui.tools-fold-over`
+header, and every umbrella does (2026-09-18): it paints its header alone under a `▶`, or open under
+a `▼` over every type row, and a click on the header, or `enter` at the block cursor on it, flips
+it, the type rows and members a reader had opened surviving beneath the fold. Every umbrella header
+— open, folded, running or settled — reads as its **Group summary** (2026-11-18): what its calls
+did as verb phrases in the order each kind first ran, `✦ Read 3 files, ran 4 commands, edited 2
+files +18 −5 · 1 failed`, with the edits' summed diffstat in the diff colours and the failed and
+denied counts in the failure red, a live verb (`Reading 2 files`) while a call of that kind is in
+flight, and a width fallback that ends at `Tools (N calls)` (`docs/layout/tool-layout.md`,
+Vocabulary). Which fold holds an umbrella is decided in order. First, with `ui.tools-auto-collapse`
+on (the default), a **settled** umbrella — every call returned, and a later entry of its run placed
+after it or its run over — that the reader has not **touched** (clicked, or opened anything inside)
+is folded whatever its size and whatever `ui.tools-open` says; a click on it opens that one alone
+and writes nothing, and touched is session-only view state, so a resumed session shows every
+settled umbrella collapsed. Otherwise — a live umbrella, a touched one, or auto-collapse off — size
+decides whose state the flip is. A **large** umbrella — more type rows than `ui.tools-fold-over`
 (default `5`; `0` makes none large), whatever the Turn is doing and wherever the umbrella sits, in
 the transcript or a run view, live or replayed — shares ONE state with every large umbrella in the
 transcript, the gesture on any of them toggling them all, remembered across sessions in
 `ui.tools-open` beside `ui.task-list-open`. A small umbrella folds on its own session-only flag,
 written nowhere, so it starts every session open; one that grows large follows the shared state from
 then on. A folded umbrella with a call in flight keeps the header an open one has — the blinking
-`✦`, the count climbing — and nothing else on the line. The start-up **session log** is the third
+`✦`, the live verb, the counts climbing — and nothing else on the line. The start-up **session log** is the third
 block that folds to its header (2026-11-12; "The start-up box", below): collapsed, it is its counted
 header alone in the Tasks card's grammar — `✦ Session log (4 notes)`, `(1 note)` for one, `▶` on
 the header, no note row and no `+N more lines` — and open it is every note uncapped under a `▼`.

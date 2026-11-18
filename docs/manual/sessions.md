@@ -182,14 +182,17 @@ Nor is what you had **open** on screen. Which blocks you had unfolded is the
 view's own state, and so is a **run view** — the full-transcript reading of one
 sub-agent you get by opening its row. A resumed session opens at the top level
 with everything folded shut, however deep into a delegation you were when it was
-written; the run itself is in the record, and one click opens it again. The two
-exceptions are the task-list card and the large Tools umbrella: their folds are
-preferences rather than view state, remembered in
-[`ui.task-list-open`](configuration.md#the-terminal-ui--ui) and
-[`ui.tools-open`](configuration.md#the-terminal-ui--ui) — so a resumed session
-paints every task-list card, and every `✦ Tools` umbrella with more
-type rows than `ui.tools-fold-over`, the way you last left them, not the way the
-record found them.
+written; the run itself is in the record, and one click opens it again. The
+exception is the task-list card: its fold is a preference rather than view
+state, remembered in [`ui.task-list-open`](configuration.md#the-terminal-ui--ui),
+so a resumed session paints every card the way you last left it, not the way
+the record found it. Every `✦ Tools` umbrella in a resumed session has
+finished, so with [`ui.tools-auto-collapse`](configuration.md#the-terminal-ui--ui)
+on (the default) each one is folded to its one summary line, whatever its
+size; which umbrellas you had opened is not remembered. With it off, an
+umbrella with more type rows than `ui.tools-fold-over` follows
+[`ui.tools-open`](configuration.md#the-terminal-ui--ui), the way you last left
+it, and a smaller one starts open.
 
 
 ## Watching a live session

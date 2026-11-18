@@ -71,20 +71,71 @@ closer is drawn today.
   entry between calls (narration, note, approval, error), and any block that
   groups with its own kind instead — a sub-agent block or group, a skill block
   or group. The umbrella header is ONE leader row,
-  `✦ Tools (3 Read, 4 Terminal) ⋯⋯ ▼`: the star, `Tools` in the tool label's
-  bold gold, then how the calls divide by tool kind — one `<n> <tool-type-header>`
-  entry per distinct tool, summed across every run of it (two Read runs a
-  Terminal run apart are one `Read` entry), numbered even at one (`1 Read`,
-  never bare `Read`), in the order each kind first ran. The whole
-  parenthetical — names, numbers and commas — is painted in the faint count
-  tone. A dotted leader of at least one dot runs from it to the fold's `▶`/`▼`
-  at the block's right edge, in the type rows' indicator column; open and
-  folded differ only in that glyph. Where the breakdown leaves no room for one
-  dot, the parenthetical falls back to the total, `(N calls)`; narrower still,
-  the row clips the way a type row's label does, so the header is always one
-  line. It forms **live**, the moment the second
-  groupable call is placed; the running call is its last row, wearing the
-  spinner star. Only a LONE groupable call stays a standalone block.
+  `✦ Read 3 files, ran 4 commands ⋯⋯ ▼`: the star, then the umbrella's
+  **Group summary** (below) — what its calls did, in plain words — and a
+  dotted leader of at least one dot from it to the fold's `▶`/`▼` at the
+  block's right edge, in the type rows' indicator column; open and folded
+  differ only in that glyph, so every umbrella — open, folded, running or
+  settled — reads the same one line (2026-11-18; until then the header was the
+  tool-type breakdown `✦ Tools (3 Read, 4 Terminal)`). It forms **live**, the
+  moment the second groupable call is placed; the running call is its last
+  row, wearing the spinner star. Only a LONE groupable call stays a standalone
+  block.
+- **Group summary** — the umbrella header's text, built in the TUI from the
+  members' views and their Tool summaries (nothing is added to the engine or
+  the record), in this order: the **verb phrases**, then the **diffstat**,
+  then the **outcome counts**:
+
+  ```text
+  ✦ Read 3 files, searched 1 pattern, ran 4 commands, edited 2 files +18 −5 ⋯ ▶
+  ✦ Read 3 files, ran 4 commands · 1 failed ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
+  ✦ Reading 2 files, ran 1 command ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+  ```
+
+  - **Phrases.** Each tool's presenter row names the phrase its calls count
+    under, and the summary merges calls by phrase, never by label, so tools
+    doing the same kind of work read as one phrase:
+
+    | Phrase (settled / live) | Tools | Counts |
+    |---|---|---|
+    | read / reading N files | `read_file` | distinct paths |
+    | edited / editing N files | `write_file`, `edit_existing_file`, `single_find_and_replace`, `multi_find_and_replace` | distinct paths |
+    | listed / listing N dirs | `list_dir` | distinct paths |
+    | searched / searching N patterns | `grep`, `find_files` | calls |
+    | ran / running N commands | `terminal`, `python_exec` | calls |
+    | fetched / fetching N pages | `web_fetch`, `http_request` | calls |
+    | copied / moved / deleted N files | `copy_file`, `move_file`, `delete_file` (one phrase each) | calls |
+    | made / making N commits | `git_commit` | calls |
+    | checked / checking git | `git_status`, `git_log`, `git_show`, `git_branch`, `git_diff_range` | no number |
+
+    A write and an edit both read "edited" — there is no "created" (owner,
+    2026-11-18). A **distinct** phrase counts the distinct `path` arguments
+    of its calls, so three reads of one file read `1 file`; the others count
+    calls. One is `1 file`, never `1 files`. Any other tool — a built-in with
+    no phrase, or an MCP tool — counts as `<Label> ×N` (`Diff Preview ×2`,
+    `github · search ×1`). The phrases follow the order each one **first
+    ran**, joined by `, `, and the first word is capitalised.
+  - **Live verb.** A phrase with a call still in flight takes its present
+    participle (`Reading 2 files`) until that call's result lands; the `✦`
+    blinks as on any live block.
+  - **Diffstat.** The `+A −R` summed over the `edited` phrase's members whose
+    slot carries a diffstat, painted on the diff colours its edits' bodies use
+    (`diff-added` / `diff-removed`). A write's line count, a multi-replace's
+    `N changes` and a failed edit's verdict carry none and are skipped; no
+    diffed edit, no diffstat.
+  - **Outcome.** `· N failed` and `· N denied`, each only when non-zero, in
+    the failure red, so a group that went wrong shows it without being
+    opened. A call the approver or a Reaction refused counts as **denied**,
+    never as failed. All succeeded: no marker.
+  - **Width fallback.** Where the whole summary leaves no room for one dot,
+    detail goes in a fixed order: the phrases after the first two give way to
+    ` and K more` (`Read 3 files, ran 4 commands and 2 more`), then the
+    diffstat goes, then the phrases give way to the bare total `Tools (N
+    calls)` — `Tools` in the tool label's bold gold, the parenthetical in the
+    faint count tone — and last that head is clipped the way a type row's
+    label is. The outcome counts survive every step and are the last thing
+    the clip takes, so the header is always one line and a failure stays on
+    it as long as anything does.
 - `<tool-header>` — short human label of one call ("Read", "Terminal", …).
 - `<tool-type-header>` — the tool's label on a type row, standing for the whole run; plurality is carried by `(<group-count>)`.
 - `<tool-details>` — the one-line collapsed summary of one call. Usually the key argument (path, pattern, command). It may differ from what opening the call shows: a sub-agent shows its *name* here and its task/result inside its run view.
@@ -170,34 +221,56 @@ closer is drawn today.
   takes the ordinary targetless shape instead, so a failure is never folded
   away.
 - The umbrella is the second block that folds to its **header alone**, and
-  EVERY umbrella does (2026-09-18). Every `✦ Tools` header wears `▶`/`▼` at
+  EVERY umbrella does (2026-09-18). Every umbrella header wears `▶`/`▼` at
   its leader's edge; a click on it, or `enter` at the block cursor on it, folds
-  the umbrella to `✦ Tools (3 Read, 4 Terminal) ⋯ ▶` — no type row beneath, no
-  `+N more lines`, the breakdown saying what the fold holds — or opens it again onto its type
-  rows under a `▼`, painted exactly as before. The fold covers the rows:
-  whatever type rows and members a reader had opened stay open beneath the
-  header and are there again when it unfolds. The rule has three parts, and
-  **size alone** drives them. (1) An umbrella is **large** when it has more
-  type rows than `ui.tools-fold-over` (default `5`; `0` makes no umbrella
-  large) — and nothing else enters: not whether the Turn is running, not
-  whether every call has returned, so the answer is the same at every depth,
-  in every view, live or replayed. (2) A large umbrella's fold is ONE state
-  shared by every large umbrella in the transcript: the gesture on any large
-  header toggles them all, and the state is remembered across sessions in
-  `ui.tools-open` (default `false` — a large umbrella starts folded; "Grouped
-  tools folded (large umbrella)" below). (3) A **small** umbrella folds on
-  its own flag — session-only, never written to `config.yaml`, never
-  serialized, so every small umbrella starts a session open ("Grouped tools
-  folded (small umbrella)" below); one that grows large follows the shared
-  preference from then on, its own flag ignored while it is large. A folded
-  umbrella with a call in flight paints its header exactly as an open one
-  with a call in flight does — the blinking `✦`, the breakdown's counts
-  climbing — and nothing else on the line. (Supersedes the 2026-09-17 rule,
-  plan `docs/plans/2026-09-17 - 01`, under which only a large umbrella whose
-  Turn had settled folded, and a small one or one with a call in flight wore a
-  bare header whose click closed its open children — plan
-  `docs/plans/2026-09-18 - 01`. Design call 9, which had the umbrella never
-  fold to one line, was superseded then.)
+  the umbrella to its Group summary line, `✦ Read 3 files, ran 4 commands ⋯ ▶`
+  — no type row beneath, no `+N more lines`, the summary saying what the fold
+  holds — or opens it again onto its type rows under a `▼`, painted exactly as
+  before. The fold covers the rows: whatever type rows and members a reader
+  had opened stay open beneath the header and are there again when it unfolds.
+  Which fold holds an umbrella is decided in this order (2026-11-18,
+  [`adr-0035-amend-1118`](../../.capcom/knowledge/decisions/adr-0035/adr-0035-amend-1118.md)):
+  (1) **Auto-collapse.** With `ui.tools-auto-collapse` on (the default), a
+  **settled** umbrella the reader has not **touched** is folded, whatever its
+  size and whatever `ui.tools-open` says — a finished group is one row unless
+  you opened it. *Settled* is derived at paint and stored nowhere: every call
+  in it has returned, AND either a later entry of its own run follows it — the
+  model's next narration or reply, a note, the next user message, a further
+  block — or nothing follows and its run is over: the Turn, for the
+  conversation; the child, inside a sub-agent's run view. An umbrella still
+  running, or the last entry of a running Turn, is not settled; a replayed one
+  always is, so a resumed session shows every umbrella collapsed. *Touched*
+  is in-session view state, never written and never serialized: the reader
+  clicked or `enter`ed its header, opened a type row, a member or a member's
+  body in it, or jumped to one of its members from the side panel. A click on
+  an auto-collapsed umbrella opens **that one alone**, on a fold of its own,
+  and writes nothing — not `ui.tools-open`, whatever the umbrella's size —
+  and every later click flips that same fold. (2) Everything else — a live
+  umbrella, a touched one, and every umbrella with `ui.tools-auto-collapse`
+  off — folds **by size**, the rule as it stood before: an umbrella is
+  **large** when it has more type rows than `ui.tools-fold-over` (default `5`;
+  `0` makes no umbrella large) — and nothing else enters that answer, so it is
+  the same at every depth, in every view, live or replayed. A large
+  umbrella's fold is ONE state shared by every large umbrella in the
+  transcript: the gesture on any large header toggles them all, and the state
+  is remembered across sessions in `ui.tools-open` (default `false` — a large
+  umbrella starts folded; "Grouped tools folded (large umbrella)" below). A
+  **small** umbrella folds on its own flag — session-only, never written to
+  `config.yaml`, never serialized, so every small umbrella starts a session
+  open ("Grouped tools folded (small umbrella)" below); one that grows large
+  follows the shared preference from then on, its own flag ignored while it
+  is large. A touched umbrella falls back to its size's fold unless the reader
+  gave it a fold of its own (the click above), which it then keeps at any
+  size. A folded umbrella with a call in flight paints its header exactly as
+  an open one with a call in flight does — the blinking `✦`, the live verb,
+  the counts climbing — and nothing else on the line. (Supersedes the
+  2026-09-17 rule, plan `docs/plans/2026-09-17 - 01`, under which only a
+  large umbrella whose Turn had settled folded, and a small one or one with a
+  call in flight wore a bare header whose click closed its open children —
+  plan `docs/plans/2026-09-18 - 01`. Design call 9, which had the umbrella
+  never fold to one line, was superseded then. The 2026-09-18 "size alone"
+  rule now governs only live and touched umbrellas — plan
+  `docs/plans/2026-11-18 - 00`.)
 - The start-up **session log** is the third block that folds to its **header
   alone** (2026-11-12; `layout.md`, "The start-up box"). It is no tool call —
   it gathers the routine notes a session starts with — but it wears the
@@ -286,7 +359,7 @@ One row per consecutive run, in time order. A row's
 `<tool-top-level-details>` aggregates its run.
 
 ```text
-✦ Tools (<n> <tool-type-header>, …) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+✦ <group-summary> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┕ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
@@ -299,14 +372,14 @@ over a single type row. It keeps the row count of the retired `✦ Terminal (4)`
 group it replaced — one header, one row — and reads the same everywhere.
 
 ```text
-✦ Tools (4 Terminal) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+✦ Ran 4 commands ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
   ┕ Terminal (4) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ exit 0 ▶
 ```
 
 ## Grouped tools expanded 1st step (super-group)
 
 ```text
-✦ Tools (<n> <tool-type-header>, …) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+✦ <group-summary> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▼
   │ ┝ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
@@ -318,7 +391,7 @@ group it replaced — one header, one row — and reads the same everywhere.
 ## Grouped tools expanded 2nd step (super-group)
 
 ```text
-✦ Tools (<n> <tool-type-header>, …) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+✦ <group-summary> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▼
   │ ┝ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
@@ -334,26 +407,43 @@ group it replaced — one header, one row — and reads the same everywhere.
 ## Grouped tools folded (large umbrella)
 
 A LARGE umbrella — more type rows than `ui.tools-fold-over`, whatever the Turn
-is doing and wherever the umbrella sits — folds to its header alone under the
-shared `ui.tools-open`; the `▶` sits on the header and no type row is painted
+is doing and wherever the umbrella sits — that auto-collapse is not holding
+(live, touched, or `ui.tools-auto-collapse` off) folds to its header alone
+under the shared `ui.tools-open`; the `▶` sits on the header and no type row is painted
 beneath it. Open, it is the "Grouped tools collapsed (super-group)" shape
 above with its `▼` at the leader's edge. With a call in flight the `✦` blinks as it
 does on an open header; the line carries nothing else.
 
 ```text
-✦ Tools (<n> <tool-type-header>, …) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
+✦ <group-summary> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
 ```
 
 ## Grouped tools folded (small umbrella)
 
-A SMALL umbrella — type rows at or under `ui.tools-fold-over` — folds to the
-same one line from a click or `enter` on its header, on a flag of its own:
-in-session only, written nowhere, so it starts every session open. The two
-folded shapes are indistinguishable on screen; only whose state the fold is
-differs.
+A SMALL umbrella — type rows at or under `ui.tools-fold-over` — that
+auto-collapse is not holding folds to the same one line from a click or `enter`
+on its header, on a flag of its own: in-session only, written nowhere, so it
+starts every session open. The three folded shapes — this one, the large
+umbrella above and the settled umbrella below — are indistinguishable on
+screen; only whose state the fold is differs.
 
 ```text
-✦ Tools (1 Read, 1 Grep) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
+✦ Read 1 file, searched 1 pattern ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
+```
+
+## Grouped tools folded (settled umbrella)
+
+With `ui.tools-auto-collapse` on (the default), an umbrella of ANY size folds
+to its Group summary line on its own once it is **settled** — every call
+returned, and a later entry of its run placed after it or its run over — and
+the reader has not **touched** it ("Fold states and interaction" above). It
+needs no click and writes nothing; `ui.tools-open` does not reach it. A
+failure stays visible on the one row, and a click or `enter` on it opens that
+umbrella alone, as view state, leaving every other umbrella and the shared
+preference as they were.
+
+```text
+✦ Read 3 files, ran 4 commands, edited 2 files +18 −5 · 1 failed ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
 ```
 
 ## Grouped Sub-agents

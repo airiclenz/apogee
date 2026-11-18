@@ -20,17 +20,17 @@ its detail — as does `⏎` on it in navigation mode, the keyboard's way into t
 ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ││    ⣾ repo-scout      running 01:12s  41%
 ✦ I'll start by mapping the call sites…              ││    ✓ planner         done       38s  27%
                                                      ││
-✦ Tools (1 Read, 1 Edit) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼ ┃│  ○ Tasks (1/3) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
-  ┝ Read ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ line one ▶ ┃│    ✓ map call sites
-  ┕ Edit ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ +12 −4 ▶ ┃│    ▸ split the tokenizer
-                                                     ┃│    ○ port the tests
-✦ Sub-agents (2)                                     ┃│
-  ┝ repo-scout ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 0 tool calls · 13k/31k ▶ ┃│  ○ Changed files (2) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
-  ┕ planner ✓ ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ done ▶ ┃│      internal/parse/parser.go     +12 −4
-                                                     ┃│    ↳ internal/parse/lexer_test.go +30 −0
-✦ The scout maps the tests while                     ┃│
-  I split the tokenizer into its                     ┃│  ○ Usage (62%) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
-  own file.                                          ┃│      20k/32k 62% ██████▎
+✦ Read 1 file, edited 1 file +12 −4 ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶ ┃│  ○ Tasks (1/3) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+                                                     ┃│    ✓ map call sites
+✦ Sub-agents (2)                                     ┃│    ▸ split the tokenizer
+  ┝ repo-scout ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 0 tool calls · 13k/31k ▶ ┃│    ○ port the tests
+  ┕ planner ✓ ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ done ▶ ┃│
+                                                     ┃│  ○ Changed files (2) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+✦ The scout maps the tests while                     ┃│      internal/parse/parser.go     +12 −4
+  I split the tokenizer into its                     ┃│    ↳ internal/parse/lexer_test.go +30 −0
+  own file.                                          ┃│
+                                                     ┃│  ○ Usage (62%) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+                                                     ┃│      20k/32k 62% ██████▎
                                                       │      prompt 4k · completion 300
                                                       │      cached 25%
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ refactor the parser ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔

@@ -1,0 +1,27 @@
+---
+title: "Group summary: the plain-words header of a Tools umbrella"
+refs: [docs/layout/tool-layout.md, internal/tui/groupsummary.go]
+---
+
+**Group summary**:
+The one-line **header of a `✦ Tools` umbrella**, saying in plain words what the umbrella's calls
+did: `✦ Read 3 files, ran 4 commands, edited 2 files +18 −5 · 1 failed`. Every umbrella wears it,
+open, folded, running or settled, and it is the whole row a settled umbrella folds to under
+`ui.tools-auto-collapse` (`adr-0035-amend-1118`). It reads, in order: **verb phrases**, one per
+kind of work in the order each kind first ran, a phrase being what a tool's presenter row names
+(`read_file` "read N files"; `grep` and `find_files` one "searched N patterns"; the four writing
+tools one "edited N files", never "created"; the git readers "checked git"), counting the distinct
+paths where the phrase says so (three reads of one file read 1 file), and taking its live verb
+(`Reading 2 files`) while one of its calls is in flight; a tool with no phrase, an MCP tool among
+them, reads `<Label> ×N`. Then the **diffstat** summed over the diffed edits, and last the
+**outcome**: `· N failed` and `· N denied` in the failure red, a refused call counting as denied.
+Where the row is too narrow the detail goes in a fixed order (phrases after the first two become
+"and K more", then the diffstat, then the head falls back to `Tools (N calls)`, then it is
+clipped), the outcome counts last of all.
+It is **built in the TUI** from each member's view and its **Tool summary** (`tool-summary`), the
+structured facts already on the result: display data a host derives, never sent to the model,
+never written to the session record, and no engine or `domain.ToolSummary` field of its own, so
+the engine stays Driver-neutral (ADR 0031). Spec: `docs/layout/tool-layout.md`, Vocabulary.
+Not to be confused with the **Tool summary** of one call, which is its input, nor with a type
+row's aggregate outcome slot.
+_Avoid_: "tools breakdown" (the retired `Tools (3 Read, 4 Terminal)` header), "group stats".

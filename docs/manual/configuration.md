@@ -35,7 +35,7 @@ aside, each such write is a single key: a committed `/settings` edit; the `serve
 entry, the `launch-profile:` — a `/model` pick writes into that entry when `remember-model:`
 is on; the `ui.color-scheme` a `/color-scheme <name>` switch saves; the `ui.task-list-open`
 flip a click on a task-list card records, and the `ui.tools-open` flip a click on a large Tools
-umbrella records the same way; the removal of one of your global Allow rules from `/settings`'
+umbrella records the same way (never a click on one `ui.tools-auto-collapse` folded); the removal of one of your global Allow rules from `/settings`'
 *Allow rules* section; the consented move
 of a `servers:` entry's retired `sub-agents: true` flag onto `sub-agents-server:`; and the
 one-time migration of a config still written in the retired schema — which copies the file
@@ -1221,10 +1221,14 @@ silently, so the next session starts the way you left this one; only a write tha
 mentioned. The row shows in `/settings` like the rest, and a hand-edit applies live.
 
 `ui.tools-open` and `ui.tools-fold-over` do the same for the `✦ Tools` umbrella a burst
-of tool calls is grouped under. Every umbrella folds to its one header line — `▶` folded, `▼`
-open — from a click on that header, whether the Turn is running or finished, in the transcript or
-inside a sub-agent's run view. An umbrella with more type rows than `ui.tools-fold-over` is *large*,
-and a large umbrella is folded unless `ui.tools-open` is on. `ui.tools-open` is **off by default**,
+of tool calls is grouped under. Every umbrella's header is its *Group summary* — what the calls
+did, in plain words: `✦ Read 3 files, ran 4 commands, edited 2 files +18 −5 · 1 failed`, the
+diffstat summed over the edits and any failed or denied calls counted in red. Every umbrella folds
+to that one header line — `▶` folded, `▼` open — from a click on that header, whether the Turn is
+running or finished, in the transcript or inside a sub-agent's run view. An umbrella with more type
+rows than `ui.tools-fold-over` is *large*, and — while it is still running, once you have clicked
+it or opened one of its tools, or whenever `ui.tools-auto-collapse` below is off — a large umbrella
+is folded unless `ui.tools-open` is on. `ui.tools-open` is **off by default**,
 so a large umbrella starts folded out of the box; like `ui.task-list-open` it is one choice for
 every large umbrella in the session, and it is written as well as read: clicking a large umbrella's
 header folds — or opens — them all and records the flip in `config.yaml` silently. A small umbrella
@@ -1233,12 +1237,16 @@ folds on its own, for this session only: nothing is written, and it starts the n
 `ui.tools-open` (each still folds on its own from its header), and a value below zero is refused —
 in `/settings` at the keystroke, in the file at startup.
 
-`ui.tools-auto-collapse` — **on by default** — folds a *settled* umbrella, one whose calls have
-all finished and whose Turn is over, to its one summary line, whatever its size and whatever
-`ui.tools-open` says, until you click it or act on one of its tools. Opening a settled umbrella
-that way is for this session only: nothing is written. Turn it off and every umbrella follows
-`ui.tools-open` and `ui.tools-fold-over` alone. The row shows in `/settings`, and a hand-edit
-applies live.
+`ui.tools-auto-collapse` — **on by default** — folds a *settled* umbrella to its one summary
+line, whatever its size and whatever `ui.tools-open` says. An umbrella is settled once all its
+calls have finished and the conversation has moved past it — the model's next reply, a note or
+your next message comes after it — or the Turn has ended; one still running, or the last thing a
+running Turn has done, stays as it is. An umbrella you have touched — clicked its header, or opened
+one of its tools — is left alone from then on. Clicking a settled umbrella opens that one only, for
+this session: nothing is written, not even `ui.tools-open`, and a resumed session shows every
+umbrella folded again. Turn it off and every umbrella follows `ui.tools-open` and
+`ui.tools-fold-over` alone; the summary header stays either way. The row shows in `/settings`, and
+a hand-edit applies live.
 
 `ui.pointer-shapes` — **off by default** — lets apogee change the mouse pointer to show what a
 click does where it rests: an I-beam over the input box and the transcript's text, a hand over a

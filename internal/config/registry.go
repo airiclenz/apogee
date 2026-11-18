@@ -1162,7 +1162,8 @@ var KeyRegistry = bindRows([]Key{
 		Path: "ui.tools-open", Kind: KindBool, Default: "false",
 		Editable: true,
 		Desc: "Large Tools umbrellas (more type rows than `ui.tools-fold-over`) start open; " +
-			"a click on one folds them all and records the choice here.",
+			"a click on one folds them all and records the choice here. A settled umbrella " +
+			"`ui.tools-auto-collapse` folded ignores it.",
 		field: uiBool(domain.UIKeyToolsOpen, func(u *domain.UIPrefs) *bool { return &u.ToolsOpen },
 			func(u *uiConfig) *bool { return u.ToolsOpen }),
 	},
@@ -1174,7 +1175,8 @@ var KeyRegistry = bindRows([]Key{
 		Path: "ui.tools-fold-over", Kind: KindInt, Default: "5",
 		Editable: true,
 		Validate: validateToolsFoldOver,
-		Desc:     "Type rows a Tools umbrella may show before it is large and obeys `ui.tools-open`; 0 makes none large.",
+		Desc: "Type rows a Tools umbrella may show before it is large and obeys `ui.tools-open` " +
+			"(unless `ui.tools-auto-collapse` folds it settled); 0 makes none large.",
 		// A pointer on disk: the explicit `0` ("never") is told from an absent key, which keeps the
 		// default; a negative count is UIPrefs.Validate's to refuse, not the load's.
 		field: uiField(domain.UIKeyToolsFoldOver, strconv.Atoi, strconv.Itoa,

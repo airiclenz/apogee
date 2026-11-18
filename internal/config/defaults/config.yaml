@@ -1144,18 +1144,21 @@ update-check: true
 # the way you left this one. Default on.
 #
 # `tools-open` and `tools-fold-over` do the same for the `✦ Tools` umbrella a burst of
-# tool calls is grouped under. Every umbrella folds to its one header line from a click on that
-# header, whether the Turn is running or finished. An umbrella with more type rows than
-# `tools-fold-over` is *large*, and a large umbrella is folded unless `tools-open` is true; clicking
+# tool calls is grouped under, whose header sums up what the calls did ("Read 3 files, ran 4
+# commands · 1 failed"). Every umbrella folds to that one header line from a click on that header,
+# whether the Turn is running or finished. An umbrella with more type rows than `tools-fold-over`
+# is *large*, and — while it is running, once you have clicked it or opened one of its tools, or
+# with `tools-auto-collapse` off — a large umbrella is folded unless `tools-open` is true; clicking
 # a large umbrella's header folds (or opens) every large umbrella and records the flip in
 # `tools-open`, silently, the way a task-list card does. A small umbrella folds on its own, for the
 # session only — nothing is written, and it starts the next session open. `tools-fold-over: 0` means
 # no umbrella is ever large, so none follows `tools-open`.
 # Defaults: `tools-open: false`, `tools-fold-over: 5`.
 #
-# `tools-auto-collapse` folds a *settled* umbrella — every call in it finished, its Turn over — to
-# its one summary line, whatever its size, until you click it or act on one of its tools; opening it
-# then is for this session only and writes nothing.
+# `tools-auto-collapse` folds a *settled* umbrella — every call in it finished, and the conversation
+# moved past it or its Turn over — to its one summary line, whatever its size and `tools-open`,
+# until you click it or open one of its tools; opening it then is for this session only and writes
+# nothing.
 # `false` leaves every umbrella to `tools-open` and `tools-fold-over` alone. Default on.
 #
 # `pointer-shapes` lets apogee change your mouse pointer to show what a click does where it rests:
