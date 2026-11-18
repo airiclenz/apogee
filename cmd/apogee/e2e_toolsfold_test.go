@@ -49,10 +49,14 @@ const (
 	// phase the pane found it, lit or blank, and an assertion that spelled the star would be right
 	// half the time.
 	toolsFoldLiveHeader = "Read 1 file, listed 1 dir, searched 1 pattern, running 1 command"
-	// The two configs under test: a threshold the fixture's three type rows exceed, and a threshold
-	// of 0, under which no umbrella is ever large. The small fold runs on the DEFAULT, no `ui:` at all.
-	toolsFoldOverTwoConfig  = "ui:\n  tools-fold-over: 2\n"
-	toolsFoldOverZeroConfig = "ui:\n  tools-fold-over: 0\n"
+	// The configs under test: a threshold the fixture's three type rows exceed, a threshold of 0,
+	// under which no umbrella is ever large, and the DEFAULT threshold the small fold runs on. Each
+	// switches `ui.tools-auto-collapse` off, because their subject is the size rule and
+	// `ui.tools-open`: under the default switch the settled umbrella would fold to its Group summary
+	// before either rule had a say.
+	toolsFoldOverTwoConfig     = "ui:\n  tools-fold-over: 2\n  tools-auto-collapse: false\n"
+	toolsFoldOverZeroConfig    = "ui:\n  tools-fold-over: 0\n  tools-auto-collapse: false\n"
+	toolsFoldOverDefaultConfig = "ui:\n  tools-auto-collapse: false\n"
 )
 
 // The umbrella's headers in each of its fold states: ▼ open on its type rows, ▶ folded to the
@@ -301,7 +305,7 @@ func TestE2EToolsUmbrellaFoldsWhileTheTurnRuns(t *testing.T) {
 }
 
 // TestE2EToolsUmbrellaSmallFoldsAlone is the small umbrella's own fold: at the default threshold
-// (no `ui:` at all) the three-row umbrella comes to rest OPEN as
+// (auto-collapse off, no other `ui:` key) the three-row umbrella comes to rest OPEN as
 // `✦ Read 1 file, listed 1 dir, searched 1 pattern ⋯ ▼`, a click on that header folds it to `▶`
 // with no type row
 // beneath it, and the home's config.yaml carries no `tools-open` line afterwards — a small
@@ -309,7 +313,7 @@ func TestE2EToolsUmbrellaFoldsWhileTheTurnRuns(t *testing.T) {
 func TestE2EToolsUmbrellaSmallFoldsAlone(t *testing.T) {
 	t.Parallel()
 
-	drv, sess := toolsFoldFrame(t, "")
+	drv, sess := toolsFoldFrame(t, toolsFoldOverDefaultConfig)
 	frame := drv.Frame()
 	_, y, ok := frame.Find(toolsFoldHeader)
 	if !ok {

@@ -201,7 +201,11 @@ internal/tui/mouse_test.go — TestLargeUmbrellasShareOneFold, modelWithLargeUmb
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestAutoCollapse|Umbrella|SidePanelTarget' ./internal/tui/`
 **Commit:** `feat(tui): exempt tool umbrellas the reader has touched from auto-collapse`
 
-## 8. Turn auto-collapse on from the setting
+## 8. Turn auto-collapse on from the setting — ✅ DONE (2026-11-18)
+
+NOTES (2026-11-18): consequential edit — internal/tui/tui.go: made necessary by seeding the transcript from Options.UI.ToolsAutoCollapse (the Options.UI comment lists what each fold key seeds and now names the switch).
+NOTES (2026-11-18): cmd/apogee/e2e_toolsfold_subagent_test.go needed no edit — its run-view fold tests launch on toolsFoldOverTwoConfig, which now carries `tools-auto-collapse: false`; TestE2EToolsUmbrellaSmallFoldsAlone moves from the empty config to a new toolsFoldOverDefaultConfig (auto-collapse off, default threshold), and runViewHome (TestE2ESubAgentView, golden t18) carries the same pin, so no golden was regenerated.
+NOTES (2026-11-18): besides the plan's one unit test (TestSettingsApplyLocalMovesToolsAutoCollapse: apply flips the switch and the cached paint moves, both ways), TestNewModelSeedsToolsAutoCollapse pins the start-up seed.
 
 **What:** Depends on items 3, 7.
 **Goal:** The TUI's auto-collapse flag follows `ui.tools-auto-collapse` at start-up, on a `/settings` edit and on a hand-edit reload; existing driven tests that assert a settled umbrella starts open pass, either pinned to `tools-auto-collapse: false` or re-expected.

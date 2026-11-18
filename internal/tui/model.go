@@ -843,10 +843,12 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// crosses as it is — the zero value is the folded card, never a default the seed leans on.
 	m.transcript.taskListOpen = opts.UI.TaskListOpen
 
-	// And the shared Tools umbrella fold with its threshold, the same way and for the same reasons:
-	// the paint reads both off the transcript, and /clear keeps the human's preference.
+	// And the shared Tools umbrella fold with its threshold and the auto-collapse switch, the same
+	// way and for the same reasons: the paint reads all three off the transcript, and /clear keeps
+	// the human's preference.
 	m.transcript.toolsOpen = opts.UI.ToolsOpen
 	m.transcript.toolsFoldOver = opts.UI.ToolsFoldOver
+	m.transcript.toolsAutoCollapse = opts.UI.ToolsAutoCollapse
 
 	// Give the transcript its block-paint cache (paintcache.go). It is built ONCE, here, and lives
 	// behind a pointer for the same reason ws is set before the first fold: every by-value copy of

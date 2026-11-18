@@ -166,6 +166,68 @@ func TestSettingsApplyLocalLandsEveryUIKeyThroughSet(t *testing.T) {
 	}
 }
 
+// TestSettingsApplyLocalMovesToolsAutoCollapse: `ui.tools-auto-collapse` is a paint input, so its
+// local apply — the one a `/settings` edit and a re-read of a hand-edited file both take — lands on
+// the transcript's switch and the very next paint folds a settled, untouched umbrella to its Group
+// summary row through the cached paint path; `false` gives the umbrella back its size fold, open.
+func TestSettingsApplyLocalMovesToolsAutoCollapse(t *testing.T) {
+	t.Parallel()
+
+	th := newTheme(scheme.Default())
+	m := newTestModel(t)
+	readCall(&m.transcript, "c1", "a.go", 1, 5, 0)
+	runCall(&m.transcript, "c2", "go test", "ok", 0)
+	m.transcript.addNote("saved") // settles the umbrella: a later entry of its run follows it
+	typeRows := []string{"┝ Read", "┕ Terminal"}
+	paint := func(m Model) string {
+		return ansiPattern.ReplaceAllString(strings.Join(m.transcript.renderLines(th, 80), "\n"), "")
+	}
+	open := paint(m)
+	for _, row := range typeRows {
+		if !strings.Contains(open, row) {
+			t.Fatalf("setup: the umbrella under the switch's seed (off) lacks type row %q:\n%s", row, open)
+		}
+	}
+
+	on, _, _, handled, err := m.settingsApplyLocal(domain.UIKeyToolsAutoCollapse, settingTrue)
+	if err != nil || !handled {
+		t.Fatalf("settingsApplyLocal(true) = handled %v, err %v", handled, err)
+	}
+
+	folded := paint(on)
+	for _, row := range typeRows {
+		if strings.Contains(folded, row) {
+			t.Errorf("after `true` the settled umbrella still shows type row %q — the paint did not move:\n%s", row, folded)
+		}
+	}
+
+	off, _, _, handled, err := on.settingsApplyLocal(domain.UIKeyToolsAutoCollapse, settingFalse)
+	if err != nil || !handled {
+		t.Fatalf("settingsApplyLocal(false) = handled %v, err %v", handled, err)
+	}
+
+	if got := paint(off); got != open {
+		t.Errorf("after `false` the paint differs from the open one:\ngot:\n%s\nwant:\n%s", got, open)
+	}
+}
+
+// TestNewModelSeedsToolsAutoCollapse: the switch the transcript paints by starts where the Options
+// put it, so a session started under the default (on) folds its first settled umbrella with no edit.
+func TestNewModelSeedsToolsAutoCollapse(t *testing.T) {
+	t.Parallel()
+
+	for _, on := range []bool{true, false} {
+		opts := testOpts
+		opts.UI.ToolsAutoCollapse = on
+
+		m := newTestModelEng(t, &fakeEngine{}, opts)
+
+		if m.transcript.toolsAutoCollapse != on {
+			t.Errorf("transcript.toolsAutoCollapse = %v under ui.tools-auto-collapse %v; want the Option's value", m.transcript.toolsAutoCollapse, on)
+		}
+	}
+}
+
 // TestSettingsReReadOfFooterRowsRelaysTheFrame: `ui.footer.rows` is structured — edited in the
 // file, never on a row — so it reaches the session as a re-read of a hand-edited file, and the
 // renderer applies it itself: the footer takes the rows the file names and Update's tail lays the

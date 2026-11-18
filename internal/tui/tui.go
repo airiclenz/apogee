@@ -1383,7 +1383,8 @@ type Options struct {
 	// SkillSuggestions gates the band above the input box (ADR 0061), a hint for the human that
 	// reaches no model; TaskListOpen seeds every task-list card's fold and ToolsOpen/ToolsFoldOver
 	// every large Tools umbrella's ([Model.toggleTaskListFold], [Model.toggleToolsFold]), each written
-	// back through [SettingsHost] silently when a card is toggled (ADR 0035 addendum). A `/settings`
+	// back through [SettingsHost] silently when a card is toggled (ADR 0035 addendum), while
+	// ToolsAutoCollapse folds a settled, untouched umbrella to its Group summary. A `/settings`
 	// edit or a hand-edited file moves any of them mid-session (ADR 0037, settingsApplyLocal).
 	UI domain.UIPrefs
 

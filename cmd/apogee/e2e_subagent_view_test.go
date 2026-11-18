@@ -268,6 +268,11 @@ func openWorkingRun(drv *tuitest.Driver) {
 	drv.WaitText(runViewCrumb)
 }
 
+// runViewAutoCollapseOff switches `ui.tools-auto-collapse` off in the run view's home: the view's
+// subject is the delegated run's own blocks, and its finished golden (t18) paints the child's
+// settled umbrella open on its rows, which the default switch would fold to its Group summary.
+const runViewAutoCollapseOff = "ui:\n  tools-auto-collapse: false\n"
+
 // runViewHome writes an apogee home whose one server is the stub and whose entry pins two parallel
 // agents (ADR 0039 decision 2).
 //
@@ -285,7 +290,8 @@ func runViewHome(t *testing.T, stub *stubllm.Server) string {
 		"    endpoint: " + stub.URL + "\n" +
 		"    model: " + stub.Model + "\n" +
 		parallelPin +
-		"server: probe-target\n"
+		"server: probe-target\n" +
+		runViewAutoCollapseOff
 	home := t.TempDir()
 	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(body), 0o600); err != nil {
 		t.Fatalf("write the run view home's config: %v", err)

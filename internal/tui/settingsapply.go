@@ -578,11 +578,13 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		// umbrella the new threshold moves across the line gains or loses its glyph on the next frame.
 		m.transcript.setToolsFoldOver(m.opts.UI.ToolsFoldOver)
 	case domain.UIKeyToolsAutoCollapse:
-		// The value lands on the Option alone: no paint reads it yet, so there is nothing on screen
-		// to move and the next frame is already right.
+		// The switch is a paint input (umbrellaFoldBy), so the setter touches the transcript on a
+		// move: a `/settings` edit or a hand-edited file folds every settled, untouched umbrella — or
+		// gives it back its size fold — on the next frame.
 		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err
 		}
+		m.transcript.setToolsAutoCollapse(m.opts.UI.ToolsAutoCollapse)
 	case domain.UIKeyPointerShapes:
 		// The flag is half of the pointer-shape gate (pointerprobe.go); the terminal's answer is the
 		// other half. Switched on in a session that never asked, the query goes out now; one that
