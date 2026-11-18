@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -167,10 +168,13 @@ var hardeningOptions = []string{"-c", "core.hooksPath=", "-c", "core.fsmonitor=f
 // credential helper, a merge driver, a textconv, a pager, a gpg.program — each names a COMMAND
 // that lives in config, and there is no --no-configured-programs to pass. Since 2026-08-14 that
 // half is closed one level up instead, and since 2026-08-26 for the whole class rather than
-// filters alone — every run through this package REFUSES the call outright when the
-// REPOSITORY's own config defines any such key (repoLocalCommandConfig), which is exactly why
-// the operator's global ones keep working. DiffHardeningArgs closes the read-path diff drivers,
-// which are the ones a mere inspection would otherwise execute.
+// filters alone — a run through this package is refused when the REPOSITORY's own config defines
+// such a key (repoLocalCommandConfig), which is exactly why the operator's global ones keep
+// working. A merge driver is the one member answered by neutralisation instead (since
+// 2026-11-18): only a content merge can run one, so each repo-local merge.<x>.driver is
+// overridden with an empty value on every call (judgeCommandConfig) and only a merge-capable argv
+// is refused. DiffHardeningArgs closes the read-path diff drivers, which are the ones a mere
+// inspection would otherwise execute.
 var hardeningEnv = []string{"GIT_CONFIG_NOSYSTEM=1"}
 
 // DiffHardeningArgs are the diff-level refusals the read paths carry. A textconv driver and
@@ -241,8 +245,10 @@ func confinementBox(ctx context.Context) *domain.ConfinementBox {
 // contract).
 //
 // It is also the choke point for the repo-local command-config refusal: a repository whose own
-// config names a program git would execute gets no git call at all, on the read paths as much as
-// the write ones (a clean filter runs on a plain diff or status, a pager on a plain log). The
+// config names a program git would execute is refused, on the read paths as much as the write
+// ones (a clean filter runs on a plain diff or status, a pager on a plain log). A repo-local merge
+// driver is the exception (judgeCommandConfig): every call carries an override that empties it,
+// and only an argv that would run a content merge is refused ([MergeDriverRefusal]). The
 // refusal is returned as an ordinary failed outcome — non-zero exit, the model-facing sentence
 // as its output — so every caller's existing "git ... failed" branch surfaces it verbatim, with
 // no signature for a future git tool to forget to handle.
@@ -274,10 +280,11 @@ type CaptureOptions struct {
 // repository gets the same failed outcome Capture returns — no git call, the refusal sentence as
 // the output. Capture is CaptureEnv with a nil env and zero options.
 func (h Host) CaptureEnv(ctx context.Context, gitPath, root string, env []string, opts CaptureOptions, timeout time.Duration, args ...string) (subprocess.SubprocessResult, error) {
-	if refused, ok, err := h.refuseCapture(ctx, gitPath, root, env); ok || err != nil {
+	overrides, refused, ok, err := h.refuseCapture(ctx, gitPath, root, env, args)
+	if ok || err != nil {
 		return refused, err
 	}
-	return h.spawn(ctx, h.runSpec(gitPath, root, env, timeout, false, opts, args...))
+	return h.spawn(ctx, h.runSpec(gitPath, root, env, timeout, false, opts, overrides, args...))
 }
 
 // CaptureEnvTo is CaptureEnv with the child's standard output streamed UNCAPPED into stdout
@@ -287,24 +294,26 @@ func (h Host) CaptureEnv(ctx context.Context, gitPath, root string, env []string
 // writes nothing to stdout and returns the refusal as the failed outcome. A nil stdout discards
 // the payload.
 func (h Host) CaptureEnvTo(ctx context.Context, gitPath, root string, env []string, opts CaptureOptions, timeout time.Duration, stdout io.Writer, args ...string) (subprocess.SubprocessResult, error) {
-	if refused, ok, err := h.refuseCapture(ctx, gitPath, root, env); ok || err != nil {
+	overrides, refused, ok, err := h.refuseCapture(ctx, gitPath, root, env, args)
+	if ok || err != nil {
 		return refused, err
 	}
-	return h.spawnTo(ctx, h.runSpec(gitPath, root, env, timeout, false, opts, args...), stdout)
+	return h.spawnTo(ctx, h.runSpec(gitPath, root, env, timeout, false, opts, overrides, args...), stdout)
 }
 
-// refuseCapture runs the command-config probe for a captured run under env. ok reports a refusal,
-// returned as the failed outcome every captured entry point hands back; err is the probe's own
-// failure (a cancelled ctx, a confinement demotion).
-func (h Host) refuseCapture(ctx context.Context, gitPath, root string, env []string) (refused subprocess.SubprocessResult, ok bool, err error) {
-	refusal, err := h.probeCommandConfig(ctx, gitPath, root, env)
+// refuseCapture runs the command-config check for a captured run of args under env. ok reports a
+// refusal, returned as the failed outcome every captured entry point hands back; otherwise
+// overrides are the neutralising options the run must carry (admitCommandConfig). err is the
+// probe's own failure (a cancelled ctx, a confinement demotion).
+func (h Host) refuseCapture(ctx context.Context, gitPath, root string, env, args []string) (overrides []string, refused subprocess.SubprocessResult, ok bool, err error) {
+	overrides, refusal, err := h.admitCommandConfig(ctx, gitPath, root, env, args)
 	if err != nil {
-		return subprocess.SubprocessResult{}, false, err
+		return nil, subprocess.SubprocessResult{}, false, err
 	}
 	if refusal != "" {
-		return subprocess.SubprocessResult{CombinedOutput: refusal, ExitCode: 1}, true, nil
+		return nil, subprocess.SubprocessResult{CombinedOutput: refusal, ExitCode: 1}, true, nil
 	}
-	return subprocess.SubprocessResult{}, false, nil
+	return overrides, subprocess.SubprocessResult{}, false, nil
 }
 
 // CaptureUnchecked is Capture without the command-config probe. Only one caller may use it: a
@@ -313,11 +322,12 @@ func (h Host) refuseCapture(ctx context.Context, gitPath, root string, env []str
 // program — go through probeGit instead, which keeps git's diagnostics out of the listing it
 // parses. Everything a MODEL causes goes through Capture.
 func (h Host) CaptureUnchecked(ctx context.Context, gitPath, root string, env []string, timeout time.Duration, args ...string) (subprocess.SubprocessResult, error) {
-	return h.spawn(ctx, h.runSpec(gitPath, root, env, timeout, false, CaptureOptions{}, args...))
+	return h.spawn(ctx, h.runSpec(gitPath, root, env, timeout, false, CaptureOptions{}, nil, args...))
 }
 
-// runSpec builds the subprocess spec for one git invocation in root: hardeningOptions ahead of
-// the subcommand, and the PATH-scoped allowlist environment with hardeningEnv and then the
+// runSpec builds the subprocess spec for one git invocation in root: hardeningOptions and then
+// the call's overrides — the `-c merge.<x>.driver=` pairs admitCommandConfig computed for this
+// repository, nil for a run the check did not judge — ahead of the subcommand, and the PATH-scoped allowlist environment with hardeningEnv and then the
 // caller's own env appended. It is the one place the hardening is composed, so every entry point
 // into the funnel — the git TOOLS through Capture, the engine's own read-side git through Query,
 // the snapshot store's GIT_DIR runs through Run — carries the identical argv and environment and
@@ -327,10 +337,11 @@ func (h Host) CaptureUnchecked(ctx context.Context, gitPath, root string, env []
 // GIT_INDEX_FILE that redirects the run to a store of apogee's own overrides nothing the
 // hardening put there, and no entry it carries can drop GIT_CONFIG_NOSYSTEM. opts rides onto the
 // spec as it is; the zero value changes nothing.
-func (h Host) runSpec(gitPath, root string, env []string, timeout time.Duration, splitStdout bool, opts CaptureOptions, args ...string) subprocess.SubprocessSpec {
-	argv := make([]string, 0, 1+len(hardeningOptions)+len(args))
+func (h Host) runSpec(gitPath, root string, env []string, timeout time.Duration, splitStdout bool, opts CaptureOptions, overrides []string, args ...string) subprocess.SubprocessSpec {
+	argv := make([]string, 0, 1+len(hardeningOptions)+len(overrides)+len(args))
 	argv = append(argv, gitPath)
 	argv = append(argv, hardeningOptions...)
+	argv = append(argv, overrides...)
 	argv = append(argv, args...)
 
 	full := h.SafeEnv(root)
@@ -439,7 +450,7 @@ func (h Host) queryDiagnosed(ctx context.Context, gitPath, dir string, env []str
 	if len(args) == 0 {
 		return "", "", errors.New("apogee: gitexec: no git subcommand")
 	}
-	refusal, err := h.probeCommandConfig(ctx, gitPath, dir, env)
+	overrides, refusal, err := h.admitCommandConfig(ctx, gitPath, dir, env, args)
 	if err != nil {
 		return "", "", err
 	}
@@ -450,7 +461,7 @@ func (h Host) queryDiagnosed(ctx context.Context, gitPath, dir string, env []str
 		return "", "", errors.New(refusal)
 	}
 
-	spec := h.runSpec(gitPath, dir, env, timeout, stdout == nil, CaptureOptions{}, args...)
+	spec := h.runSpec(gitPath, dir, env, timeout, stdout == nil, CaptureOptions{}, overrides, args...)
 	var res subprocess.SubprocessResult
 	if stdout != nil {
 		res, err = h.spawnTo(ctx, spec, stdout)
@@ -481,6 +492,15 @@ func (h Host) queryDiagnosed(ctx context.Context, gitPath, dir string, env []str
 // `--git-dir=<path>`) is skipped alone. A list of options only falls back to its first argument,
 // so the message still names what was run. args must not be empty.
 func subcommand(args []string) string {
+	if at := subcommandAt(args); at >= 0 {
+		return args[at]
+	}
+	return args[0]
+}
+
+// subcommandAt is the index of the subcommand in args by [subcommand]'s rule, or -1 when args
+// holds leading global options only.
+func subcommandAt(args []string) int {
 	for i := 0; i < len(args); i++ {
 		argument := args[i]
 		if argument == "-c" || argument == "-C" {
@@ -488,10 +508,10 @@ func subcommand(args []string) string {
 			continue
 		}
 		if !strings.HasPrefix(argument, "-") {
-			return argument
+			return i
 		}
 	}
-	return args[0]
+	return -1
 }
 
 // CommandConfigName matches every config name whose VALUE is a program git executes — an
@@ -500,6 +520,10 @@ func subcommand(args []string) string {
 // git-remote-<vcs> and resolves against the working directory when the name holds a slash). A
 // key that merely SELECTS one of those (a filter.<driver>.required, a .gitattributes attribute)
 // names no program and runs nothing on its own, so it is deliberately absent.
+//
+// One member is answered differently from the rest: a merge driver (merge.<x>.driver) runs only
+// on a content merge, so it is neutralised on every call and refuses only a merge-capable argv
+// (judgeCommandConfig) instead of the whole repository.
 //
 // Two classes are deliberately absent for their own reasons. core.hooksPath and core.fsmonitor
 // are neutralised by hardeningOptions above, so refusing them as well would cost a repository
@@ -587,15 +611,6 @@ func (p commandConfigProbe) holds() bool {
 	return true
 }
 
-// refusal renders the answer as the call's refusal: [CommandConfigRefusal] naming
-// the command-valued keys, or "" when the repository carries none.
-func (p commandConfigProbe) refusal() string {
-	if len(p.names) == 0 {
-		return ""
-	}
-	return CommandConfigRefusal(p.names)
-}
-
 // fileprint is the identity of one file the probe's answer depends on, as os.Stat reports it:
 // size, modification time, mode, the inode/device pair os.SameFile compares and — where the
 // platform exposes it (changeTime) — the inode change time — so an edit in place, a rename over
@@ -647,10 +662,102 @@ func sameChangeTime(then, now os.FileInfo) bool {
 	return thenOK == nowOK && thenCtime.Equal(nowCtime)
 }
 
-// probeCommandConfig answers whether the run at root under env may go ahead: "" when the
-// repository it would actually reach passes repoLocalCommandConfig's check, otherwise the
-// model-facing refusal sentence — [CommandConfigRefusal] naming the command-valued keys, or
-// [CommandConfigIncompleteRefusal] when the probe could not complete. It goes to git only when
+// admitCommandConfig judges one run of args at root under env against the repository it would
+// actually reach: the overrides the run must carry, or the model-facing refusal sentence —
+// [CommandConfigIncompleteRefusal] when the probe could not complete, otherwise
+// judgeCommandConfig's verdict on the names the probe found.
+func (h Host) admitCommandConfig(ctx context.Context, gitPath, root string, env, args []string) (overrides []string, refusal string, err error) {
+	names, refusal, err := h.probeCommandConfig(ctx, gitPath, root, env)
+	if err != nil || refusal != "" {
+		return nil, refusal, err
+	}
+	overrides, refusal = judgeCommandConfig(names, args)
+	return overrides, refusal, nil
+}
+
+// judgeCommandConfig decides a run of args in a repository whose own config carries the
+// command-valued names. Any name other than a neutralisable merge driver refuses the run with
+// [CommandConfigRefusal] naming every key, as the whole class did before 2026-11-18. A repository
+// carrying merge drivers alone is admitted with one `-c merge.<x>.driver=` pair per driver — an
+// empty driver value makes git print `cannot run :` instead of executing anything, and git still
+// exits zero on every read verb — except an argv whose job is a content merge
+// (mergeCapableVerb), which is refused with [MergeDriverRefusal] so the merge fails with a
+// sentence rather than git's own `cannot run`. Security rests on the override alone: a
+// merge-capable argv missing from that list costs a confusing error, never an execution.
+func judgeCommandConfig(names, args []string) (overrides []string, refusal string) {
+	var drivers []string
+	for _, name := range names {
+		if !neutralisableMergeDriver(name) {
+			return nil, CommandConfigRefusal(names)
+		}
+		drivers = append(drivers, name)
+	}
+	if len(drivers) == 0 {
+		return nil, ""
+	}
+	if verb, capable := mergeCapableVerb(args); capable {
+		return nil, MergeDriverRefusal(verb, drivers)
+	}
+	overrides = make([]string, 0, 2*len(drivers))
+	for _, driver := range drivers {
+		overrides = append(overrides, "-c", driver+"=")
+	}
+	return overrides, ""
+}
+
+// mergeDriverName matches a merge.<x>.driver key as the probe's listing spells it (section and
+// variable lowercased, subsection kept).
+var mergeDriverName = regexp.MustCompile(`^merge\..*\.driver$`)
+
+// neutralisableMergeDriver reports whether name is a merge driver a `-c` override can empty. git
+// splits a `-c` argument at its FIRST `=`, so a subsection holding one (merge.a=b.driver) would
+// override some other key and leave the driver live: such a name stays in the refusing class.
+func neutralisableMergeDriver(name string) bool {
+	return mergeDriverName.MatchString(name) && !strings.Contains(name, "=")
+}
+
+// mergeCapableVerb names the subcommand of args and reports whether the argv can run a content
+// merge, and so a merge driver: rebase, cherry-pick, revert, am and merge-tree always; merge and
+// pull unless --ff-only; stash apply, pop and branch; checkout and switch with -m or --merge; apply
+// with -3 or --3way. An argv carrying --abort or --quit unwinds and merges nothing, so it is never
+// merge-capable. Options are read up to a `--`, past which every argument is a pathspec.
+func mergeCapableVerb(args []string) (verb string, capable bool) {
+	at := subcommandAt(args)
+	if at < 0 {
+		return "", false
+	}
+	verb, rest := args[at], args[at+1:]
+	if end := slices.Index(rest, "--"); end >= 0 {
+		rest = rest[:end]
+	}
+	carries := func(options ...string) bool {
+		return slices.ContainsFunc(rest, func(argument string) bool { return slices.Contains(options, argument) })
+	}
+	if carries("--abort", "--quit") {
+		return verb, false
+	}
+	switch verb {
+	case "rebase", "cherry-pick", "revert", "am", "merge-tree":
+		return verb, true
+	case "merge", "pull":
+		return verb, !carries("--ff-only")
+	case "stash":
+		action := ""
+		if word := slices.IndexFunc(rest, func(argument string) bool { return !strings.HasPrefix(argument, "-") }); word >= 0 {
+			action = rest[word]
+		}
+		return verb, action == "apply" || action == "pop" || action == "branch"
+	case "checkout", "switch":
+		return verb, carries("-m", "--merge")
+	case "apply":
+		return verb, carries("-3", "--3way")
+	}
+	return verb, false
+}
+
+// probeCommandConfig answers which command-valued names the repository the run at root under env
+// would actually reach carries in its own config (repoLocalCommandConfig), or the
+// [CommandConfigIncompleteRefusal] sentence when the probe could not complete. It goes to git only when
 // the (gitPath, root, env) triple has no memoised answer or a file that decided the memoised one
 // has changed since.
 //
@@ -663,25 +770,25 @@ func sameChangeTime(then, now os.FileInfo) bool {
 //
 // The memo key leaves the Host out on purpose (see Host): the answer describes the repository's
 // files, and the fingerprints are what keep it honest.
-func (h Host) probeCommandConfig(ctx context.Context, gitPath, root string, env []string) (string, error) {
+func (h Host) probeCommandConfig(ctx context.Context, gitPath, root string, env []string) (names []string, incompleteRefusal string, err error) {
 	key := gitPath + "\x00" + root + "\x00" + strings.Join(env, "\x00")
 	if cached, ok := commandConfigProbes.Load(key); ok {
 		if probe := cached.(commandConfigProbe); probe.holds() {
-			return probe.refusal(), nil
+			return probe.names, "", nil
 		}
 	}
 	probe, err := h.repoLocalCommandConfig(ctx, gitPath, root, env)
 	var incomplete errIncompleteProbe
 	if errors.As(err, &incomplete) {
-		return CommandConfigIncompleteRefusal(incomplete.reason), nil
+		return nil, CommandConfigIncompleteRefusal(incomplete.reason), nil
 	}
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if probe.reached {
 		commandConfigProbes.Store(key, probe)
 	}
-	return probe.refusal(), nil
+	return probe.names, "", nil
 }
 
 // errIncompleteProbe is the error probeGit returns for a probe call whose answer git did not
@@ -705,7 +812,7 @@ func (e errIncompleteProbe) Error() string {
 // refuse the call may be exactly the part that is missing. Only a run that finished is an answer,
 // whatever its exit code.
 func (h Host) probeGit(ctx context.Context, gitPath, root string, env []string, args ...string) (subprocess.SubprocessResult, error) {
-	res, err := h.spawn(ctx, h.runSpec(gitPath, root, env, probeTimeout, true, CaptureOptions{}, args...))
+	res, err := h.spawn(ctx, h.runSpec(gitPath, root, env, probeTimeout, true, CaptureOptions{}, nil, args...))
 	if err != nil {
 		return res, err
 	}
@@ -914,14 +1021,55 @@ func (s *orderedSet) add(value string) {
 // that only said "refused" would send the model retrying the same call — and states the rule,
 // including the half that still works, so the operator's own global config is not read as broken.
 func CommandConfigRefusal(names []string) string {
-	shown, extra := names, ""
-	if len(names) > maxNamedCommandKeys {
-		shown = names[:maxNamedCommandKeys]
-		extra = fmt.Sprintf(" (+%d more)", len(names)-maxNamedCommandKeys)
+	return commandConfigRefusalLead + namedKeys(names) + "). " +
+		"Repo-local command-valued keys are refused for every git tool; the operator's global git config is untouched and still applies."
+}
+
+// commandConfigRefusalLead opens every [CommandConfigRefusal] sentence, up to the keys it names.
+const commandConfigRefusalLead = "git refused: this repository's own config names a program git would execute ("
+
+// MergeDriverRefusal is the model-facing sentence for a merge-capable argv — verb is its
+// subcommand — in a repository whose own config names the merge drivers in names and no other
+// command-valued key. It names the keys as [CommandConfigRefusal] does and states the rest of the
+// rule: every other git call still runs, with those drivers neutralised, and a merge driver the
+// operator's global config names is theirs and still runs. It is a refusal that stands while the
+// config does, never an incomplete one.
+func MergeDriverRefusal(verb string, names []string) string {
+	return refusalPrefix + verb + mergeDriverRefusalMid + namedKeys(names) + "). " +
+		"Repo-local merge drivers are neutralised on every other git call; a merge driver in the operator's global git config still runs."
+}
+
+// refusalPrefix opens every refusal sentence this package renders.
+const refusalPrefix = "git refused: "
+
+// mergeDriverRefusalMid follows the verb in every [MergeDriverRefusal] sentence, up to the keys
+// it names.
+const mergeDriverRefusalMid = " would run the merge driver this repository's own config names ("
+
+// namedKeys renders the keys a refusal names, capped at maxNamedCommandKeys with a count of the
+// rest.
+func namedKeys(names []string) string {
+	if len(names) <= maxNamedCommandKeys {
+		return strings.Join(names, ", ")
 	}
-	return fmt.Sprintf("git refused: this repository's own config names a program git would execute (%s%s). "+
-		"Repo-local command-valued keys are refused for every git tool; the operator's global git config is untouched and still applies.",
-		strings.Join(shown, ", "), extra)
+	return fmt.Sprintf("%s (+%d more)", strings.Join(names[:maxNamedCommandKeys], ", "), len(names)-maxNamedCommandKeys)
+}
+
+// IsCommandConfigRefusal reports whether text is a refusal that stands while the repository's own
+// config does — a [CommandConfigRefusal] or a [MergeDriverRefusal] — rather than a
+// [CommandConfigIncompleteRefusal], which the next call asks again, or anything git itself
+// printed. A caller that must tell a refused repository from a failed git call tells them apart
+// here, never by matching the sentences itself.
+func IsCommandConfigRefusal(text string) bool {
+	if strings.HasPrefix(text, commandConfigRefusalLead) {
+		return true
+	}
+	rest, ok := strings.CutPrefix(text, refusalPrefix)
+	if !ok {
+		return false
+	}
+	_, after, ok := strings.Cut(rest, " ")
+	return ok && strings.HasPrefix(after, strings.TrimPrefix(mergeDriverRefusalMid, " "))
 }
 
 // CommandConfigIncompleteRefusal is the model-facing sentence for a call whose command-config

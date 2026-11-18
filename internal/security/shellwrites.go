@@ -984,8 +984,9 @@ var gitReadSubcommands = map[string]bool{
 // GitCommandConfigNameSource is the one source string behind every "config name whose VALUE is
 // a program git executes" pattern: an sshCommand, an editor, a pager, an askpass, a filter or
 // merge or diff driver, a credential helper, a gpg.program, an ssh signing-key command, a proxy
-// command, a remote helper (remote.<name>.vcs). internal/gitexec anchors it as its CommandConfigName — the repo-local probe that costs
-// a repository its git tools — and hands that string to git's --get-regexp verbatim, so it must
+// command, a remote helper (remote.<name>.vcs). internal/gitexec anchors it as its CommandConfigName — the repo-local probe that refuses
+// a repository's git calls, or for a merge.<x>.driver alone neutralises it and refuses only a
+// content merge — and hands that string to git's --get-regexp verbatim, so it must
 // stay POSIX-ERE compatible: plain ( ) groups, no (?: and no (?i). It lives here because gitexec
 // imports security, never the reverse; a name it matches is spelled lowercase, so a caller lowers
 // what it matches first.

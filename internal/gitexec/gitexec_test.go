@@ -1171,3 +1171,307 @@ func TestIsIncompleteRefusal_TellsAnUnfinishedProbeFromARefusedRepository(t *tes
 		}
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Repo-local merge drivers: neutralised on every call, refused only for a merge
+// ----------------------------------------------------------------------------
+
+// mergeDriverKey is the planted driver's key as git's own listing spells it: section and variable
+// lowercased, the mixed-case subsection kept — the spelling the override must repeat exactly.
+const mergeDriverKey = "merge.Capcom-Log.driver"
+
+// mergeDriverRepository builds a real repository whose history holds a merge commit that a
+// remerge-diff can only re-create by running the merge driver: a committed .gitattributes routes
+// f through Capcom-Log, both branches edit f's one line, and the sides were joined with -s ours,
+// so re-merging them is a genuine content merge of f. Only after that is the driver planted in
+// .git/config — a script that creates the returned marker if it ever runs — so a call missing its
+// override fails the test rather than the fixture. It also returns a wrapper git that records
+// every argv it is launched with in the returned record file and then runs the host's git.
+func mergeDriverRepository(t *testing.T) (root, wrapper, record, marker string) {
+	t.Helper()
+	posixScriptHost(t)
+	gitPath := realGit(t)
+	root = t.TempDir()
+	write := func(name, text string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, name), []byte(text), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	runRealGit(t, gitPath, root, "init", "-b", "main")
+	write(".gitattributes", "f merge=Capcom-Log\n")
+	write("f", "base\n")
+	runRealGit(t, gitPath, root, "add", ".")
+	runRealGit(t, gitPath, root, "commit", "-m", "base")
+	runRealGit(t, gitPath, root, "checkout", "-b", "side")
+	write("f", "side\n")
+	runRealGit(t, gitPath, root, "commit", "-am", "side")
+	runRealGit(t, gitPath, root, "checkout", "main")
+	write("f", "main\n")
+	runRealGit(t, gitPath, root, "commit", "-am", "main")
+	runRealGit(t, gitPath, root, "merge", "-s", "ours", "--no-edit", "side")
+
+	scripts := t.TempDir()
+	marker = filepath.Join(scripts, "driver.ran")
+	driver := filepath.Join(scripts, "driver.sh")
+	if err := os.WriteFile(driver, []byte("#!/bin/sh\n: > \""+marker+"\"\n"), 0o755); err != nil {
+		t.Fatalf("write driver: %v", err)
+	}
+	appendToConfig(t, root, "[merge \"Capcom-Log\"]\n\tdriver = "+driver+" %O %A %B\n")
+
+	record = filepath.Join(scripts, "argv")
+	wrapper = writeFakeGit(t, scripts, "#!/bin/sh\necho \"$*\" >> \""+record+"\"\nexec \""+gitPath+"\" \"$@\"\n")
+	return root, wrapper, record, marker
+}
+
+// requireDriverNeverRan fails the test when the planted merge driver has executed.
+func requireDriverNeverRan(t *testing.T, marker string) {
+	t.Helper()
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatalf("the repository's merge driver executed")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stat marker: %v", err)
+	}
+}
+
+// TestMergeDriver_FixtureRunsTheDriverWithoutTheOverride pins that the fixture is live: the
+// host's git, run bare, executes the planted driver on a remerge-diff — so the neutralisation
+// tests below fail if their override goes missing.
+func TestMergeDriver_FixtureRunsTheDriverWithoutTheOverride(t *testing.T) {
+	root, _, _, marker := mergeDriverRepository(t)
+	runRealGit(t, realGit(t), root, "show", "--remerge-diff", "HEAD")
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("a bare remerge-diff did not run the planted driver (%v); the fixture asserts nothing", err)
+	}
+}
+
+// TestMergeDriver_ReadVerbsRunWithTheDriverNeutralised pins the neutralisation half: in a
+// repository whose own config names a merge driver and nothing else, every read — the two
+// remerge-diff forms among them, which DO run a merge driver — succeeds, the driver never runs,
+// and every launched argv carries the override with the subsection spelled as git lists it.
+func TestMergeDriver_ReadVerbsRunWithTheDriverNeutralised(t *testing.T) {
+	root, wrapper, record, marker := mergeDriverRepository(t)
+
+	for _, args := range [][]string{
+		{"status"},
+		{"log", "-p"},
+		{"show", "--remerge-diff", "HEAD"},
+		{"log", "--diff-merges=remerge", "-p"},
+	} {
+		res, err := gitexec.OS().Capture(context.Background(), wrapper, root, testTimeout, args...)
+		if err != nil {
+			t.Fatalf("Capture %v err = %v", args, err)
+		}
+		if res.ExitCode != 0 {
+			t.Errorf("Capture %v exit %d: %q", args, res.ExitCode, res.CombinedOutput)
+		}
+		requireDriverNeverRan(t, marker)
+	}
+	if _, err := gitexec.OS().Query(context.Background(), wrapper, root, nil, testTimeout, "show", "--remerge-diff", "HEAD"); err != nil {
+		t.Errorf("Query remerge-diff err = %v", err)
+	}
+	requireDriverNeverRan(t, marker)
+
+	logged, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("read argv record: %v", err)
+	}
+	override := "-c " + mergeDriverKey + "= "
+	commands := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(logged)), "\n") {
+		if strings.Contains(line, " rev-parse --git-path ") || strings.Contains(line, " --show-origin --list -z") {
+			continue
+		}
+		commands++
+		if !strings.Contains(line, override) {
+			t.Errorf("argv %q lacks the override %q", line, override)
+		}
+	}
+	if commands != 5 {
+		t.Errorf("recorded %d commands, want 5", commands)
+	}
+}
+
+// TestMergeDriver_RefusesOnlyTheMergeCapableArgv pins the refusing half against the real git: an
+// argv whose job is a content merge is refused with MergeDriverRefusal naming the key and never
+// launched, while a fast-forward-only merge and the unwind flags run (git answers them itself).
+// The driver never runs either way.
+func TestMergeDriver_RefusesOnlyTheMergeCapableArgv(t *testing.T) {
+	root, wrapper, _, marker := mergeDriverRepository(t)
+	keys := []string{mergeDriverKey}
+
+	for _, args := range [][]string{
+		{"rebase", "side"},
+		{"merge", "side"},
+		{"merge-tree", "main", "side"},
+		{"stash", "pop"},
+		{"-c", "x.y=z", "rebase", "side"},
+	} {
+		res, err := gitexec.OS().Capture(context.Background(), wrapper, root, testTimeout, args...)
+		if err != nil {
+			t.Fatalf("Capture %v err = %v", args, err)
+		}
+		if want := gitexec.MergeDriverRefusal(subcommandOf(args), keys); res.CombinedOutput != want {
+			t.Errorf("Capture %v = %q, want the refusal %q", args, res.CombinedOutput, want)
+		}
+		requireDriverNeverRan(t, marker)
+	}
+	if _, err := gitexec.OS().Query(context.Background(), wrapper, root, nil, testTimeout, "rebase", "side"); err == nil ||
+		err.Error() != gitexec.MergeDriverRefusal("rebase", keys) {
+		t.Errorf("Query rebase err = %v, want the merge-driver refusal", err)
+	}
+
+	for _, args := range [][]string{
+		{"merge", "--ff-only", "side"},
+		{"rebase", "--abort"},
+		{"rebase", "--quit"},
+	} {
+		res, err := gitexec.OS().Capture(context.Background(), wrapper, root, testTimeout, args...)
+		if err != nil {
+			t.Fatalf("Capture %v err = %v", args, err)
+		}
+		if gitexec.IsCommandConfigRefusal(res.CombinedOutput) {
+			t.Errorf("Capture %v was refused: %q", args, res.CombinedOutput)
+		}
+		requireDriverNeverRan(t, marker)
+	}
+}
+
+// subcommandOf names the subcommand of a test argv, past a leading -c pair.
+func subcommandOf(args []string) string {
+	if args[0] == "-c" {
+		return args[2]
+	}
+	return args[0]
+}
+
+// mergeDriverListing answers the probe as a repository whose --local config carries listing —
+// one `file:<origin>\0<key>\n<value>\0` record per key — and every other invocation with an
+// empty success.
+func mergeDriverListing(listing string) gitAnswer {
+	return func(argv string) subprocess.SubprocessResult {
+		if strings.Contains(argv, " config --local ") {
+			return subprocess.SubprocessResult{Stdout: listing}
+		}
+		return subprocess.SubprocessResult{}
+	}
+}
+
+// TestMergeDriver_JudgesEachArgvByWhetherItCanMerge pins the merge-capable verb list row by row
+// through a fake launcher: a refused argv is never launched and gets MergeDriverRefusal naming
+// its verb; an admitted one is launched with the override ahead of its subcommand.
+func TestMergeDriver_JudgesEachArgvByWhetherItCanMerge(t *testing.T) {
+	t.Parallel()
+	listing := "file:.git/config\x00merge.Capcom-Log.driver\nx %O %A %B\x00"
+	for _, tc := range []struct {
+		args    []string
+		refused bool
+	}{
+		{[]string{"rebase", "@{u}"}, true},
+		{[]string{"rebase", "--continue"}, true},
+		{[]string{"cherry-pick", "abc"}, true},
+		{[]string{"revert", "abc"}, true},
+		{[]string{"am", "patch"}, true},
+		{[]string{"merge-tree", "a", "b"}, true},
+		{[]string{"merge", "side"}, true},
+		{[]string{"pull"}, true},
+		{[]string{"stash", "apply"}, true},
+		{[]string{"stash", "pop", "--index"}, true},
+		{[]string{"stash", "-q", "branch", "b"}, true},
+		{[]string{"checkout", "-m", "main"}, true},
+		{[]string{"switch", "--merge", "main"}, true},
+		{[]string{"apply", "-3", "p"}, true},
+		{[]string{"apply", "--3way", "p"}, true},
+		{[]string{"-c", "x.y=z", "rebase"}, true},
+		{[]string{"merge", "--ff-only", "side"}, false},
+		{[]string{"pull", "--ff-only"}, false},
+		{[]string{"rebase", "--abort"}, false},
+		{[]string{"cherry-pick", "--quit"}, false},
+		{[]string{"revert", "--abort"}, false},
+		{[]string{"am", "--abort"}, false},
+		{[]string{"merge", "--abort"}, false},
+		{[]string{"stash", "list"}, false},
+		{[]string{"stash"}, false},
+		{[]string{"checkout", "main"}, false},
+		{[]string{"checkout", "main", "--", "-m"}, false},
+		{[]string{"apply", "p"}, false},
+		{[]string{"status"}, false},
+		{[]string{"log", "--remerge-diff"}, false},
+		{[]string{"diff"}, false},
+	} {
+		host, spawned := fakeHost(outsideGit(t), mergeDriverListing(listing))
+		res, err := host.Capture(context.Background(), outsideGit(t), t.TempDir(), testTimeout, tc.args...)
+		if err != nil {
+			t.Fatalf("Capture %v err = %v", tc.args, err)
+		}
+		last := strings.Join((*spawned)[len(*spawned)-1].Argv[1:], " ")
+		if tc.refused {
+			if want := gitexec.MergeDriverRefusal(subcommandOf(tc.args), []string{mergeDriverKey}); res.CombinedOutput != want {
+				t.Errorf("Capture %v = %q, want the refusal %q", tc.args, res.CombinedOutput, want)
+			}
+			if strings.HasSuffix(last, strings.Join(tc.args, " ")) {
+				t.Errorf("the refused argv %v was launched: %q", tc.args, last)
+			}
+			continue
+		}
+		want := "-c core.hooksPath= -c core.fsmonitor=false -c " + mergeDriverKey + "= " + strings.Join(tc.args, " ")
+		if res.ExitCode != 0 || last != want {
+			t.Errorf("Capture %v launched %q (exit %d, %q), want %q", tc.args, last, res.ExitCode, res.CombinedOutput, want)
+		}
+	}
+}
+
+// TestMergeDriver_OtherKeysStillRefuseTheRepository pins the boundary of the neutralisation: a
+// driver whose subsection holds `=` cannot be emptied by `-c` (git splits at the first `=`, so the
+// override would name another key and leave the driver live) and stays in the refusing class, and
+// a driver beside any other command-valued key refuses the whole repository exactly as before,
+// naming both keys. Neither run launches the command.
+func TestMergeDriver_OtherKeysStillRefuseTheRepository(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		listing string
+		names   []string
+	}{
+		{"file:.git/config\x00merge.a=b.driver\nx\x00", []string{"merge.a=b.driver"}},
+		{
+			"file:.git/config\x00merge.Capcom-Log.driver\nx\x00file:.git/config\x00filter.x.clean\ntrue\x00",
+			[]string{mergeDriverKey, "filter.x.clean"},
+		},
+	} {
+		host, spawned := fakeHost(outsideGit(t), mergeDriverListing(tc.listing))
+		res, err := host.Capture(context.Background(), outsideGit(t), t.TempDir(), testTimeout, "status")
+		if err != nil {
+			t.Fatalf("Capture err = %v", err)
+		}
+		if want := gitexec.CommandConfigRefusal(tc.names); res.CombinedOutput != want {
+			t.Errorf("Capture = %q, want the refusal %q", res.CombinedOutput, want)
+		}
+		for _, spec := range *spawned {
+			if strings.HasSuffix(strings.Join(spec.Argv, " "), " status") {
+				t.Errorf("the refused command was launched: %q", spec.Argv)
+			}
+		}
+	}
+}
+
+// TestIsCommandConfigRefusal_TellsAStandingRefusalFromEverythingElse pins the predicate a caller
+// recognises a refused repository by: true for both standing refusals, false for a probe that
+// could not finish and for anything git itself might print.
+func TestIsCommandConfigRefusal_TellsAStandingRefusalFromEverythingElse(t *testing.T) {
+	t.Parallel()
+	cases := map[string]bool{
+		gitexec.CommandConfigRefusal([]string{"core.sshcommand"}):                               true,
+		gitexec.CommandConfigRefusal([]string{"a", "b", "c", "d", "e", "f"}):                    true,
+		gitexec.MergeDriverRefusal("rebase", []string{mergeDriverKey}):                          true,
+		gitexec.MergeDriverRefusal("cherry-pick", []string{"merge.a.driver", "merge.b.driver"}): true,
+		gitexec.CommandConfigIncompleteRefusal("git config --local timed out after 15s"):        false,
+		"fatal: not a git repository (or any of the parent directories): .git":                  false,
+		"git refused: something else entirely":                                                  false,
+		"":                                                                                      false,
+	}
+	for text, want := range cases {
+		if got := gitexec.IsCommandConfigRefusal(text); got != want {
+			t.Errorf("IsCommandConfigRefusal(%q) = %v, want %v", text, got, want)
+		}
+	}
+}

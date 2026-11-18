@@ -180,7 +180,8 @@ func (t *treeSnapshotter) active(ctx context.Context) bool {
 // frequently spawned program apogee runs and must carry the same hardening as a git tool's —
 // the exec fence on the resolved binary, core.hooksPath=, GIT_CONFIG_NOSYSTEM, the allowlisted
 // workspace-scoped environment (apogee's API key never reaches it), the repo-local
-// command-config refusal (every repo-local key whose value is a program git executes) and the
+// command-config refusal (every repo-local key whose value is a program git executes, a merge
+// driver aside — that one is neutralised on every call instead) and the
 // §2.4 process-tree teardown. The status listing takes the same Host's streaming RunTo
 // (statusListing), whose guarantees are Run's.
 //

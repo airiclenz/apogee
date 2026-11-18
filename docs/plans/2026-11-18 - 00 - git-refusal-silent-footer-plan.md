@@ -43,7 +43,11 @@
 - treesnapshot latching off silently in a repo refused for a non-merge-driver key.
 - VERSION or release changes.
 
-## 1. gitexec: neutralise repo-local merge drivers, refuse only merge-capable argv
+## 1. gitexec: neutralise repo-local merge drivers, refuse only merge-capable argv — ✅ DONE (2026-11-18)
+
+NOTES (2026-11-18): `internal/tools/git_test.go`'s `TestGit_RefusesRepoLocalCommandConfig/merge.foo.driver` row now fails by design (git_status succeeds in a merge-driver repo); item 2 owns removing that row, and `internal/tools/readonly_subprocess.go`'s "outright refusal" comment is left for item 2, which lists that file.
+NOTES (2026-11-18): the prose-rule grep still hits `CommandConfigRefusal`'s own sentence ("refused for every git tool"), kept verbatim because the Goal pins that sentence unchanged; `subcommand` now delegates to a new `subcommandAt` so the merge-capable judgment reads the argv after the verb.
+NOTES (2026-11-18): the `=`-subsection driver takes the refusing route (`CommandConfigRefusal`), not the `GIT_CONFIG_COUNT` route; an empty-subsection `merge..driver` is neutralised (git 2.47.3 accepts `-c merge..driver=`).
 
 **What:** fix: a repo-local `merge.<x>.driver` refuses every git call, though only a content merge can run it (issue `git-refusal-silent-footer`, part 2).
 **Regression guard.** `--abort` and `--quit` on rebase, cherry-pick, revert, am and merge are NOT merge-capable (they unwind and merge nothing); add test rows proving `rebase --abort` is not refused in a merge-driver repo. A driver whose subsection holds `=` (`merge.a=b.driver`) cannot be neutralised by `-c` (git splits at the first `=`; checked on git 2.47.3: key `merge.a`, driver live): keep such a name in the refusing class (`CommandConfigRefusal`), or neutralise every name through `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`, which does stop it; add an `=` test row. The remerge-diff fixture commits `.gitattributes` `<f> merge=Capcom-Log`, both branches edit the same line of `<f>`, and the merge commit is made before the driver is planted (or the marker removed after setup), so a missing `-c` pair fails the test.

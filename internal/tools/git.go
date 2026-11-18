@@ -44,8 +44,9 @@ import (
 // attacker-authored checkout are attacker-authored scripts. Neither half is implemented here any
 // more: internal/gitexec is the hardened runner every one of these tools spawns through, and it
 // owns the allowlisted PATH-scoped environment, the per-invocation switches that neutralise what
-// they can, and the outright refusal of a repository whose own config names a program git would
-// execute. What sits between the tools and that package are the thin wrappers below.
+// they can, and the refusal of a repository whose own config names a program git would execute
+// — a repo-local merge driver aside, which is neutralised on every call and refuses only a content
+// merge. What sits between the tools and that package are the thin wrappers below.
 
 // gitTimeout bounds a single git invocation. git operations are local (no network
 // op is exposed by these tools), so a short ceiling is ample and a hung git never
