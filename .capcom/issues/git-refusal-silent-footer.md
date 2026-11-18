@@ -1,11 +1,13 @@
 ---
 title: A repo-local merge driver silently drops the footer git segment and refuses every read-only git tool
-status: open
+status: done
 type: bug
 priority: 2
 labels: [security]
 plan: 2026-11-18 - 00 - git-refusal-silent-footer-plan
 created: 2026-11-18T08:58:29Z
+closed: 2026-11-18T10:45:13Z
+reason: "Resolved by plan '2026-11-18 - 00 - git-refusal-silent-footer-plan' (archived at b6aa679e): repo-local merge drivers neutralised per call, merge-capable argv refused, footer shows 'git refused' with a one-time note, posture recorded in adr-0012-amend-1118 and adr-0108-amend-1118."
 ---
 
 A repository whose own `.git/config` carries any command-valued key loses every git tool AND the footer's git segment, and the footer loss is silent. Verified against the code at v0.35.4 (7c8f5aa1).
