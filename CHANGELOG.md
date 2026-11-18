@@ -12,6 +12,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.35.6] — 2026-11-18
+
 - **The side panel's width works while you watch a session.** Watching another apogee's session no longer freezes the panel's width: a drag of its separator resizes it and saves `ui.side-panel.width`, a double-click on the separator returns it to the default, and `/panel width <n>` and `/panel width reset` run as they do outside a watch — the width is your own layout, never the watched session's. The pin glyph and every other `/panel` form stay read-only while watching.
 - **`ui.tools-auto-collapse` setting.** A new `ui:` key, on by default, that switches the
   collapse of a settled `✦ Tools` umbrella to its one summary line; it shows in `/settings` and
