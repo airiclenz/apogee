@@ -1347,8 +1347,9 @@ func (m Model) resetPanelWidth() Model {
 
 // followPanelTarget does what a click on target means: a pin toggles its section between pinned
 // and auto, a sub-agent row opens its Run view, a task or changed-file row unfolds that one block
-// — never the shared task-list fold, whose toggle writes `ui.task-list-open` — and scrolls it into
-// view (opening the run that holds it first), a usage row opens /usage and an mcp row opens /mcp.
+// — never the shared task-list fold, whose toggle writes `ui.task-list-open`, nor the shared Tools
+// umbrella fold, whose toggle writes `ui.tools-open`: a folded umbrella holding it opens alone —
+// and scrolls it into view (opening the run that holds it first), a usage row opens /usage and an mcp row opens /mcp.
 // ⏎ on the row's stop in navigation mode is the same call ([Model.activatePanelCursor]), so the
 // click and the key cannot come to mean different things.
 //
@@ -1381,6 +1382,10 @@ func (m Model) followPanelTarget(target panelTarget) (tea.Model, tea.Cmd) {
 		if target.run != m.viewedRun() {
 			m = m.openRun(target.run)
 		}
+		// A member of a Tools umbrella paints no line while the umbrella is folded or its type row
+		// is shut: open both first, on the umbrella's own fold — the jump never moves the shared
+		// `ui.tools-open` fold, whose flip is a write (transcript.revealUmbrellaMember).
+		m.transcript.revealUmbrellaMember(target.entry)
 		m.transcript.setExpanded(target.entry, true)
 		m.revealEntry(target.entry)
 		return m, nil

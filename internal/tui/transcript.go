@@ -2388,6 +2388,89 @@ func (t *transcript) setUmbrellaFolded(head int, folded bool) bool {
 	return true
 }
 
+// umbrellaHeadOf is the head of the Tools umbrella entries[i] belongs to — the head itself, a
+// type row's head or any member — and whether it belongs to one at all. toolSuperGroup is only
+// correct at a block head, so this finds the head the paint's walk would: back over the adjacent
+// groupable calls at i's own depth, which is the stretch toolSuperGroup consumes whole, to its
+// first call, and then asks whether that call heads an umbrella reaching i. A lone groupable call,
+// a solo call and every other kind belong to none (ownGroupAt is the same walk for the groups that
+// fold with their own kind).
+func umbrellaHeadOf(entries []entry, i int) (int, bool) {
+	if sameLabelRun(entries, i) == 0 {
+		return -1, false
+	}
+	first := i
+	for first > 0 {
+		prev := entries[first-1]
+		if prev.kind != entryToolCall || prev.depth != entries[i].depth || !groupable(prev.tool) {
+			break
+		}
+		first--
+	}
+	if sup := toolSuperGroup(entries, first); len(sup) > 0 && i < first+sup.calls() {
+		return first, true
+	}
+	return -1, false
+}
+
+// markUmbrellaTouched records that the reader acted on the Tools umbrella entries[index] belongs
+// to ([umbrellaHeadOf]) — opened a type row, a member or its body, or moved its header's fold —
+// which exempts it from auto-collapse from then on ([transcript.umbrellaFoldBy]), and reports
+// whether the mark moved. It leaves the umbrella's fold where it stands: a touched umbrella without
+// a fold of its own folds by its size again, the fold it showed before it settled. An index in no
+// umbrella changes nothing, and the generation moves only on a move, setUmbrellaFolded's rule.
+func (t *transcript) markUmbrellaTouched(index int) bool {
+	head, ok := umbrellaHeadOf(t.entries, index)
+	if !ok || t.entries[head].umbrellaTouched {
+		return false
+	}
+	t.entries[head].umbrellaTouched = true
+	t.touch()
+	return true
+}
+
+// openUmbrellaAlone opens the Tools umbrella headed by entries[head] on a fold of its own: touched,
+// so auto-collapse leaves it be, and holding its own head flag (entry.umbrellaOwnFold) open, so
+// neither its size nor the shared `ui.tools-open` preference decides it from here on — the
+// reader's open of an auto-collapsed umbrella, which opens that one and writes nothing (ratified
+// "Large-umbrella click"). A further click flips that same head flag (Model.toggleBlockAt). It
+// reports whether anything moved; an index heading no umbrella changes nothing.
+func (t *transcript) openUmbrellaAlone(head int) bool {
+	if len(toolSuperGroup(t.entries, head)) == 0 {
+		return false
+	}
+	e := &t.entries[head]
+	if e.umbrellaTouched && e.umbrellaOwnFold && !e.umbrellaFolded {
+		return false
+	}
+	e.umbrellaTouched, e.umbrellaOwnFold, e.umbrellaFolded = true, true, false
+	t.touch()
+	return true
+}
+
+// revealUmbrellaMember makes the umbrella member entries[index] paintable, as a side-panel jump to
+// it needs (Model.followPanelTarget): a folded umbrella opens on a fold of its own
+// ([transcript.openUmbrellaAlone]) — never the shared toggle, whose flip writes `ui.tools-open` —
+// an open one is marked touched, and the TYPE ROW holding the member opens, since a closed type row
+// paints no member line for the jump to land on. An index in no umbrella changes nothing.
+func (t *transcript) revealUmbrellaMember(index int) {
+	head, ok := umbrellaHeadOf(t.entries, index)
+	if !ok {
+		return
+	}
+	if t.umbrellaFolded(head) {
+		t.openUmbrellaAlone(head)
+	} else {
+		t.markUmbrellaTouched(head)
+	}
+	for _, run := range toolSuperGroup(t.entries, head) {
+		if index >= run.at && index < run.at+run.n {
+			t.setTypeExpanded(run.at, true)
+			return
+		}
+	}
+}
+
 // setTypeExpanded opens or closes the TYPE ROW of the run headed by entries[index] — the second,
 // independent level of a super-group's state (entry.typeExpanded) — and reports whether it found a
 // run head to set. Only a tool call can head a run (sameLabelRun), so every other kind answers false

@@ -180,7 +180,13 @@ internal/tui/model.go — markRunning, enterRunning, finishWorker; internal/tui/
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestAutoCollapse|Umbrella' ./internal/tui/`
 **Commit:** `feat(tui): fold settled, untouched tool umbrellas`
 
-## 7. Mark umbrellas touched from every reader action
+## 7. Mark umbrellas touched from every reader action — ✅ DONE (2026-11-18)
+
+NOTES (2026-11-18): the head lookup is `umbrellaHeadOf(entries, i)` in transcript.go (walks back over adjacent same-depth groupable calls, ownGroupAt's pattern). The writers are `transcript.markUmbrellaTouched(index)` (any member index, touched only), `transcript.openUmbrellaAlone(head)` (touched + ownFold + head flag open) and `transcript.revealUmbrellaMember(index)` (the panel jump: openUmbrellaAlone when folded, else markUmbrellaTouched, then setTypeExpanded on the member's run head). toggleBlockAt's targetUmbrella arm switches on `umbrellaFoldBy`: foldBySettled → openUmbrellaAlone; foldByShared → toggleToolsFold + touched; foldByHead → flip the head flag + touched. targetHeader/targetType hits mark touched after the switch.
+NOTES (2026-11-18): settingsapply.go got a doc-comment change only (toggleToolsFold now names the foldByShared case it serves); no code change was needed there.
+NOTES (2026-11-18): the generation checks for the three new writers live in autocollapse_touch_test.go (TestAutoCollapseTouchWritersMoveTheGeneration), not in TestTranscriptWritersBumpTheGeneration: that test's shared seed holds no umbrella, and adding one would move the index-based cases it already lists.
+NOTES (2026-11-18): the panel jump opens a folded umbrella on its own fold whatever the auto-collapse flag says (a large umbrella folded by `ui.tools-open`, or a small one folded on its head flag), since the guard forbids the writing toggle there; before this, a jump into a folded umbrella painted no row and scrolled nowhere. An umbrella already open when jumped to is only marked touched.
+NOTES (2026-11-18): read_file members hide nothing and paint no click mark, so the member tests click Terminal members (the run's second call) rather than reads.
 
 **What:** Depends on item 6.
 **Goal:** Any reader action inside or on an umbrella — opening a type row, a member, a member's body, or folding/unfolding its header, by mouse or keyboard — marks that umbrella touched; opening an auto-collapsed umbrella opens it alone without writing `ui.tools-open`; a side-panel jump to a member of a folded umbrella unfolds it, marks it touched and reveals the member.

@@ -809,8 +809,10 @@ func (m *Model) setToolsOpen(open bool) {
 }
 
 // toggleToolsFold is what a click on a LARGE Tools umbrella's header, or ⏎ at the block cursor on
-// one, means (toggleBlockAt): the shared fold flips on every large umbrella, and the flip is
-// PERSISTED through [SettingsHost.Write] as `ui.tools-open` — toggleTaskListFold's whole contract,
+// one, means (toggleBlockAt) while the shared preference is what holds its fold
+// (transcript.umbrellaFoldBy's foldByShared) — an auto-collapsed umbrella, or one the reader gave a
+// fold of its own, moves its own head flag and writes nothing. The shared fold flips on every large
+// umbrella, and the flip is PERSISTED through [SettingsHost.Write] as `ui.tools-open` — toggleTaskListFold's whole contract,
 // mirrored: the pane's own write and journal entry (recordSettingEdit), no note on success, one
 // transcript error naming the key when the write failed, with the flipped state standing either
 // way. A nil seam flips and writes nothing — the Driver degrade (ADR 0031) — and the write is
