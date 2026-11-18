@@ -14,6 +14,7 @@ import (
 	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/gitstatus"
 	"github.com/airiclenz/apogee/internal/subprocess"
+	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // gitStatusBackstop bounds one status or fetch call. It is a backstop, not a budget: a fetch
@@ -87,14 +88,15 @@ type gitStatusHost struct {
 	goos string
 }
 
-// Status reads root's git state. inside is false — with a nil error — where root is no work tree,
-// where no usable git is on PATH, and where gitexec refuses the repository for a repo-local
-// command-valued key; none of those runs the status read. "Inside" is decided by
-// `rev-parse --is-inside-work-tree`, never by git's stderr text.
+// Status reads root's git state. inside is false — with a nil error — where root is no work tree
+// and where no usable git is on PATH. Where gitexec refuses the repository for a repo-local
+// command-valued key it is false with a [tui.GitRefusedError] carrying gitexec's refusal sentence,
+// so the footer can tell a refused repository from no repository. None of those runs the status
+// read. "Inside" is decided by `rev-parse --is-inside-work-tree`, never by git's stderr text.
 //
-// A non-nil error means no trustworthy answer this time — a timed-out or wedged call, a failed
-// status, or a command-config probe that could not complete — and the snapshot and inside carry
-// nothing: the caller keeps its last answer rather than showing a zero one. The status output is
+// Any other non-nil error means no trustworthy answer this time — a timed-out or wedged call, a
+// failed status, or a command-config probe that could not complete — and the snapshot and inside
+// carry nothing: the caller keeps its last answer rather than showing a zero one. The status output is
 // counted as a stream, so the counts are exact at any size.
 func (h gitStatusHost) Status(ctx context.Context, root string) (gitstatus.Snapshot, bool, error) {
 	gitPath, err := h.git.Resolve(ctx, root)
@@ -163,9 +165,10 @@ func (h gitStatusHost) transportEnv(ctx context.Context, gitPath, root string) (
 	return env, true, nil
 }
 
-// insideWorkTree asks git whether root is inside a work tree. A non-zero exit — no repository, or
-// a repository gitexec refuses — is "not inside"; only a probe that could not complete, which the
-// next call asks again, is an error.
+// insideWorkTree asks git whether root is inside a work tree. A non-zero exit is "not inside", with
+// a nil error for no repository and a [tui.GitRefusedError] for a repository gitexec refuses
+// ([gitexec.IsCommandConfigRefusal]); a probe that could not complete, which the next call asks
+// again, is an ordinary error.
 func (h gitStatusHost) insideWorkTree(ctx context.Context, gitPath, root string, env []string) (bool, error) {
 	var out bytes.Buffer
 	res, err := h.git.CaptureEnvTo(ctx, gitPath, root, env, gitexec.CaptureOptions{}, gitStatusBackstop, &out,
@@ -177,8 +180,11 @@ func (h gitStatusHost) insideWorkTree(ctx context.Context, gitPath, root string,
 		return false, gitOutcomeError("rev-parse", res)
 	}
 	if res.ExitCode != 0 {
-		if gitexec.IsIncompleteRefusal(res.CombinedOutput) {
+		switch {
+		case gitexec.IsIncompleteRefusal(res.CombinedOutput):
 			return false, errors.New(strings.TrimSpace(res.CombinedOutput))
+		case gitexec.IsCommandConfigRefusal(res.CombinedOutput):
+			return false, tui.GitRefusedError{Sentence: strings.TrimSpace(res.CombinedOutput)}
 		}
 		return false, nil
 	}

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -19,12 +20,25 @@ import (
 // so a shutdown cancels a call still in flight.
 type GitStatusHost interface {
 	// Status reads root's git state. inside is false, with a nil error, where root is no work
-	// tree (or the host refuses the repository); a non-nil error means no trustworthy answer
-	// this time, and the snapshot and inside carry nothing.
+	// tree. Where the host refuses the repository it is false with a [GitRefusedError] carrying
+	// the refusal sentence, so a refusal never reads as "no repository". Any other non-nil error
+	// means no trustworthy answer this time, and the snapshot and inside carry nothing.
 	Status(ctx context.Context, root string) (snap gitstatus.Snapshot, inside bool, err error)
 	// Fetch updates root's remote-tracking refs, so the next Status sees new upstream commits.
 	Fetch(ctx context.Context, root string) error
 }
+
+// GitRefusedError is the error [GitStatusHost.Status] returns where the host refused the
+// repository — its own config names a program git would execute — so no read ran. Sentence is the
+// host's refusal sentence, verbatim; it stands while the repository's config does, unlike a probe
+// that could not complete, which is an ordinary error the next read asks again. A plain string, so
+// the Model can keep it (ADR 0011).
+type GitRefusedError struct {
+	Sentence string
+}
+
+// Error returns the refusal sentence.
+func (e GitRefusedError) Error() string { return e.Sentence }
 
 // gitStatusCadence is the status chain's cadence: how long after a read LANDS the next one runs,
 // unless the read itself was slow ([gitStatusWait]).
@@ -35,9 +49,10 @@ const gitStatusCadence = 5 * time.Second
 // its time in `git status` rather than running it back to back.
 const gitStatusSlowFactor = 4
 
-// gitStatusBackoff is the wait after a read that found no work tree or failed. Neither is worth the
-// 5 s cadence: a workspace that is no repository rarely becomes one, and a failing git (a wedged
-// lock, a probe that timed out on a slow box) only gets more load from being asked again. A Turn
+// gitStatusBackoff is the wait after a read that found no work tree, was refused or failed. None is
+// worth the 5 s cadence: a workspace that is no repository rarely becomes one, a refused one stays
+// refused until its config changes, and a failing git (a wedged lock, a probe that timed out on a
+// slow box) only gets more load from being asked again. A Turn
 // end still re-reads at once, so a `git init` the model ran shows up when its Turn ends.
 const gitStatusBackoff = time.Minute
 
@@ -65,9 +80,15 @@ type gitState struct {
 	// snap is the host workspace's last good snapshot; meaningful only when hasSnap. Its entry
 	// lists are nil. A read of a watched workspace never lands here (watchState.gitSnap).
 	snap gitstatus.Snapshot
-	// hasSnap reports that the workspace was inside a work tree at the last good read. A failed
-	// read keeps it (and snap); a read that found no work tree clears it.
+	// hasSnap reports that the workspace was inside a work tree at the last good read. A read
+	// that failed for any reason but a refusal keeps it (and snap); a read that found no work tree
+	// or was refused clears it.
 	hasSnap bool
+	// refusal is the host's refusal sentence ([GitRefusedError]) from the last read that was
+	// refused; "" while none is recorded. A refused read records it, a good read or one that found
+	// no work tree clears it, and any other failed read keeps it, as it keeps snap. A read of a
+	// watched workspace never lands here (watchState.gitRefusal).
+	refusal string
 
 	// gen is the status chain's live generation; a Msg carrying any other one is inert. 0 means
 	// no chain (the host is unwired).
@@ -143,7 +164,7 @@ func (m Model) gitRoot() (root string, ok bool) {
 }
 
 // gitSnapshot is the footer's reading of the workspace's git state: the last good snapshot, and
-// false when there is none to show (unwired, not yet landed, or not inside a work tree).
+// false when there is none to show (unwired, not yet landed, not inside a work tree, or refused).
 func (m Model) gitSnapshot() (gitstatus.Snapshot, bool) {
 	return m.git.snap, m.git.hasSnap
 }
@@ -250,24 +271,30 @@ func (m Model) gitFetchInterval() time.Duration {
 }
 
 // foldGitStatus folds one landed read and re-arms the chain from HERE, so reads never overlap. The
-// snapshot lands in the slot of the root it was read at ([Model.keepGitSnapshot]). A failed read
-// keeps the last snapshot — a timed-out read on a slow box is no reason to blank the
-// segment — and a read that found no work tree clears it; both wait out [gitStatusBackoff] rather
-// than the cadence. A Turn end that arrived meanwhile turns the wait into one read at once.
+// snapshot and the refusal sentence land in the slot of the root it was read at
+// ([Model.keepGitSnapshot]). A refused read ([GitRefusedError]) clears the snapshot and records
+// its sentence; any other failed read keeps the last snapshot and the recorded sentence — a
+// timed-out read on a slow box is no reason to blank the segment — and a read that found no work
+// tree clears both. All three wait out [gitStatusBackoff] rather than the cadence. A Turn end that
+// arrived meanwhile turns the wait into one read at once.
 func (m Model) foldGitStatus(msg gitStatusMsg) (tea.Model, tea.Cmd) {
 	if !m.gitWired() || msg.gen != m.git.gen {
 		return m, nil
 	}
 	m.git.inFlight = false
 	wait := gitStatusWait(m.gitStatusInterval(), msg.elapsed)
+	var refused GitRefusedError
 	switch {
+	case errors.As(msg.err, &refused):
+		m.keepGitSnapshot(gitstatus.Snapshot{}, false, refused.Sentence)
+		wait = max(gitStatusBackoff, wait)
 	case msg.err != nil:
 		wait = max(gitStatusBackoff, wait)
 	case !msg.inside:
-		m.keepGitSnapshot(gitstatus.Snapshot{}, false)
+		m.keepGitSnapshot(gitstatus.Snapshot{}, false, "")
 		wait = max(gitStatusBackoff, wait)
 	default:
-		m.keepGitSnapshot(countsOnly(msg.snap), true)
+		m.keepGitSnapshot(countsOnly(msg.snap), true, "")
 	}
 	fetch := m.armGitFetch()
 	if m.git.dirty {
@@ -298,15 +325,16 @@ func (m Model) foldGitStatusTick(msg gitStatusTickMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(read, recheck)
 }
 
-// keepGitSnapshot stores a landed read's snapshot in the slot of the root it was read at: the
-// watch's own while a watch is active, the host's otherwise. The generation bump at each watch
-// boundary ([Model.retargetGit]) is what guarantees a read lands only while its root is current.
-func (m *Model) keepGitSnapshot(snap gitstatus.Snapshot, inside bool) {
+// keepGitSnapshot stores a landed read's snapshot and refusal sentence ("" for none) in the slot of
+// the root it was read at: the watch's own while a watch is active, the host's otherwise. The
+// generation bump at each watch boundary ([Model.retargetGit]) is what guarantees a read lands only
+// while its root is current.
+func (m *Model) keepGitSnapshot(snap gitstatus.Snapshot, inside bool, refusal string) {
 	if m.watch.isActive {
-		m.watch.gitSnap, m.watch.hasGitSnap = snap, inside
+		m.watch.gitSnap, m.watch.hasGitSnap, m.watch.gitRefusal = snap, inside, refusal
 		return
 	}
-	m.git.snap, m.git.hasSnap = snap, inside
+	m.git.snap, m.git.hasSnap, m.git.refusal = snap, inside, refusal
 }
 
 // countsOnly drops a snapshot's entry lists: the footer reads counts and branch fields, and the

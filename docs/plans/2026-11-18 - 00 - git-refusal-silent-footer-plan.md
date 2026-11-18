@@ -111,7 +111,11 @@ NOTES (2026-11-18): the shared fixture `armMergeDriver` (gitstatus_host_test.go)
 
 **Commit:** `test(git): footer status and actions beside a repo-local merge driver`
 
-## 4. GitStatusHost reports a refused repository distinctly
+## 4. GitStatusHost reports a refused repository distinctly — ✅ DONE (2026-11-18)
+
+NOTES (2026-11-18): keepGitSnapshot gained a refusal parameter so the snapshot and the refusal sentence land in the same root's slot in one call; the gitSnapshot doc comment now names "refused" among the no-snapshot cases, and TestGitStatusMissWaitsOutTheBackoff gained a "refused" row.
+NOTES (2026-11-18): the watched-root refusal test is a new top-level TestGitStatusWatchedRefusalLandsInTheWatchSlot (not a TestWatchReadsGit... subtest) so the item's `-run 'TestGitStatus'` Acceptance selects it.
+NOTES (2026-11-18): tui.go's Options.GitStatusInterval comment ("a read that found no work tree or failed") still holds — a refused read is a failed one — and was left as is; footerGitSegment's comment is item 5's to change with the marker.
 
 **What:** fix: `gitStatusHost.Status` reads a refused repository as "not a work tree", so the TUI cannot tell a refusal from no repository (issue `git-refusal-silent-footer`, part 1).
 **Regression guard.** Comment rule, not a closed list: every comment calling a refused repository "not inside" or saying every failed read keeps the snapshot is corrected (`rg -n 'refus|failed read keeps' cmd/apogee/gitstatus_host.go internal/tui/gitstatus.go internal/tui/doc.go`; today `insideWorkTree`, `foldGitStatus`, doc.go:658). Only a not-inside or good landing clears the recorded refusal; an errored landing (an incomplete-refusal probe timing out on a slow box) keeps it, as it keeps the snapshot.

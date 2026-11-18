@@ -21,6 +21,7 @@ import (
 	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/subprocess"
 	"github.com/airiclenz/apogee/internal/testtime"
+	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // requireGitForStatusHost skips the test when no git is on PATH: the live behaviour is only
@@ -318,7 +319,8 @@ func TestGitStatusHostNotARepositoryIsNotInside(t *testing.T) {
 }
 
 // TestGitStatusHostRefusedRepositoryRunsNoStatusOrFetch pins the refused repo: a repo-local
-// core.sshCommand makes the repository not inside, and neither verb ever reaches git.
+// core.sshCommand makes the repository not inside with a [tui.GitRefusedError] carrying gitexec's
+// refusal sentence — never the nil error of no repository — and neither verb ever reaches git.
 func TestGitStatusHostRefusedRepositoryRunsNoStatusOrFetch(t *testing.T) {
 	t.Parallel()
 	requireGitForStatusHost(t)
@@ -329,8 +331,13 @@ func TestGitStatusHostRefusedRepositoryRunsNoStatusOrFetch(t *testing.T) {
 	rec := &recordingStatusHost{}
 	host := rec.host()
 	ctx := context.Background()
-	if _, inside, err := host.Status(ctx, clone); err != nil || inside {
-		t.Fatalf("Status = inside %v, err %v; want not inside, nil", inside, err)
+	_, inside, err := host.Status(ctx, clone)
+	var refused tui.GitRefusedError
+	if inside || !errors.As(err, &refused) {
+		t.Fatalf("Status = inside %v, err %v; want not inside with a GitRefusedError", inside, err)
+	}
+	if want := gitexec.CommandConfigRefusal([]string{"core.sshcommand"}); refused.Sentence != want {
+		t.Errorf("refusal sentence = %q, want %q", refused.Sentence, want)
 	}
 	if err := host.Fetch(ctx, clone); err == nil {
 		t.Fatal("Fetch in a refused repository = nil, want the refusal")

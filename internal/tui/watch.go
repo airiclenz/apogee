@@ -173,6 +173,10 @@ type watchState struct {
 	// left it. Its entry lists are nil, and leaveWatch drops it with the rest of the watch.
 	gitSnap    gitstatus.Snapshot
 	hasGitSnap bool
+	// gitRefusal is the watched workspace's recorded refusal sentence, kept as gitState.refusal
+	// is for the host's ([Model.keepGitSnapshot]); "" while none is. leaveWatch drops it with the
+	// rest of the watch.
+	gitRefusal string
 	// workdir is the watched workspace as the footer spells it ([workdirDisplay], escape-stripped),
 	// resolved once at entry as newModel resolves m.workdir; "" when the watched workspace is
 	// unknown. leaveWatch drops it with the rest of the watch.

@@ -655,10 +655,11 @@
 // invariant, kept the armBeat way: a Turn end ([gitAfterTurn]) asks for a read now through
 // [Model.refreshGit], which opens a fresh generation while the chain waits on its tick (retiring the
 // tick) and only marks it dirty while a read is in flight, so the landing issues exactly one
-// follow-up. A failed read keeps the last snapshot; one that found no work tree clears it; both wait
-// out a long backoff, never the 5 s cadence. While a watch is active the same one chain reads the
-// WATCHED session's workspace ([Model.gitRoot]) — entering and leaving each open a fresh generation
-// at the new root ([Model.retargetGit]), leaving re-reads the host at once, a watch of an unknown
+// follow-up. A read the host refused ([GitRefusedError]) clears the snapshot and records the
+// refusal sentence; any other failed read keeps the last snapshot and the recorded sentence; one
+// that found no work tree clears both; all three wait out a long backoff, never the 5 s cadence.
+// While a watch is active the same one chain reads the WATCHED session's workspace
+// ([Model.gitRoot]) — entering and leaving each open a fresh generation at the new root ([Model.retargetGit]), leaving re-reads the host at once, a watch of an unknown
 // workspace reads nothing — and a watched read folds into the watch's own slot, never the host's
 // snapshot. The fetch chain is a second generation, live only while `ui.git-fetch` is on, the host
 // snapshot names an upstream and no watch is active — armed by a landed read or the pref switched

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"go/parser"
 	"go/token"
 	"slices"
@@ -259,6 +260,70 @@ func TestGitStatusNotInsideClearsTheSnapshot(t *testing.T) {
 	}
 }
 
+// testRefusal is the refusal a refused host read carries in these tests.
+var testRefusal = GitRefusedError{Sentence: "git refused: this repository's own config names a program git would execute (core.sshcommand)."}
+
+// TestGitStatusRefusalClearsTheSnapshotAndRecordsTheSentence pins the refused landing: it clears
+// the snapshot like a read that found no work tree but records the refusal sentence, which a
+// failed read keeps and only a good or not-inside landing clears.
+func TestGitStatusRefusalClearsTheSnapshotAndRecordsTheSentence(t *testing.T) {
+	t.Parallel()
+
+	host := newFakeGitHost(tracked())
+	m, _ := land(t, gitModel(t, host, false))
+	landWith := func(m Model, change func(*fakeGitHost)) Model {
+		t.Helper()
+		host.set(change)
+		m.git.inFlight = true
+		m, _ = land(t, m)
+		return m
+	}
+
+	m = landWith(m, func(f *fakeGitHost) { f.err = fmt.Errorf("git rev-parse: %w", testRefusal) })
+	if m.git.hasSnap || m.git.refusal != testRefusal.Sentence {
+		t.Fatalf("after a refused read hasSnap %v, refusal %q; want the snapshot cleared and %q recorded",
+			m.git.hasSnap, m.git.refusal, testRefusal.Sentence)
+	}
+
+	m = landWith(m, func(f *fakeGitHost) { f.err = errors.New("git rev-parse: timed out") })
+	if m.git.refusal != testRefusal.Sentence {
+		t.Errorf("after a failed read refusal %q; want the recorded sentence kept", m.git.refusal)
+	}
+
+	m = landWith(m, func(f *fakeGitHost) { f.err = nil })
+	if !m.git.hasSnap || m.git.refusal != "" {
+		t.Errorf("after a good read hasSnap %v, refusal %q; want the snapshot back and the sentence cleared",
+			m.git.hasSnap, m.git.refusal)
+	}
+
+	m = landWith(m, func(f *fakeGitHost) { f.err = testRefusal })
+	m = landWith(m, func(f *fakeGitHost) { f.err, f.inside = nil, false })
+	if m.git.hasSnap || m.git.refusal != "" {
+		t.Errorf("after a not-inside read hasSnap %v, refusal %q; want both cleared", m.git.hasSnap, m.git.refusal)
+	}
+}
+
+// TestGitStatusWatchedRefusalLandsInTheWatchSlot pins a refused read of the watched workspace to
+// the watch's own slot: the host's snapshot and refusal stay as its last read left them.
+func TestGitStatusWatchedRefusalLandsInTheWatchSlot(t *testing.T) {
+	t.Parallel()
+
+	host := newFakeGitHost(tracked())
+	m, _ := land(t, gitModel(t, host, false))
+	host.set(func(f *fakeGitHost) { f.err = testRefusal })
+
+	m, cmd := m.enterWatch(watchWithWorkspace(t, t.TempDir()).src)
+	m = foldAll(t, m, expandBatch(cmd))
+	if m.watch.hasGitSnap || m.watch.gitRefusal != testRefusal.Sentence {
+		t.Errorf("watched slot hasGitSnap %v, refusal %q; want the refusal %q recorded there",
+			m.watch.hasGitSnap, m.watch.gitRefusal, testRefusal.Sentence)
+	}
+	if !m.git.hasSnap || m.git.refusal != "" {
+		t.Errorf("host slot hasSnap %v, refusal %q; want the host's last good read untouched",
+			m.git.hasSnap, m.git.refusal)
+	}
+}
+
 // A slow read never overlaps a second one: while it is blocked a tick issues nothing and a Turn end
 // only marks the chain dirty, View still renders, and the landing issues exactly one follow-up.
 func TestGitStatusSlowReadNeverOverlaps(t *testing.T) {
@@ -343,6 +408,7 @@ func TestGitStatusMissWaitsOutTheBackoff(t *testing.T) {
 		miss func(*fakeGitHost)
 	}{
 		{"not inside", func(f *fakeGitHost) { f.inside = false }},
+		{"refused", func(f *fakeGitHost) { f.err = testRefusal }},
 		{"error", func(f *fakeGitHost) { f.err = errors.New("wedged") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
