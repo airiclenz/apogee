@@ -221,7 +221,11 @@ cmd/apogee/e2e_toolsfold_test.go — toolsFoldOverTwoConfig, TestE2EToolsUmbrell
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestE2EToolsFold|TestE2EToolsUmbrella|TestE2ESubAgentView' ./cmd/apogee/`
 **Commit:** `feat(tui): apply ui.tools-auto-collapse live`
 
-## 9. Drive auto-collapse end to end
+## 9. Drive auto-collapse end to end — ✅ DONE (2026-11-18)
+
+NOTES (2026-11-18): the survey turn of toolsautocollapse.yaml issues toolsfold.yaml's three calls, so the tests reuse e2e_toolsfold_test.go's toolsFoldPrompt/toolsFoldWrapUp/toolsFoldHeader{Open,Folded}/toolsFoldReadRow rather than respelling the same Group summary.
+NOTES (2026-11-18): the `false` scenario is two subtests that each differ from the default switch: a small umbrella (default threshold) stands open ▼, and a large one (`tools-fold-over: 2`) with `tools-open: true` stands open ▼, so both would fold under the default; the large-and-folded `tools-open: false` case is already pinned by TestE2EToolsUmbrellaFoldsOverThreshold.
+NOTES (2026-11-18): the touched scenario also asserts the home's config.yaml carries no `tools-open` line after opening the auto-collapsed umbrella, and runs at e2eSize+10 rows so the opened umbrella, the wrap-up and the next reply share one screen.
 
 **What:** Depends on item 8.
 **Goal:** Driven tests through `internal/tuitest` + `internal/stubllm` pin, in the real binary with the default config: a settled umbrella collapses to its Group summary row; one the reader opened something in stays open after the next reply; a resumed session shows its settled umbrellas collapsed; a failed call shows `· 1 failed` on the collapsed header; `tools-auto-collapse: false` keeps today's fold.
