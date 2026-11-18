@@ -89,7 +89,10 @@ NOTES (2026-11-18): the new test arms its fixture with a committed `.gitattribut
 
 **Commit:** `test(tools): git tools keep working beside a repo-local merge driver`
 
-## 3. Footer hosts in a merge-driver repository
+## 3. Footer hosts in a merge-driver repository — ✅ DONE (2026-11-18)
+
+NOTES (2026-11-18): `gitActionRun.act` is split into `act` + a new `capture` (the unjudged outcome); only `Rebase` reads `capture`'s result and returns a standing refusal (`gitexec.IsCommandConfigRefusal`, non-zero exit) as `errors.New(<sentence>)` unchanged — every other verb's error text is untouched, rather than making `act` return a typed refusal error for every verb.
+NOTES (2026-11-18): the shared fixture `armMergeDriver` (gitstatus_host_test.go) routes every path to the driver through `.git/info/attributes`, not a committed `.gitattributes`, so the status test's counts see an untouched tree; it skips on Windows (POSIX driver script).
 
 **What:** Recast at the regression check (2026-11-18). test item for item 1's effect on `cmd/apogee`: the footer status read and fetch, pull, push and switch work in a merge-driver repo; the rebase action is refused with `MergeDriverRefusal`.
 **Regression guard.** the footer rebase action returns gitexec's MergeDriverRefusal unchanged and runs no conflict listing (`diff --diff-filter=U`) and no `rebase --abort` after a refused rebase; add cmd/apogee/gitactions_host.go to item 3's Files if the host needs a change to achieve that, and the test asserts neither follow-up verb ran. (It does: `gitActionsHost.Rebase` calls `gitActionRun.abortRebase` on every failed `rebase`, which runs `conflictedPaths` and `rebase --abort`.) The seam: `Rebase` judges the rebase call's own `res.CombinedOutput` before `gitOutcomeError` flattens it to `git rebase: exit 1: <sentence>` (`act` returns the result, or a typed refusal error), using item 1's `IsCommandConfigRefusal`, which is true for `MergeDriverRefusal`. Every comment in `gitactions_host.go` saying a failed rebase is aborted names the refused-rebase exception (`rg -n -i abort cmd/apogee/gitactions_host.go`; today `Rebase`'s doc comment and `abortRebase`'s).

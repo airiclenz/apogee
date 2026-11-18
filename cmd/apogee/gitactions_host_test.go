@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/gitexec"
 )
 
 // gitFixtureOutput runs one fixture git command in dir and returns its trimmed standard output,
@@ -657,6 +659,74 @@ func TestGitActionsHostRebaseRefusesAnSshSigningKeyCommand(t *testing.T) {
 	if _, statErr := os.Stat(marker); !errors.Is(statErr, fs.ErrNotExist) {
 		t.Errorf("the repository's ssh signing-key command ran (stat marker: %v)", statErr)
 	}
+}
+
+// TestGitActionsHostMergeDriverRepositoryKeepsItsActions pins the footer's actions beside a
+// repo-local merge driver: gitexec neutralises the driver on every call, and none of fetch, a
+// fast-forward pull, push or switch runs a content merge, so each succeeds and the driver never
+// runs.
+func TestGitActionsHostMergeDriverRepositoryKeepsItsActions(t *testing.T) {
+	t.Parallel()
+	requireGitForStatusHost(t)
+	remote, clone := statusHostClone(t)
+	identifyFixture(t, clone)
+	marker := armMergeDriver(t, clone)
+	pushUpstreamCommit(t, remote, "upstream.txt")
+	host := gitActionsHost{}
+	ctx := context.Background()
+
+	if _, err := host.Fetch(ctx, clone); err != nil {
+		t.Fatalf("Fetch = %v", err)
+	}
+	if result, err := host.Pull(ctx, clone); err != nil || result != "pull: fast-forwarded 1 commit" {
+		t.Fatalf("Pull = %q, %v; want a one-commit fast-forward", result, err)
+	}
+	commitFixtureFile(t, clone, "local.txt")
+	if _, err := host.Push(ctx, clone); err != nil {
+		t.Fatalf("Push = %v", err)
+	}
+	if head, upstream := gitFixtureOutput(t, clone, "rev-parse", "HEAD"), gitFixtureOutput(t, remote, "rev-parse", "main"); head != upstream {
+		t.Errorf("the remote's main = %s after the push, want HEAD %s", upstream, head)
+	}
+	gitFixture(t, clone, "branch", "feature")
+	if result, err := host.Switch(ctx, clone, "feature"); err != nil || result != "switch: switched to feature" {
+		t.Fatalf("Switch = %q, %v; want the switch to feature", result, err)
+	}
+	if ref := gitFixtureOutput(t, clone, "symbolic-ref", "HEAD"); ref != "refs/heads/feature" {
+		t.Errorf("HEAD = %s after the switch, want refs/heads/feature", ref)
+	}
+	requireMergeDriverNeverRan(t, marker)
+}
+
+// TestGitActionsHostRebaseRefusesAMergeDriverRepository pins the one action a repo-local merge
+// driver refuses: a rebase can run a content merge, so gitexec refuses it before it starts with
+// [gitexec.MergeDriverRefusal] naming the key, and the host returns that sentence unchanged with
+// no conflict listing and no `rebase --abort` after it — a rebase that never started has nothing
+// to list or abort. The two sides conflict on one file, so a driver that did run would run on it.
+func TestGitActionsHostRebaseRefusesAMergeDriverRepository(t *testing.T) {
+	t.Parallel()
+	requireGitForStatusHost(t)
+	remote, clone := statusHostClone(t)
+	identifyFixture(t, clone)
+	divergeFromUpstream(t, remote, clone, "upstream.txt")
+	marker := armMergeDriver(t, clone)
+	before := gitFixtureOutput(t, clone, "rev-parse", "HEAD")
+	rec := &recordingStatusHost{}
+
+	_, err := gitActionsHost{base: rec.host()}.Rebase(context.Background(), clone)
+
+	if want := gitexec.MergeDriverRefusal("rebase", []string{gitMergeDriverKey}); err == nil || err.Error() != want {
+		t.Fatalf("Rebase = %v, want exactly %q", err, want)
+	}
+	for _, verb := range []string{"rebase", "diff"} {
+		if argvs := rec.recordedArgvs(verb); len(argvs) > 0 {
+			t.Errorf("a refused rebase ran `git %s`: %q", verb, argvs)
+		}
+	}
+	if after := gitFixtureOutput(t, clone, "rev-parse", "HEAD"); after != before {
+		t.Errorf("HEAD moved from %s to %s on a refused rebase", before, after)
+	}
+	requireMergeDriverNeverRan(t, marker)
 }
 
 // TestGitActionsHostFetchRefusesARemoteHelper pins the remote-helper route into an unconfined

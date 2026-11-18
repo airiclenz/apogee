@@ -11,6 +11,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/gitstatus"
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
 // gitActionsConfig is the -c set every fetch, merge, push, checkout and rebase the actions host
@@ -181,7 +182,10 @@ func (h gitActionsHost) Switch(ctx context.Context, root, name string) (string, 
 }
 
 // Rebase rebases the branch onto its upstream as last fetched; it fetches nothing. A dirty tree
-// is refused, and a rebase that fails is aborted (see [gitActionRun.abortRebase]).
+// is refused, and a rebase that fails is aborted (see [gitActionRun.abortRebase]) — except one
+// gitexec refused before it started (a repo-local merge driver's [gitexec.MergeDriverRefusal]
+// among them): that rebase never ran, so its refusal comes back unchanged, with no conflict
+// listing and no `rebase --abort` after it.
 func (h gitActionsHost) Rebase(ctx context.Context, root string) (string, error) {
 	run, err := h.local(ctx, root)
 	if err != nil {
@@ -201,7 +205,14 @@ func (h gitActionsHost) Rebase(ctx context.Context, root string) (string, error)
 	if behind == "0" {
 		return "rebase: already up to date with " + upstream, nil
 	}
-	if err := run.act(ctx, "rebase", "@{u}"); err != nil {
+	res, err := run.capture(ctx, "rebase", "@{u}")
+	if err != nil {
+		return "", err
+	}
+	if res.ExitCode != 0 && gitexec.IsCommandConfigRefusal(res.CombinedOutput) {
+		return "", errors.New(res.CombinedOutput)
+	}
+	if err := gitOutcomeError("rebase", res); err != nil {
 		return "", run.abortRebase(ctx, err)
 	}
 	return "rebase: rebased onto " + upstream, nil
@@ -342,8 +353,10 @@ func (r gitActionRun) requireClean(ctx context.Context, verb string) error {
 // abortRebase runs `rebase --abort` after a failed rebase, so the branch and tree are as they
 // were, and returns the error to report: the conflicting files when the rebase stopped on a
 // conflict, else git's own rebase error. The unmerged paths are read before the abort clears
-// them. A rebase that failed before it started leaves nothing to abort; the abort's refusal is
-// then appended rather than dropped, since apogee cannot tell that case from a failed abort.
+// them. A rebase gitexec refused never reaches here ([gitActionsHost.Rebase] returns that
+// refusal as it stands). Any other rebase that failed before it started leaves nothing to abort;
+// the abort's refusal is then appended rather than dropped, since apogee cannot tell that case
+// from a failed abort.
 func (r gitActionRun) abortRebase(ctx context.Context, rebaseErr error) error {
 	cause := rebaseErr
 	conflicts, listErr := r.conflictedPaths(ctx)
@@ -377,12 +390,18 @@ func (r gitActionRun) conflictedPaths(ctx context.Context) ([]string, error) {
 // act runs one verb that reaches the network or moves the branch, with [gitActionsConfig] ahead
 // of it and no controlling terminal. A non-zero exit is an error carrying git's own message.
 func (r gitActionRun) act(ctx context.Context, args ...string) error {
-	res, err := r.git.CaptureEnv(ctx, r.gitPath, r.root, r.env, gitexec.CaptureOptions{NoTerminal: true},
-		gitStatusBackstop, slices.Concat(gitActionsConfig, args)...)
+	res, err := r.capture(ctx, args...)
 	if err != nil {
 		return err
 	}
 	return gitOutcomeError(args[0], res)
+}
+
+// capture runs one verb as [gitActionRun.act] does and returns git's outcome unjudged, for a
+// caller that must read a refusal's sentence before [gitOutcomeError] folds it into an error.
+func (r gitActionRun) capture(ctx context.Context, args ...string) (subprocess.SubprocessResult, error) {
+	return r.git.CaptureEnv(ctx, r.gitPath, r.root, r.env, gitexec.CaptureOptions{NoTerminal: true},
+		gitStatusBackstop, slices.Concat(gitActionsConfig, args)...)
 }
 
 // read runs one read-only query and returns its standard output, trimmed.

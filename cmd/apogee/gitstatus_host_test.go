@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -337,6 +340,72 @@ func TestGitStatusHostRefusedRepositoryRunsNoStatusOrFetch(t *testing.T) {
 			t.Fatalf("a refused repository ran `git %s`", verb)
 		}
 	}
+}
+
+// gitMergeDriverKey is the repo-local merge driver armMergeDriver plants, spelled as git's
+// config listing keeps it (section and variable lowercased, the mixed-case subsection kept) and
+// so as a refusal names it. Its subsection is the shape capcom's own setup leaves.
+const gitMergeDriverKey = "merge.Capcom-Log.driver"
+
+// armMergeDriver plants a repo-local merge driver in dir that writes a marker if it ever
+// executes, and routes every path to it through .git/info/attributes so the working tree stays
+// as it was. It returns the marker's path, which must never exist.
+func armMergeDriver(t *testing.T, dir string) (marker string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the planted merge driver is a POSIX shell script; the neutralisation it pins is platform-independent")
+	}
+	marker = filepath.Join(t.TempDir(), "merge-driver.ran")
+	driver := filepath.Join(t.TempDir(), "merge-driver.sh")
+	script := "#!/bin/sh\n: > \"" + marker + "\"\nexit 0\n"
+	if err := os.WriteFile(driver, []byte(script), 0o755); err != nil {
+		t.Fatalf("write the merge driver: %v", err)
+	}
+	writeFixtureFile(t, dir, filepath.Join(".git", "info", "attributes"), "* merge=Capcom-Log\n")
+	gitFixture(t, dir, "config", "--local", gitMergeDriverKey, driver+" %O %A %B")
+	return marker
+}
+
+// requireMergeDriverNeverRan fails the test when armMergeDriver's marker exists.
+func requireMergeDriverNeverRan(t *testing.T, marker string) {
+	t.Helper()
+	if _, err := os.Stat(marker); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the repository's merge driver ran (stat marker: %v)", err)
+	}
+}
+
+// TestGitStatusHostMergeDriverRepositoryIsInside pins the footer's read beside a repo-local merge
+// driver: gitexec neutralises the driver rather than refusing the repository, so Status reports
+// it inside with its counts and Fetch updates its upstream, and the driver never runs.
+func TestGitStatusHostMergeDriverRepositoryIsInside(t *testing.T) {
+	t.Parallel()
+	requireGitForStatusHost(t)
+	remote, clone := statusHostClone(t)
+	marker := armMergeDriver(t, clone)
+	pushUpstreamCommit(t, remote, "upstream.txt")
+	writeFixtureFile(t, clone, "README", "edited\n")
+	writeFixtureFile(t, clone, "new.txt", "new\n")
+	rec := &recordingStatusHost{}
+	host := rec.host()
+	ctx := context.Background()
+
+	if err := host.Fetch(ctx, clone); err != nil {
+		t.Fatalf("Fetch = %v, want nil", err)
+	}
+	snap, inside, err := host.Status(ctx, clone)
+
+	if err != nil || !inside {
+		t.Fatalf("Status = inside %v, err %v; want inside, nil", inside, err)
+	}
+	if snap.Branch != "main" || snap.Dirty != 2 || snap.Unstaged != 1 || snap.Untracked != 1 || snap.Behind != 1 {
+		t.Errorf("Status = %+v; want branch main, Dirty 2, Unstaged 1, Untracked 1, Behind 1", snap)
+	}
+	for _, verb := range []string{"status", "fetch"} {
+		if !rec.ran(verb) {
+			t.Errorf("a merge-driver repository ran no `git %s`", verb)
+		}
+	}
+	requireMergeDriverNeverRan(t, marker)
 }
 
 // TestGitStatusHostEnvCarriesNoPromptAndSSHPassThrough pins the child environment: the no-prompt
