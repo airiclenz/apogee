@@ -11,7 +11,8 @@ package main
 //
 // The segment is also a control (ADR 0108): the same clones carry the git actions a click on it
 // opens — a pull and a push taken through the picker — and a repository the git tools refuse,
-// which shows no segment and whose /git refuses.
+// whose segment reads `git refused` in place of its state and whose /git answers with the
+// refusal sentence naming the key.
 
 import (
 	"os"
@@ -21,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tuitest"
@@ -117,12 +119,16 @@ func TestE2EGitActionsPullAndPushFromTheFooter(t *testing.T) {
 }
 
 // TestE2EGitActionsRefusedRepository opens the run in a repository the git tools refuse — its own
-// config names an ssh command to run — and finds no git segment on the footer and /git answering
-// with its refusal rather than a picker.
+// config names an ssh command to run — and finds the footer's git segment reading `git refused`
+// rather than vanishing, and /git answering with the refusal sentence that names the key rather
+// than a picker or "no git here".
 //
-// The absence is watched over a window of many status cadences rather than asserted once: a
-// segment that is merely slow to appear would pass a single look. The sibling tests show the same
-// clones seating the segment within that cadence when nothing is refused.
+// The sentence is a whole wrapped line in the transcript, so it is counted on the flattened
+// transcript ([transcriptProse]); the one-time note the refusal posts may already carry it, so /git's answer is the
+// count rising past what stood before it. The absence of any state the repository was never read
+// for is watched over a window of many status cadences rather than asserted once: a segment that
+// is merely slow to appear would pass a single look. The sibling tests show the same clones seating
+// the segment within that cadence when nothing is refused.
 func TestE2EGitActionsRefusedRepository(t *testing.T) {
 	t.Parallel()
 
@@ -133,38 +139,64 @@ func TestE2EGitActionsRefusedRepository(t *testing.T) {
 	launchTUIInGitPolling(t, drv, stub, ws, gitStatusEvery)
 	waitIdle(drv)
 
+	drv.WaitFor(func() bool {
+		f := drv.Frame()
+		y := footerRowIndex(f, footerWorkspace)
+		return y >= 0 && strings.Contains(f.Row(y), gitRefusedMarker)
+	}, tuitest.Awaiting("the footer's "+gitRefusedMarker+" marker"))
+
+	refusal := flatten(gitexec.CommandConfigRefusal([]string{"core.sshcommand"}))
+	before := strings.Count(transcriptProse(drv.Frame()), refusal)
 	submit(drv, "/git")
-	drv.WaitText(gitRefusedNote)
+	drv.WaitFor(func() bool { return strings.Count(transcriptProse(drv.Frame()), refusal) > before },
+		tuitest.Awaiting("/git's answer "+refusal))
 	if frameHas(drv.Frame(), gitActionsPickerTitle) {
 		t.Fatalf("/git in a refused repository opened the git actions picker:\n%s", drv.Frame())
 	}
 
 	for watched := testtime.Expiry(gitRefusedWatch); !watched(); {
 		if row := footerWorkspaceRow(t, drv.Frame()); strings.Contains(row, glyphGitDirty) {
-			t.Fatalf("a refused repository shows a git segment on the footer's workspace row %q", row)
+			t.Fatalf("a refused repository shows git state it was never read for on the footer's workspace row %q", row)
 		}
 		time.Sleep(testtime.Fixed(50 * time.Millisecond))
 	}
 }
 
 // The git actions' own words (internal/tui/gitactions.go and cmd/apogee/gitactions_host.go): the
-// picker's title over these clones, the glosses that filter it down to one row, and the notes the
-// actions and the refusal land as.
+// picker's title over these clones, the glosses that filter it down to one row, the notes the
+// actions land as, and the marker a refused repository's segment reads.
 const (
 	gitActionsPickerTitle = "git actions — " + gitStatusBranch
 	gitPullGloss          = "fast-forward"
 	gitPushGloss          = "never forced"
 	gitPullNote           = "git pull: fast-forwarded 1 commit"
 	gitPushNote           = "git push: pushed " + gitStatusBranch + " to origin/" + gitStatusBranch
-	gitRefusedNote        = "no git here — git actions need a workspace in a git repository"
+	// gitRefusedMarker is the footer's git segment in a repository the git tools refuse.
+	gitRefusedMarker = "git refused"
 	// glyphGitDirty is the changed-paths mark every git segment carries, a detached HEAD's
 	// included — the one mark no other footer segment paints.
 	glyphGitDirty = "Δ"
 )
 
-// gitRefusedWatch is how long a refused repository is watched for a git segment: eight status
-// cadences, each of which would have seated one in a repository the tools accept.
+// gitRefusedWatch is how long a refused repository is watched for a git state segment: eight
+// status cadences, each of which would have seated one in a repository the tools accept.
 var gitRefusedWatch = testtime.Fixed(8 * gitStatusEvery)
+
+// transcriptProse is the frame's text left of the side panel, flattened ([flatten]): each row cut
+// at its last rule (`│`, the panel's separator), so a sentence the transcript wrapped reads whole
+// rather than broken by the separator its rows end on.
+func transcriptProse(f tuitest.Frame) string {
+	rows := f.Rows()
+	for i, row := range rows {
+		if at := strings.LastIndex(row, panelRule); at >= 0 {
+			rows[i] = row[:at]
+		}
+	}
+	return flatten(strings.Join(rows, "\n"))
+}
+
+// panelRule is the side panel's separator rune, which ends every row the transcript shares with it.
+const panelRule = "│"
 
 // awaitGitSegment waits for the footer to read segment and checks it stands on the footer's
 // workspace row rather than anywhere else on the frame.

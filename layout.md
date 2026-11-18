@@ -2109,8 +2109,12 @@ its upstream and `↑` how many it is ahead. The marks keep their shape under `u
 segment states only what git compared: `↓` and `↑` are absent on a branch with no upstream (or one
 whose upstream is gone), since a `0↓ 0↑` there would claim a level the branch was never measured
 against; a detached HEAD has no branch to name, so the counts stand alone (`5Δ`); and outside a
-work tree — or in a repository the git tools refuse, one whose own config names a command to run —
-the segment is absent with its separator. The branch is the repository's text, so its escape
+work tree the segment is absent with its separator. A repository the git tools refuse — one whose
+own config names a command to run — is not read as no repository: the segment reads `git refused`
+in the `error` tone, at the same priority, and the first read that finds a refusal (or a different
+one) posts one routine note — the refusal sentence, naming the key, then `Move the key to your
+global git config if you trust it.` — while a refusal that stands is noted only once. A refusal of
+a watched session's workspace shows the marker and posts no note. The branch is the repository's text, so its escape
 sequences are stripped before it is measured or painted. The branch and every zero count sit in
 the footer's own muted tone; a non-zero count takes the tone of what it means — a non-zero `Δ` (work
 not yet committed) and `↓` (upstream commits not yet merged) in `warning` (`#d7af5f`), a non-zero
@@ -2137,12 +2141,13 @@ on every cell the fit leaves it — is a click target, the footer's second besid
 and `/git` is its keyboard reach. A click opens the git actions picker (below, "And the same
 overlay offers the git actions"): fetch, pull, push, sync, switch branch and rebase onto upstream,
 each the user's own act — outside the Approver and the mode, like `/undo`, and through the same
-hardened runner the reads use, so a refused repository stays refused and has no segment to click
-(`/git` there notes `no git here — …`). An action notes `git <verb>…` as it starts and its result
-as it lands — `git pull: fast-forwarded 1 commit`, or `git <verb> failed — ` and git's own message —
-and asks for a read at once, so the counts show what it did. The segment answers a click on the
-marker's terms (a live state, no picker already open, no `/sessions` browser and no `/settings`
-pane owning input) but for one difference: a Turn running or a decision pending does not close it,
+hardened runner the reads use, so a refused repository stays refused and gets no action: a click on
+its `git refused` marker, like `/git` there, notes the refusal sentence instead of opening the
+picker (and `/git` with no repository at all notes `no git here — …`). An action notes
+`git <verb>…` as it starts and its result as it lands — `git pull: fast-forwarded 1 commit`, or
+`git <verb> failed — ` and git's own message — and asks for a read at once, so the counts show
+what it did. The segment answers a click on the marker's terms (a live state, no picker already
+open, no `/sessions` browser and no `/settings` pane owning input) but for one difference: a Turn running or a decision pending does not close it,
 and the click is answered there with the note `git actions wait for the Turn to end`, because the
 picker opens only at idle. During a watch the click opens nothing either: it raises the watch's
 `read-only — you are watching this session; esc goes back` flash, as `/git` does there. While an action runs, a submitted prompt and a second action wait for it

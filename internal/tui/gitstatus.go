@@ -89,6 +89,10 @@ type gitState struct {
 	// no work tree clears it, and any other failed read keeps it, as it keeps snap. A read of a
 	// watched workspace never lands here (watchState.gitRefusal).
 	refusal string
+	// notedRefusal is the last refusal sentence a host read posted its one note for
+	// ([Model.noteGitRefusal]); "" until one has. A refused landing whose sentence matches it posts
+	// nothing, so a refusal that stands is noted once rather than every backoff.
+	notedRefusal string
 
 	// gen is the status chain's live generation; a Msg carrying any other one is inert. 0 means
 	// no chain (the host is unwired).
@@ -275,8 +279,9 @@ func (m Model) gitFetchInterval() time.Duration {
 // ([Model.keepGitSnapshot]). A refused read ([GitRefusedError]) clears the snapshot and records
 // its sentence; any other failed read keeps the last snapshot and the recorded sentence — a
 // timed-out read on a slow box is no reason to blank the segment — and a read that found no work
-// tree clears both. All three wait out [gitStatusBackoff] rather than the cadence. A Turn end that
-// arrived meanwhile turns the wait into one read at once.
+// tree clears both. A refused read of the host workspace also posts the refusal's one note
+// ([Model.noteGitRefusal]). All three wait out [gitStatusBackoff] rather than the cadence. A Turn
+// end that arrived meanwhile turns the wait into one read at once.
 func (m Model) foldGitStatus(msg gitStatusMsg) (tea.Model, tea.Cmd) {
 	if !m.gitWired() || msg.gen != m.git.gen {
 		return m, nil
@@ -287,6 +292,7 @@ func (m Model) foldGitStatus(msg gitStatusMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case errors.As(msg.err, &refused):
 		m.keepGitSnapshot(gitstatus.Snapshot{}, false, refused.Sentence)
+		m.noteGitRefusal(refused.Sentence)
 		wait = max(gitStatusBackoff, wait)
 	case msg.err != nil:
 		wait = max(gitStatusBackoff, wait)
@@ -335,6 +341,29 @@ func (m *Model) keepGitSnapshot(snap gitstatus.Snapshot, inside bool, refusal st
 		return
 	}
 	m.git.snap, m.git.hasSnap, m.git.refusal = snap, inside, refusal
+}
+
+// The words a refused repository ([GitRefusedError]) is stated in beside its own sentence.
+const (
+	// gitRefusedLabel is the footer's git segment while the shown root's slot holds a refusal
+	// ([Model.footerGitSegment]), painted in the footer's error tone.
+	gitRefusedLabel = "git refused"
+	// gitRefusedAdvice follows the refusal sentence in the one note a new refusal posts
+	// ([Model.noteGitRefusal]): the sentence names the key, this says what the human can do.
+	gitRefusedAdvice = " Move the key to your global git config if you trust it."
+)
+
+// noteGitRefusal posts one routine note — the host's refusal sentence, then [gitRefusedAdvice] —
+// the first time a read of the host workspace lands a sentence other than the last one noted, so
+// the footer's `git refused` marker is explained once rather than on every backoff. A refusal of a
+// watched workspace posts nothing: the marker states it, and the note would read as apogee's own
+// repository.
+func (m *Model) noteGitRefusal(sentence string) {
+	if m.watch.isActive || sentence == m.git.notedRefusal {
+		return
+	}
+	m.git.notedRefusal = sentence
+	m.noteRoutine(sentence + gitRefusedAdvice)
 }
 
 // countsOnly drops a snapshot's entry lists: the footer reads counts and branch fields, and the

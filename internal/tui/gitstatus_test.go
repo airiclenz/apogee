@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/gitstatus"
 	"github.com/airiclenz/apogee/internal/testtime"
 )
@@ -321,6 +323,93 @@ func TestGitStatusWatchedRefusalLandsInTheWatchSlot(t *testing.T) {
 	if !m.git.hasSnap || m.git.refusal != "" {
 		t.Errorf("host slot hasSnap %v, refusal %q; want the host's last good read untouched",
 			m.git.hasSnap, m.git.refusal)
+	}
+	if !strings.Contains(footerPlain(m), gitRefusedLabel) {
+		t.Errorf("the watched refusal shows no %q on the footer: %q", gitRefusedLabel, footerPlain(m))
+	}
+	if n := countRefusalNotes(m, testRefusal.Sentence); n != 0 {
+		t.Errorf("a watched refusal posted %d notes; the marker states it and the note is the host's own", n)
+	}
+}
+
+// emittedRefusal is the refusal sentence the host's runner emits for a repository whose own config
+// names an ssh command — the exact words, not a stand-in, so the note and /git are pinned to them.
+var emittedRefusal = GitRefusedError{Sentence: gitexec.CommandConfigRefusal([]string{"core.sshcommand"})}
+
+// footerPlain is m's footer at a width that seats every segment, with its styling stripped.
+func footerPlain(m Model) string {
+	return ansiPattern.ReplaceAllString(m.footerContent(160), "")
+}
+
+// countRefusalNotes counts the transcript and session-log notes that are sentence's one note.
+func countRefusalNotes(m Model, sentence string) int {
+	n := 0
+	for _, note := range noteAndLogTexts(m) {
+		if note == sentence+gitRefusedAdvice {
+			n++
+		}
+	}
+	return n
+}
+
+// TestGitStatusRefusalNotesOncePerSentence pins the refused repository's two faces on the host
+// workspace: the footer reads `git refused` while the refusal is recorded, and the first landing
+// of a sentence posts one note — the sentence and the advice — that a repeat landing does not post
+// again, while a different sentence posts its own. A non-repository shows no segment at all.
+func TestGitStatusRefusalNotesOncePerSentence(t *testing.T) {
+	t.Parallel()
+
+	host := newFakeGitHost(tracked())
+	m, _ := land(t, gitModel(t, host, false))
+	landWith := func(m Model, change func(*fakeGitHost)) Model {
+		t.Helper()
+		host.set(change)
+		m.git.inFlight = true
+		m, _ = land(t, m)
+		return m
+	}
+
+	m = landWith(m, func(f *fakeGitHost) { f.err = emittedRefusal })
+	m = landWith(m, func(f *fakeGitHost) { f.err = emittedRefusal })
+	if !strings.Contains(footerPlain(m), gitRefusedLabel) {
+		t.Errorf("a refused repository's footer %q does not read %q", footerPlain(m), gitRefusedLabel)
+	}
+	if n := countRefusalNotes(m, emittedRefusal.Sentence); n != 1 {
+		t.Errorf("two refused landings posted %d notes, want one: %q", n, noteAndLogTexts(m))
+	}
+
+	other := gitexec.CommandConfigRefusal([]string{"core.fsmonitor", "core.sshcommand"})
+	m = landWith(m, func(f *fakeGitHost) { f.err = GitRefusedError{Sentence: other} })
+	if n := countRefusalNotes(m, other); n != 1 {
+		t.Errorf("a different refusal posted %d notes of its own, want one: %q", n, noteAndLogTexts(m))
+	}
+
+	m = landWith(m, func(f *fakeGitHost) { f.err, f.inside = nil, false })
+	if footer := footerPlain(m); strings.Contains(footer, gitRefusedLabel) || strings.Contains(footer, m.th.glyphs.gitDirty) {
+		t.Errorf("a non-repository's footer %q shows a git segment", footer)
+	}
+}
+
+// TestGitStatusRefusalAnswersGitActions pins the git actions' answer in a refused repository: /git
+// and a click on the `git refused` marker both note the recorded refusal sentence — the one naming
+// the key — instead of opening the picker or saying there is no git here.
+func TestGitStatusRefusalAnswersGitActions(t *testing.T) {
+	t.Parallel()
+
+	base, host := gitActionsModelWith(t, tracked(), &fakeGitActionsHost{}, func(*Options) {})
+	host.set(func(f *fakeGitHost) { f.err = emittedRefusal })
+	base.git.inFlight = true
+	base, _ = land(t, base)
+
+	m := sendLine(t, base, "/git")
+	if m.picker.open || lastNote(m) != emittedRefusal.Sentence {
+		t.Errorf("/git gave picker %+v and note %q, want the refusal sentence %q", m.picker, lastNote(m), emittedRefusal.Sentence)
+	}
+
+	y, first, _ := footerGitCells(t, base)
+	m = step(t, base, leftClick(first, y))
+	if m.picker.open || lastNote(m) != emittedRefusal.Sentence {
+		t.Errorf("a click on the marker gave picker %+v and note %q, want the refusal sentence %q", m.picker, lastNote(m), emittedRefusal.Sentence)
 	}
 }
 

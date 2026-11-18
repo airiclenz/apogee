@@ -530,6 +530,9 @@ const (
 	footerToneWarning
 	// footerToneSuccess is the `success` role: commits made here and ready to push.
 	footerToneSuccess
+	// footerToneError is the `error` role: a repository the host refused, whose segment reads
+	// `git refused` instead of its state ([Model.footerGitSegment]).
+	footerToneError
 )
 
 // footerSpan is one piece of the footer's git segment and the tone it is read in

@@ -307,7 +307,7 @@ type theme struct {
 	surface color.Color // the `surface` role: the input box's interior, the status field, a popup pane's fill
 	chrome  color.Color // the `chrome` role: the user block's field, the borders, the gauge's track
 	muted   color.Color // the `muted` role: the dim tone, and modeColor's off-ladder fallback
-	errorFg color.Color // the `error` role: the footer's offline segment, painted onto footerText
+	errorFg color.Color // the `error` role: the footer's offline segment and its `git refused` marker (footerToneError), painted onto footerText
 
 	// The four autonomy-mode marker colours, warming up the privilege ladder (least → most
 	// autonomous): plan turquoise-green, ask-before green, allow-edits blue, auto orange.
@@ -449,13 +449,16 @@ func (th theme) modeColor(m domain.Mode) color.Color {
 }
 
 // footerToneStyle is the style a piece of the footer's git segment paints in: the tone's role on
-// the footer's own field, and the footer's own muted text for the muted tone or an unknown one.
+// the footer's own field, and the footer's own muted text for the muted tone or an unknown one. The
+// error tone is painted the way the offline segment is ([Model.footerLeft]).
 func (th theme) footerToneStyle(tone footerTone) lipgloss.Style {
 	switch tone {
 	case footerToneWarning:
 		return th.footerWarning
 	case footerToneSuccess:
 		return th.footerSuccess
+	case footerToneError:
+		return th.footerText.Foreground(th.errorFg)
 	default:
 		return th.footerText
 	}

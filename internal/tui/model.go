@@ -4332,7 +4332,8 @@ func (m Model) footerOverride(target domain.FooterSegment) (lipgloss.Style, bool
 
 // footerGit paints the git segment the layout kept: every piece in its span's tone
 // ([footerTone], [theme.footerToneStyle]) — the branch and every zero count on the footer's own
-// muted tone, a non-zero `Δ` or `↓` in the `warning` role, a non-zero `↑` in `success` — adjacent
+// muted tone, a non-zero `Δ` or `↓` in the `warning` role, a non-zero `↑` in `success`, the
+// `git refused` marker in `error` — adjacent
 // pieces of one tone joined into one styled run. The pieces are the ones the layout KEPT
 // ([footerSegmentSpan]) — an elided branch included — never re-worded from the snapshot, which
 // would no longer re-join to the text the fit measured once the branch is shortened. Should they
@@ -4473,17 +4474,23 @@ func (m Model) footerLeftText() footerInput {
 	return in
 }
 
-// footerGitSegment is the git segment, worded into its toned pieces ([gitFooterSegment]), or an
-// empty one — the segment absent WITH its separator — while no snapshot is held: unwired, not yet
-// landed, or a workspace outside any work tree. While a watch is active it is the WATCHED
-// workspace's snapshot ([watchState.gitSnap]), never the host's, so a watch of an unknown
+// footerGitSegment is the git segment, worded into its toned pieces ([gitFooterSegment]): the
+// [gitRefusedLabel] marker alone, in the error tone, while the slot holds a refusal sentence
+// ([GitRefusedError]) — so a refused repository never reads as no repository — or an empty one —
+// the segment absent WITH its separator — while no snapshot is held: unwired, not yet landed, or a
+// workspace outside any work tree. While a watch is active it is the WATCHED workspace's slot
+// ([watchState.gitSnap], [watchState.gitRefusal]), never the host's, so a watch of an unknown
 // workspace — which reads none — shows no git segment at all.
 func (m Model) footerGitSegment() footerSegment {
 	snap, ok := m.gitSnapshot()
+	refusal := m.git.refusal
 	if m.watch.isActive {
-		snap, ok = m.watch.gitSnap, m.watch.hasGitSnap
+		snap, ok, refusal = m.watch.gitSnap, m.watch.hasGitSnap, m.watch.gitRefusal
 	}
-	if !ok {
+	switch {
+	case refusal != "":
+		return gitFooterSegment([]footerSpan{{text: gitRefusedLabel, tone: footerToneError}})
+	case !ok:
 		return gitFooterSegment(nil)
 	}
 	return gitFooterSegment(gitFooterSpans(snap, m.th.glyphs))

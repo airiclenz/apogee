@@ -88,7 +88,8 @@ func (a gitAction) runningNote() string {
 // picker carries.
 const (
 	// noGitActionsNote answers /git with no git to act on: no actions host wired, no workspace, or
-	// a workspace the status read found outside any work tree — or in a repository apogee refuses.
+	// a workspace the status read found outside any work tree. A repository apogee refuses is
+	// answered with its own refusal sentence instead ([Model.gitActionsRefusal]).
 	noGitActionsNote = "no git here — git actions need a workspace in a git repository apogee can act on"
 	// gitActionsBusyNote answers /git and the footer click while a Turn runs or a decision is
 	// pending: the picker opens only at idle.
@@ -117,12 +118,17 @@ func (m Model) gitActionsWired() bool {
 }
 
 // gitActionsRefusal is the one gate /git and the footer click share: the note the opener answers
-// with instead of the picker, and false where the picker may open. With no git to act on it says
-// so; while a Turn runs or a decision is pending, and while a git action is still running, the
-// actions wait.
+// with instead of the picker, and false where the picker may open. In a repository the host
+// refused it answers with the refusal sentence the status read recorded ([GitRefusedError]), the
+// one that names the key; with no git to act on it says so; while a Turn runs or a decision is
+// pending, and while a git action is still running, the actions wait.
 func (m Model) gitActionsRefusal() (string, bool) {
 	switch {
-	case !m.gitActionsWired() || !m.git.hasSnap:
+	case !m.gitActionsWired():
+		return noGitActionsNote, true
+	case m.git.refusal != "":
+		return m.git.refusal, true
+	case !m.git.hasSnap:
 		return noGitActionsNote, true
 	case m.busy():
 		return gitActionsBusyNote, true

@@ -202,25 +202,29 @@ var footerGitTestSnapshot = gitstatus.Snapshot{
 // TestFooterStatesTheGitSegment pins the footer's git segment in the painted row: after the workdir
 // it describes, `<branch> NΔ N↓ N↑`, its upstream counts absent without an upstream, its branch
 // absent on a detached HEAD, and the whole segment absent WITH its separator while no snapshot is
-// held. The branch is repository text and leaves its escapes behind on the way in.
+// held — unless the host refused the repository, which reads `git refused` in its place. The
+// branch is repository text and leaves its escapes behind on the way in.
 func TestFooterStatesTheGitSegment(t *testing.T) {
 	t.Parallel()
 
 	const facts = "test-host ✦ test-model ✦ high ✦ /ws/proj"
 	for _, tc := range []struct {
-		name string
-		snap *gitstatus.Snapshot
-		want string
+		name    string
+		snap    *gitstatus.Snapshot
+		refusal string
+		want    string
 	}{
-		{"no snapshot shows no segment", nil, facts},
-		{"a branch with an upstream", &footerGitTestSnapshot, facts + " ✦ main 5Δ 0↓ 4↑"},
-		{"no upstream", &gitstatus.Snapshot{Branch: "main", Dirty: 5}, facts + " ✦ main 5Δ"},
-		{"a detached HEAD", &gitstatus.Snapshot{Detached: true, Dirty: 5}, facts + " ✦ 5Δ"},
+		{"no snapshot shows no segment", nil, "", facts},
+		{"a branch with an upstream", &footerGitTestSnapshot, "", facts + " ✦ main 5Δ 0↓ 4↑"},
+		{"no upstream", &gitstatus.Snapshot{Branch: "main", Dirty: 5}, "", facts + " ✦ main 5Δ"},
+		{"a detached HEAD", &gitstatus.Snapshot{Detached: true, Dirty: 5}, "", facts + " ✦ 5Δ"},
 		{
 			"an escape-laden branch",
 			&gitstatus.Snapshot{Branch: "ma\x1b]8;;http://evil\x07in\x1b[31m", Dirty: 5},
+			"",
 			facts + " ✦ main 5Δ",
 		},
+		{"a refused repository shows the marker", nil, testRefusal.Sentence, facts + " ✦ " + gitRefusedLabel},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -229,6 +233,7 @@ func TestFooterStatesTheGitSegment(t *testing.T) {
 			if tc.snap != nil {
 				m = withGitSnapshot(m, *tc.snap)
 			}
+			m.git.refusal = tc.refusal
 			if got := footerLeftRun(t, m, 160); got != tc.want {
 				t.Errorf("footer's left run = %q, want %q", got, tc.want)
 			}
@@ -432,10 +437,10 @@ func footerToneOpeners(t *testing.T, m Model) map[footerTone]string {
 	t.Helper()
 
 	openers := map[footerTone]string{}
-	for _, tone := range []footerTone{footerToneMuted, footerToneWarning, footerToneSuccess} {
+	for _, tone := range []footerTone{footerToneMuted, footerToneWarning, footerToneSuccess, footerToneError} {
 		openers[tone] = sgrOpener(t, m.th.footerToneStyle(tone))
 	}
-	for _, tone := range []footerTone{footerToneWarning, footerToneSuccess} {
+	for _, tone := range []footerTone{footerToneWarning, footerToneSuccess, footerToneError} {
 		if openers[tone] == "" || openers[tone] == openers[footerToneMuted] {
 			t.Fatalf("tone %d opens with %q, indistinguishable from the footer's own", tone, openers[tone])
 		}
@@ -480,6 +485,28 @@ func TestFooterTonesOnlyNonZeroGitCounts(t *testing.T) {
 		if strings.Contains(footer, tones[lit]) {
 			t.Errorf("a clean, level tree opens a lit tone (%d): %q", lit, footer)
 		}
+	}
+}
+
+// TestFooterTonesTheGitRefusedMarker reads the styled bytes of a refused repository's segment: the
+// whole `git refused` marker opens the error tone — the offline segment's own paint — and nothing
+// of it sits on the footer's muted tone.
+func TestFooterTonesTheGitRefusedMarker(t *testing.T) {
+	t.Parallel()
+
+	m := footerFactsModel(t)
+	m.git.refusal = testRefusal.Sentence
+	tones := footerToneOpeners(t, m)
+
+	footer := m.footerContent(160)
+	if !strings.Contains(footer, tones[footerToneError]+gitRefusedLabel) {
+		t.Errorf("footer does not paint %q in the error tone: %q", gitRefusedLabel, footer)
+	}
+	if offline := sgrOpener(t, m.th.footerText.Foreground(m.th.errorFg)); tones[footerToneError] != offline {
+		t.Errorf("the error tone opens with %q, want the offline segment's %q", tones[footerToneError], offline)
+	}
+	if strings.Contains(footer, tones[footerToneMuted]+gitRefusedLabel) {
+		t.Errorf("footer paints %q on its own muted tone: %q", gitRefusedLabel, footer)
 	}
 }
 

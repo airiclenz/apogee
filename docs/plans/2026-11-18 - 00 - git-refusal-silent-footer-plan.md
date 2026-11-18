@@ -135,7 +135,10 @@ NOTES (2026-11-18): tui.go's Options.GitStatusInterval comment ("a read that fou
 
 **Commit:** `fix(tui): tell a refused repository from no repository in the git status seam`
 
-## 5. Footer `git refused` marker, one-time note, `/git` answer
+## 5. Footer `git refused` marker, one-time note, `/git` answer — ✅ DONE (2026-11-18)
+
+NOTES (2026-11-18): the last-noted sentence is `gitState.notedRefusal`, posted through a new `Model.noteGitRefusal` called from foldGitStatus's refused case; a good or not-inside landing does not reset it, so the same sentence refused again later posts nothing ("different from the last noted one", read literally). The label and advice are constants `gitRefusedLabel` / `gitRefusedAdvice` in gitstatus.go.
+NOTES (2026-11-18): the /git and footer-click test is TestGitStatusRefusalAnswersGitActions in gitstatus_test.go (the plan's `TestGitActions` pattern matches no existing test; the existing ones are `TestGitAction…`), and the e2e test counts the sentence on a new `transcriptProse` helper (flatten after cropping each row at the side panel's `│`), since plain `flatten` reads the wrapped sentence broken by the panel separator; the Δ-absence watch is kept.
 
 **What:** fix: a refused repository leaves the footer with no git segment and no explanation (issue `git-refusal-silent-footer`, part 1).
 **Regression guard.** `TestE2EGitActionsRefusedRepository` (cmd/apogee/e2e_gitstatus_test.go) waits for `git refused` on the footer workspace row, then expects `gitexec.CommandConfigRefusal([]string{"core.sshcommand"})` from `/git` instead of `gitRefusedNote`; keep its Δ-absence watch and update the file header comment. Layout rule: every layout.md line saying a refused repository has no git segment or that `/git` notes `no git here` there (`rg -n 'refused repository|no git here|names a command to run' layout.md`, today "The git state." and "And the git state is a control too"). The marker paints through a new `footerToneError` (footerfit.go) whose `footerToneStyle` case (theme.go) returns `footerText.Foreground(errorFg)`; mode_test.go's tone loop extends to it. Supersedes ADR 0108 Decision 3 ("A refused repository gets no action, as it gets no git segment"): the segment is recorded by item 6's `adr-0108-amend-1118`; the repository still gets no git action.
