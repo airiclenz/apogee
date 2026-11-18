@@ -52,17 +52,17 @@ func leaderEdgeRow(text, mark string) string {
 }
 
 // umbrellaHeaderRow is the umbrella's header line as a collapsed-leader golden reads it: the star,
-// "Tools" and its per-kind breakdown ("3 Read, 4 Terminal"), the leader's one dot, and the fold's
+// the umbrella's Group summary ("Read 3 files, ran 4 commands"), the leader's one dot, and the fold's
 // mark at the block's edge (umbrellaHeader). One definition, so a golden that moves because the
 // header's shape moved fails everywhere at once.
-func umbrellaHeaderRow(breakdown, mark string) string {
-	return leaderEdgeRow("✦ "+superGroupLabel+" ("+breakdown+") ⋯", mark)
+func umbrellaHeaderRow(summary, mark string) string {
+	return leaderEdgeRow("✦ "+summary+" ⋯", mark)
 }
 
 // blinkedUmbrellaHeaderRow is that line at a live umbrella's blinked-out phase: the star's cell
 // blank and its column held (blockState.star), the rest of the row exactly as it was.
-func blinkedUmbrellaHeaderRow(breakdown, mark string) string {
-	return leaderEdgeRow("  "+superGroupLabel+" ("+breakdown+") ⋯", mark)
+func blinkedUmbrellaHeaderRow(summary, mark string) string {
+	return leaderEdgeRow("  "+summary+" ⋯", mark)
 }
 
 // memberEdgeRow is the same arithmetic for a mark that is NOT on a leader row and so must be padded
@@ -277,9 +277,9 @@ func TestFiringBlockJoinsNoToolGrouping(t *testing.T) {
 // gutter inside the sub-agent run — and the bracketless bold-gold label as the header text.
 //
 // The nine calls in a row are ONE block now, the umbrella of docs/layout/tool-layout.md: six type
-// rows in time order under "✦ Tools (9 calls)" — the per-kind breakdown no longer fits the row at
-// 80 columns, so the header falls back to the bare total (umbrellaBreakdown) —
-// each counting its run where the run holds more than one call ("Read (3)", "Replace (2)") and
+// rows in time order under its Group summary, "✦ Read 3 files, ran 1 command and 3 more +1 −1" — the
+// whole phrase list no longer fits the row at 80 columns, so the summary keeps its first two
+// phrases and the diffstat (buildGroupSummary's fallback) — each type row counting its run where the run holds more than one call ("Read (3)", "Replace (2)") and
 // aggregating it in the outcome slot — the reads' 570 lines summed, the Replace run blank because
 // a diffstat and a change count do not add up. The golden
 // carries all three of the canon sketch's states at once: the rows collapsed, the Terminal row open
@@ -345,7 +345,7 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		strings.Repeat(glyphPadBelow, 80), // the prompt's ▀ half row stands in for the separator
 		"✦ Reading the docs first.",
 		"",
-		umbrellaHeaderRow("9 calls", glyphExpanded),
+		umbrellaHeaderRow("Read 3 files, ran 1 command and 3 more +1 −1", glyphExpanded),
 		groupMemberLine("  ┝ Read (3) ⋯ 570 lines"),
 		leaderEdgeRow("  ┝ Terminal ⋯ exit 0", glyphExpanded),
 		leaderEdgeRow("  │ ┕ go test ./... ⋯ exit 0", glyphExpanded),

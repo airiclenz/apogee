@@ -2378,7 +2378,7 @@ func TestRunTestsGroupsAndCounts(t *testing.T) {
 		return tr
 	}
 
-	header := umbrellaHeaderRow("1 Read, 1 Tests", glyphExpanded)
+	header := umbrellaHeaderRow("Read 1 file, Tests ×1", glyphExpanded)
 	readRow := groupMemberLine("  ┝ Read ⋯ 5 lines")
 
 	t.Run("collapsed: one umbrella counting both", func(t *testing.T) {

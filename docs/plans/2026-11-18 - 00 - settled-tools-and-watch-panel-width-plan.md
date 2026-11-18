@@ -132,7 +132,17 @@ internal/tui/blockstate.go — anyOpenCall; internal/tui/paintcache.go — entry
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestGroupSummary' ./internal/tui/`
 **Commit:** `feat(tui): build a verb-phrase Group summary for tool umbrellas`
 
-## 5. Render every umbrella header as its Group summary
+## 5. Render every umbrella header as its Group summary — ✅ DONE (2026-11-18)
+
+NOTES (2026-11-18): re-derived from "renderSuperGroup already holds" the per-call done state: toolRunView carried no done state, so it gains a `done []bool` (memberDone, bounded like memberExpanded) filled in superRunViews by a new `doneFlags` in internal/tui/blockstate.go, next to memberFlags, its twin; umbrellaGroupCalls turns the runs into item 4's `[]groupCall`.
+NOTES (2026-11-18): umbrellaHeaderText and umbrellaBreakdown are removed; umbrellaHeaderPaint keeps its name but now paints the summary segment by segment: phrases in th.toolHeader (the header's own tone), the count fallback as before (bold-gold `Tools` + faint parenthetical, now umbrellaCountPaint), failed/denied in th.errorText. "Diff colours" maps to the diffAdded/diffRemoved bands (composed under the header foreground, the leading gap left unbanded), because the scheme has no foreground diff role and the failure red must stay the only red text on the line.
+NOTES (2026-11-18): TestUmbrellaHeaderBreaksDownByToolKind is renamed TestUmbrellaHeader_ShowsTheGroupSummary and re-pinned; it gains the narrow-width fallback subtest on a real four-kind umbrella with a failure (whole → "and 2 more" → `Tools (4 calls) · 1 failed` → clip before the failure count), plus paint subtests for the failure red, the count fallback and the diffstat bands.
+NOTES (2026-11-18): the mouse_test.go locators umbrellaHeaderLine/umbrellaHeaders now go through isUmbrellaHeaderLine: the star or blank star cell, a letter straight after it (not a branch marker), and the leader dot running straight into the ▶/▼ with no outcome slot between. No targetUmbrella mark is read.
+NOTES (2026-11-18): consequential edit — internal/tui/toolleader.go: made necessary by removing umbrellaHeaderText (the leaderTargetBudget comment named it).
+NOTES (2026-11-18): consequential edit — internal/tui/doc.go: made necessary by the header change (the package map spelled the old `✦ Tools (3 Read, 4 Terminal)` header).
+NOTES (2026-11-18): consequential edit — internal/tui/blockstate.go: made necessary by the done state the summary's live verb needs (doneFlags beside memberFlags; see the re-derive note).
+NOTES (2026-11-18): consequential edit — internal/tui/settingsapply_test.go: made necessary by the header change (TestGlyphsApplyRepaintsThePaintedBlocks pinned the umbrella as "✦ Tools"/"♦ Tools"; it is now pinned as "✦ Read 1 file"/"♦ Read 1 file"). This falls under the item's Goal that no test pins the old header.
+NOTES (2026-11-18): consequential edit — internal/tui/theme_test.go: made necessary by the header change (TestSafeGlyphFrameDrawsNoUnicodeMarks and TestUnicodeGlyphFrameIsTheDefaultLook pinned "♦ Tools"/"✦ Tools"; re-pinned the same way).
 
 **What:** Depends on item 4.
 **Goal:** Every `✦` tools umbrella header (open, folded, live, settled; main transcript and run view) renders the Group summary, keeping the `✦`, its blink while live, and the fold glyph; no test or golden pins the old `Tools (3 Read, …)` breakdown.

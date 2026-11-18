@@ -218,7 +218,7 @@ func leaderAvail(th theme, marker string, room int) int {
 // the outcome slot's tail (zero for a row with no slot) is reserved and the leader holds its gap and
 // its floor of leaderMinDots. A left content wider than this is clipped (leaderRowIn); one that fits
 // prints whole with at least one dot after it, which is what a caller choosing between two wordings
-// of the same row measures against (umbrellaHeaderText).
+// of the same row measures against (umbrellaHeader's Group summary budget).
 func leaderTargetBudget(avail, tail int) int {
 	return avail - tail - leaderGap - leaderMinDots
 }

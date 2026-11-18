@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	lipgloss "charm.land/lipgloss/v2"
@@ -101,6 +100,7 @@ type toolRunView struct {
 	views    []toolView
 	expanded bool   // the run's TYPE ROW state (entry.typeExpanded on its head)
 	members  []bool // each member's own expanded flag, in view order
+	done     []bool // whether each member's result has landed (entry.done), in view order
 }
 
 // memberExpanded is the n'th member's own view state, bounded for the repaint path: a short slice
@@ -109,12 +109,17 @@ func (r toolRunView) memberExpanded(n int) bool {
 	return n >= 0 && n < len(r.members) && r.members[n]
 }
 
-// The umbrella header's own wording (design call 9, docs/layout/tool-layout.md, "Vocabulary"):
-// "✦ Tools (3 Read, 4 Terminal)", or "✦ Tools (7 calls)" where the breakdown cannot fit.
-// superGroupLabel takes the label's bold gold like any tool name — it is what the block IS — and
-// the parenthetical beside it the faint tone every group count wears, kind names included, because
-// it is the block's own arithmetic rather than part of a name. superCallNoun is the total's noun;
-// superKindSeparator joins the breakdown's entries.
+// memberDone is whether the n'th member's result has landed, bounded as memberExpanded is: a short
+// slice reads as landed, so a view handed in without its done states never paints a live verb.
+func (r toolRunView) memberDone(n int) bool {
+	return n < 0 || n >= len(r.done) || r.done[n]
+}
+
+// The umbrella header's own wording where its Group summary gives way (buildGroupSummary):
+// "✦ Tools (7 calls)", the last-resort count head once no phrase list fits. superGroupLabel takes
+// the label's bold gold like any tool name and the parenthetical beside it the faint tone every
+// group count wears (umbrellaCountPaint). superCallNoun is the total's noun; superKindSeparator
+// joins the summary's verb phrases ("Read 3 files, ran 2 commands").
 const (
 	superGroupLabel    = "Tools"
 	superCallNoun      = "call"
@@ -122,7 +127,7 @@ const (
 )
 
 // renderSuperGroup paints the umbrella: a run of 2+ groupable calls — one run of a single tool, or
-// adjacent runs of different tools — folded under one "✦ Tools (3 Read, 4 Terminal)" header, one
+// adjacent runs of different tools — folded under one "✦ Read 3 files, ran 4 commands" header, one
 // row per run in time order (docs/layout/tool-layout.md, "Grouped tools collapsed (super-group)"). It is a LIST whose rows stand for RUNS rather than for calls, and everything
 // about the shape follows from that:
 //
@@ -149,10 +154,11 @@ const (
 //     state beneath a fold is untouched: what a reader opened stays open under the header and is
 //     there again when it unfolds.
 //
-// What the header states is the CALLS, divided by tool kind (umbrellaBreakdown): a reader wants to
-// know how much work is folded away and of what sort, and a folded umbrella has no rows left to say
-// how it divides. Where that breakdown cannot fit beside a dot, the header falls back to the bare
-// total (umbrellaHeaderText). Its star is the block's, live while any call in it is still open
+// What the header states is the umbrella's Group summary (buildGroupSummary): the work as verb
+// phrases, the summed diffstat and the failed/denied counts — a reader wants to know how much work
+// is folded away, of what sort and how it came out, and a folded umbrella has no rows left to say
+// it. Where the whole summary cannot fit beside a dot, it spends detail by its own fallback order,
+// down to the bare `Tools (7 calls)` total. Its star is the block's, live while any call in it is still open
 // (blockState.live) — the running call being the last row's last member, by construction of a
 // time-ordered walk (design call 2).
 //
@@ -205,64 +211,93 @@ func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState,
 // blank cell that holds its column while a call is open (blockState.star), not a row's chrome.
 func umbrellaHeader(th theme, runs []toolRunView, state blockState, room, width int, open bool) string {
 	marker := state.star(th) + " "
-	text := umbrellaHeaderText(th, runs, leaderTargetBudget(leaderAvail(th, marker, room), 0))
-	row := leaderRowIn(th, text, umbrellaHeaderPaint(th), branchSummary{}, marker, paintHeaderMarker,
-		room, open, noRemainder)
+	summary := buildGroupSummary(th, umbrellaGroupCalls(runs),
+		leaderTargetBudget(leaderAvail(th, marker, room), 0))
+	row := leaderRowIn(th, summary.text(), umbrellaHeaderPaint(th, summary), branchSummary{}, marker,
+		paintHeaderMarker, room, open, noRemainder)
 	return indicatorRow(th, row, width, stateIndicator(th, open))
 }
 
-// umbrellaHeaderText is the header's left content as it is MEASURED: the label and the breakdown,
-// "Tools (3 Read, 4 Terminal)", when that fits in budget — whole, with the leader's floor of one dot
-// still standing after it — and the bare total, "Tools (7 calls)", when it does not. A header too
-// narrow even for the total is not narrowed further here: the leader row clips it by its own rule,
-// as it would a type row's label, so the header stays one line at any width.
-func umbrellaHeaderText(th theme, runs []toolRunView, budget int) string {
-	if text := superGroupLabel + " (" + umbrellaBreakdown(runs) + ")"; th.measure.Width(text) <= budget {
-		return text
-	}
-	calls := 0
+// umbrellaGroupCalls is the umbrella's members as the Group summary reads them (buildGroupSummary):
+// every run's views in time order, each beside whether its result has landed — the fact that picks
+// a phrase's live verb while a call of it is still in flight.
+func umbrellaGroupCalls(runs []toolRunView) []groupCall {
+	n := 0
 	for _, r := range runs {
-		calls += len(r.views)
+		n += len(r.views)
 	}
-	return superGroupLabel + " (" + plural(calls, superCallNoun) + ")"
+	calls := make([]groupCall, 0, n)
+	for _, r := range runs {
+		for k, tv := range r.views {
+			calls = append(calls, groupCall{view: tv, done: r.memberDone(k)})
+		}
+	}
+	return calls
 }
 
-// umbrellaBreakdown is how the umbrella's calls divide by tool kind, as "3 Read, 4 Terminal": one
-// entry per distinct run label, summed across every run of it — two Read runs a Terminal run apart
-// are one kind — numbered even at one ("1 Read"), so every entry reads the same way, and in the
-// order each kind first ran, which is the order the reader saw them start.
-func umbrellaBreakdown(runs []toolRunView) string {
-	var kinds []string
-	counts := make(map[string]int, len(runs))
-	for _, r := range runs {
-		if len(r.views) == 0 {
-			continue
-		}
-		kind := r.views[0].Label
-		if _, seen := counts[kind]; !seen {
-			kinds = append(kinds, kind)
-		}
-		counts[kind] += len(r.views)
-	}
-	entries := make([]string, len(kinds))
-	for i, kind := range kinds {
-		entries[i] = strconv.Itoa(counts[kind]) + " " + kind
-	}
-	return strings.Join(entries, superKindSeparator)
-}
-
-// umbrellaHeaderPaint dresses whatever of [umbrellaHeaderText] survived the row's clip: the label
-// in the tool label's bold gold, and the whole parenthetical after it — names, numbers and commas —
-// in the faint toolIndicator tone, the tone a group count wears. A clip that reached into the label
-// leaves nothing to split on, and the survivor is painted as the label it began as (typeRowPaint's
-// rule).
-func umbrellaHeaderPaint(th theme) func(string) string {
+// umbrellaHeaderPaint dresses whatever of the Group summary survived the row's clip, segment by
+// segment in the tone each one states (groupTone): the phrases in the header's own tone, the count
+// fallback as the `Tools (N calls)` header it has always been (umbrellaCountPaint), the diffstat's
+// halves on the diff bands (diffAdded / diffRemoved — the scheme's only diff colours, so a header's
+// +18 −5 reads in the colours its edits' bodies do), and the failed/denied counts in the failure
+// red. The summary is built to fit the row, so the clip normally hands every segment back whole; a
+// segment the clip reached into is painted as far as it survived, in its own tone, and ends the row.
+func umbrellaHeaderPaint(th theme, summary groupSummary) func(string) string {
 	return func(clipped string) string {
-		if rest, ok := strings.CutPrefix(clipped, superGroupLabel+" "); ok {
-			return th.toolLabel.Render(superGroupLabel) + " " + th.toolIndicator.Render(rest)
+		var b strings.Builder
+		rest := clipped
+		for _, seg := range summary {
+			if rest == "" {
+				break
+			}
+			text, whole := seg.text, true
+			if !strings.HasPrefix(rest, text) {
+				text, whole = rest, false
+			}
+			b.WriteString(paintGroupSegment(th, groupSegment{text: text, tone: seg.tone}))
+			rest = rest[len(text):]
+			if !whole {
+				break
+			}
 		}
-		return th.toolLabel.Render(clipped)
+		if rest != "" {
+			b.WriteString(th.toolHeader.Render(rest))
+		}
+		return b.String()
 	}
+}
+
+// paintGroupSegment is one segment of the Group summary in the style its tone names. A diffstat
+// half carries its leading separator in its text; the band sits under the count alone, so the gap
+// before it reads as the space between two words rather than as part of the mark.
+func paintGroupSegment(th theme, seg groupSegment) string {
+	switch seg.tone {
+	case groupToneCalls:
+		return umbrellaCountPaint(th, seg.text)
+	case groupToneAdded, groupToneRemoved:
+		band := th.diffAdded
+		if seg.tone == groupToneRemoved {
+			band = th.diffRemoved
+		}
+		count := strings.TrimLeft(seg.text, " ")
+		lead := seg.text[:len(seg.text)-len(count)]
+		return th.toolHeader.Render(lead) + band.Inherit(th.toolHeader).Render(count)
+	case groupToneOutcome:
+		return th.errorText.Render(seg.text)
+	default:
+		return th.toolHeader.Render(seg.text)
+	}
+}
+
+// umbrellaCountPaint dresses the Group summary's last-resort head, `Tools (7 calls)`, as that
+// header has always read: the label in the tool label's bold gold and the parenthetical after it in
+// the faint toolIndicator tone a group count wears. A clip that reached into the label leaves
+// nothing to split on, and the survivor is painted as the label it began as (typeRowPaint's rule).
+func umbrellaCountPaint(th theme, clipped string) string {
+	if rest, ok := strings.CutPrefix(clipped, superGroupLabel+" "); ok {
+		return th.toolLabel.Render(superGroupLabel) + " " + th.toolIndicator.Render(rest)
+	}
+	return th.toolLabel.Render(clipped)
 }
 
 // paintHeaderMarker dresses the umbrella header's star in the header's own tone (th.toolHeader) —
@@ -324,6 +359,7 @@ func superRunViews(ins []paintInput, g superGroup) []toolRunView {
 			views:    toolViews(span),
 			expanded: span[0].typeExpanded,
 			members:  memberFlags(span),
+			done:     doneFlags(span),
 		})
 	}
 	return runs

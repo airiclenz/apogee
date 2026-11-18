@@ -28,10 +28,10 @@ import (
 const (
 	toolsFoldPrompt = "Survey the workspace."
 	toolsFoldWrapUp = "The workspace is surveyed."
-	// toolsFoldHeader is the umbrella's header for the fixture's three calls, broken down by tool
-	// kind — the text EVERY umbrella — small or large — runs its leader dots from to the fold's ▶/▼
+	// toolsFoldHeader is the umbrella's header for the fixture's three calls, its Group summary —
+	// the text EVERY umbrella — small or large — runs its leader dots from to the fold's ▶/▼
 	// at the row's right edge.
-	toolsFoldHeader = "✦ Tools (1 Read, 1 List, 1 Grep)"
+	toolsFoldHeader = "✦ Read 1 file, listed 1 dir, searched 1 pattern"
 	// toolsFoldReadRow is the first type row's head — its branch marker and label — the row a folded
 	// umbrella hides and an open one paints. It is asserted by its head rather than as a whole row,
 	// because the row's right edge carries the run's aggregate and its own ▶, neither of which this
@@ -42,12 +42,13 @@ const (
 	// beneath the three landed reads. It is the umbrella's LAST type row, so its branch marker is the
 	// closing ┕ rather than the ┝ the rows above it wear.
 	toolsFoldTerminalRow = "┕ Terminal"
-	// toolsFoldLiveHeader is the live fixture's umbrella, broken down for its four calls and matched
-	// without the star cell before it. The approval pane freezes the blink (spinner.go
+	// toolsFoldLiveHeader is the live fixture's umbrella, its Group summary for its four calls — the
+	// gated terminal still in flight, so its phrase takes the live verb — matched without the star
+	// cell before it. The approval pane freezes the blink (spinner.go
 	// foldSpinnerTick drops its ticks outside stateRunning), so the header's ✦ is caught in whichever
 	// phase the pane found it, lit or blank, and an assertion that spelled the star would be right
 	// half the time.
-	toolsFoldLiveHeader = "Tools (1 Read, 1 List, 1 Grep, 1 Terminal)"
+	toolsFoldLiveHeader = "Read 1 file, listed 1 dir, searched 1 pattern, running 1 command"
 	// The two configs under test: a threshold the fixture's three type rows exceed, and a threshold
 	// of 0, under which no umbrella is ever large. The small fold runs on the DEFAULT, no `ui:` at all.
 	toolsFoldOverTwoConfig  = "ui:\n  tools-fold-over: 2\n"
@@ -134,7 +135,7 @@ func awaitConfigCarries(t *testing.T, drv *tuitest.Driver, home, line string) {
 
 // TestE2EToolsUmbrellaFoldsOverThreshold drives the fold from the FILE: with
 // `ui.tools-fold-over: 2` an umbrella of three type rows stands folded to
-// `✦ Tools (1 Read, 1 List, 1 Grep) ⋯ ▶` with no type row beneath it — the default
+// `✦ Read 1 file, listed 1 dir, searched 1 pattern ⋯ ▶` with no type row beneath it — the default
 // `ui.tools-open: false` — and a click on that header opens it onto its rows under a ▼. The folded frame is recorded as a golden, since the fold is a
 // paint claim and the header's own spelling is what a reader sees.
 func TestE2EToolsUmbrellaFoldsOverThreshold(t *testing.T) {
@@ -254,7 +255,8 @@ var toolsFoldLiveSize = tuitest.Size{W: e2eSize.W, H: e2eSize.H + 10}
 // shipped fold got wrong: a large umbrella whose Turn has NOT come to rest. toolsfold-live.yaml
 // follows the three reads with a gated `terminal` call, so the approval pane holds the Turn open
 // with the umbrella's fourth type row still live — and under `ui.tools-fold-over: 2` that umbrella
-// stands folded to `Tools (1 Read, 1 List, 1 Grep, 1 Terminal) ⋯ ▶` with no type row beneath it
+// stands folded to `Read 1 file, listed 1 dir, searched 1 pattern, running 1 command ⋯ ▶`
+// with no type row beneath it
 // all the same. A click on the header, pane and all, opens it onto its four rows, the live
 // Terminal row among them; the decision then lets the Turn wrap up. The header is matched without
 // its star (toolsFoldLiveHeaderFolded) because the pane freezes the star's blink phase.
@@ -300,7 +302,8 @@ func TestE2EToolsUmbrellaFoldsWhileTheTurnRuns(t *testing.T) {
 
 // TestE2EToolsUmbrellaSmallFoldsAlone is the small umbrella's own fold: at the default threshold
 // (no `ui:` at all) the three-row umbrella comes to rest OPEN as
-// `✦ Tools (1 Read, 1 List, 1 Grep) ⋯ ▼`, a click on that header folds it to `▶` with no type row
+// `✦ Read 1 file, listed 1 dir, searched 1 pattern ⋯ ▼`, a click on that header folds it to `▶`
+// with no type row
 // beneath it, and the home's config.yaml carries no `tools-open` line afterwards — a small
 // umbrella's fold is a session-only flag, never the shared preference and never a write.
 func TestE2EToolsUmbrellaSmallFoldsAlone(t *testing.T) {

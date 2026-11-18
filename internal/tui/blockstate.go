@@ -109,6 +109,16 @@ func memberFlags(ins []paintInput) []bool {
 	return flags
 }
 
+// doneFlags is each entry's done state (entry.done) read off its record, in order — memberFlags'
+// twin for the fact the umbrella's Group summary picks a live verb by (umbrellaGroupCalls).
+func doneFlags(ins []paintInput) []bool {
+	flags := make([]bool, len(ins))
+	for i := range ins {
+		flags[i] = ins[i].done
+	}
+	return flags
+}
+
 // blockHidesWhenCollapsed reports whether a block's collapsed paint leaves anything unshown — the
 // whole of the toggle-target rule: a header is a click target exactly when there is something
 // behind it. It asks the very functions that do the hiding — collapsedCall for the lines a cap

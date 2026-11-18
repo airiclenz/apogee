@@ -371,7 +371,7 @@ func TestSafeGlyphFrameDrawsNoUnicodeMarks(t *testing.T) {
 			break
 		}
 	}
-	for _, want := range []string{"·", "►", "♦ Tools", "› read main.go", "√ allow edits"} {
+	for _, want := range []string{"·", "►", "♦ Read 1 file", "› read main.go", "√ allow edits"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("the safe frame carries no %q:\n%s", want, frame)
 		}
@@ -393,7 +393,7 @@ func TestUnicodeGlyphFrameIsTheDefaultLook(t *testing.T) {
 			unicode.Content, unset.Content)
 	}
 	frame := plain(unicode)
-	for _, want := range []string{"⋯", "✦ Tools", "▶", "❯ read main.go", "✔ allow edits"} {
+	for _, want := range []string{"⋯", "✦ Read 1 file", "▶", "❯ read main.go", "✔ allow edits"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("the unicode frame carries no %q:\n%s", want, frame)
 		}

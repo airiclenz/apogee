@@ -22,7 +22,7 @@ func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
 	readCall(tr, "c3", "ISSUES.md", 1, 8, 0)
 
 	want := strings.Join([]string{
-		umbrellaHeaderRow("3 Read", glyphExpanded),
+		umbrellaHeaderRow("Read 3 files", glyphExpanded),
 		groupMemberLine("  ┕ Read (3) ⋯ 570 lines"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -33,7 +33,7 @@ func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
 		t.Fatal("setTypeExpanded(0, true) = false; want the Read run's type row open")
 	}
 	want = strings.Join([]string{
-		umbrellaHeaderRow("3 Read", glyphExpanded),
+		umbrellaHeaderRow("Read 3 files", glyphExpanded),
 		leaderEdgeRow("  ┕ Read (3) ⋯ 570 lines", glyphExpanded),
 		"  │ ┝ README.md ⋯ 154 lines",
 		"  │ ┝ TODO.md ⋯ 408 lines",
@@ -58,7 +58,7 @@ func TestRenderGroupsInsideSubAgent(t *testing.T) {
 		t.Fatal("setTypeExpanded(0, true) = false; want the Read run's type row open")
 	}
 	want := strings.Join([]string{
-		"│ " + umbrellaHeaderRow("2 Read", glyphExpanded),
+		"│ " + umbrellaHeaderRow("Read 2 files", glyphExpanded),
 		"│ " + leaderEdgeRow("  ┕ Read (2) ⋯ 14 lines", glyphExpanded),
 		"│   │ ┝ a.go ⋯ 5 lines",
 		"│   │ ┕ bb.go ⋯ 9 lines",
@@ -83,7 +83,7 @@ func TestRenderGroupsDifferentToolsSharingALabel(t *testing.T) {
 		t.Fatal("setTypeExpanded(0, true) = false; want the Replace run's type row open")
 	}
 	want := strings.Join([]string{
-		umbrellaHeaderRow("2 Replace", glyphExpanded),
+		umbrellaHeaderRow("Edited 2 files", glyphExpanded),
 		leaderEdgeRow("  ┕ Replace (2) ⋯", glyphExpanded),
 		"  │ ┝ a.go ⋯ replaced text in a.go",
 		"  │ ┕ bb.go ⋯ applied 2 replacements to bb.go",
@@ -154,7 +154,7 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 		return tr
 	}
 	header := []string{
-		umbrellaHeaderRow("2 Read, 1 Terminal", glyphExpanded),
+		umbrellaHeaderRow("Read 2 files, ran 1 command", glyphExpanded),
 	}
 	readRowShut := groupMemberLine("  ┝ Read (2) ⋯ 14 lines")
 	readRowOpen := []string{
@@ -241,7 +241,7 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 		if !tr.setUmbrellaFolded(readHead, true) {
 			t.Fatalf("setUmbrellaFolded(%d, true) = false; want the small umbrella folded on its own flag", readHead)
 		}
-		want := umbrellaHeaderRow("2 Read, 1 Terminal", defaultGlyphs.collapsed)
+		want := umbrellaHeaderRow("Read 2 files, ran 1 command", defaultGlyphs.collapsed)
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("folded small umbrella mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
@@ -261,7 +261,7 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 		if !tr.setTypeExpanded(readHead, true) {
 			t.Fatalf("setTypeExpanded(%d, true) = false; want the Read run's type row open under the fold", readHead)
 		}
-		want := umbrellaHeaderRow("2 Read, 1 Terminal", defaultGlyphs.collapsed)
+		want := umbrellaHeaderRow("Read 2 files, ran 1 command", defaultGlyphs.collapsed)
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("folded umbrella mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
@@ -281,7 +281,7 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 		if !tr.setToolsOpen(true) {
 			t.Fatal("setToolsOpen(true) = false; want the preference to move off its folded default")
 		}
-		want := strings.Join(append(append([]string{umbrellaHeaderRow("2 Read, 1 Terminal", glyphExpanded)}, readRowOpen...),
+		want := strings.Join(append(append([]string{umbrellaHeaderRow("Read 2 files, ran 1 command", glyphExpanded)}, readRowOpen...),
 			groupMemberLine("  ┕ Terminal ⋯ exit 0"),
 		), "\n")
 		if got := renderPlain(tr, 80); got != want {
@@ -306,8 +306,8 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 		tr.toolsFoldOver = 1
 		th := newTheme(scheme.Default())
 		for blink, want := range map[bool]string{
-			false: umbrellaHeaderRow("2 Read, 1 Terminal", defaultGlyphs.collapsed),
-			true:  blinkedUmbrellaHeaderRow("2 Read, 1 Terminal", defaultGlyphs.collapsed),
+			false: umbrellaHeaderRow("Read 2 files, running 1 command", defaultGlyphs.collapsed),
+			true:  blinkedUmbrellaHeaderRow("Read 2 files, running 1 command", defaultGlyphs.collapsed),
 		} {
 			view := tr.renderView(th, 80, blink, breadcrumbHint)
 			if got := strings.TrimRight(collapseLeader(strip(strings.Join(view.lines, "\n"))), " "); got != want {
@@ -359,7 +359,7 @@ func TestRenderGroupsBodyCarryingCalls(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		umbrellaHeaderRow("3 Terminal", glyphExpanded),
+		umbrellaHeaderRow("Ran 3 commands", glyphExpanded),
 		groupMemberLine("  ┕ Terminal (3) ⋯ exit 0"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -370,7 +370,7 @@ func TestRenderGroupsBodyCarryingCalls(t *testing.T) {
 		t.Fatal("setTypeExpanded(0, true) = false; want the Terminal run's type row open")
 	}
 	want = strings.Join([]string{
-		umbrellaHeaderRow("3 Terminal", glyphExpanded),
+		umbrellaHeaderRow("Ran 3 commands", glyphExpanded),
 		leaderEdgeRow("  ┕ Terminal (3) ⋯ exit 0", glyphExpanded),
 		groupMemberLine("  │ ┝ go build ./... ⋯ exit 0"),
 		groupMemberLine("  │ ┝ go vet ./... ⋯ exit 0"),
@@ -505,7 +505,7 @@ func TestExpandedGroupMemberPaintsTheSketchShape(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		umbrellaHeaderRow("3 Terminal", glyphExpanded),
+		umbrellaHeaderRow("Ran 3 commands", glyphExpanded),
 		leaderEdgeRow("  ┕ Terminal (3) ⋯ exit 0", glyphExpanded),
 		groupMemberLine("  │ ┝ go build ./... ⋯ exit 0"),
 		leaderEdgeRow("  │ ┝ go vet ./... ⋯ exit 0", glyphExpanded),
@@ -558,7 +558,7 @@ func TestGroupMemberWithABlankRunStillOpens(t *testing.T) {
 		t.Fatal("setup: entries[0] does not head the umbrella's Terminal type row")
 	}
 	wantCollapsed := strings.Join([]string{
-		umbrellaHeaderRow("3 Terminal", glyphExpanded),
+		umbrellaHeaderRow("Ran 3 commands · 1 failed", glyphExpanded),
 		leaderEdgeRow("  ┕ Terminal (3) ⋯ 1 error", glyphExpanded),
 		groupMemberLine("  │ ┝ go build ./... ⋯ exit 0"),
 		groupMemberLine("  │ ┝ false ⋯ error: exit 1"),
@@ -573,7 +573,7 @@ func TestGroupMemberWithABlankRunStillOpens(t *testing.T) {
 		t.Fatal("a blank run's member is not a toggleable block — its ▶ reveals nothing")
 	}
 	wantExpanded := strings.Join([]string{
-		umbrellaHeaderRow("3 Terminal", glyphExpanded),
+		umbrellaHeaderRow("Ran 3 commands · 1 failed", glyphExpanded),
 		leaderEdgeRow("  ┕ Terminal (3) ⋯ 1 error", glyphExpanded),
 		groupMemberLine("  │ ┝ go build ./... ⋯ exit 0"),
 		leaderEdgeRow("  │ ┝ false ⋯ error: exit 1", glyphExpanded),
@@ -874,7 +874,7 @@ func TestGitStatusGroupsAndCounts(t *testing.T) {
 		return tr
 	}
 
-	header := umbrellaHeaderRow("1 Read, 1 Grep, 1 Git Status, 1 Git Log", glyphExpanded)
+	header := umbrellaHeaderRow("Read 1 file, searched 1 pattern, checked git", glyphExpanded)
 	readRow := groupMemberLine("  ┝ Read ⋯ 5 lines")
 	grepRow := groupMemberLine("  ┝ Grep ⋯ a.go:3: // TODO")
 	logRow := groupMemberLine("  ┕ Git Log ⋯ 6fd6ff7 feat: x")
@@ -946,16 +946,17 @@ func TestGitStatusGroupsAndCounts(t *testing.T) {
 	})
 }
 
-// The umbrella's header says how its calls divide by tool kind, on a leader row of its own (the
-// issue register's tools-header-breakdown): "✦ Tools (3 Read, 4 Terminal)", the dots run to the
-// fold's ▶/▼ at the block's edge, one entry per kind summed across non-adjacent runs, numbered even
-// at one, in the order each kind first ran. Where the breakdown cannot stand beside one dot the
-// header falls back to the bare total, and below that the row clips like any leader row — always
-// one line.
-func TestUmbrellaHeaderBreaksDownByToolKind(t *testing.T) {
+// The umbrella's header is its Group summary on a leader row of its own (the issue register's
+// settled-tool-group-clutter): "✦ Read 3 files, ran 4 commands", the dots run to the fold's ▶/▼ at
+// the block's edge, one verb phrase per kind of work summed across non-adjacent runs, in the order
+// each first ran, its first word capitalised. Where the summary cannot stand beside one dot it
+// spends detail by its fallback order — the phrases after the first two, then the diffstat, then
+// the bare `Tools (N calls)` total, a failure count outliving each step — and below that the row
+// clips like any leader row: always one line.
+func TestUmbrellaHeader_ShowsTheGroupSummary(t *testing.T) {
 	t.Parallel()
 
-	// Read, Terminal ×2, Read, Terminal ×2, Read: five runs, two kinds.
+	// Read, Terminal ×2, Read, Terminal ×2, Read: five runs, two kinds of work.
 	interleaved := func(t *testing.T) *transcript {
 		t.Helper()
 		tr := &transcript{}
@@ -977,14 +978,14 @@ func TestUmbrellaHeaderBreaksDownByToolKind(t *testing.T) {
 		return th.measure.Width(defaultGlyphs.assistant+" ") + th.measure.Width(text) +
 			leaderGap + leaderMinDots + groupIndicatorCells(th)
 	}
-	const breakdown = "Tools (3 Read, 4 Terminal)"
+	const summary = "Read 3 files, ran 4 commands"
 
-	t.Run("sums each kind across its runs, open and folded differing only in the glyph", func(t *testing.T) {
+	t.Run("words each kind of work across its runs, open and folded differing only in the glyph", func(t *testing.T) {
 		t.Parallel()
 
 		tr := interleaved(t)
 		open := headerAt(tr, 80, false)
-		if got, want := collapseLeader(strip(open)), umbrellaHeaderRow("3 Read, 4 Terminal", glyphExpanded); got != want {
+		if got, want := collapseLeader(strip(open)), umbrellaHeaderRow(summary, glyphExpanded); got != want {
 			t.Errorf("open header = %q, want %q", got, want)
 		}
 		if !tr.setUmbrellaFolded(0, true) {
@@ -999,23 +1000,23 @@ func TestUmbrellaHeaderBreaksDownByToolKind(t *testing.T) {
 		}
 	})
 
-	t.Run("numbers a single call and orders kinds by first appearance", func(t *testing.T) {
+	t.Run("orders phrases by first appearance and capitalises the first", func(t *testing.T) {
 		t.Parallel()
 
 		tr := &transcript{}
 		runCall(tr, "c1", "go build", "built", 0)
 		readCall(tr, "c2", "a.go", 1, 5, 0)
 		runCall(tr, "c3", "go test", "PASS", 0)
-		if got, want := collapseLeader(strip(headerAt(tr, 80, false))), umbrellaHeaderRow("2 Terminal, 1 Read", glyphExpanded); got != want {
+		if got, want := collapseLeader(strip(headerAt(tr, 80, false))), umbrellaHeaderRow("Ran 2 commands, read 1 file", glyphExpanded); got != want {
 			t.Errorf("header = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("keeps the breakdown down to one dot", func(t *testing.T) {
+	t.Run("keeps the whole summary down to one dot", func(t *testing.T) {
 		t.Parallel()
 
-		width := fitWidth(breakdown)
-		want := defaultGlyphs.assistant + " " + breakdown + " " + defaultGlyphs.leaderDot + " " + glyphExpanded
+		width := fitWidth(summary)
+		want := defaultGlyphs.assistant + " " + summary + " " + defaultGlyphs.leaderDot + " " + glyphExpanded
 		if got := strip(headerAt(interleaved(t), width, false)); got != want {
 			t.Errorf("header at %d cells = %q, want %q", width, got, want)
 		}
@@ -1024,13 +1025,47 @@ func TestUmbrellaHeaderBreaksDownByToolKind(t *testing.T) {
 	t.Run("falls back to the total one cell narrower", func(t *testing.T) {
 		t.Parallel()
 
-		width := fitWidth(breakdown) - 1
+		width := fitWidth(summary) - 1
 		got := strip(headerAt(interleaved(t), width, false))
 		if want := defaultGlyphs.assistant + " Tools (7 calls) "; !strings.HasPrefix(got, want) {
 			t.Errorf("header at %d cells = %q, want it to open %q", width, got, want)
 		}
 		if !strings.HasSuffix(got, defaultGlyphs.leaderDot+" "+glyphExpanded) || th.measure.Width(got) != width {
 			t.Errorf("header at %d cells = %q, want its dots to run to the ▼ at the edge", width, got)
+		}
+	})
+
+	t.Run("spends the later phrases first and keeps the failure count to the last", func(t *testing.T) {
+		t.Parallel()
+
+		// Read, Terminal (failed), Grep, List: four kinds of work, one of them gone wrong.
+		tr := &transcript{}
+		readCall(tr, "c1", "a.go", 1, 5, 0)
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "terminal",
+			Arguments: []byte(`{"command":"go test"}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "FAIL", IsError: true}})
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c3", Tool: "grep",
+			Arguments: []byte(`{"pattern":"TODO"}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c3", Content: "a.go:1: TODO"}})
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c4", Tool: "list_dir",
+			Arguments: []byte(`{"path":"."}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c4", Content: "a.go"}})
+
+		const whole = "Read 1 file, ran 1 command, searched 1 pattern, listed 1 dir · 1 failed"
+		if got, want := collapseLeader(strip(headerAt(tr, 100, false))), umbrellaHeaderRow(whole, glyphExpanded); got != want {
+			t.Errorf("header at 100 cells = %q, want %q", got, want)
+		}
+		const shortened = "Read 1 file, ran 1 command and 2 more · 1 failed"
+		if got, want := collapseLeader(strip(headerAt(tr, fitWidth(whole)-1, false))), umbrellaHeaderRow(shortened, glyphExpanded); got != want {
+			t.Errorf("header one cell short of the whole = %q, want %q", got, want)
+		}
+		const counted = "Tools (4 calls) · 1 failed"
+		if got, want := collapseLeader(strip(headerAt(tr, fitWidth(shortened)-1, false))), umbrellaHeaderRow(counted, glyphExpanded); got != want {
+			t.Errorf("header one cell short of the shortened list = %q, want %q", got, want)
+		}
+		clipped := strip(headerAt(tr, fitWidth(counted)-1, false))
+		if !strings.Contains(clipped, clipTail+" · 1 failed ") {
+			t.Errorf("header one cell short of the count = %q, want the head clipped before the failure count", clipped)
 		}
 	})
 
@@ -1051,13 +1086,12 @@ func TestUmbrellaHeaderBreaksDownByToolKind(t *testing.T) {
 		}
 	})
 
-	t.Run("paints the parenthetical faint, the dots as a leader and the star in the header's tone", func(t *testing.T) {
+	t.Run("paints the phrases in the header's tone, the dots as a leader and the star with them", func(t *testing.T) {
 		t.Parallel()
 
 		got := headerAt(interleaved(t), 80, false)
 		dots := strings.Count(strip(got), defaultGlyphs.leaderDot)
-		want := th.toolHeader.Render(defaultGlyphs.assistant+" ") +
-			th.toolLabel.Render(superGroupLabel) + " " + th.toolIndicator.Render("(3 Read, 4 Terminal)") + " " +
+		want := th.toolHeader.Render(defaultGlyphs.assistant+" ") + th.toolHeader.Render(summary) + " " +
 			th.toolLeader.Render(strings.Repeat(defaultGlyphs.leaderDot, dots)) +
 			strings.Repeat(" ", groupIndicatorGap) + th.toolIndicator.Render(glyphExpanded)
 		if got != want {
@@ -1065,6 +1099,46 @@ func TestUmbrellaHeaderBreaksDownByToolKind(t *testing.T) {
 		}
 		if colorActive(th) && strings.HasPrefix(got, detailTone(th, true).Render(defaultGlyphs.assistant)) {
 			t.Errorf("the star took a row marker's detail tone: %q", got)
+		}
+	})
+
+	t.Run("paints a failure count red and the count fallback as the header it always was", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		readCall(tr, "c1", "a.go", 1, 5, 0)
+		runCall(tr, "c2", "go build", "built", 0)
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c3", Tool: "terminal",
+			Arguments: []byte(`{"command":"go test"}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c3", Content: "FAIL", IsError: true}})
+		got := headerAt(tr, 80, false)
+		if want := th.toolHeader.Render("Read 1 file, ran 2 commands") + th.errorText.Render(" · 1 failed") + " "; !strings.Contains(got, want) {
+			t.Errorf("styled header %q does not carry %q", got, want)
+		}
+		counted := headerAt(tr, fitWidth("Read 1 file, ran 2 commands · 1 failed")-1, false)
+		if want := th.toolLabel.Render(superGroupLabel) + " " + th.toolIndicator.Render("(3 calls)") +
+			th.errorText.Render(" · 1 failed"); !strings.Contains(counted, want) {
+			t.Errorf("styled count fallback %q does not carry %q", counted, want)
+		}
+	})
+
+	t.Run("paints the diffstat's halves on the diff bands, the gap before each unbanded", func(t *testing.T) {
+		t.Parallel()
+
+		summary := groupSummary{
+			{text: "Edited 2 files", tone: groupTonePhrase},
+			{text: " +18", tone: groupToneAdded},
+			{text: " −5", tone: groupToneRemoved},
+		}
+		got := umbrellaHeaderPaint(th, summary)(summary.text())
+		want := th.toolHeader.Render("Edited 2 files") +
+			th.toolHeader.Render(" ") + th.diffAdded.Inherit(th.toolHeader).Render("+18") +
+			th.toolHeader.Render(" ") + th.diffRemoved.Inherit(th.toolHeader).Render("−5")
+		if got != want {
+			t.Errorf("styled diffstat:\n got  %q\n want %q", got, want)
+		}
+		if clipped := umbrellaHeaderPaint(th, summary)("Edited 2 f…"); strip(clipped) != "Edited 2 f…" {
+			t.Errorf("a clipped head painted as %q, want the survivor alone", strip(clipped))
 		}
 	})
 

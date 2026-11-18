@@ -605,7 +605,7 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 			t.Fatal("setTypeExpanded(0, true) = false; want the Ask User run's type row open")
 		}
 		want := strings.Join([]string{
-			umbrellaHeaderRow("2 Ask User", glyphExpanded),
+			umbrellaHeaderRow("Ask User ×2", glyphExpanded),
 			leaderEdgeRow("  ┕ Ask User (2) ⋯", glyphExpanded),
 			"  │ ┝ Ship it? ⋯",
 			"  │ ┕ Tag it? ⋯",
@@ -656,7 +656,7 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 			t.Fatal("setTypeExpanded(0, true) = false; want the Ask User run's type row open")
 		}
 		want := strings.Join([]string{
-			umbrellaHeaderRow("2 Ask User", glyphExpanded),
+			umbrellaHeaderRow("Ask User ×2 · 2 failed", glyphExpanded),
 			leaderEdgeRow("  ┕ Ask User (2) ⋯ 2 errors", glyphExpanded),
 			"  │ ┝ Ship it? ⋯ " + errWord + " " + defaultGlyphs.collapsed,
 			"  │ ┕ Tag it? ⋯ " + errWord + " " + defaultGlyphs.collapsed,
@@ -2359,7 +2359,7 @@ func TestTranscriptCodecReplaysANoReportDelegationWithoutACheck(t *testing.T) {
 // it. So a blob written before the mark
 // existed — every session recorded up to now, where load_skill had no registry entry at all — must
 // still replay refusing that fold, or a reload would bury the instructions the run took on inside a
-// "✦ Tools (2 Skill)" umbrella the live paint never showed.
+// "✦ Skill ×2" umbrella the live paint never showed.
 //
 // Hand-written bytes with no "solo" member, because the case IS an old file: a re-encode would
 // carry today's true and prove nothing.

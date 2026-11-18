@@ -157,7 +157,7 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 				readCall(tr, "c2", "util.go", 1, 42, 0)
 			},
 			want: []blockMark{
-				{line: 0, kind: targetUmbrella, entry: 0, text: umbrellaHeaderRow("2 Read", glyphExpanded)},
+				{line: 0, kind: targetUmbrella, entry: 0, text: umbrellaHeaderRow("Read 2 files", glyphExpanded)},
 				{line: 1, kind: targetType, entry: 0,
 					text: groupMemberLine("  ┕ Read (2) ⋯ 196 lines")},
 			},
@@ -723,7 +723,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				openRead(tr, "c2", "util.go", 0)
 			},
-			settled: umbrellaHeaderRow("2 Read", glyphExpanded), flipped: blinkedUmbrellaHeaderRow("2 Read", glyphExpanded),
+			settled: umbrellaHeaderRow("Reading 2 files", glyphExpanded), flipped: blinkedUmbrellaHeaderRow("Reading 2 files", glyphExpanded),
 		},
 		{
 			name: "a same-type run whose calls have all landed settles",
@@ -731,7 +731,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				readCall(tr, "c2", "util.go", 1, 42, 0)
 			},
-			settled: umbrellaHeaderRow("2 Read", glyphExpanded), flipped: umbrellaHeaderRow("2 Read", glyphExpanded),
+			settled: umbrellaHeaderRow("Read 2 files", glyphExpanded), flipped: umbrellaHeaderRow("Read 2 files", glyphExpanded),
 		},
 		{
 			// A run is live until its REPORT lands, whatever the span has already finished.
@@ -772,7 +772,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				openRun(tr, "c2", "go test ./...")
 			},
-			settled: umbrellaHeaderRow("1 Read, 1 Terminal", glyphExpanded), flipped: blinkedUmbrellaHeaderRow("1 Read, 1 Terminal", glyphExpanded),
+			settled: umbrellaHeaderRow("Read 1 file, running 1 command", glyphExpanded), flipped: blinkedUmbrellaHeaderRow("Read 1 file, running 1 command", glyphExpanded),
 		},
 		{
 			name: "an umbrella whose calls have all landed settles",
@@ -780,7 +780,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				runCall(tr, "c2", "go test ./...", "PASS", 0)
 			},
-			settled: umbrellaHeaderRow("1 Read, 1 Terminal", glyphExpanded), flipped: umbrellaHeaderRow("1 Read, 1 Terminal", glyphExpanded),
+			settled: umbrellaHeaderRow("Read 1 file, ran 1 command", glyphExpanded), flipped: umbrellaHeaderRow("Read 1 file, ran 1 command", glyphExpanded),
 		},
 	}
 	for _, tc := range cases {

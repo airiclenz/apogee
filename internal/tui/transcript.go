@@ -2329,7 +2329,7 @@ type toolRun struct {
 	n  int // how many calls the run holds; never 0
 }
 
-// superGroup is the umbrella: the adjacent runs that fold under one "✦ Tools (3 Read, 4 Terminal)" header, in
+// superGroup is the umbrella: the adjacent runs that fold under one "✦ Read 3 files, ran 4 commands" header, in
 // TIME ORDER, which is the order they appear in the transcript. Calls are never reordered to merge
 // same-type calls that were not adjacent (docs/layout/tool-layout.md): `read, terminal, read` is
 // three runs and therefore three rows, not two.
@@ -2377,7 +2377,7 @@ func sameLabelRun(entries []entry, i int) int {
 // toolSuperGroup is the umbrella entries[i] heads, or nil when it heads none: the adjacent
 // same-depth runs of groupable calls starting there. TWO CALLS are the floor, whatever their
 // labels (plan "2026-09-02 - 01", item 3) — a run of 2+ same-label calls folds under the umbrella
-// exactly as adjacent runs of different labels do, so four terminals are `✦ Tools (4 Terminal)` over
+// exactly as adjacent runs of different labels do, so four terminals are `✦ Ran 4 commands` over
 // one `┕ Terminal (4)` type row, and a Read followed by a Terminal is that same umbrella over two
 // rows. Only a LONE groupable call heads no umbrella and stays the standalone block it always was.
 //

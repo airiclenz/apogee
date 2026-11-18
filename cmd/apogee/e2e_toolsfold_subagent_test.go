@@ -80,7 +80,8 @@ func assertRunViewUmbrellaFolded(t *testing.T, f tuitest.Frame, header umbrellaH
 
 // TestE2EToolsUmbrellaFoldsInsideARunView is the finished shape: with the run over, ⌥↑ ⏎ on the
 // delegation opens its view, and the child's three-row umbrella stands there folded to
-// `✦ Tools (1 Read, 1 List, 1 Grep) ⋯ ▶` under the default `ui.tools-open: false`; a click on that
+// `✦ Read 1 file, listed 1 dir, searched 1 pattern ⋯ ▶`
+// under the default `ui.tools-open: false`; a click on that
 // header opens it onto its rows under a ▼, and esc walks back up to the conversation.
 func TestE2EToolsUmbrellaFoldsInsideARunView(t *testing.T) {
 	t.Parallel()
@@ -119,7 +120,8 @@ func TestE2EToolsUmbrellaFoldsInsideARunView(t *testing.T) {
 // umbrella at four type rows, the last of them live. The view is opened over that pane by a CLICK
 // on the delegation's row — ⌥↑ never enters the walk while a decision is pending
 // (blockCursorOwnsKeys) and ⏎ belongs to the pane's rows — and the umbrella stands folded to
-// `Tools (1 Read, 1 List, 1 Grep, 1 Terminal) ⋯ ▶` all the same. The header is matched without its
+// `Read 1 file, listed 1 dir, searched 1 pattern, running 1 command ⋯ ▶`
+// all the same. The header is matched without its
 // star for e2e_toolsfold_test.go's reason: the pane freezes the star's blink phase.
 //
 // The decision is taken before esc, not after the wrap-up: inside a view esc means "one level up"

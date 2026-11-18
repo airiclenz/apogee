@@ -285,8 +285,8 @@ func TestGlyphsApplyRepaintsThePaintedBlocks(t *testing.T) {
 		want       glyphSet
 		gone, seen []string
 	}{
-		{string(domain.GlyphsSafe), safeGlyphs, []string{"⋯", "▶", "✦"}, []string{"··", "►", "♦ Tools"}},
-		{string(domain.GlyphsUnicode), defaultGlyphs, []string{"··", "►", "♦"}, []string{"⋯", "▶", "✦ Tools"}},
+		{string(domain.GlyphsSafe), safeGlyphs, []string{"⋯", "▶", "✦"}, []string{"··", "►", "♦ Read 1 file"}},
+		{string(domain.GlyphsUnicode), defaultGlyphs, []string{"··", "►", "♦"}, []string{"⋯", "▶", "✦ Read 1 file"}},
 	} {
 		applied, _, _, handled, err := m.settingsApplyLocal(domain.UIKeyGlyphs, tc.value)
 		if err != nil || !handled {
