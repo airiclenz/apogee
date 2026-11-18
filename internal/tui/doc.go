@@ -1246,7 +1246,9 @@
 // resets and a watch parks and swaps as one value through Model.swapSessionView;
 // userblock.go the full-width prompt block and its skill-span accents; startupbox.go the startup
 // banner beside the presented-block painter; toolblock.go the tool block and the super-group
-// walk with the member rows they paint; toolleader.go the leader row, the dotted leader and the
+// walk with the member rows they paint; groupsummary.go the umbrella's Group summary — the verb
+// phrases, diffstat and failed/denied counts its header is worded from ([buildGroupSummary]), as
+// styled segments a painter dresses; toolleader.go the leader row, the dotted leader and the
 // promote-guard that flexes it; blockstate.go the [blockState] a painter is told and the
 // predicates that decide what a collapsed block hides; toolbranch.go the ┝/┕ branch rows and the
 // detail lines beneath them; toolbody.go the ONE painter those bodies are all drawn by — the

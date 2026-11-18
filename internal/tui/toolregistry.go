@@ -231,6 +231,13 @@ type toolPresenter struct {
 	// and say nothing new about it. The four write/edit rows set it; a row without it — and a tool
 	// with no row at all — keeps its full arguments, bounded.
 	wireDropped []string
+
+	// group is the verb phrase this tool's calls are counted under in an umbrella's Group summary
+	// ("read 3 files", "ran 2 commands"; buildGroupSummary). Tools that do the same kind of work
+	// share one phrase value (grep and find_files both "searched N patterns", the four writing tools
+	// "edited N files"), and the summary merges calls by that value rather than by label. The zero
+	// value is "no phrase": such a tool, and every tool with no row, is counted as `<Label> ×N`.
+	group groupPhrase
 }
 
 // askUserToolName is the raw tool id whose ANSWERED record stands alone: the block keeps the
@@ -302,6 +309,7 @@ var toolRegistry = map[string]toolPresenter{
 		detail: firstLineDetail, // floor; the slot's line count comes from domain.ReadSpan
 		stat:   readSpanStat,
 		body:   readFileBody, // the located line numbers, when a term was asked for
+		group:  readFilesPhrase,
 	},
 	"write_file": {
 		label:       "Write",
@@ -311,6 +319,7 @@ var toolRegistry = map[string]toolPresenter{
 		argStat:     writtenLinesStat,    // the lines the REQUEST writes — the result reports bytes
 		argBody:     writtenLines,        // the content the call writes, as + lines
 		wireDropped: []string{"content"}, // the file body: the card's + lines already carry it
+		group:       editedFilesPhrase,
 	},
 	"list_dir": {
 		label:  "List",
@@ -318,6 +327,7 @@ var toolRegistry = map[string]toolPresenter{
 		target: listDirTarget, // path, plus "· recursive" when the call asked for one
 		detail: firstLineDetail,
 		stat:   listedEntriesStat,
+		group:  listedDirsPhrase,
 	},
 	"grep": {
 		label:  "Grep",
@@ -325,6 +335,7 @@ var toolRegistry = map[string]toolPresenter{
 		target: grepTarget, // pattern, plus "· <path>" and "· <glob>" when the call scoped it
 		detail: firstLineDetail,
 		stat:   matchedLinesStat, // "N hits"; the table's "· M files" is not on the result
+		group:  searchedPatternsPhrase,
 	},
 	"find_files": {
 		label:  "Find Files",
@@ -332,6 +343,7 @@ var toolRegistry = map[string]toolPresenter{
 		target: findFilesTarget, // name pattern, plus "· <path>" when the call scoped it
 		detail: firstLineDetail, // the tool's own header: "[N files found, showing …]"
 		stat:   foundFilesStat,
+		group:  searchedPatternsPhrase,
 	},
 	"single_find_and_replace": {
 		label:       "Replace",
@@ -342,6 +354,7 @@ var toolRegistry = map[string]toolPresenter{
 		argStat:     singleReplacementStat,          // "+A −R", counted off the pair the call asks for
 		argBody:     singleReplacementBody,          // the one oldText → newText pair, as -/+ lines
 		wireDropped: []string{"oldText", "newText"}, // the pair: the card's -/+ lines already carry it
+		group:       editedFilesPhrase,
 	},
 	"multi_find_and_replace": {
 		label:       "Replace",
@@ -352,6 +365,7 @@ var toolRegistry = map[string]toolPresenter{
 		argStat:     multiReplacementStat,     // "N changes" — one per replacement the call lists
 		argBody:     multiReplacementBody,     // one -/+ pair per replacement, in argument order
 		wireDropped: []string{"replacements"}, // the pairs: the card's -/+ lines already carry them
+		group:       editedFilesPhrase,
 	},
 	"edit_existing_file": {
 		label:       "Edit",
@@ -362,6 +376,7 @@ var toolRegistry = map[string]toolPresenter{
 		argStat:     fileEditStat,        // "+A −R", counted off the patch (or content) the call sends
 		argBody:     fileEditBody,        // a patch's hunks, or full replacement content as + lines
 		wireDropped: []string{"content"}, // the patch or body: the card's -/+ lines already carry it
+		group:       editedFilesPhrase,
 	},
 	"view_diff": {
 		label:   "Diff Preview",
@@ -378,6 +393,7 @@ var toolRegistry = map[string]toolPresenter{
 		target: sourceDestinationTarget,
 		detail: firstLineDetail, // "copied a.txt to b.txt"
 		stat:   blankStat,       // the table's `—`: the target already says what happened
+		group:  copiedFilesPhrase,
 	},
 	"move_file": {
 		label:  "Move",
@@ -385,6 +401,7 @@ var toolRegistry = map[string]toolPresenter{
 		target: sourceDestinationTarget,
 		detail: firstLineDetail, // "moved a.txt to b.txt"
 		stat:   blankStat,
+		group:  movedFilesPhrase,
 	},
 	"delete_file": {
 		label:  "Delete",
@@ -392,6 +409,7 @@ var toolRegistry = map[string]toolPresenter{
 		target: stringArg("path"),
 		detail: firstLineDetail, // "deleted a.txt"
 		stat:   blankStat,
+		group:  deletedFilesPhrase,
 	},
 	"terminal": {
 		label:   "Terminal",
@@ -400,6 +418,7 @@ var toolRegistry = map[string]toolPresenter{
 		failure: subprocessFailure,
 		detail:  subprocessDetail,
 		stat:    exitCodeStat,
+		group:   ranCommandsPhrase,
 	},
 	"python_exec": {
 		label:   "Python",
@@ -408,6 +427,7 @@ var toolRegistry = map[string]toolPresenter{
 		failure: subprocessFailure,
 		detail:  subprocessDetail,
 		stat:    exitCodeStat,
+		group:   ranCommandsPhrase,
 	},
 	// The Console family (ADR 0059) drives ONE live process across four calls, so the four rows
 	// are written to be read together: the id the model steers by leads every branch but the
@@ -448,6 +468,7 @@ var toolRegistry = map[string]toolPresenter{
 		target: joinedArgs("action", "name"),
 		detail: outputDetail, // a branch list is multi-line; create/switch is one line
 		stat:   blankStat,
+		group:  checkedGitPhrase,
 	},
 	"git_commit": {
 		label:  "Git Commit",
@@ -457,6 +478,7 @@ var toolRegistry = map[string]toolPresenter{
 		// slot so the hash holds it at every width (commitDetail).
 		detail: commitDetail,
 		stat:   commitHashStat,
+		group:  madeCommitsPhrase,
 	},
 	"git_diff_range": {
 		label:   "Git Diff",
@@ -466,6 +488,7 @@ var toolRegistry = map[string]toolPresenter{
 		stat:    diffLinesStat,       // "+A −R", counted off the regions that walk recovers
 		body:    gitDiffRangeBody,    // that same plain floor, kept beneath the row on the typed path
 		regions: gitDiffRangeRegions, // git's own diff, cut into numbered regions file by file
+		group:   checkedGitPhrase,
 	},
 	// git_status takes no arguments — the working tree IS what it reads — so its target is that
 	// fixed phrase (workingTreeTarget). It cannot be the branch: the row is drawn while the call
@@ -478,6 +501,7 @@ var toolRegistry = map[string]toolPresenter{
 		detail: outputDetail, // floor: the branch line plus the staged/unstaged/untracked sections
 		stat:   changedFilesStat,
 		body:   gitStatusBody, // that same report, kept beneath the row on the typed path
+		group:  checkedGitPhrase,
 	},
 	"git_log": {
 		label:  "Git Log",
@@ -485,6 +509,7 @@ var toolRegistry = map[string]toolPresenter{
 		target: gitLogTarget,
 		detail: outputDetail, // one line per commit
 		stat:   commitCountStat,
+		group:  checkedGitPhrase,
 	},
 	// git_show is read_file at a revision — the same arguments, the same domain.ReadSpan summary —
 	// so it presents as read_file does: the slot counts the span, the body is the locate report,
@@ -497,6 +522,7 @@ var toolRegistry = map[string]toolPresenter{
 		detail: firstLineDetail, // floor; the tool's own "[File: path @ ref, …]" header
 		stat:   readSpanStat,
 		body:   readFileBody, // the located line numbers, when a term was asked for
+		group:  checkedGitPhrase,
 	},
 	"diagnostics": {
 		label:  "Diagnostics",
@@ -521,6 +547,7 @@ var toolRegistry = map[string]toolPresenter{
 		detail:     firstLineDetail, // "HTTP 200 OK" — the body never floods the chat
 		stat:       fetchedBodyStat,
 		statTokens: fetchedBodyTokenStat,
+		group:      fetchedPagesPhrase,
 	},
 	"http_request": {
 		label:      "HTTP",
@@ -529,6 +556,7 @@ var toolRegistry = map[string]toolPresenter{
 		detail:     firstLineDetail, // "HTTP 200 OK"
 		stat:       fetchedBodyStat,
 		statTokens: fetchedBodyTokenStat,
+		group:      fetchedPagesPhrase,
 	},
 	"web_search": {
 		label:  "Search",

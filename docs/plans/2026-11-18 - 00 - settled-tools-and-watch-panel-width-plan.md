@@ -110,7 +110,14 @@ internal/tui/settingsapply_test.go — TestSettingsApplyLocalLandsEveryUIKeyThro
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run TestSettingsApplyLocalLandsEveryUIKeyThroughSet ./internal/tui/`
 **Commit:** `feat(config): add the ui.tools-auto-collapse setting`
 
-## 4. Build the Group summary text
+## 4. Build the Group summary text — ✅ DONE (2026-11-18)
+
+NOTES (2026-11-18): consequential edit — internal/tui/doc.go: made necessary by the new groupsummary.go (the package file map, pinned by TestDocMapNamesEveryFile).
+NOTES (2026-11-18): groupPhrase carries one field beyond the approach's list, `uncounted`, for "checked git" (a phrase with no number); the phrase values live as shared vars in groupsummary.go and each registry row points at one (`toolPresenter.group`), so phrase equality is what merges grep+find and the four writing tools.
+NOTES (2026-11-18): the builder's input is `[]groupCall{view toolView; done bool}` (item 5 builds it from the umbrella's paint inputs); its output is `groupSummary` segments tagged with a `groupTone` (phrase, calls fallback, added, removed, outcome) that the painter maps to styles — no theme styles are applied here.
+NOTES (2026-11-18): first-word capitalisation applies only when the list opens with a verb phrase; a leading `<Label> ×N` keeps the label's own spelling (an MCP `github · search` is a name, not a word of the sentence).
+NOTES (2026-11-18): the clip step clips the `Tools (N calls)` head into the room the failed/denied segments leave; only where no clipped head would fit beside them are they dropped and the head clipped to the whole budget. The count text is composed from superGroupLabel/superCallNoun, so umbrellaHeaderText's own copy remains until item 5 replaces that header.
+NOTES (2026-11-18): the two engine denial sentences are restated in the TUI (approverDenialPrefix, reactionDenialPrefix) as the delegation markers are; no test pins them to internal/agent, whose reaction prefix is unexported and whose approver sentence is a literal. Replay reads the first plain-kind body line only when the slot carries a failure, so an edit's argument-derived -/+ lines above the refusal do not hide it.
 
 **What:**
 **Goal:** A pure TUI function turns an umbrella's runs into its Group summary header text at a width budget: verb phrases from a per-tool phrase table, in first-run order of each phrase, first word capitalised; distinct-path counts for read/list/edit phrases; summed `+A −R` diffstat; `· N failed` and `· N denied` counted apart; the present-participle verb on a phrase with a call in flight; the width fallback. Nothing calls it yet.

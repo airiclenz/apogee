@@ -161,6 +161,22 @@ const (
 	interruptedSummary = "interrupted — the run did not finish"
 )
 
+// The two sentences the engine opens a refused call's error result with, spelled again here as the
+// delegation markers are (delegationNoReportMarker): the TUI does not import internal/agent. The
+// approver's is a whole sentence the engine may extend with " — <hint>" (agent dispatch's gate
+// denial); a reaction gate's names the reaction after it (internal/agent's gateDenialPrefix).
+const (
+	approverDenialPrefix = "tool call denied by approver"
+	reactionDenialPrefix = "tool call denied by reaction "
+)
+
+// deniedContent reports whether a failed call's result is the engine's refusal of the call rather
+// than the tool's own failure: its text opens with one of the two refusal sentences.
+func deniedContent(content string) bool {
+	content = strings.TrimLeft(content, " \t\n")
+	return strings.HasPrefix(content, approverDenialPrefix) || strings.HasPrefix(content, reactionDenialPrefix)
+}
+
 // namedSummary is a summary in the presenter's OWN words — a typed phrase, or a sentence naming a
 // path — so the shortening seam spells that path relative to the workspace.
 //
@@ -693,6 +709,14 @@ type toolView struct {
 	// from the record's own arguments and spawned run id on replay (backgroundSubAgentCall), so it is
 	// not on the wire. A bool is not display text, so the escape seam has nothing to strip in it.
 	background bool
+
+	// denied says the approver or a reaction gate refused this call before it ran: its error result
+	// opens with one of the engine's two refusal sentences (deniedContent). It is what the umbrella's
+	// Group summary counts as `· N denied` apart from `· N failed` (buildGroupSummary); the row's own
+	// slot is the ordinary failure's and is unchanged by it. Set live where the failure is absorbed
+	// (absorbFailure) and re-derived on replay from the failure body the record kept
+	// (fromWireToolView), so it is not on the wire.
+	denied bool
 }
 
 // backgroundSubAgentPresenter is the row a background sub_agent's call is presented by (ADR 0094,
@@ -1390,6 +1414,7 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 // line entry.neverStarted reads stays where it looks.
 func (tv *toolView) absorbFailure(result domain.ToolResult) {
 	content := result.Content
+	tv.denied = deniedContent(content)
 	if verdict, ok := delegationNeverStartedVerdict(content); tv.headsRun() && ok {
 		tv.Summary = namedSummary(detailLine{Text: verdict})
 		tv.Details = tv.Details.with(failureBody(content))

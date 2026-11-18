@@ -652,6 +652,13 @@ func fromWireToolView(w *session.ToolView, done bool) toolView {
 		}
 		tv.Details = newToolBody(lines)
 	}
+	// A refused call's denied mark is not on the wire (toolView.denied) and is re-derived from the
+	// failure body the record kept, which is the refusal absorbFailure laid out beneath the branch.
+	// Only a failed slot is read, so a successful call whose output opens with the same words is
+	// never counted as denied.
+	if tv.Summary.failed {
+		tv.denied = deniedFailureBody(tv.Details.all())
+	}
 	// A delegation the human's act settled before it started — pre-empted by a queued message, or
 	// caught queued by a turn cancel — is re-derived from its stored body rather than trusted: a
 	// session recorded before those rows took their neutral verdict (delegationNeverStartedVerdict)
@@ -710,6 +717,19 @@ func fromWireToolView(w *session.ToolView, done bool) toolView {
 	}
 	tv.sanitize()
 	return tv
+}
+
+// deniedFailureBody reads a replayed failed call's body for the engine's refusal (deniedContent).
+// The failure body is the result's own lines in the plain kind; an edit or a write lays its -/+
+// lines from the call's arguments ABOVE it (argBody), so the first plain line is where the result
+// begins.
+func deniedFailureBody(lines []detailLine) bool {
+	for _, line := range lines {
+		if line.Kind == detailPlain {
+			return deniedContent(line.Text)
+		}
+	}
+	return false
 }
 
 // fromWirePresented rebuilds a presentedView from the wire. Method is restored verbatim as a
