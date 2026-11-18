@@ -1,10 +1,12 @@
 ---
 title: The side panel separator does not drag while watching a session
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-11-18 - 00 - settled-tools-and-watch-panel-width-plan.md
 created: 2026-11-18T11:22:07Z
+closed: 2026-11-18T15:00:52Z
+reason: "Resolved by settled-tools-and-watch-panel-width plan (archived 527a7dca), items 1-2: panel width drag, double-click reset and /panel width work while watching; pins stay refused; adr-0110-amend-1118 and docs updated"
 ---
 
 Reported by the owner (2026-11-18, apogee v0.35.4): while apogee is **watching** another live

@@ -1,10 +1,12 @@
 ---
 title: Finished tool groups stay open; collapse them to one summary row
-status: open
+status: done
 type: feature
 priority: 2
 plan: 2026-11-18 - 00 - settled-tools-and-watch-panel-width-plan.md
 created: 2026-11-18T11:27:57Z
+closed: 2026-11-18T15:00:52Z
+reason: "Resolved by settled-tools-and-watch-panel-width plan (archived 527a7dca), items 3-10: Group summary header, ui.tools-auto-collapse (default on) folding settled untouched umbrellas, driven tests, adr-0035-amend-1118 and Group summary glossary Note"
 ---
 
 A finished tool group stays open in the transcript long after the conversation has moved past it. A `✦ Tools (…)` umbrella with up to `ui.tools-fold-over` type rows (default `5`) starts every session open and stays open until the reader folds it by hand. Each one costs its header plus one row per type row, and a long session fills with blocks nobody is reading any more. The owner wants a group that is no longer active to collapse to **one row**, and that row to say in plain words what the group did, the way Claude Code's "Read 3 files, ran 2 commands" line does.
