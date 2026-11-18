@@ -36,7 +36,7 @@ func countptr(n int) *WholeCount { w := WholeCount(n); return &w }
 // domain.DefaultUIPrefs, so a change to any shipped default shows up here as a failure instead of
 // silently agreeing with itself.
 var wantUIDefault = domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true,
-	ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+	ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, ToolsAutoCollapse: true, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
 	FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelSections: wantSidePanelSectionsDefault}
 
 // wantFooterRowsDefault is the `ui.footer.rows` a config that names none resolves to — the upstream
@@ -302,7 +302,7 @@ func TestResolvePrecedence(t *testing.T) {
 			file: fileConfig{UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false)}},
 			want: func(o *Options) {
 				o.UI = domain.UIPrefs{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false,
-					ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+					ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, ToolsAutoCollapse: true, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
 					FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelSections: wantSidePanelSectionsDefault}
 			},
 		},
@@ -374,6 +374,11 @@ func TestResolvePrecedence(t *testing.T) {
 			name: "ui with tools-fold-over: 0 → no umbrella is ever large and nothing else moves",
 			file: fileConfig{UI: &uiConfig{ToolsFoldOver: countptr(0)}},
 			want: func(o *Options) { o.UI.ToolsFoldOver = 0 },
+		},
+		{
+			name: "ui with tools-auto-collapse: false → settled umbrellas keep the size rule and nothing else moves",
+			file: fileConfig{UI: &uiConfig{ToolsAutoCollapse: boolptr(false)}},
+			want: func(o *Options) { o.UI.ToolsAutoCollapse = false },
 		},
 		{
 			name: "a context-files block replaces the default name list whole",
@@ -761,7 +766,8 @@ func everyKeyFileConfig() fileConfig {
 		UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), Glyphs: "safe", ShowScrollbar: boolptr(false),
 			ColorScheme: "nord", StallAfter: strptr("30s"), Inspector: boolptr(true),
 			SkillSuggestions: boolptr(false), TaskListOpen: boolptr(false), ToolsOpen: boolptr(true),
-			ToolsFoldOver: countptr(8), Notify: "osc9", GitFetch: boolptr(false), PointerShapes: boolptr(true),
+			ToolsFoldOver: countptr(8), ToolsAutoCollapse: boolptr(false), Notify: "osc9", GitFetch: boolptr(false),
+			PointerShapes: boolptr(true),
 			SidePanel: &uiSidePanelConfig{Show: "on", Width: countptr(48), Sections: sidePanelSectionsConfig{
 				{Section: domain.SidePanelUsage, Mode: domain.SidePanelModePinned},
 				{Section: domain.SidePanelTasks, Mode: domain.SidePanelModeHidden},
@@ -5793,7 +5799,7 @@ func TestApplyConfigUI(t *testing.T) {
 	}
 
 	want := domain.UIPrefs{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "light",
-		StallAfter: 2 * time.Minute, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+		StallAfter: 2 * time.Minute, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, ToolsAutoCollapse: true, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
 		FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelSections: wantSidePanelSectionsDefault}
 	if opts.UI != want {
 		t.Errorf("opts.ui = %+v; want %+v", opts.UI, want)
@@ -6302,21 +6308,21 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only spinner: → the colour loop stays on and the bar stays shown",
 			yaml: "ui:\n  spinner: classic\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, ToolsAutoCollapse: true, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
 				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 		{
 			name: "only spinner-color: false → the style stays the default and the bar stays shown",
 			yaml: "ui:\n  spinner-color: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, ToolsAutoCollapse: true, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
 				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 		{
 			name: "only show-scrollbar: false → the bar goes, the spinner keys stay put",
 			yaml: "ui:\n  show-scrollbar: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, ToolsAutoCollapse: true, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
 				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 		{
@@ -6325,14 +6331,14 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only show-scrollbar: true → the shipped default, said out loud",
 			yaml: "ui:\n  show-scrollbar: true\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, ToolsAutoCollapse: true, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
 				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 		{
 			name: "only color-scheme: → the spinner keys and the bar stay put",
 			yaml: "ui:\n  color-scheme: light\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "light",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, ToolsAutoCollapse: true, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
 				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 		{
@@ -6341,7 +6347,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only skill-suggestions: false → the band goes and the look is untouched",
 			yaml: "ui:\n  skill-suggestions: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: false, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+				StallAfter: 120 * time.Second, SkillSuggestions: false, TaskListOpen: true, ToolsFoldOver: 5, ToolsAutoCollapse: true, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
 				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 		{
@@ -6350,7 +6356,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only task-list-open: false → the cards start folded and nothing else moves",
 			yaml: "ui:\n  task-list-open: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: false, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: false, ToolsFoldOver: 5, ToolsAutoCollapse: true, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
 				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 		{
@@ -6359,7 +6365,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only stall-after: 0 → the look is untouched and only the guard goes",
 			yaml: "ui:\n  stall-after: 0\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 0, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+				StallAfter: 0, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, ToolsAutoCollapse: true, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
 				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 		{
@@ -6368,7 +6374,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only git-fetch: false → the fetch stops and the look is untouched",
 			yaml: "ui:\n  git-fetch: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: false,
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, ToolsAutoCollapse: true, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: false,
 				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 	}

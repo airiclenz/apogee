@@ -96,6 +96,12 @@ var uiKeyCases = map[string]uiKeyCase{
 			"-1":   `apogee: invalid ui.tools-fold-over -1: want 0 or more, where 0 never folds a Tools umbrella`,
 		},
 	},
+	UIKeyToolsAutoCollapse: {
+		value: "false",
+		read:  func(u UIPrefs) any { return u.ToolsAutoCollapse },
+		want:  false,
+		bad:   map[string]string{"maybe": `apogee: invalid ui.tools-auto-collapse "maybe": want true or false`},
+	},
 	UIKeyNotify: {
 		value: "osc9",
 		read:  func(u UIPrefs) any { return u.Notify },
@@ -133,7 +139,7 @@ var uiKeyCases = map[string]uiKeyCase{
 }
 
 // TestUIKeysAreTheTemplateOrderAndEveryKeyHasACase pins the sweep the other tests run on: the
-// sixteen keys in the order the starter template presents them, each with a case above, and a slice
+// seventeen keys in the order the starter template presents them, each with a case above, and a slice
 // a caller cannot reorder under this package.
 func TestUIKeysAreTheTemplateOrderAndEveryKeyHasACase(t *testing.T) {
 	t.Parallel()
@@ -141,8 +147,8 @@ func TestUIKeysAreTheTemplateOrderAndEveryKeyHasACase(t *testing.T) {
 	want := []string{
 		"ui.spinner", "ui.spinner-color", "ui.glyphs", "ui.show-scrollbar", "ui.color-scheme",
 		"ui.stall-after", "ui.inspector", "ui.skill-suggestions", "ui.task-list-open", "ui.tools-open",
-		"ui.tools-fold-over", "ui.pointer-shapes", "ui.notify", "ui.git-fetch", "ui.side-panel.show",
-		"ui.side-panel.width",
+		"ui.tools-fold-over", "ui.tools-auto-collapse", "ui.pointer-shapes", "ui.notify", "ui.git-fetch",
+		"ui.side-panel.show", "ui.side-panel.width",
 	}
 	if got := UIKeys(); !slices.Equal(got, want) {
 		t.Errorf("UIKeys() = %v; want the template order %v", got, want)

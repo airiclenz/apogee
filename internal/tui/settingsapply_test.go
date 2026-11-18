@@ -91,21 +91,22 @@ func TestSettingsApplyLocalLandsEveryUIKeyThroughSet(t *testing.T) {
 	// refused is one the block cannot read. The colour scheme's refusal is the resolver's, not the
 	// parser's — Set takes any name — so its refused arm runs over a model with no resolve wired.
 	values := map[string]struct{ accepted, refused string }{
-		domain.UIKeySpinner:          {string(domain.SpinnerGlitter), "nope"},
-		domain.UIKeySpinnerColor:     {settingTrue, "maybe"},
-		domain.UIKeyGlyphs:           {string(domain.GlyphsSafe), "ascii"},
-		domain.UIKeyShowScrollbar:    {settingFalse, "maybe"},
-		domain.UIKeyColorScheme:      {"light", "light"},
-		domain.UIKeyStallAfter:       {"2m", "soonish"},
-		domain.UIKeySkillSuggestions: {settingTrue, "maybe"},
-		domain.UIKeyTaskListOpen:     {settingFalse, "maybe"},
-		domain.UIKeyToolsOpen:        {settingTrue, "maybe"},
-		domain.UIKeyToolsFoldOver:    {"8", "many"},
-		domain.UIKeyNotify:           {string(domain.NotifyOSC9), "beep"},
-		domain.UIKeyGitFetch:         {settingTrue, "maybe"},
-		domain.UIKeyPointerShapes:    {settingTrue, "maybe"},
-		domain.UIKeySidePanelShow:    {string(domain.SidePanelShowOff), "wide"},
-		domain.UIKeySidePanelWidth:   {"48", "23"},
+		domain.UIKeySpinner:           {string(domain.SpinnerGlitter), "nope"},
+		domain.UIKeySpinnerColor:      {settingTrue, "maybe"},
+		domain.UIKeyGlyphs:            {string(domain.GlyphsSafe), "ascii"},
+		domain.UIKeyShowScrollbar:     {settingFalse, "maybe"},
+		domain.UIKeyColorScheme:       {"light", "light"},
+		domain.UIKeyStallAfter:        {"2m", "soonish"},
+		domain.UIKeySkillSuggestions:  {settingTrue, "maybe"},
+		domain.UIKeyTaskListOpen:      {settingFalse, "maybe"},
+		domain.UIKeyToolsOpen:         {settingTrue, "maybe"},
+		domain.UIKeyToolsFoldOver:     {"8", "many"},
+		domain.UIKeyToolsAutoCollapse: {settingTrue, "maybe"},
+		domain.UIKeyNotify:            {string(domain.NotifyOSC9), "beep"},
+		domain.UIKeyGitFetch:          {settingTrue, "maybe"},
+		domain.UIKeyPointerShapes:     {settingTrue, "maybe"},
+		domain.UIKeySidePanelShow:     {string(domain.SidePanelShowOff), "wide"},
+		domain.UIKeySidePanelWidth:    {"48", "23"},
 	}
 	model := func(t *testing.T, resolves bool) Model {
 		t.Helper()

@@ -89,6 +89,12 @@ type UIPrefs struct {
 	// so none is ever large and every one folds on its own session-only flag alone. Negative is
 	// meaningless and Validate refuses it.
 	ToolsFoldOver int
+	// ToolsAutoCollapse is whether a SETTLED Tools umbrella — every call in it done, its Turn over —
+	// that the reader has not touched folds on its own to one Group summary row, whatever its size
+	// and whatever ToolsOpen says. Default TRUE: a finished burst is history, and its summary is the
+	// part worth reading. Off, every umbrella follows the size rule above alone. Screen-only, like
+	// ToolsOpen: nothing about it reaches the model.
+	ToolsAutoCollapse bool
 	// Glyphs names the set the screen's symbols are drawn from: [GlyphsUnicode], the look apogee
 	// has always had, or [GlyphsSafe], which swaps every symbol a terminal font may lack for one
 	// it carries. Default unicode, and `""` reads as unicode too — [ParseSpinnerStyle]'s posture,
@@ -569,20 +575,21 @@ const DefaultToolsFoldOver = 5
 // The `ui:` block's keys as the config file spells them, dotted under their block — the one
 // spelling [UIPrefs.Set] takes, the settings surface offers and the registry rows are described by.
 const (
-	UIKeySpinner          = "ui.spinner"
-	UIKeySpinnerColor     = "ui.spinner-color"
-	UIKeyGlyphs           = "ui.glyphs"
-	UIKeyShowScrollbar    = "ui.show-scrollbar"
-	UIKeyColorScheme      = "ui.color-scheme"
-	UIKeyStallAfter       = "ui.stall-after"
-	UIKeyInspector        = "ui.inspector"
-	UIKeySkillSuggestions = "ui.skill-suggestions"
-	UIKeyTaskListOpen     = "ui.task-list-open"
-	UIKeyToolsOpen        = "ui.tools-open"
-	UIKeyToolsFoldOver    = "ui.tools-fold-over"
-	UIKeyNotify           = "ui.notify"
-	UIKeyGitFetch         = "ui.git-fetch"
-	UIKeyPointerShapes    = "ui.pointer-shapes"
+	UIKeySpinner           = "ui.spinner"
+	UIKeySpinnerColor      = "ui.spinner-color"
+	UIKeyGlyphs            = "ui.glyphs"
+	UIKeyShowScrollbar     = "ui.show-scrollbar"
+	UIKeyColorScheme       = "ui.color-scheme"
+	UIKeyStallAfter        = "ui.stall-after"
+	UIKeyInspector         = "ui.inspector"
+	UIKeySkillSuggestions  = "ui.skill-suggestions"
+	UIKeyTaskListOpen      = "ui.task-list-open"
+	UIKeyToolsOpen         = "ui.tools-open"
+	UIKeyToolsFoldOver     = "ui.tools-fold-over"
+	UIKeyToolsAutoCollapse = "ui.tools-auto-collapse"
+	UIKeyNotify            = "ui.notify"
+	UIKeyGitFetch          = "ui.git-fetch"
+	UIKeyPointerShapes     = "ui.pointer-shapes"
 	// UIKeyFooterRows is a key of the nested `footer:` block, and like every key of that block it
 	// is not one of [UIKeys]: it is a structured value, edited in the file rather than on a row.
 	UIKeyFooterRows = "ui.footer.rows"
@@ -609,8 +616,8 @@ const (
 var uiKeys = []string{
 	UIKeySpinner, UIKeySpinnerColor, UIKeyGlyphs, UIKeyShowScrollbar, UIKeyColorScheme,
 	UIKeyStallAfter, UIKeyInspector, UIKeySkillSuggestions, UIKeyTaskListOpen, UIKeyToolsOpen,
-	UIKeyToolsFoldOver, UIKeyPointerShapes, UIKeyNotify, UIKeyGitFetch, UIKeySidePanelShow,
-	UIKeySidePanelWidth,
+	UIKeyToolsFoldOver, UIKeyToolsAutoCollapse, UIKeyPointerShapes, UIKeyNotify, UIKeyGitFetch,
+	UIKeySidePanelShow, UIKeySidePanelWidth,
 }
 
 // UIKeys returns the `ui:` block's keys in template order. It hands back a fresh slice on every
@@ -624,7 +631,8 @@ func UIKeys() []string {
 // DefaultUIPrefs is the `ui:` block with nothing configured: the default spinner style with the
 // colour loop on, the scroll bar shown, the default colour scheme, the shipped quiet threshold,
 // the Inspector disarmed, the skill-suggestion band on, the task-list cards open, the Tools
-// umbrella folding past five type rows with large umbrellas starting folded, pointer shapes off,
+// umbrella folding past five type rows with large umbrellas starting folded and settled ones
+// folding to their summary, pointer shapes off,
 // the unicode glyph set, the terminal bell when apogee waits on the human, the footer's
 // periodic git fetch on, the footer laid out on two rows, the upstream above the workspace, and the
 // side panel drawn at its unset width (0, which every reader resolves to 44 columns) where the window
@@ -640,6 +648,7 @@ func DefaultUIPrefs() UIPrefs {
 		SkillSuggestions:  true,
 		TaskListOpen:      true,
 		ToolsFoldOver:     DefaultToolsFoldOver,
+		ToolsAutoCollapse: true,
 		Glyphs:            DefaultGlyphSet,
 		Notify:            DefaultNotifyMode,
 		GitFetch:          true,
@@ -800,6 +809,8 @@ func (u *UIPrefs) land(key, value string) error {
 			return err
 		}
 		u.ToolsFoldOver = n
+	case UIKeyToolsAutoCollapse:
+		return landBool(&u.ToolsAutoCollapse, key, value, defaults.ToolsAutoCollapse)
 	case UIKeyNotify:
 		// `""` lands the shipped default, the contract every key keeps here — not the off that
 		// ParseNotifyMode reads the zero value as.

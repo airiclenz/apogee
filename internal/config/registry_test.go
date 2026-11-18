@@ -514,6 +514,35 @@ func TestToolsOpenRowIsAnEditableBoolDefaultingOff(t *testing.T) {
 	}
 }
 
+// The auto-collapse row is the Tools umbrella's other bool, with ui.tools-open's default turned
+// around again: it defaults ON — a settled umbrella folds to its summary out of the box — is
+// editable, and reads back what THIS session resolved rather than the declared default.
+func TestToolsAutoCollapseRowIsAnEditableBoolDefaultingOn(t *testing.T) {
+	t.Parallel()
+
+	row, ok := LookupKey("ui.tools-auto-collapse")
+	if !ok {
+		t.Fatal("no registry row for ui.tools-auto-collapse; /settings could not show the key at all")
+	}
+	if row.Kind != KindBool {
+		t.Errorf("kind = %q, want %q", row.Kind, KindBool)
+	}
+	if row.Default != "true" {
+		t.Errorf("default = %q, want \"true\" — a config that names nothing folds settled Tools umbrellas", row.Default)
+	}
+	if !row.Editable {
+		t.Error("the row is not editable; the knob is live from /settings (ADR 0037)")
+	}
+
+	off := Options{UI: domain.UIPrefs{ToolsAutoCollapse: false}}
+	if got := row.Read(off); got != "false" {
+		t.Errorf("read of a session with auto-collapse off = %q, want \"false\"", got)
+	}
+	if got := row.Read(Options{UI: domain.DefaultUIPrefs()}); got != "true" {
+		t.Errorf("read of an unconfigured session = %q, want \"true\"", got)
+	}
+}
+
 // The notify row is an editable enum over the four modes that defaults to the bell. An absent key
 // resolves to that bell, while a zero UIPrefs.Notify reads back as off — the zero value never rings.
 func TestNotifyRowIsAnEditableEnumDefaultingBell(t *testing.T) {
@@ -1107,7 +1136,8 @@ func TestRegistrySetIsTheInverseOfRead(t *testing.T) {
 		"ui.spinner": "UI", "ui.spinner-color": "UI", "ui.glyphs": "UI", "ui.show-scrollbar": "UI",
 		"ui.color-scheme": "UI", "ui.stall-after": "UI", "ui.inspector": "UI",
 		"ui.skill-suggestions": "UI", "ui.task-list-open": "UI", "ui.pointer-shapes": "UI",
-		"ui.tools-open": "UI", "ui.tools-fold-over": "UI", "ui.notify": "UI", "ui.git-fetch": "UI",
+		"ui.tools-open": "UI", "ui.tools-fold-over": "UI", "ui.tools-auto-collapse": "UI",
+		"ui.notify": "UI", "ui.git-fetch": "UI",
 		"ui.side-panel.show": "UI", "ui.side-panel.width": "UI",
 		"sessions.max-age": "Sessions", "sessions.max-count": "Sessions", "sessions.share-group": "Sessions",
 		"cursor-shape": "CursorShape", "editor": "Editor", "bypass": "Bypass",
@@ -1187,7 +1217,7 @@ func TestUIRowsLandThroughUIPrefsSet(t *testing.T) {
 		"ui.spinner": "classic", "ui.spinner-color": "false", "ui.glyphs": "safe", "ui.show-scrollbar": "false",
 		"ui.color-scheme": "light", "ui.stall-after": "1m30s", "ui.inspector": "true",
 		"ui.skill-suggestions": "false", "ui.task-list-open": "false", "ui.tools-open": "true",
-		"ui.tools-fold-over": "12", "ui.notify": "both", "ui.git-fetch": "false",
+		"ui.tools-fold-over": "12", "ui.tools-auto-collapse": "false", "ui.notify": "both", "ui.git-fetch": "false",
 		"ui.pointer-shapes": "true", "ui.side-panel.show": "off", "ui.side-panel.width": "48",
 	}
 

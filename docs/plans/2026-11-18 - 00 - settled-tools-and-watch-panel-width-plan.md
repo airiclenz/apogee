@@ -88,7 +88,10 @@ docs/layout/side-panel-layout.md — grip bullets, /panel bullets; docs/manual/c
 **Closes:** panel-drag-blocked-watching
 **Commit:** `docs(panel): record that the panel width changes while watching`
 
-## 3. Add the `ui.tools-auto-collapse` setting
+## 3. Add the `ui.tools-auto-collapse` setting — ✅ DONE (2026-11-18)
+
+NOTES (2026-11-18): the key sits right after `ui.tools-fold-over` (not between it and `ui.tools-open`) in `uiKeys`, the registry, the template and every enumerating test, so the `tools-open`/`tools-fold-over` pair that refers to each other stays adjacent; gofmt realigned the `UIKey*` constant block and `DefaultUIPrefs` literal for the longer name.
+NOTES (2026-11-18): `registry_test.go`'s owns table and documented-value table (`TestRegistrySetIsTheInverseOfRead`, `TestUIRowsLandThroughUIPrefsSet`) and `config_test.go`'s `TestEveryConfigKeyReachesTheOptions` fixture plus a load case gained the key; the manual and template prose describe the rule items 6–8 implement, ahead of item 10's full write-up.
 
 **What:**
 **Goal:** `ui.tools-auto-collapse` is a registry-declared, editable bool defaulting to `true`, present in `domain.UIPrefs` (`ToolsAutoCollapse`), the file config, the starter template and `docs/manual/configuration.md`'s tools section; the registry and docs drift tests pass. No TUI behaviour reads it yet.

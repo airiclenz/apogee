@@ -90,8 +90,8 @@ func fabricatedSettings() config.Options {
 		Present:               config.PresentSettings{AutoOpen: true, Command: "zed {path}", Port: 8080},
 		UI: domain.UIPrefs{Spinner: tui.SpinnerGlitter, SpinnerColor: true, Glyphs: domain.GlyphsSafe, ShowScrollbar: false,
 			ColorScheme: "dark", StallAfter: 2 * time.Minute, Inspector: true, SkillSuggestions: false,
-			TaskListOpen: false, ToolsOpen: true, ToolsFoldOver: 3, Notify: domain.NotifyBoth, GitFetch: false,
-			PointerShapes: true, FooterRows: "[[host, model, effort, mode], [workdir, git, spend]]",
+			TaskListOpen: false, ToolsOpen: true, ToolsFoldOver: 3, ToolsAutoCollapse: false, Notify: domain.NotifyBoth,
+			GitFetch: false, PointerShapes: true, FooterRows: "[[host, model, effort, mode], [workdir, git, spend]]",
 			FooterColors: fixtureFooterColors(), SidePanelShow: domain.SidePanelShowOn, SidePanelWidth: 48,
 			SidePanelSections: "[usage: pinned, tasks: hidden, sub-agents: auto, changed-files: auto]",
 			SidePanelFolded:   "[usage, mcp]"},
@@ -502,6 +502,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"ui.task-list-open":                  "false", // folded in the fixture, for the same reason: the row reports the value
 		"ui.tools-open":                      "true",  // opened in the fixture, against its false default: the row reports the value
 		"ui.tools-fold-over":                 "3",     // a count prints itself, and the fixture's 3 is not the default 5
+		"ui.tools-auto-collapse":             "false", // off in the fixture, against its true default
 		"ui.notify":                          "both",  // both signals in the fixture, against the bell default
 		"ui.git-fetch":                       "false", // off in the fixture, against its true default
 		"ui.pointer-shapes":                  "true",  // on in the fixture, against its false default

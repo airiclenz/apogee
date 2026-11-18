@@ -2916,6 +2916,10 @@ type uiConfig struct {
 	// stall-after: yaml's own whole-number parse is the only one there is, and the one judgement
 	// (below zero) is UIPrefs.Validate's.
 	ToolsFoldOver *WholeCount `yaml:"tools-fold-over"`
+	// ToolsAutoCollapse is whether a settled, untouched Tools umbrella folds to its Group summary.
+	// A pointer for SkillSuggestions's reason: the default is TRUE, so it is the explicit `false`
+	// that must be distinguishable from an absent key.
+	ToolsAutoCollapse *bool `yaml:"tools-auto-collapse"`
 	// Notify names how the terminal is told apogee waits on the human — off | bell | osc9 | both.
 	// Empty ⇒ the default (bell): the absent key keeps DefaultUIPrefs' value, even though a zero
 	// UIPrefs.Notify reads as off. A raw string for Spinner's reason: UIPrefs.Validate parses it

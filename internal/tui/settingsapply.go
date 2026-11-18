@@ -577,6 +577,12 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		// Which umbrellas are large is a paint fact, so the setter touches the transcript: an
 		// umbrella the new threshold moves across the line gains or loses its glyph on the next frame.
 		m.transcript.setToolsFoldOver(m.opts.UI.ToolsFoldOver)
+	case domain.UIKeyToolsAutoCollapse:
+		// The value lands on the Option alone: no paint reads it yet, so there is nothing on screen
+		// to move and the next frame is already right.
+		if err := m.opts.UI.Set(path, value); err != nil {
+			return m, "", nil, true, err
+		}
 	case domain.UIKeyPointerShapes:
 		// The flag is half of the pointer-shape gate (pointerprobe.go); the terminal's answer is the
 		// other half. Switched on in a session that never asked, the query goes out now; one that

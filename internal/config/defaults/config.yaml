@@ -1153,6 +1153,11 @@ update-check: true
 # no umbrella is ever large, so none follows `tools-open`.
 # Defaults: `tools-open: false`, `tools-fold-over: 5`.
 #
+# `tools-auto-collapse` folds a *settled* umbrella — every call in it finished, its Turn over — to
+# its one summary line, whatever its size, until you click it or act on one of its tools; opening it
+# then is for this session only and writes nothing.
+# `false` leaves every umbrella to `tools-open` and `tools-fold-over` alone. Default on.
+#
 # `pointer-shapes` lets apogee change your mouse pointer to show what a click does where it rests:
 # an I-beam over the input box and the transcript's text, a hand over a row or a block a click
 # opens, folds or picks, the ordinary arrow everywhere else. It needs a terminal that understands
@@ -1222,6 +1227,7 @@ ui:
   task-list-open: true   # false = task-list cards start folded; toggling a card writes this back
   tools-open: false      # true = large Tools umbrellas start open; toggling one writes this back
   tools-fold-over: 5     # type rows an umbrella may show before it folds; 0 = never folds
+  tools-auto-collapse: true  # false = settled Tools umbrellas fold by tools-open / tools-fold-over alone
   pointer-shapes: false  # true = text / hand mouse pointer on hover, on a terminal that answers OSC 22
   notify: bell           # off | bell | osc9 | both — how the terminal is told apogee waits on you
   git-fetch: true        # false = no background git fetch; the footer's ↓ counts only what is fetched

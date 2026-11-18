@@ -1233,6 +1233,13 @@ folds on its own, for this session only: nothing is written, and it starts the n
 `ui.tools-open` (each still folds on its own from its header), and a value below zero is refused —
 in `/settings` at the keystroke, in the file at startup.
 
+`ui.tools-auto-collapse` — **on by default** — folds a *settled* umbrella, one whose calls have
+all finished and whose Turn is over, to its one summary line, whatever its size and whatever
+`ui.tools-open` says, until you click it or act on one of its tools. Opening a settled umbrella
+that way is for this session only: nothing is written. Turn it off and every umbrella follows
+`ui.tools-open` and `ui.tools-fold-over` alone. The row shows in `/settings`, and a hand-edit
+applies live.
+
 `ui.pointer-shapes` — **off by default** — lets apogee change the mouse pointer to show what a
 click does where it rests: an I-beam over the input box and the transcript's text, a hand over a
 row or a block a click opens, folds or picks, and the ordinary arrow everywhere else. It needs a

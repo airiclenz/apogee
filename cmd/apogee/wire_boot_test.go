@@ -280,6 +280,8 @@ func TestRunRootCarriesTheUIPrefsWhole(t *testing.T) {
 		TaskListOpen:     false,
 		ToolsOpen:        true,
 		ToolsFoldOver:    7,
+		// Off against its true default; the zero value, named so the literal states every field.
+		ToolsAutoCollapse: false,
 	}
 	rec := &recordingLauncher{}
 	opts := config.Options{

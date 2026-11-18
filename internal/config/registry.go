@@ -1182,6 +1182,18 @@ var KeyRegistry = bindRows([]Key{
 			func(u *uiConfig) *int { return countPtr(u.ToolsFoldOver) }),
 	},
 	{
+		// The size rule's override for a finished burst: a bool the renderer applies to itself, read
+		// but never written back — an umbrella the reader opens stays open as view state only. It
+		// defaults ON: a settled umbrella is history, and its one-row Group summary is what is worth
+		// reading.
+		Path: "ui.tools-auto-collapse", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc: "Fold a settled Tools umbrella the reader has not touched to its one-row summary, " +
+			"whatever its size; false leaves every umbrella to `ui.tools-open` and `ui.tools-fold-over`.",
+		field: uiBool(domain.UIKeyToolsAutoCollapse, func(u *domain.UIPrefs) *bool { return &u.ToolsAutoCollapse },
+			func(u *uiConfig) *bool { return u.ToolsAutoCollapse }),
+	},
+	{
 		// A bool like ui.show-scrollbar, applied the same way (the renderer's own
 		// settingsApplyLocal): its whole effect is the pointer over THIS screen. Off by default, and
 		// on it still waits for the terminal to answer an OSC 22 query (ADR 0106) — which the

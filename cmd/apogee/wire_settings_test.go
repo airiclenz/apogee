@@ -973,6 +973,7 @@ var settingKeysAppliedByTheRenderer = []string{
 	"ui.task-list-open",
 	"ui.tools-open",
 	"ui.tools-fold-over",
+	"ui.tools-auto-collapse",
 	"ui.notify",
 	"ui.git-fetch",
 	"ui.pointer-shapes",
