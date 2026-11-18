@@ -250,7 +250,8 @@
 // internal/agent/treesnapshot.go) so no bookkeeping git of apogee's has to spawn outside it.
 // The funnel itself is not here: the exec fence on git, the
 // allowlisted environment, the per-invocation hardening and the repo-local command-config
-// refusal live in internal/gitexec, and what git.go holds are the thin wrappers this package's
+// refusal (which neutralises a repo-local merge driver rather than refusing it) live in
+// internal/gitexec, and what git.go holds are the thin wrappers this package's
 // tools and tests reach them by.
 //
 // The Console family (ADR 0059) — a persistent interactive program the model drives across

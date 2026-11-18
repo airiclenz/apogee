@@ -17,8 +17,9 @@ import "github.com/airiclenz/apogee/internal/domain"
 // of these tools. It no longer is. Every hardening that closed that gap landed afterwards:
 // the allowlisted PATH-scoped child environment and the per-invocation switches that
 // neutralise the programs a repository names (internal/gitexec, reached through runGit), the
-// outright refusal of a repository whose own config names a program git would execute
-// (gitexec's repo-local command-config probe), the argv[0] fence, --no-textconv and
+// refusal of a repository whose own config names a program git would execute (gitexec's
+// repo-local command-config probe; a repo-local merge driver is neutralised on every call
+// instead, and refuses only a content merge, which none of these reads runs), the argv[0] fence, --no-textconv and
 // --no-ext-diff on every diff-producing path (gitexec.DiffHardeningArgs), and the two-part ref
 // guard (validRef plus looksLikeOption). The engine already runs that same hardened
 // read-side git unattended in every mode for its tree-snapshot floor (tools.RunGitQuery,
@@ -30,9 +31,9 @@ import "github.com/airiclenz/apogee/internal/domain"
 //
 //   - spawns git only through gitRead (git.go) with a gitRef — the one read call, which spawns
 //     through runGit, so internal/gitexec's hardening options, GIT_CONFIG_NOSYSTEM, the
-//     repo-local command-config refusal and the argv[0] fence all apply, and which takes a
-//     revision only as a gitRef, the type guardRef alone mints from validRef AND
-//     looksLikeOption;
+//     repo-local command-config refusal (merge-driver neutralisation included) and the argv[0]
+//     fence all apply, and which takes a revision only as a gitRef, the type guardRef alone
+//     mints from validRef AND looksLikeOption;
 //   - marks every diff-producing invocation diffProducing, so gitRead passes
 //     gitexec.DiffHardeningArgs — and on a blob read by path (git_show), where --no-textconv is
 //     what keeps the repository's textconv driver off the object;

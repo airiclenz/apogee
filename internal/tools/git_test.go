@@ -1923,9 +1923,10 @@ func TestGit_FilterRefusalStaysRepoLocal(t *testing.T) {
 	}
 }
 
-// TestGit_RefusesRepoLocalCommandConfig pins the widened rule: EVERY repo-local config key whose
+// TestGit_RefusesRepoLocalCommandConfig pins the widened rule: every repo-local config key whose
 // value is a program git would execute — not filter drivers alone — refuses the call, and the
-// refusal names the key. Each case is a real repository with the key set through git itself, so
+// refusal names the key. A merge driver is the one exception: it is neutralised on every call
+// instead (TestGit_RepoLocalMergeDriverIsNeutralised). Each case is a real repository with the key set through git itself, so
 // what is asserted is git's own canonical name (section and variable lowercased, subsection kept)
 // rather than the spelling the test typed.
 func TestGit_RefusesRepoLocalCommandConfig(t *testing.T) {
@@ -1939,7 +1940,6 @@ func TestGit_RefusesRepoLocalCommandConfig(t *testing.T) {
 		{key: "credential.helper", value: "!payload", canonical: "credential.helper"},
 		{key: "gpg.program", value: "payload", canonical: "gpg.program"},
 		{key: "diff.foo.textconv", value: "payload", canonical: "diff.foo.textconv"},
-		{key: "merge.foo.driver", value: "payload %O %A %B", canonical: "merge.foo.driver"},
 		{key: "pager.status", value: "payload", canonical: "pager.status"},
 		{key: "remote.origin.proxy", value: "payload", canonical: "remote.origin.proxy"},
 		{key: "gpg.ssh.defaultKeyCommand", value: "./payload", canonical: "gpg.ssh.defaultkeycommand"},
@@ -1998,6 +1998,67 @@ func TestGit_RepoLocalFsmonitorTrueIsNotRefused(t *testing.T) {
 	}
 	if res.IsError {
 		t.Fatalf("git_status refused a repo with the builtin fsmonitor enabled: %q", res.Content)
+	}
+}
+
+// TestGit_RepoLocalMergeDriverIsNeutralised pins the merge-driver exception to the command-config
+// refusal: a repository whose own config names a merge driver (the shape capcom's own setup
+// leaves) keeps every model git tool, because gitexec empties each repo-local merge.<x>.driver on
+// every call and none of these tools runs a content merge. The fixture is armed: .gitattributes
+// routes every path to the driver, the subsection is mixed-case as git keeps it, and the driver
+// writes a marker if it ever executes.
+func TestGit_RepoLocalMergeDriverIsNeutralised(t *testing.T) {
+	posixScriptHost(t)
+	for _, tc := range []struct {
+		tool string
+		run  func(root string) (domain.ToolResult, error)
+	}{
+		{"git_status", func(root string) (domain.ToolResult, error) {
+			return NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
+		}},
+		{"git_log", func(root string) (domain.ToolResult, error) {
+			return NewGitLog(root).Execute(context.Background(), logCall("c1", `{"path":"README.md"}`))
+		}},
+		{"git_show", func(root string) (domain.ToolResult, error) {
+			return NewGitShow(root).Execute(context.Background(), showCall("c1", `{"ref":"HEAD~1","path":"README.md"}`))
+		}},
+		{"git_diff_range", func(root string) (domain.ToolResult, error) {
+			return NewGitDiffRange(root).Execute(context.Background(), diffCall("c1", `{"base":"HEAD~1","head":"HEAD"}`))
+		}},
+		{"git_commit", func(root string) (domain.ToolResult, error) {
+			if err := writeFileForTest(root, "new.txt", "added\n"); err != nil {
+				t.Fatalf("write new file: %v", err)
+			}
+			return NewGitCommit(root).Execute(context.Background(), commitCall("c1", `{"message":"add new.txt","files":["new.txt"]}`))
+		}},
+		{"git_branch", func(root string) (domain.ToolResult, error) {
+			return NewGitBranch(root).Execute(context.Background(), branchCall("c1", `{"action":"create","name":"feature"}`))
+		}},
+	} {
+		t.Run(tc.tool, func(t *testing.T) {
+			root := gitRepo(t)
+			marker := filepath.Join(t.TempDir(), "merge-driver.ran")
+			driver := filepath.Join(t.TempDir(), "merge-driver.sh")
+			writeMarkerScript(t, driver, marker, "exit 0")
+			if err := writeFileForTest(root, ".gitattributes", "* merge=Capcom-Log\n"); err != nil {
+				t.Fatalf("write .gitattributes: %v", err)
+			}
+			if err := writeFileForTest(root, "README.md", "hello again\n"); err != nil {
+				t.Fatalf("edit README.md: %v", err)
+			}
+			runInRepo(t, root, "add", ".gitattributes", "README.md")
+			runInRepo(t, root, "commit", "-m", "route every path to the merge driver")
+			runInRepo(t, root, "config", "--local", "merge.Capcom-Log.driver", driver+" %O %A %B")
+
+			res, err := tc.run(root)
+			if err != nil {
+				t.Fatalf("%s err = %v", tc.tool, err)
+			}
+			if res.IsError {
+				t.Fatalf("%s refused a repo that only names a merge driver: %q", tc.tool, res.Content)
+			}
+			requireNotRan(t, marker, "the repository's merge driver")
+		})
 	}
 }
 

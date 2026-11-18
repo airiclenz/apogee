@@ -70,7 +70,9 @@ NOTES (2026-11-18): the `=`-subsection driver takes the refusing route (`Command
 
 **Commit:** `fix(gitexec): neutralise repo-local merge drivers instead of refusing the repository`
 
-## 2. Model git tools work in a merge-driver repository
+## 2. Model git tools work in a merge-driver repository — ✅ DONE (2026-11-18)
+
+NOTES (2026-11-18): the new test arms its fixture with a committed `.gitattributes` (`* merge=Capcom-Log`), a mixed-case `merge.Capcom-Log.driver` writing a marker, and a second commit so `git_show HEAD~1` and `git_diff_range HEAD~1..HEAD` have a range; each tool runs in its own fresh repository.
 
 **What:** test-and-comment item for item 1's effect on `internal/tools`: a repo-local merge driver no longer refuses `git_status`, `git_log`, `git_show`, `git_diff_range`, `git_commit`, `git_branch`.
 **Goal:** `internal/tools` tests prove each git tool succeeds in a repo with a planted, marker-writing `merge.<x>.driver` and the marker never appears; the `merge.foo.driver` row leaves `TestGit_RefusesRepoLocalCommandConfig`'s refused table and every other row still refuses.
