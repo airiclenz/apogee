@@ -1091,7 +1091,7 @@ func TestUmbrellaHeader_ShowsTheGroupSummary(t *testing.T) {
 
 		got := headerAt(interleaved(t), 80, false)
 		dots := strings.Count(strip(got), defaultGlyphs.leaderDot)
-		want := th.toolHeader.Render(defaultGlyphs.assistant+" ") + th.toolHeader.Render(summary) + " " +
+		want := th.toolStar.Render(defaultGlyphs.assistant) + th.toolHeader.Render(" ") + th.toolHeader.Render(summary) + " " +
 			th.toolLeader.Render(strings.Repeat(defaultGlyphs.leaderDot, dots)) +
 			strings.Repeat(" ", groupIndicatorGap) + th.toolIndicator.Render(glyphExpanded)
 		if got != want {
@@ -1151,6 +1151,118 @@ func TestUmbrellaHeader_ShowsTheGroupSummary(t *testing.T) {
 		settled, blinked := strip(headerAt(tr, 80, false)), strip(headerAt(tr, 80, true))
 		if want := strings.Replace(settled, defaultGlyphs.assistant, " ", 1); blinked != want || settled == blinked {
 			t.Errorf("blinked header = %q, want the settled %q with only its star blanked", blinked, settled)
+		}
+	})
+}
+
+// TestToolBlockStarPaintsInTheToolsHeaderColour pins every tool block's leading ✦ — an umbrella, a
+// lone call, a Sub-agents group and a Skill group — to the scheme's tool-header colour (th.toolStar),
+// with the header text after it painted exactly as before: the star alone takes the colour. The
+// live blink's bare cell and a Firing's borrowed ⟳ are the two marks it must leave alone.
+func TestToolBlockStarPaintsInTheToolsHeaderColour(t *testing.T) {
+	t.Parallel()
+
+	th := newTheme(scheme.Default())
+	star := th.toolStar.Render(defaultGlyphs.assistant)
+	firstLine := func(t *testing.T, tr *transcript, blink bool) string {
+		t.Helper()
+		lines := tr.renderView(th, 80, blink, breadcrumbHint).lines
+		if len(lines) == 0 {
+			t.Fatal("the transcript rendered nothing at all")
+		}
+		return lines[0]
+	}
+	groupLabel := func(label string) string {
+		return th.toolLabel.Render(label) + " " + th.toolIndicator.Render("(2)")
+	}
+	cases := []struct {
+		name  string
+		build func(tr *transcript)
+		// after is the styled header text the star leads, exactly as it painted before the star
+		// took its colour.
+		after string
+	}{
+		{
+			name: "umbrella",
+			build: func(tr *transcript) {
+				readCall(tr, "c1", "main.go", 1, 154, 0)
+				readCall(tr, "c2", "util.go", 1, 42, 0)
+			},
+			after: th.toolHeader.Render(" ") + th.toolHeader.Render("Read 2 files"),
+		},
+		{
+			name:  "lone call",
+			build: func(tr *transcript) { runCall(tr, "c1", "go test ./...", "PASS", 0) },
+			after: " " + th.toolLabel.Render("Terminal"),
+		},
+		{
+			name: "Sub-agents group",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				subAgentReport(tr, "s1", "done", 0)
+				subAgentCall(tr, "s2", "survey the docs", 0)
+				subAgentReport(tr, "s2", "done", 0)
+			},
+			after: " " + groupLabel("Sub-agents"),
+		},
+		{
+			name: "Skill group",
+			build: func(tr *transcript) {
+				skillFetch(tr, "c1", "format Go", "<skill: Coding Standards>\nUse gofmt.\n</skill>\n")
+				skillFetch(tr, "c2", "cut a release", "<skill: Brew Release>\nTag it.\n</skill>\n")
+			},
+			after: " " + groupLabel("Skill"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tr := &transcript{}
+			tc.build(tr)
+			if got, want := firstLine(t, tr, false), star+tc.after; !strings.HasPrefix(got, want) {
+				t.Errorf("header:\n got  %q\n want prefix %q", got, want)
+			}
+		})
+	}
+
+	t.Run("the star's colour is the scheme's tool-header colour in every scheme", func(t *testing.T) {
+		t.Parallel()
+
+		for _, name := range scheme.Discover("") {
+			s, _ := scheme.Resolve(name, "")
+			sth := newTheme(s)
+			if got, want := sth.toolStar.GetForeground(), sth.toolLabel.GetForeground(); got != want {
+				t.Errorf("scheme %q: toolStar fg = %v, want the tool-header colour %v", name, got, want)
+			}
+			if sth.toolStar.GetBold() {
+				t.Errorf("scheme %q: toolStar is bold; the star takes the colour alone", name)
+			}
+		}
+		if colorActive(th) && !strings.Contains(star, "\x1b[") {
+			t.Errorf("the painted star %q carries no SGR", star)
+		}
+	})
+
+	t.Run("the live blink still paints a bare cell", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+			ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+		if got, want := firstLine(t, tr, true), " "+" "+th.toolLabel.Render("Terminal"); !strings.HasPrefix(got, want) {
+			t.Errorf("blinked-out header:\n got  %q\n want prefix %q", got, want)
+		}
+		if got := firstLine(t, tr, false); !strings.HasPrefix(got, star+" ") {
+			t.Errorf("live header at the settled phase:\n got  %q\n want the coloured star %q first", got, star)
+		}
+	})
+
+	t.Run("a Firing's ⟳ paints as it always has", func(t *testing.T) {
+		t.Parallel()
+
+		if got, want := firstLine(t, firingBlock("the log is clean"), false), "⟳ "+th.toolLabel.Render("Schedule"); !strings.HasPrefix(got, want) {
+			t.Errorf("Firing header:\n got  %q\n want prefix %q", got, want)
 		}
 	})
 }

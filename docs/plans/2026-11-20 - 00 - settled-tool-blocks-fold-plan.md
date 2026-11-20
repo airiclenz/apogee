@@ -41,7 +41,12 @@
 - Workflow blocks, task-list cards' own `ui.task-list-open` fold, lone delegation run blocks (`shapeSubAgentRun`) — none auto-collapse.
 - Any engine or `domain.ToolSummary` change.
 
-## 1. Paint every tool block's star in the tools header colour
+## 1. Paint every tool block's star in the tools header colour — ✅ DONE (2026-11-20)
+
+NOTES (2026-11-20): the star is painted by one helper, `paintStar` (toolblock.go), rather than at each site: it colours only the `✦` glyph, so the live blink's bare cell stays an unstyled space and a `blockState.glyph` override (the Firing's `⟳`) passes through untouched; `paintHeaderMarker` splits the umbrella's measured marker into the coloured star plus the gap in `th.toolHeader`.
+NOTES (2026-11-20): added one sentence to `layout.md` §The label stating the star's colour (a doc the change affects, per the implementer's documentation step); not in the item's Files list.
+NOTES (2026-11-20): the built-in scheme files' `tool-header` role comments (`internal/scheme/schemes/dark.yaml`, `light.yaml`) still list "header label … and the sub-agent rail" without the star — left as written, since they are not made false and item 7 owns the wording pass.
+NOTES (2026-11-20): workflow block headers (`workflowblock.go`) and the session log header (`render.go`, `renderSessionLog`) keep their star uncoloured — both are outside this item's named shapes (the plan's Out of scope names Workflow blocks).
 
 **What:**
 **Goal:** The leading `✦` of the umbrella header, a lone tool block header (`renderToolBlock`, every caller), and the Sub-agent / Skill group header renders with the tools header foreground (`ColorScheme.ToolHeader`) in every colour scheme; the live blink (a bare cell) is unchanged; no header text changes colour.

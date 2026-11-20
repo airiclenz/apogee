@@ -92,6 +92,7 @@ func TestNewThemeTakesItsColoursFromTheScheme(t *testing.T) {
 		// The tool header's own role and the code role it used to borrow: sampled together, because
 		// keeping them apart is the whole reason `tool-header` exists.
 		{"toolLabel fg", th.toolLabel.GetForeground(), s.ToolHeader},
+		{"toolStar fg", th.toolStar.GetForeground(), s.ToolHeader},
 		{"subRail fg", th.subRail.GetForeground(), s.ToolHeader},
 		{"mdCode fg", th.mdCode.GetForeground(), s.Code},
 		{"gaugeFill fg", th.gaugeFill.GetForeground(), s.Gauge},

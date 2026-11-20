@@ -572,7 +572,7 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 	if count > 0 {
 		label := th.toolLabel.Render(groupLabelOf(members)) + " " +
 			th.toolIndicator.Render(fmt.Sprintf(groupCountFormat, count))
-		out.add(hangingWrap(th, th.toolHeader, state.star(th)+" ", label, width), targetNone)
+		out.add(hangingWrap(th, th.toolHeader, paintStar(th, state.star(th))+" ", label, width), targetNone)
 	}
 	room := toolRowCells(th, width)
 	for _, m := range members {

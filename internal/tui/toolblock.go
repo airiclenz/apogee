@@ -86,7 +86,7 @@ func renderToolBlock(th theme, view toolView, width int, state blockState) block
 		}
 	}
 	var out blockPaint
-	out.add(hangingWrap(th, th.toolHeader, state.star(th)+" ", label, width), toggle)
+	out.add(hangingWrap(th, th.toolHeader, paintStar(th, state.star(th))+" ", label, width), toggle)
 	out.join(renderToolBranch(th, view, state.branchMarkerIn(0, 1), width, state.expanded, toggle))
 	return out
 }
@@ -301,12 +301,27 @@ func umbrellaCountPaint(th theme, clipped string) string {
 	return th.toolLabel.Render(clipped)
 }
 
-// paintHeaderMarker dresses the umbrella header's star in the header's own tone (th.toolHeader) —
-// the tone every ✦ header's star is in — whatever the fold's state: the star is the block's, not a
-// row's chrome, so neither the detail tone nor the open/shut step reaches it. It is leaderRowIn's
-// marker painter for that one row; every other leader row passes paintRowMarker.
+// paintHeaderMarker dresses the umbrella header's star in the star's own tone (paintStar) and the
+// gap after it in the header's (th.toolHeader) whatever the fold's state: the star is the block's,
+// not a row's chrome, so neither the detail tone nor the open/shut step reaches it. It is
+// leaderRowIn's marker painter for that one row; every other leader row passes paintRowMarker.
 func paintHeaderMarker(th theme, marker string, _ bool) string {
+	if rest, ok := strings.CutPrefix(marker, th.glyphs.assistant); ok {
+		return paintStar(th, th.glyphs.assistant) + th.toolHeader.Render(rest)
+	}
 	return th.toolHeader.Render(marker)
+}
+
+// paintStar dresses a tool block's header star (blockState.star) in the tools header colour
+// (th.toolStar) — the ✦ of an umbrella, a lone call and a Sub-agent or Skill group alike. Only the
+// ✦ takes it: the live blink's bare cell stays a bare cell, so a blinking header paints no SGR run
+// around a space, and a borrowed glyph (blockState.glyph, a Firing's ⟳) keeps the tone it was
+// always painted in. The header text beside the star is not this function's: it keeps its own.
+func paintStar(th theme, star string) string {
+	if star != th.glyphs.assistant {
+		return star
+	}
+	return th.toolStar.Render(star)
 }
 
 // typeRowText is a type row's left content as it is MEASURED: the run's label, and the "(N)" beside

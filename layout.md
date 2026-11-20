@@ -823,7 +823,9 @@ leads the first branch line instead, so the block reshapes around its targets ra
 them. The label carries no brackets and is rendered **bold in the scheme's `tool-header` role**
 (`#aea580` under `dark`) — a role of its own rather than the `code` role inline code and fenced
 blocks carry, so the blocks apogee *ran* read apart from the code it *prints*, and either tone can
-be retuned without dragging the other along. The styling is uniform too: a known friendly label
+be retuned without dragging the other along. The leading `✦` takes that same colour, not bold, on
+every tool block's header — an umbrella, a lone call, a Sub-agents or Skill group — while the text
+after it keeps its own tone; the live star's bare cell and a Firing's `⟳` are left as they were. The styling is uniform too: a known friendly label
 ("Read"), an unknown tool's label, and `result` all look the same. An unknown tool's label is
 its raw name, except an MCP tool's: its raw name `<server>__<tool>` reads `<server> · <tool>`
 (`github · search_issues`), split at the first `__` and only where both halves are non-empty; the
