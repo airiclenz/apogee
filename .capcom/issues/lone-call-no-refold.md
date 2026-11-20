@@ -1,10 +1,12 @@
 ---
 title: "A lone tool call is no tool group: it cannot be re-folded, and the group header paints white"
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-11-20 - 00 - tool-group-of-one-plan.md
 created: 2026-11-20T20:00:13Z
+closed: 2026-11-20T21:56:41Z
+reason: "Resolved by plan 2026-11-20 - 00 - tool-group-of-one-plan (archived at 756922869): every call is a group of one that folds, opens and re-folds; lone delegation/skill fetch render as Sub-agents (1)/Skill (1); Group summary paints in toolLabel."
 ---
 
 Under `ui.tools-auto-collapse` a settled lone call folds to its Group summary, but once the reader opens it, it cannot be folded again: the open lone call paints as a plain tool block with no fold header (`blockFoldBy` returns `foldByNone` for a touched lone call). A `✦ Tools` umbrella, by contrast, re-folds on click. Lone delegations and lone skill fetches are not groups at all. Separately, the Group summary phrase on a group header paints in the terminal default (white) — `th.toolHeader` has no foreground — instead of the tools header colour every individual tool header uses (`th.toolLabel`).
