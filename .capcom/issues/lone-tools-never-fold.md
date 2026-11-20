@@ -1,9 +1,11 @@
 ---
 title: Settled lone tool calls, Sub-agent and Skill groups never auto-collapse; tool stars uncoloured
-status: open
+status: done
 type: bug
 priority: 2
 created: 2026-11-20T15:43:21Z
+closed: 2026-11-20T17:57:00Z
+reason: "Resolved by settled-tool-blocks-fold-plan (archived at f42048a0f): lone calls, Sub-agent and Skill groups auto-collapse when settled; tool stars use the tools header colour; driven tests, docs and adr-0035-amend-1120 landed."
 ---
 
 Under `ui.tools-auto-collapse` (on by default, v0.35.6) a settled, untouched `✦ Tools` umbrella folds to its one Group summary line, but three other tool surfaces stay open when settled: a lone tool call (`✦ Read` + `└ README.md … 249 lines`, `✦ Terminal` + its row), the `✦ Sub-agents (N)` group and the `✦ Skill (N)` group. A transcript of finished work therefore reads half folded (owner report, 2026-11-20, screenshot of a v0.35.6 session). Separately, a folded umbrella's `✦` is the plain text colour, so a folded line is hard to tell apart from narration.

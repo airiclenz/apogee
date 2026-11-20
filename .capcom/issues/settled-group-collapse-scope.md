@@ -1,10 +1,12 @@
 ---
 title: Decide whether Sub-agent, Skill groups and lone tool blocks auto-collapse when settled
-status: open
+status: done
 type: feature
 priority: 3
 deps: [settled-tool-group-clutter]
 created: 2026-11-18T11:30:56Z
+closed: 2026-11-20T17:57:01Z
+reason: "Decided (owner 2026-11-20: all three collapse) and implemented by settled-tool-blocks-fold-plan (archived at f42048a0f)."
 ---
 
 `settled-tool-group-clutter` auto-collapses settled, untouched `✦ Tools` umbrellas to one Group summary row. On purpose, it leaves out `✦ Sub-agents (N)` and `✦ Skill (N)` groups (spec `docs/layout/tool-layout.md` §Grouped Sub-agents, §Grouped Skills) and lone tool blocks, which collapsed are still a header plus one row (§Vocabulary, *Remainder*). This issue decides, case by case, whether each of those follows the same rule under `ui.tools-auto-collapse`, and what its one row reads. A sub-agent row already carries a gist and verdict, so its group may need a different summary.
