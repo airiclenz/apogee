@@ -22,10 +22,10 @@ func autoCollapseUmbrella(t *testing.T) *transcript {
 	return tr
 }
 
-// settledAt asks blockSettled of the block entries[head] heads, its end read off the head's shape
+// settledAt asks blockSettled of the block entries[head] heads, its end read off the head
 // (foldableHead) as every production caller reads it; an index heading no block answers false.
 func settledAt(tr *transcript, head int) bool {
-	end, _, ok := foldableHead(tr.entries, head)
+	end, ok := foldableHead(tr.entries, head)
 	return ok && tr.blockSettled(head, end)
 }
 
@@ -414,4 +414,196 @@ func TestAutoCollapseFoldsALoneCall(t *testing.T) {
 			t.Errorf("the Read left alone painted folded off the dissolved umbrella's flag:\n%s", renderPlain(tr, 80))
 		}
 	})
+}
+
+// subAgentGroupOf puts a two-member Sub-agents group at entries[0] — each delegation started, one
+// Read of its own in its span and its report paired — under auto-collapse with the Turn running,
+// so the group is the running Turn's last entry and stands open.
+func subAgentGroupOf(t *testing.T) *transcript {
+	t.Helper()
+	tr := &transcript{}
+	tr.setToolsAutoCollapse(true)
+	tr.setTurnLive(true)
+	for _, d := range [][2]string{{"s1", "a.go"}, {"s2", "b.go"}} {
+		delegationCall(tr, "", d[0], d[0], "look around", 0)
+		subAgentStarted(tr, d[0], 1)
+		delegatedRead(tr, d[0], "r"+d[0], d[1], 1)
+		subAgentReport(tr, d[0], "all clear", 0)
+	}
+	if _, pos, ok := subAgentGroupAt(tr.entries, 0); !ok || pos != 0 {
+		t.Fatal("setup: entries[0] heads no Sub-agents group")
+	}
+	return tr
+}
+
+// skillGroupOf puts a two-fetch Skill group at entries[0] under auto-collapse with the Turn
+// running, so the group is the running Turn's last entry and stands open.
+func skillGroupOf(t *testing.T) *transcript {
+	t.Helper()
+	tr := &transcript{}
+	tr.setToolsAutoCollapse(true)
+	tr.setTurnLive(true)
+	skillFetch(tr, "k1", "format Go", "<skill: Coding Standards>\nUse gofmt.\n</skill>\n")
+	skillFetch(tr, "k2", "cut a release", "<skill: Brew Release>\nTag it.\n</skill>\n")
+	if _, pos, ok := ownGroupAt(tr.entries, 0, loadSkillToolName); !ok || pos != 0 {
+		t.Fatal("setup: entries[0] heads no Skill group")
+	}
+	return tr
+}
+
+// TestAutoCollapseFoldsSettledGroups pins the settled fold on the Sub-agent and Skill groups: a
+// group whose members have all finished folds to its header once narration follows it or its Turn
+// ends, and paints its header line alone; it stays open while it is the running Turn's last entry,
+// once the reader touched any row of it, and — on its head flag — with auto-collapse off; and a
+// replayed group is settled by construction.
+func TestAutoCollapseFoldsSettledGroups(t *testing.T) {
+	t.Parallel()
+
+	groups := map[string]struct {
+		build  func(t *testing.T) *transcript
+		header string
+		member string // a word only the second member's row paints
+		second int    // the second member's entry
+	}{
+		"Sub-agents": {subAgentGroupOf, "✦ Sub-agents (2)", "s2", 2},
+		"Skill":      {skillGroupOf, "✦ Skill (2)", "Brew Release", 1},
+	}
+	settle := map[string]func(tr *transcript){
+		"narration": func(tr *transcript) { tr.apply(domain.MessageEvent{Text: "Done."}) },
+		"turn end":  func(tr *transcript) { tr.setTurnLive(false) },
+	}
+	for name, group := range groups {
+		for how, follow := range settle {
+			t.Run(name+" settles on "+how, func(t *testing.T) {
+				t.Parallel()
+
+				tr := group.build(t)
+				tr.paints = newPaintCache()
+				if tr.blockFolded(0) {
+					t.Fatal("blockFolded(0) = true on the running Turn's last group; want it open")
+				}
+				if !strings.Contains(renderPlain(tr, 80), group.member) {
+					t.Fatalf("the open group paints no %q member row:\n%s", group.member, renderPlain(tr, 80))
+				}
+
+				follow(tr)
+
+				if got := tr.blockFoldBy(0); got != foldBySettled {
+					t.Errorf("blockFoldBy(0) = %d; want foldBySettled", got)
+				}
+				paint := renderPlain(tr, 80)
+				if !strings.Contains(paint, group.header) || strings.Contains(paint, group.member) {
+					t.Errorf("the settled group does not paint its header %q alone:\n%s", group.header, paint)
+				}
+			})
+		}
+
+		t.Run(name+" touched stays open", func(t *testing.T) {
+			t.Parallel()
+
+			tr := group.build(t)
+			if !tr.markBlockTouched(group.second) || !tr.entries[0].foldTouched {
+				t.Fatal("setup: the second member's row did not mark its group touched")
+			}
+			tr.setTurnLive(false)
+			if got := tr.blockFoldBy(0); got != foldByHead || tr.blockFolded(0) {
+				t.Errorf("blockFoldBy(0) = %d, folded %v on a touched settled group; want foldByHead, open",
+					got, tr.blockFolded(0))
+			}
+		})
+
+		t.Run(name+" auto-collapse off follows its head flag", func(t *testing.T) {
+			t.Parallel()
+
+			tr := group.build(t)
+			tr.setToolsAutoCollapse(false)
+			tr.setTurnLive(false)
+			if got := tr.blockFoldBy(0); got != foldByHead || tr.blockFolded(0) {
+				t.Errorf("blockFoldBy(0) = %d, folded %v with auto-collapse off; want foldByHead, open",
+					got, tr.blockFolded(0))
+			}
+			tr.setBlockFolded(0, true)
+			if !tr.blockFolded(0) {
+				t.Error("blockFolded(0) = false with the head flag shut; want true")
+			}
+		})
+
+		t.Run(name+" replayed folds", func(t *testing.T) {
+			t.Parallel()
+
+			src := group.build(t)
+			tr := &transcript{}
+			tr.setToolsAutoCollapse(true)
+			tr.replay(append([]entry(nil), src.entries...))
+			if !tr.blockFolded(0) {
+				t.Error("blockFolded(0) = false on a replayed group under auto-collapse; want true")
+			}
+		})
+	}
+}
+
+// TestAutoCollapseKeepsAWorkingGroupOpen: a Sub-agents group with a member still working stays
+// open whatever follows — even with the Turn over — because a member is done only when its own
+// run head says so; narration inside a member's span is never asked. Once that head reports, by
+// its FINISHED phase alone ahead of the result burst, the group settles.
+func TestAutoCollapseKeepsAWorkingGroupOpen(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{}
+	tr.setToolsAutoCollapse(true)
+	tr.setTurnLive(true)
+	for _, id := range []string{"s1", "s2"} {
+		delegationCall(tr, "", id, id, "look around", 0)
+		subAgentStarted(tr, id, 1)
+		tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1, CallID: id}, Text: "checking"})
+	}
+	subAgentPhaseFinished(tr, "s1", "all clear")
+	tr.setTurnLive(false)
+	if settledAt(tr, 0) || tr.blockFolded(0) {
+		t.Fatal("a Sub-agents group with s2 still working settled; want it open")
+	}
+
+	subAgentPhaseFinished(tr, "s2", "all clear")
+
+	if !settledAt(tr, 0) {
+		t.Error("blockSettled(0) = false once every member's run head finished; want true — span narration is never asked")
+	}
+	if got := tr.blockFoldBy(0); got != foldBySettled {
+		t.Errorf("blockFoldBy(0) = %d; want foldBySettled", got)
+	}
+}
+
+// TestAutoCollapseRunViewGroupFoldsOnChildReport: a Sub-agents group nested inside a delegated
+// run, as that run's last entry, stays open while the child runs and folds once the child reports
+// — in the transcript and in the child's run view alike.
+func TestAutoCollapseRunViewGroupFoldsOnChildReport(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{}
+	tr.setToolsAutoCollapse(true)
+	tr.setTurnLive(true)
+	delegationCall(tr, "", "sa1", "lead", "split the work", 0)
+	subAgentStarted(tr, "sa1", 1)
+	for _, id := range []string{"n1", "n2"} {
+		delegationCall(tr, "sa1", id, id, "look around", 1)
+		tr.apply(domain.ToolResultEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: "sa1"},
+			Result:    domain.ToolResult{CallID: id, Content: "all clear"},
+		})
+	}
+	head := 1
+	if _, pos, ok := subAgentGroupAt(tr.entries, head); !ok || pos != 0 {
+		t.Fatalf("entries[%d] heads no Sub-agents group; want the child's two delegations under one", head)
+	}
+	if tr.blockFolded(head) {
+		t.Fatal("blockFolded = true while the child is still running; want false")
+	}
+	subAgentReport(tr, "sa1", "done", 0)
+	if !tr.blockFolded(head) {
+		t.Error("blockFolded = false once the child reported; want true")
+	}
+	tr.setRoot(tr.entries[0].spawned())
+	if got := tr.blockFoldBy(head); got != foldBySettled {
+		t.Errorf("blockFoldBy = %d in the run view; want foldBySettled", got)
+	}
 }

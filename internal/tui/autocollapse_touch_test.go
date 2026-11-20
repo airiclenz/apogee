@@ -396,3 +396,56 @@ func TestAutoCollapsePanelJumpRevealsAFoldedLoneCall(t *testing.T) {
 		t.Errorf("writes = %+v after the jump; want none", log.writes)
 	}
 }
+
+// TestAutoCollapseEnteringAGroupMemberTouchesItsGroup pins the run-view redirect's touch: a click
+// or ⏎ on a framed member row of an open Sub-agents group opens that member's run view AND marks
+// the group touched, so a group that settles while the reader is inside it — the Turn ends behind
+// them — stays open when they come back up.
+func TestAutoCollapseEnteringAGroupMemberTouchesItsGroup(t *testing.T) {
+	t.Parallel()
+	const groupHead, secondMember = 1, 3
+
+	for _, way := range []string{"mouse", "enter"} {
+		t.Run(way, func(t *testing.T) {
+			t.Parallel()
+
+			m := newTestModelEng(t, &fakeEngine{}, testOpts)
+			m.transcript.reset()
+			m.transcript.addUser("survey both", nil)
+			for _, d := range [][2]string{{"s1", "a.go"}, {"s2", "b.go"}} {
+				subAgentCall(&m.transcript, d[0], "survey", 0)
+				readCall(&m.transcript, "r"+d[0], d[1], 1, 5, 1)
+				subAgentReport(&m.transcript, d[0], "all clear", 0)
+			}
+			m.transcript.setToolsAutoCollapse(true)
+			m.transcript.setTurnLive(true)
+			m.refreshViewport()
+			if m.transcript.blockFolded(groupHead) {
+				t.Fatal("setup: the running Turn's last group stands folded; want it open")
+			}
+
+			if way == "mouse" {
+				m = clickCell(t, m, 4, screenRow(t, m, lastLineMarked(t, m, targetHeader, secondMember)))
+			} else {
+				m = step(t, cursorOnTarget(t, m, targetHeader, secondMember), keyEnter())
+			}
+
+			if got, want := m.viewedRun(), m.transcript.entries[secondMember].spawned(); got != want {
+				t.Fatalf("viewed run = %+v after the gesture; want the member's run %+v", got, want)
+			}
+			if !m.transcript.entries[groupHead].foldTouched {
+				t.Error("entering a member's run view did not mark its group touched")
+			}
+
+			m.transcript.setTurnLive(false)
+			m = m.upRun()
+
+			if !settledAt(&m.transcript, groupHead) {
+				t.Fatal("setup: the group is not settled once the Turn ended")
+			}
+			if m.transcript.blockFolded(groupHead) {
+				t.Errorf("the settled group the reader entered folded behind them:\n%s", strings.Join(m.lines, "\n"))
+			}
+		})
+	}
+}

@@ -125,7 +125,15 @@ internal/tui/blockcursor.go — cursorStops, cursorRunHead; internal/tui/sidepan
 - `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/tui/`
 **Commit:** `feat(tui): fold Sub-agent and Skill groups from their header`
 
-## 5. Auto-collapse settled, untouched Sub-agent and Skill groups
+## 5. Auto-collapse settled, untouched Sub-agent and Skill groups — ✅ DONE (2026-11-20)
+
+NOTES (2026-11-20): the settled arm of `blockFoldBy` is no longer gated by shape, so `autoCollapses` was deleted and `foldableHead` / `toolGroupAt` drop the shape value item 4 added only for that gate (now read nowhere); `settledAt` in autocollapse_test.go follows the two-value signature.
+NOTES (2026-11-20): member done-ness is a new `entry.reported()` (done, or the FINISHED phase — subAgentReported's rule on the entry), used for every block's own members and for the run-head check `blockSettled` already made; deeper span entries are still never asked.
+NOTES (2026-11-20): the run-view redirect in `toggleBlockAt` marks the group touched before `openRunAt` when `runOpenableAt` answers yes; a lone delegation heads no foldable block and marks nothing.
+NOTES (2026-11-20): consequential edit — internal/tui/subagentblock_test.go: made necessary by groups now taking the settled fold (item 4's interim "auto-collapse never folds a settled, untouched group" subtest now pins the folded header).
+NOTES (2026-11-20): consequential edit — internal/tui/blocktarget.go: made necessary by group headers now taking the settled fold (targetUmbrella doc comment).
+NOTES (2026-11-20): consequential edit — internal/tui/render.go: made necessary by group headers now taking the settled fold (resolveGroup doc comment).
+NOTES (2026-11-20): e2e: a shared `openSubAgentsGroup` helper (e2e_fanout_test.go) opens the folded group before tests whose subject is the member rows — livestate (read page by page, since the opened list holds the view on its header), both preempt journeys, the stream test, and the delegation step-cap continuation (two delegations from successive replies group by adjacency). e2e_parallel_test.go needed no change.
 
 Depends on items 3, 4.
 **What:**

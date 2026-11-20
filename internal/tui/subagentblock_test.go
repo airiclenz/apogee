@@ -1223,8 +1223,8 @@ func TestNeverRanDelegationRowIsExpandableAtEveryWidth(t *testing.T) {
 // TestGroupHeaderFoldsTheGroup pins the Sub-agent and Skill group's own fold, on its head's flag
 // (transcript.setBlockFolded): folded, the group paints its header line alone under ▶ — every
 // member and every span behind it covered by that one block, an open member included, whose state
-// waits beneath the fold — its star blinks while a member still works, and auto-collapse never
-// folds a group: a settled, untouched one stays open.
+// waits beneath the fold — its star blinks while a member still works, and auto-collapse folds a
+// settled, untouched group to that same header line, an unspanned fan-out included.
 func TestGroupHeaderFoldsTheGroup(t *testing.T) {
 	t.Parallel()
 
@@ -1306,7 +1306,7 @@ func TestGroupHeaderFoldsTheGroup(t *testing.T) {
 		}
 	})
 
-	t.Run("auto-collapse never folds a settled, untouched group", func(t *testing.T) {
+	t.Run("auto-collapse folds a settled, untouched group", func(t *testing.T) {
 		t.Parallel()
 
 		for _, tc := range []struct {
@@ -1320,7 +1320,7 @@ func TestGroupHeaderFoldsTheGroup(t *testing.T) {
 					skillFetch(tr, "k1", "format Go", "<skill: Coding Standards>\nUse gofmt.\n</skill>\n")
 					skillFetch(tr, "k2", "cut a release", "<skill: Brew Release>\nTag it.\n</skill>\n")
 				},
-				want: groupHeaderLine("Skill", 2),
+				want: foldedHeader("Skill", 2),
 			},
 			{
 				name: "unspanned sub-agent group",
@@ -1330,7 +1330,7 @@ func TestGroupHeaderFoldsTheGroup(t *testing.T) {
 					subAgentCall(tr, "s2", "build", 0)
 					subAgentReport(tr, "s2", "refused at the depth bound", 0)
 				},
-				want: groupHeaderLine("Sub-agents", 2),
+				want: foldedHeader("Sub-agents", 2),
 			},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
@@ -1344,11 +1344,11 @@ func TestGroupHeaderFoldsTheGroup(t *testing.T) {
 				if !settledAt(tr, 0) {
 					t.Fatal("setup: the group is not settled, so the case proves nothing")
 				}
-				if tr.blockFolded(0) {
-					t.Error("auto-collapse folded a settled, untouched group; a group folds on its header alone")
+				if got := tr.blockFoldBy(0); got != foldBySettled {
+					t.Errorf("blockFoldBy(0) = %d on a settled, untouched group; want foldBySettled", got)
 				}
 				if got := strings.SplitN(renderPlain(tr, 80), "\n", 2)[0]; got != tc.want {
-					t.Errorf("the group header reads %q, want the open %q", got, tc.want)
+					t.Errorf("the group header reads %q, want the folded %q", got, tc.want)
 				}
 			})
 		}

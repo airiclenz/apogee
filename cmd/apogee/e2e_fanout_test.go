@@ -14,6 +14,7 @@ package main
 // driven session runs wider than one.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -224,4 +225,23 @@ func toolResultsOf(req stubllm.Request) []string {
 		}
 	}
 	return out
+}
+
+// openSubAgentsGroup opens the settled "✦ Sub-agents (count)" group the default
+// `ui.tools-auto-collapse` folded to its header once the run moved past it: it waits for that folded
+// header, clicks it and waits for it to stand open, so a test whose subject is the members' own
+// rows reads them as the reader would after opening the group. Opening it is view state alone.
+func openSubAgentsGroup(t *testing.T, drv *tuitest.Driver, count int) {
+	t.Helper()
+
+	text := fmt.Sprintf("Sub-agents (%d)", count)
+	folded := umbrellaHeaderMatch{text: text, glyph: "▶"}
+	folded.await(drv)
+	x, y, ok := folded.find(drv.Frame())
+	if !ok {
+		t.Fatalf("the frame carries no folded %q header to click:\n%s", folded, drv.Frame())
+	}
+	click(drv, x, y)
+	umbrellaHeaderMatch{text: text, glyph: "▼"}.await(drv)
+	drv.WaitQuiet(settled)
 }

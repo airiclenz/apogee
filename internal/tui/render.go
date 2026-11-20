@@ -1140,7 +1140,8 @@ func previewTail(s string) string {
 // the lone block it folded from. buf is the walk's record buffer, as [transcript.resolveBlock]
 // states.
 //
-// The group's header is a fold ([transcript.blockFoldBy], on the first member's own flag): FOLDED,
+// The group's header is a fold ([transcript.blockFoldBy]: settled and untouched under
+// auto-collapse first, else on the first member's own flag): FOLDED,
 // the group is ONE block covering every member and its span — no open member ends it, since none
 // paints a row — and paints its header line alone; the fold rides the block into the paint key
 // (resolvedBlock.fold), so the click that folds or opens it is a fresh paint.

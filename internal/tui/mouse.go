@@ -878,7 +878,13 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 		// A framed delegation opens as a run VIEW rather than as a rail in place (ADR 0063): one
 		// redirect, asked before the flip, so the mouse and the block cursor's ⏎ — which arrives
 		// through this same call — cannot come to mean different things by the same gesture.
-		if next, opened := m.openRunAt(target.entry); opened {
+		// Entering a group member's run is the reader acting on that group, so the group is
+		// marked touched before the view opens (transcript.markBlockTouched; a lone delegation
+		// heads no foldable block and marks nothing): a settled group the reader went into never
+		// auto-collapses behind them.
+		if _, openable := m.runOpenableAt(target.entry); openable {
+			m.transcript.markBlockTouched(target.entry)
+			next, _ := m.openRunAt(target.entry)
 			return next, nil
 		}
 		// A task-list card's fold is the one every such card shares, and flipping it is also a
@@ -922,8 +928,8 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 		// the reopen. Either of the last two marks the umbrella touched, so it never auto-collapses
 		// under the reader afterwards. A folded LONE call wears this header too and is only ever
 		// auto-collapsed, so its click is the first arm's: it opens to its standalone block, touched.
-		// A Sub-agent or Skill group's header is this target too, and its fold is always its head
-		// flag's, live or settled: the foldByHead arm.
+		// A Sub-agent or Skill group's header is this target too: auto-collapsed it takes the first
+		// arm, and otherwise its fold is its head flag's, live or settled — the foldByHead arm.
 		switch m.transcript.blockFoldBy(target.entry) {
 		case foldBySettled:
 			m.transcript.openBlockAlone(target.entry)

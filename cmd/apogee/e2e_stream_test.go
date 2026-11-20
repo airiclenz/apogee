@@ -326,7 +326,9 @@ func TestE2EDelegationsStreamIntoTheirOwnBlocks(t *testing.T) {
 		}
 	}
 
-	// And the frame shows what the record describes: two delegations, each under its own name.
+	// And the frame shows what the record describes: two delegations, each under its own name —
+	// read off the settled group's rows once it is opened, as the default auto-collapse folds it.
+	openSubAgentsGroup(t, drv, 2)
 	final := drv.Frame().String()
 	for _, name := range []string{"alpha", "beta"} {
 		if !strings.Contains(final, name) {

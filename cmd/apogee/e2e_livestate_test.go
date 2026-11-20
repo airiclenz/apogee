@@ -402,13 +402,15 @@ func TestE2ELiveStateLauncherMoveKeepsTheSessionWorking(t *testing.T) {
 	drv.WaitFor(func() bool { return childRequests(second, fanoutTask) >= 3 },
 		tuitest.Awaiting("all three delegates to run against the new server"))
 	// The request log leads the screen: a child's request is made before the block reporting it is
-	// committed, so the LAST delegate's block is waited for rather than read off the frame the
-	// request count just unblocked.
-	drv.WaitText("gamma")
-	drv.WaitQuiet(settled)
-	fanned := drv.Frame()
+	// committed, so the parent's wrap-up is waited for rather than the frame the request count just
+	// unblocked read — and the wrap-up settles the group, which the default auto-collapse folds to
+	// its header, so it is opened onto the delegates' own rows — and read page by page, since the
+	// opened list holds the view on its header.
+	drv.WaitText(fanOutWidthWrapUp)
+	openSubAgentsGroup(t, drv, 3)
+	fanned := scrollTranscript(drv)
 	for _, name := range []string{"alpha", "beta", "gamma"} {
-		if _, _, ok := fanned.Find(name); !ok {
+		if !strings.Contains(fanned, name) {
 			t.Errorf("the fan-out has no block for the delegate %q:\n%s", name, fanned)
 		}
 	}

@@ -379,8 +379,10 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		}
 
 		// The conversation: a second run row, wearing the inherited name rather than the continue
-		// call's task, and finished — not stopped short.
-		drv.WaitQuiet(settled)
+		// call's task, and finished — not stopped short. The two runs come from successive replies
+		// and group as one list, which the default auto-collapse folds once the wrap-up settles it,
+		// so the group is opened onto its rows first.
+		openSubAgentsGroup(t, drv, 2)
 		collapsed := drv.Frame()
 		if got := rowsContaining(collapsed, "survey to continue ✓"); got != 2 {
 			t.Fatalf("the conversation carries %d run rows named survey, want the capped run's and the continued run's:\n%s", got, collapsed)

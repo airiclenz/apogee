@@ -136,7 +136,9 @@ func TestE2EQueuedMessagePreemptsTheScheduledSubAgents(t *testing.T) {
 		}
 	}
 
-	// The screen: the skipped row says the verdict, not `queued`, and the group is collapsed.
+	// The screen: the skipped row says the verdict, not `queued`, and the row is collapsed — read
+	// once the settled group the default auto-collapse folded to its header is opened.
+	openSubAgentsGroup(t, drv, 2)
 	frame := drv.Frame()
 	row := rowContaining(t, frame, "beta")
 	if !strings.Contains(row, preemptErrorWord) {
@@ -191,6 +193,7 @@ func TestE2EQueuedMessageWaitsForTheWholeWave(t *testing.T) {
 		t.Errorf("no request carries the second delegation's task; the ⏎ message skipped it:\n%s", preemptRequestLog(stub))
 	}
 
+	openSubAgentsGroup(t, drv, 2)
 	frame := drv.Frame()
 	if row := rowContaining(t, frame, "beta"); strings.Contains(row, preemptErrorWord) {
 		t.Errorf("the second delegation's row reads %q after a ⏎ message; want it run: %q", preemptErrorWord, row)
