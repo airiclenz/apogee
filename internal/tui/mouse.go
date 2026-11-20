@@ -922,6 +922,8 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 		// the reopen. Either of the last two marks the umbrella touched, so it never auto-collapses
 		// under the reader afterwards. A folded LONE call wears this header too and is only ever
 		// auto-collapsed, so its click is the first arm's: it opens to its standalone block, touched.
+		// A Sub-agent or Skill group's header is this target too, and its fold is always its head
+		// flag's, live or settled: the foldByHead arm.
 		switch m.transcript.blockFoldBy(target.entry) {
 		case foldBySettled:
 			m.transcript.openBlockAlone(target.entry)

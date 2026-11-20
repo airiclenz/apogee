@@ -508,8 +508,10 @@ func blockKey(shape blockShape, ins []paintInput, th theme, width int, blink, li
 // The painter draws folded alone — every umbrella's header wears the fold's ▶/▼ and is a fold
 // target whatever its size (renderSuperGroup) — while large names which fold that is, so the key
 // still turns over when a threshold or preference edit carries the umbrella across the line.
-// Every other shape carries the zero value. It is one value rather than two bools because the two
-// travel together from the shape decision to the key and the painter ([resolvedBlock.fold]).
+// A Sub-agent or Skill group's first block carries its header fold in folded (render.go's
+// resolveGroup), never large. Every other shape carries the zero value. It is one value rather
+// than two bools because the two travel together from the shape decision to the key and the
+// painter ([resolvedBlock.fold]).
 type umbrellaFold struct {
 	large  bool
 	folded bool

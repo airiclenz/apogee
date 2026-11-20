@@ -567,12 +567,21 @@ const subAgentGroupLabel = "Sub-agents"
 // What a row SAYS is not the group's business at all: each member is read exactly as the lone block
 // it folded from (collapsedSubAgentView), so folding changes the frame around a delegation and
 // never the record of it.
-func renderSubAgentGroup(th theme, count int, members []subAgentMember, width int, state blockState) blockPaint {
+//
+// The header is a FOLD, a small umbrella's (renderSuperGroup): a leader row of its own
+// ([groupHeader]) wearing ▼ while the rows show and ▶ while the group stands folded, marked
+// targetUmbrella open or shut, live or done, so a click or ⏎ there always has a fold to answer with
+// (Model.toggleBlockAt). FOLDED, the group paints that header line alone, its star live while a
+// member still works; every member's own state beneath the fold is untouched for the reopen.
+func renderSubAgentGroup(th theme, count int, members []subAgentMember, width int, state blockState,
+	folded bool) blockPaint {
 	var out blockPaint
 	if count > 0 {
-		label := th.toolLabel.Render(groupLabelOf(members)) + " " +
-			th.toolIndicator.Render(fmt.Sprintf(groupCountFormat, count))
-		out.add(hangingWrap(th, th.toolHeader, paintStar(th, state.star(th))+" ", label, width), targetNone)
+		out.add([]string{groupHeader(th, groupLabelOf(members), count, state, width, !folded)},
+			targetUmbrella)
+	}
+	if folded {
+		return out
 	}
 	room := toolRowCells(th, width)
 	for _, m := range members {
@@ -731,6 +740,31 @@ func scheduledSubAgentView(head paintInput) toolView {
 	view.Summary = branchSummary{detailLine: detailLine{Text: scheduledSummary}}
 	view.Details = toolBody{} // the zero body: nothing to lay out, and so nothing to expand for
 	return view
+}
+
+// groupHeader is a Sub-agent or Skill group's header line: ONE leader row (leaderRowIn) led by the
+// block's star, the group's label and its "(N)" where a call would put its target, no outcome slot,
+// and its dots running to the fold's ▶/▼ at the block's edge (indicatorRow) — the umbrella header's
+// shape (umbrellaHeader), so the two folds read alike. open reaches the glyph alone: the row is laid
+// out the same open or folded, so the click that folds it does not move it.
+func groupHeader(th theme, label string, count int, state blockState, width int, open bool) string {
+	text := label + " " + fmt.Sprintf(groupCountFormat, count)
+	row := leaderRowIn(th, text, groupHeaderPaint(th, label), branchSummary{}, state.star(th)+" ",
+		paintHeaderMarker, toolRowCells(th, width), open, noRemainder)
+	return indicatorRow(th, row, width, stateIndicator(th, open))
+}
+
+// groupHeaderPaint dresses whatever of a group header's text survived the row's clip: the label in
+// the label tone and the "(N)" behind it in the indicator tone. A clip that reached into the label
+// leaves the label alone, painted as far as it survived.
+func groupHeaderPaint(th theme, label string) func(string) string {
+	return func(clipped string) string {
+		count, ok := strings.CutPrefix(clipped, label+" ")
+		if !ok {
+			return th.toolLabel.Render(clipped)
+		}
+		return th.toolLabel.Render(label) + " " + th.toolIndicator.Render(count)
+	}
 }
 
 // groupLabelOf is the label a folded group names itself with. A group of delegations wears the

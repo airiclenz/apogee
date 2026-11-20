@@ -1376,6 +1376,10 @@ func (m Model) followPanelTarget(target panelTarget) (tea.Model, tea.Cmd) {
 	case panelTargetFold:
 		return m.toggleSidePanelFold(target.section, target.isOpen), nil
 	case panelTargetRun:
+		// A member of a folded Sub-agents group paints no row: the group opens first, on its own
+		// fold (transcript.revealBlockMember), so the run the reader leaves to come back to is
+		// on screen.
+		m.transcript.revealBlockMember(target.entry)
 		next, _ := m.openRunAt(target.entry)
 		return next, nil
 	case panelTargetBlock:

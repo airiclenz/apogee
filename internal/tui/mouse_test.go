@@ -4349,11 +4349,127 @@ func modelWithSubAgentGroup(t *testing.T) Model {
 	return m
 }
 
+// modelWithTwoGroups builds a ready idle model whose scrollback holds a fan-out of two delegations
+// (heads 1 and 3, each with a nested read behind it), a note, and two adjacent skill fetches (heads
+// 6 and 7) — a Sub-agents group and a Skill group, each with a header fold of its own.
+func modelWithTwoGroups(t *testing.T, opts Options) Model {
+	t.Helper()
+	m := newTestModelEng(t, &fakeEngine{}, opts)
+	m.transcript.reset()
+	m.transcript.addUser("survey and tidy", nil)
+	for _, d := range [][3]string{{"s1", "survey", "a.go"}, {"s2", "build", "b.go"}} {
+		subAgentCall(&m.transcript, d[0], d[1], 0)
+		readCall(&m.transcript, "r"+d[0], d[2], 1, 5, 1)
+		subAgentReport(&m.transcript, d[0], "all clear", 0)
+	}
+	m.transcript.addNote("saved")
+	skillFetch(&m.transcript, "k1", "format Go", "<skill: Coding Standards>\nUse gofmt.\n</skill>\n")
+	skillFetch(&m.transcript, "k2", "cut a release", "<skill: Brew Release>\nTag it.\n</skill>\n")
+	m.refreshViewport()
+	return m
+}
+
+// TestGroupHeaderFoldsItsGroupAlone pins the group header's fold as a reader reaches it: a click or
+// ⏎ on one group's header folds that group alone on its head's session-only flag and writes nothing
+// to the settings seam; the block cursor stands on the header as a stop of its own while a member
+// row still answers ^x's run question; and a side-panel jump to a member of a folded group opens the
+// group before it opens the member's run.
+func TestGroupHeaderFoldsItsGroupAlone(t *testing.T) {
+	t.Parallel()
+	const subAgentHead, middleAgent, skillHead = 1, 3, 6
+
+	setup := func(t *testing.T) (Model, *settingsWriteLog) {
+		t.Helper()
+		log := &settingsWriteLog{}
+		opts := testOpts
+		opts.Settings = fakeSettingsHost{write: log.write}
+		return modelWithTwoGroups(t, opts), log
+	}
+	headerLine := func(t *testing.T, m Model, head int) int {
+		t.Helper()
+		line := slices.IndexFunc(m.lineTargets, func(target lineTarget) bool {
+			return target.kind == targetUmbrella && target.entry == head
+		})
+		if line < 0 {
+			t.Fatalf("no header is marked for the group headed by %d:\n%s", head, strings.Join(m.lines, "\n"))
+		}
+		return line
+	}
+
+	t.Run("a click folds the group under it alone and writes nothing", func(t *testing.T) {
+		t.Parallel()
+		m, log := setup(t)
+		toolsOpen := m.opts.UI.ToolsOpen
+
+		m = clickCell(t, m, 4, screenRow(t, m, headerLine(t, m, skillHead)))
+
+		if !m.transcript.blockFolded(skillHead) || m.transcript.blockFolded(subAgentHead) {
+			t.Errorf("folded: skill=%v sub-agents=%v; want the clicked Skill group alone",
+				m.transcript.blockFolded(skillHead), m.transcript.blockFolded(subAgentHead))
+		}
+		if len(log.writes) != 0 || len(m.settingEdits) != 0 || m.opts.UI.ToolsOpen != toolsOpen {
+			t.Errorf("writes = %+v, edits = %+v; want nothing written or journaled for a group's fold",
+				log.writes, m.settingEdits)
+		}
+
+		m = clickCell(t, m, 4, screenRow(t, m, headerLine(t, m, skillHead)))
+
+		if m.transcript.blockFolded(skillHead) {
+			t.Error("a second click on the folded Skill header did not open it again")
+		}
+	})
+
+	t.Run("⏎ on a header folds that group alone", func(t *testing.T) {
+		t.Parallel()
+		m, log := setup(t)
+
+		m = step(t, cursorOnTarget(t, m, targetUmbrella, subAgentHead), keyEnter())
+
+		if !m.transcript.blockFolded(subAgentHead) || m.transcript.blockFolded(skillHead) {
+			t.Errorf("folded: sub-agents=%v skill=%v; want the Sub-agents group alone",
+				m.transcript.blockFolded(subAgentHead), m.transcript.blockFolded(skillHead))
+		}
+		if len(log.writes) != 0 {
+			t.Errorf("writes = %+v; a group's fold is never persisted", log.writes)
+		}
+	})
+
+	t.Run("a member row still answers the run question, the header does not", func(t *testing.T) {
+		t.Parallel()
+		m, _ := setup(t)
+
+		onMember := cursorOnTarget(t, m, targetHeader, middleAgent)
+		if head, ok := onMember.cursorRunHead(); !ok || head.callID != "s2" {
+			t.Errorf("cursorRunHead on the middle member = %q, %v; want its delegation s2", head.callID, ok)
+		}
+		if _, ok := cursorOnTarget(t, m, targetUmbrella, subAgentHead).cursorRunHead(); ok {
+			t.Error("cursorRunHead on the group header named a run; the header is the group's fold")
+		}
+	})
+
+	t.Run("a panel jump to a member of a folded group opens the group first", func(t *testing.T) {
+		t.Parallel()
+		m, _ := setup(t)
+		m.transcript.setBlockFolded(subAgentHead, true)
+		m.refreshViewport()
+
+		next, _ := m.followPanelTarget(panelTarget{kind: panelTargetRun, entry: middleAgent})
+
+		m = next.(Model)
+		if m.transcript.blockFolded(subAgentHead) {
+			t.Error("the jump left the group folded over the member it opened")
+		}
+		if !m.inRunView() {
+			t.Error("the jump did not open the member's run view")
+		}
+	})
+}
+
 // TestSubAgentGroupMemberClickOpensItsSpan is the folded list's interaction: a member row is its own
 // click surface, so a click opens THAT delegation's span — as its run view, which is the one shape a
 // framed delegation opens into (ADR 0063) — and its siblings come nowhere near it. The breadcrumb
-// brings the list back. The group header itself toggles nothing — a collapsed list has no state of
-// its own to flip.
+// brings the list back. The group header is the group's own fold: it folds the list to its header
+// line and opens it again exactly as it stood.
 func TestSubAgentGroupMemberClickOpensItsSpan(t *testing.T) {
 	t.Parallel()
 	// The prompt is entries[0], so the three delegations head at 1, 3 and 5.
@@ -4412,19 +4528,31 @@ func TestSubAgentGroupMemberClickOpensItsSpan(t *testing.T) {
 		}
 	})
 
-	t.Run("the group header toggles nothing", func(t *testing.T) {
+	t.Run("the group header folds the list and opens it again", func(t *testing.T) {
 		t.Parallel()
 		m := modelWithSubAgentGroup(t)
 		line := memberRows(t, m, first)[0] - 1 // the header sits directly above the first row
 		if got := strip(m.lines[line]); !strings.Contains(got, "Sub-agents (3)") {
 			t.Fatalf("setup: the line above the first member is %q, not the group header", got)
 		}
-		if kind := m.lineTargets[line].kind; kind != targetNone {
-			t.Errorf("the group header is marked %v, want no target at all", kind)
+		if target := m.lineTargets[line]; target.kind != targetUmbrella || target.entry != first {
+			t.Errorf("the group header is marked %+v, want the group's fold on its head %d", target, first)
 		}
 		before := strings.Join(m.lines, "\n")
-		if got := strings.Join(clickLine(t, m, line).lines, "\n"); got != before {
-			t.Errorf("a click on the group header repainted it:\n%s", got)
+
+		folded := clickLine(t, m, line)
+
+		want := umbrellaHeaderRow("Sub-agents (3)", defaultGlyphs.collapsed)
+		if got := strings.TrimRight(collapseLeader(strip(folded.lines[line])), " "); got != want {
+			t.Errorf("the folded header reads %q, want %q", got, want)
+		}
+		for _, target := range folded.lineTargets {
+			if target.kind == targetHeader {
+				t.Errorf("the folded group still paints a member row %+v:\n%s", target, strings.Join(folded.lines, "\n"))
+			}
+		}
+		if got := strings.Join(clickLine(t, folded, line).lines, "\n"); got != before {
+			t.Errorf("the reopened group does not paint the list it folded:\n%s", got)
 		}
 	})
 }

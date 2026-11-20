@@ -837,7 +837,7 @@ func TestSkillGroupSitsBetweenTwoToolUmbrellas(t *testing.T) {
 		umbrellaHeaderRow("Read 2 files", glyphExpanded),
 		groupMemberLine("  ┕ Read (2) ⋯ 10 lines"),
 		"",
-		"✦ Skill (2)",
+		groupHeaderLine("Skill", 2),
 		groupMemberLine("  ┝ Coding Standards ⋯"),
 		groupMemberLine("  ┕ Brew Release ⋯"),
 		"",

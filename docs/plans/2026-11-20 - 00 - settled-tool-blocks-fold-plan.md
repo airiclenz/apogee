@@ -102,7 +102,15 @@ internal/tui/toolbranch.go — groupable; cmd/apogee/e2e_hostile_test.go — Tes
 - `GOMEMLIMIT=2GiB go test -race -count=1 ./cmd/apogee/`
 **Commit:** `feat(tui): fold a settled, untouched lone tool call to its Group summary`
 
-## 4. Give Sub-agent and Skill group headers a fold of their own
+## 4. Give Sub-agent and Skill group headers a fold of their own — ✅ DONE (2026-11-20)
+
+NOTES (2026-11-20): foldableHead now returns the block's shape as a third value (end, shape, ok) — the plan's "foldableHead returns the shape"; the settled arm of blockFoldBy is gated by autoCollapses(shape) (umbrella and lone call only), so no group auto-collapses yet.
+NOTES (2026-11-20): consequential edit — internal/tui/autocollapse_test.go: made necessary by foldableHead's new three-value signature (settledAt helper's one call site).
+NOTES (2026-11-20): consequential edit — internal/tui/blocktarget.go: made necessary by group headers now being marked targetUmbrella (targetKind doc comment).
+NOTES (2026-11-20): consequential edit — internal/tui/paintcache.go: made necessary by resolveGroup now carrying its header fold in umbrellaFold (doc comment said every non-umbrella shape carries the zero value).
+NOTES (2026-11-20): blockcursor.go needed no edit — the header became a cursor stop by being marked (cursorStops compares lineTarget whole, so {targetUmbrella, head} and the first member's {targetHeader, head} are separate stops), and cursorRunHead reads targetHeader only, so member rows answer ^x unchanged; both pinned in TestGroupHeaderFoldsItsGroupAlone.
+NOTES (2026-11-20): foldHeadOf now maps any Sub-agent/Skill group member to its group head (new toolGroupAt), so a member-row click and revealBlockMember also mark the group touched; harmless here (touch only gates the settled arm, which groups do not take yet) and the shape item 5 builds on.
+NOTES (2026-11-20): the group header is now a leader row (umbrella header shape: `✦ Sub-agents (2) ⋯ ▼`), replacing the hangingWrap header; test goldens use a new groupHeaderLine helper in subagentblock_test.go. Also ran the cmd/apogee sub-agent/skill e2e set (fan-out, delegation, naming, parallel, preempt, sub-agent view, tools-fold-subagent, fallback TUI): all pass.
 
 Depends on item 2.
 **What:**

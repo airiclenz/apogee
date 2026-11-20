@@ -2044,7 +2044,7 @@ func TestSubAgentStreamBelongsToTheChildThatIsTalking(t *testing.T) {
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "child words"})
 
 	want := strings.Join([]string{
-		"✦ Sub-agents (2)",
+		groupHeaderLine("Sub-agents", 2),
 		groupMemberLine("  ┝ survey the tests ⋯"),
 		groupMemberLine("  ┕ survey the docs ⋯"),
 	}, "\n")

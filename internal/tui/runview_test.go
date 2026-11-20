@@ -176,7 +176,13 @@ func TestRunViewOpensOnExpand(t *testing.T) {
 		if m.inRunView() {
 			t.Error("a click on the umbrella opened a run view; the umbrella lists members, it is not one")
 		}
-		memberRows(t, m, 3) // the list is still there to click a member of
+		// The header's own click is the group's fold: it folds the list to its header line, and a
+		// second click brings the list back to click a member of.
+		if !m.transcript.blockFolded(1) {
+			t.Error("a click on the umbrella did not fold the group to its header")
+		}
+		m = clickCell(t, m, 4, screenRow(t, m, header))
+		memberRows(t, m, 3)
 	})
 }
 

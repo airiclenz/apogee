@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -49,6 +50,13 @@ func TestSubAgentReflowAtSmallWidths(t *testing.T) {
 	}
 }
 
+// groupHeaderLine is a Sub-agent or Skill group's header as a collapsed-leader golden reads it
+// while the group stands open: the star, the label and its count, the leader's one dot, and the
+// fold's ▼ at the block's edge (groupHeader) — the umbrella header's shape (umbrellaHeaderRow).
+func groupHeaderLine(label string, count int) string {
+	return umbrellaHeaderRow(fmt.Sprintf("%s (%d)", label, count), glyphExpanded)
+}
+
 // A fan-out reads as ONE list: adjacent delegations fold under "✦ Sub-agents (3)", one row per agent
 // in the shape every folded member takes (docs/layout/tool-layout.md, Rules). What a row SAYS is
 // the lone block's own collapsed reading (collapsedSubAgentView) — the work behind it and the gist
@@ -79,7 +87,7 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 		}
 		return tr
 	}
-	header := "✦ Sub-agents (3)"
+	header := groupHeaderLine("Sub-agents", 3)
 	rows := []string{
 		groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · all clear"),
 		groupMemberLine("  ┝ build ✓ ⋯ 1 tool call · all clear"),
@@ -130,7 +138,7 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 			CallID: "s2", Content: "it fell over", IsError: true}})
 
 		want := strings.Join([]string{
-			"✦ Sub-agents (2)",
+			groupHeaderLine("Sub-agents", 2),
 			groupMemberLine("  ┝ working ⋯ 1 tool call"),
 			groupMemberLine("  ┕ broken ⋯ 1 tool call · error"),
 		}, "\n")
@@ -163,7 +171,7 @@ func TestRenderSkillGroupSketchStates(t *testing.T) {
 		t.Parallel()
 
 		want := strings.Join([]string{
-			"✦ Skill (2)",
+			groupHeaderLine("Skill", 2),
 			groupMemberLine("  ┝ Coding Standards ⋯"),
 			groupMemberLine("  ┕ Brew Release ⋯"),
 		}, "\n")
@@ -176,7 +184,7 @@ func TestRenderSkillGroupSketchStates(t *testing.T) {
 		t.Parallel()
 
 		want := strings.Join([]string{
-			"✦ Skill (3)",
+			groupHeaderLine("Skill", 3),
 			groupMemberLine("  ┝ Coding Standards ⋯"),
 			groupMemberLine("  ┝ Brew Release ⋯"),
 			groupMemberLine("  ┕ Grill Me ⋯"),
@@ -200,7 +208,7 @@ func TestRenderSkillGroupSketchStates(t *testing.T) {
 			t.Fatal("setExpanded(0, true) = false; a skill member expands in place")
 		}
 		got := renderPlain(tr, 80)
-		for _, line := range []string{"✦ Skill (2)", "│ Use gofmt.", groupMemberLine("  ┕ Brew Release ⋯")} {
+		for _, line := range []string{groupHeaderLine("Skill", 2), "│ Use gofmt.", groupMemberLine("  ┕ Brew Release ⋯")} {
 			if !strings.Contains(got, line) {
 				t.Errorf("the open group is missing %q:\n%s", line, got)
 			}
@@ -252,7 +260,7 @@ func TestSubAgentMemberDoneOnItsOwnFinishedPhase(t *testing.T) {
 		return tr
 	}
 	collapsed := strings.Join([]string{
-		"✦ Sub-agents (2)",
+		groupHeaderLine("Sub-agents", 2),
 		groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · done"),
 		groupMemberLine("  ┕ build ⋯ 1 tool call"), // still working: no ✓, and no gist of its own
 	}, "\n")
@@ -305,7 +313,7 @@ func TestSubAgentGroupRunningRowsWearTheCap(t *testing.T) {
 	subAgentCall(tr, "s4", "check", 0)
 
 	want := strings.Join([]string{
-		"✦ Sub-agents (4)",
+		groupHeaderLine("Sub-agents", 4),
 		groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · done surveying"),
 		groupMemberLine("  ┝ build ⋯ 1 tool call · 80 steps (120 asked)"),
 		groupMemberLine("  ┝ lint ⋯"),
@@ -338,7 +346,7 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 		subAgentCall(tr, "s3", "check", 0)
 		return tr
 	}
-	header := "✦ Sub-agents (3)"
+	header := groupHeaderLine("Sub-agents", 3)
 	running := []string{
 		groupMemberLine("  ┝ survey ⋯ 1 tool call"),
 		groupMemberLine("  ┝ build ⋯ 1 tool call"),
@@ -589,8 +597,8 @@ func TestFramedSubAgentRowKeepsItsTopLevelDetails(t *testing.T) {
 		subAgentReport(tr, "s2", "all clear", 0)
 		return tr
 	}
+	header := groupHeaderLine("Sub-agents", 2)
 	const (
-		header  = "✦ Sub-agents (2)"
 		working = "survey ⋯ 1 tool call · 12k/32k"    // count and fill, and no action phrase
 		done    = "build ✓ ⋯ 1 tool call · all clear" // the same line, closed by the report's gist
 	)
@@ -652,7 +660,7 @@ func TestSpanlessSubAgentHeadsGroupWithEachOther(t *testing.T) {
 		// full width before the target was given any budget, so design call 4's order played out
 		// to its end and both rows went out with no target at all, showing which delegation was
 		// refused nowhere on screen.
-		"✦ Sub-agents (2)",
+		groupHeaderLine("Sub-agents", 2),
 		groupMemberLine("  ┝ first ⋯ error"),
 		groupMemberLine("  ┕ second ⋯ error"),
 	}, "\n")
@@ -1020,7 +1028,7 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 
 		sibling := leaderEdgeRow("  ┕ build it ✓ ⋯ "+refusedResult, defaultGlyphs.collapsed)
 		want := strings.Join([]string{
-			"✦ Sub-agents (2)",
+			groupHeaderLine("Sub-agents", 2),
 			leaderEdgeRow("  ┝ survey the tests ✓ ⋯ done", glyphExpanded),
 			"  │ " + prompt[0],
 			"  │ " + prompt[1],
@@ -1202,12 +1210,147 @@ func TestNeverRanDelegationRowIsExpandableAtEveryWidth(t *testing.T) {
 		subAgentReport(tr, "s2", refusal, 0)
 
 		want := strings.Join([]string{
-			"✦ Sub-agents (2)",
+			groupHeaderLine("Sub-agents", 2),
 			leaderEdgeRow("  ┝ "+target+" ✓ ⋯ "+refusal, defaultGlyphs.collapsed),
 			leaderEdgeRow("  ┕ build it ✓ ⋯ "+refusal, defaultGlyphs.collapsed),
 		}, "\n")
 		if got := renderPlain(tr, 110); got != want {
 			t.Errorf("folded grouped refusals mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+}
+
+// TestGroupHeaderFoldsTheGroup pins the Sub-agent and Skill group's own fold, on its head's flag
+// (transcript.setBlockFolded): folded, the group paints its header line alone under ▶ — every
+// member and every span behind it covered by that one block, an open member included, whose state
+// waits beneath the fold — its star blinks while a member still works, and auto-collapse never
+// folds a group: a settled, untouched one stays open.
+func TestGroupHeaderFoldsTheGroup(t *testing.T) {
+	t.Parallel()
+
+	foldedHeader := func(label string, count int) string {
+		return umbrellaHeaderRow(fmt.Sprintf("%s (%d)", label, count), defaultGlyphs.collapsed)
+	}
+
+	t.Run("a folded fan-out paints its header line alone", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		for _, id := range []string{"s1", "s2"} {
+			subAgentCall(tr, id, "survey "+id, 0)
+			readCall(tr, "r"+id, id+".go", 1, 5, 1)
+			subAgentReport(tr, id, "all clear", 0)
+		}
+
+		if !tr.setBlockFolded(0, true) {
+			t.Fatal("setBlockFolded(0, true) = false; want the group's head flag to move")
+		}
+
+		if got, want := renderPlain(tr, 80), foldedHeader("Sub-agents", 2); got != want {
+			t.Errorf("folded fan-out mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+		marks := blockMarks(t, tr, 80)
+		if len(marks) != 1 || marks[0].kind != targetUmbrella || marks[0].entry != 0 {
+			t.Errorf("the folded fan-out marks %+v; want its header alone, the fold on entry 0", marks)
+		}
+	})
+
+	t.Run("a folded skill group covers an open member and every row after it", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		for _, id := range []string{"k1", "k2", "k3"} {
+			skillFetch(tr, id, "ask "+id, "<skill: Skill "+id+">\nUse gofmt.\n</skill>\n")
+		}
+		if !tr.setExpanded(0, true) {
+			t.Fatal("setup: setExpanded(0, true) = false; a skill member expands in place")
+		}
+
+		tr.setBlockFolded(0, true)
+
+		if got, want := renderPlain(tr, 80), foldedHeader("Skill", 3); got != want {
+			t.Errorf("folded skill group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+		if !tr.entries[0].expanded {
+			t.Error("the fold reset the open member; a fold hides state, it does not reset it")
+		}
+		tr.setBlockFolded(0, false)
+		if got := renderPlain(tr, 80); !strings.Contains(got, "Use gofmt.") {
+			t.Errorf("the reopened group does not paint the member it held open:\n%s", got)
+		}
+	})
+
+	t.Run("a live folded header blinks", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		readCall(tr, "r1", "a.go", 1, 5, 1)
+		subAgentCall(tr, "s2", "build it", 0)
+		tr.setBlockFolded(0, true)
+		th := newTheme(scheme.Default())
+
+		for _, tc := range []struct {
+			blink bool
+			want  string
+		}{
+			{blink: false, want: foldedHeader("Sub-agents", 2)},
+			{blink: true, want: blinkedUmbrellaHeaderRow("Sub-agents (2)", defaultGlyphs.collapsed)},
+		} {
+			lines := tr.renderView(th, 80, tc.blink, breadcrumbHint).lines
+			got := strings.TrimRight(collapseLeader(ansiPattern.ReplaceAllString(lines[0], "")), " ")
+			if len(lines) != 1 || got != tc.want {
+				t.Errorf("blink=%v: the folded live group paints %q (%d lines), want %q alone",
+					tc.blink, got, len(lines), tc.want)
+			}
+		}
+	})
+
+	t.Run("auto-collapse never folds a settled, untouched group", func(t *testing.T) {
+		t.Parallel()
+
+		for _, tc := range []struct {
+			name  string
+			build func(tr *transcript)
+			want  string
+		}{
+			{
+				name: "skill group",
+				build: func(tr *transcript) {
+					skillFetch(tr, "k1", "format Go", "<skill: Coding Standards>\nUse gofmt.\n</skill>\n")
+					skillFetch(tr, "k2", "cut a release", "<skill: Brew Release>\nTag it.\n</skill>\n")
+				},
+				want: groupHeaderLine("Skill", 2),
+			},
+			{
+				name: "unspanned sub-agent group",
+				build: func(tr *transcript) {
+					subAgentCall(tr, "s1", "survey", 0)
+					subAgentReport(tr, "s1", "refused at the depth bound", 0)
+					subAgentCall(tr, "s2", "build", 0)
+					subAgentReport(tr, "s2", "refused at the depth bound", 0)
+				},
+				want: groupHeaderLine("Sub-agents", 2),
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				tr := &transcript{}
+				tr.setToolsAutoCollapse(true)
+				tc.build(tr)
+				tr.addNote("saved")
+
+				if !settledAt(tr, 0) {
+					t.Fatal("setup: the group is not settled, so the case proves nothing")
+				}
+				if tr.blockFolded(0) {
+					t.Error("auto-collapse folded a settled, untouched group; a group folds on its header alone")
+				}
+				if got := strings.SplitN(renderPlain(tr, 80), "\n", 2)[0]; got != tc.want {
+					t.Errorf("the group header reads %q, want the open %q", got, tc.want)
+				}
+			})
 		}
 	})
 }
@@ -1243,7 +1386,7 @@ func TestRunningGroupedDelegationOpensItsChild(t *testing.T) {
 		started(tr)
 
 		want := strings.Join([]string{
-			"✦ Sub-agents (2)",
+			groupHeaderLine("Sub-agents", 2),
 			groupMemberLine("  ┝ survey the tests ⋯"),
 			groupMemberLine("  ┕ build it ⋯"),
 		}, "\n")
@@ -1251,14 +1394,17 @@ func TestRunningGroupedDelegationOpensItsChild(t *testing.T) {
 			t.Errorf("running fan-out mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
 
-		// The affordance and the click are the one predicate's single answer, and a list has no
-		// state of its own: the two member rows are marked, each for its OWN member's entry, and
-		// the header over them is marked for nothing.
+		// The affordance and the click are the one predicate's single answer: the two member rows
+		// are marked, each for its OWN member's entry, and the header over them is the group's fold,
+		// marked for the group's head.
 		marks := blockMarks(t, tr, width)
-		if len(marks) != 2 {
-			t.Fatalf("the fan-out marks %+v; want one target per member row", marks)
+		if len(marks) != 3 {
+			t.Fatalf("the fan-out marks %+v; want the header's fold and one target per member row", marks)
 		}
-		for i, mk := range marks {
+		if mk := marks[0]; mk.kind != targetUmbrella || mk.entry != 0 {
+			t.Errorf("header mark %+v; want a targetUmbrella on entry 0", mk)
+		}
+		for i, mk := range marks[1:] {
 			if mk.kind != targetHeader || mk.entry != i {
 				t.Errorf("mark %+v; want a targetHeader on entry %d", mk, i)
 			}
@@ -2264,7 +2410,7 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 		rename(tr, "s1", name)
 
 		want := strings.Join([]string{
-			"✦ Sub-agents (2)",
+			groupHeaderLine("Sub-agents", 2),
 			groupMemberLine("  ┝ " + name + " ⋯ 1 tool call"),
 			groupMemberLine("  ┕ build the docs ⋯ 1 tool call"),
 		}, "\n")
@@ -2537,7 +2683,7 @@ func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
 		return tr
 	}
 	collapsed := strings.Join([]string{
-		"✦ Sub-agents (2)",
+		groupHeaderLine("Sub-agents", 2),
 		groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · all clear"),
 		groupMemberLine("  ┕ check ⋯ not started · your message"),
 	}, "\n")
@@ -2573,7 +2719,7 @@ func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
 			t.Fatalf("setExpanded(2, true) = false; want the skipped member open")
 		}
 		want := strings.Join([]string{
-			"✦ Sub-agents (2)",
+			groupHeaderLine("Sub-agents", 2),
 			groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · all clear"),
 			leaderEdgeRow("  ┕ check ⋯ not started · your message", glyphExpanded),
 			"  │ " + unframedSubAgentPromptLead + "check",

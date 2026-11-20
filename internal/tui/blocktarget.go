@@ -49,7 +49,9 @@ package tui
 // follows the shared `ui.tools-open` preference (Model.toggleToolsFold), a small one — or a touched
 // one with a fold of its own — its own head flag alone (transcript.setBlockFolded), with every
 // child's state left as it stood beneath either fold. A click on any of the three levels marks the
-// umbrella touched (transcript.markBlockTouched), so auto-collapse never folds it again.
+// umbrella touched (transcript.markBlockTouched), so auto-collapse never folds it again. A
+// Sub-agent or Skill group's header (renderSubAgentGroup) is marked targetUmbrella too, for its
+// group's head: it folds on that head flag alone, live or settled.
 //
 // targetStage is one stage row of a workflow block that draws them (renderWorkflowStages): the row a Recipe's
 // stage stands on, one per stage of its Plan. It names the block's entry like every other kind, and

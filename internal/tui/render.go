@@ -1139,10 +1139,18 @@ func previewTail(s string) string {
 // drawn is settled by the members themselves, and [renderSubAgentGroup] reads each row exactly as
 // the lone block it folded from. buf is the walk's record buffer, as [transcript.resolveBlock]
 // states.
+//
+// The group's header is a fold ([transcript.blockFoldBy], on the first member's own flag): FOLDED,
+// the group is ONE block covering every member and its span — no open member ends it, since none
+// paints a row — and paints its header line alone; the fold rides the block into the paint key
+// (resolvedBlock.fold), so the click that folds or opens it is a fresh paint.
 func (t *transcript) resolveGroup(head int, in paintInput, width int, blink bool,
 	root paintRoot, buf []paintInput, grp []groupBlock, pos int, shape blockShape) resolvedBlock {
+	// Only the group's first block carries the header, and so only it can stand folded: a member
+	// further in heads no foldable block (foldableHead), so it answers open.
+	folded := t.blockFolded(head)
 	end := len(grp) - 1
-	for k := pos; k < len(grp); k++ {
+	for k := pos; k < len(grp) && !folded; k++ {
 		if t.entries[grp[k].at].expanded {
 			end = k
 			break
@@ -1169,7 +1177,7 @@ func (t *transcript) resolveGroup(head int, in paintInput, width int, blink bool
 	// The walk resumes ON the member the block stopped at when that member is open — its span
 	// follows as blocks of its own — and past that member's whole span when it is collapsed,
 	// which is what elides it.
-	open := t.entries[grp[end].at].expanded
+	open := !folded && t.entries[grp[end].at].expanded
 	next := grp[end].at + 1
 	if !open {
 		next += grp[end].span
@@ -1178,6 +1186,7 @@ func (t *transcript) resolveGroup(head int, in paintInput, width int, blink bool
 		shape: shape,
 		ins:   ins,
 		live:  live,
+		fold:  umbrellaFold{folded: folded},
 		// The member rows are the painter's input alone, so they are built on the miss that paints
 		// them: a hit reads only the key, which the records already name.
 		draw: func(th theme) blockPaint {
@@ -1192,7 +1201,7 @@ func (t *transcript) resolveGroup(head int, in paintInput, width int, blink bool
 				})
 			}
 			return renderSubAgentGroup(th, count, members, railedWidth(width, depth),
-				blockState{live: live, blink: blink}).railed(th, depth)
+				blockState{live: live, blink: blink}, folded).railed(th, depth)
 		},
 		next: next,
 		// pos > 0 is this block RESUMING a list an open member ended — precisely the spec's

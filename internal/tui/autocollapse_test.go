@@ -25,7 +25,7 @@ func autoCollapseUmbrella(t *testing.T) *transcript {
 // settledAt asks blockSettled of the block entries[head] heads, its end read off the head's shape
 // (foldableHead) as every production caller reads it; an index heading no block answers false.
 func settledAt(tr *transcript, head int) bool {
-	end, ok := foldableHead(tr.entries, head)
+	end, _, ok := foldableHead(tr.entries, head)
 	return ok && tr.blockSettled(head, end)
 }
 

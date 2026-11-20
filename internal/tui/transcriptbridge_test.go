@@ -453,7 +453,7 @@ func TestTranscriptCodecReDerivesSubAgentSolo(t *testing.T) {
 	// (failedSummary), so each row carries the done ✓ — the mark is read off the record's own state
 	// and its own wording, which is exactly what a replay has to reproduce.
 	want := strings.Join([]string{
-		"✦ Sub-agents (2)",
+		groupHeaderLine("Sub-agents", 2),
 		"  ┝ survey the tests ✓ ⋯ refused",
 		"  ┕ survey the docs ✓ ⋯ refused",
 	}, "\n")
