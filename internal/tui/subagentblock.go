@@ -387,12 +387,13 @@ func insideCollapsedRunAtDepth(entries []entry, depth int) bool {
 // replayed record nor a stale flag can re-open a rail in place — and [transcript.setExpanded]
 // refuses to write one in the first place.
 //
-// A LONE run is drawn in the very shape a grouped one is (design call 3 of
+// A delegation never reaches this painter: a lone one is a group of one (ownGroup) and is drawn by
+// [renderSubAgentGroup]. What does is a run head that never groups — a Workflow item's
+// (entryWorkflowItem) — and it is drawn in the very shape a grouped one is (design call 3 of
 // docs/plans/archived/"2026-08-11 - 01"): the same cascading summary of the work behind it
-// (subAgentSummary), and the same ✓ after its name once it has reported (subAgentFinished).
-// Whether the delegations either side of it happened to fold it into a list is a fact about the
-// frame around a delegation and never about the delegation, so the two paths ask the same two
-// questions of the same head rather than each wording an answer of its own.
+// (subAgentSummary), and the same ✓ after its name once it has reported (subAgentFinished), so
+// the two paths ask the same two questions of the same head rather than each wording an answer of
+// its own.
 //
 // The head is ONE summarised line: the report body is elided along with the span, because the
 // summary slot already carries that report's first line and no block says the same thing twice in
@@ -848,8 +849,8 @@ func renderSubAgentMemberRows(th theme, tv toolView, marker string, width, room 
 // act on facts the entry keeps whole, so the report the run view opens on is the one the delegation
 // actually returned.
 //
-// One reading serves the lone block and the folded group's member row alike (renderSubAgentRun,
-// renderSubAgentGroup): grouping changes the frame a delegation is drawn in, and a second wording
+// One reading serves a lone run block (a Workflow item's, renderSubAgentRun) and the folded group's
+// member row (renderSubAgentGroup) alike: grouping changes the frame a delegation is drawn in, and a second wording
 // of "what does a delegation's row say" would part company with this one — taking the per-child
 // live tail a fan-out is observed through (ADR 0039) with it.
 func collapsedSubAgentView(head paintInput, span []paintInput) toolView {

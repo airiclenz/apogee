@@ -1745,9 +1745,9 @@ func TestGroupMemberClickTogglesOnlyThatMember(t *testing.T) {
 // modelWithLiveToolBlock builds a RUNNING model whose transcript holds a sub-agent run still doing
 // its work: the head call has no report yet and a child call is open inside its span, so the block
 // is LIVE and its star alternates with the spinner phase — every tick rewrites the very header line
-// a press rests on. A run is the live block that is also CLICKABLE: it elides its span
-// (blockState.elides), which marks the header a toggle target however short the head's own report
-// is, where a plain call still in flight has no body to hide and so is no target at all.
+// a press rests on. A lone delegation is a group of one, and its group header is the live line that
+// is also CLICKABLE: it folds and opens the group (targetUmbrella), where a plain call still in
+// flight has no body to hide and so is no target at all.
 func modelWithLiveToolBlock(t *testing.T) Model {
 	t.Helper()
 	m := newTestModel(t) // 80x24
@@ -1772,16 +1772,15 @@ func modelWithLiveToolBlock(t *testing.T) Model {
 // its header every half second — and the keep-if-unchanged rule used to zero the press anchor on
 // exactly that line, which is the answer the release needs. Collapsed spans are now exempt
 // (spanUnchanged), so the press outlives the blink and lands on a running tool like any other: the
-// block it lands on here heads a live delegation, so what the release opens is that run's view
-// (ADR 0063).
+// header it lands on here is a live delegation's group of one, so what the release does is fold it.
 func TestTranscriptClickTogglesALiveBlockAcrossTheBlink(t *testing.T) {
 	t.Parallel()
 	m := modelWithLiveToolBlock(t)
-	header := markedLine(t, m, targetHeader)
+	header := markedLine(t, m, targetUmbrella)
 	entry := m.lineTargets[header].entry
 	row := screenRow(t, m, header)
-	if m.transcript.entries[entry].expanded {
-		t.Fatal("setup: the block is expanded before any click; collapsed is the default")
+	if m.transcript.blockFolded(entry) {
+		t.Fatal("setup: the live group is folded before any click; a live group stands open")
 	}
 
 	m = step(t, m, leftClick(2, row))
@@ -1796,8 +1795,8 @@ func TestTranscriptClickTogglesALiveBlockAcrossTheBlink(t *testing.T) {
 	}
 
 	m = step(t, m, leftRelease(2, row))
-	if !m.inRunView() {
-		t.Fatal("a click held across a star blink did not open the live block's run view")
+	if !m.transcript.blockFolded(entry) {
+		t.Fatal("a click held across a star blink did not fold the live group")
 	}
 }
 

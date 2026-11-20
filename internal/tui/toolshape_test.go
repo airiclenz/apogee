@@ -731,11 +731,11 @@ func skillFetch(tr *transcript, id, query, content string) {
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: id, Content: content}})
 }
 
-// A skill fetch paints as a card of its own, headed by the friendly label rather than by the raw
-// tool id it used to show ("✦ load_skill"), with the SKILL that answered on the branch instead of
-// the query that asked for it and the outcome slot deliberately blank — the ratified row for this
-// tool (docs/layout/tool-layout.md). The body is the skill's own text, behind the collapse
-// indicator every block with more to say wears.
+// A lone skill fetch paints as a group of one, "✦ Skill (1)", headed by the friendly label rather
+// than by the raw tool id it used to show ("✦ load_skill"), its member row carrying the SKILL that
+// answered instead of the query that asked for it and the outcome slot deliberately blank — the
+// ratified row for this tool (docs/layout/tool-layout.md). The row is the grouped member's own, so
+// the body — the skill's own text — waits behind the member's collapse indicator.
 func TestRenderSkillFetchCard(t *testing.T) {
 	t.Parallel()
 
@@ -744,8 +744,8 @@ func TestRenderSkillFetchCard(t *testing.T) {
 		"<skill: Coding Standards>\nUse gofmt as the sole formatter.\n</skill>\n")
 
 	want := strings.Join([]string{
-		"✦ Skill",
-		groupMemberLine("  ┕ Coding Standards ⋯ +3 more lines"),
+		groupHeaderLine("Skill", 1),
+		groupMemberLine("  ┕ Coding Standards ⋯"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("skill card mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -769,8 +769,8 @@ func TestRenderSkillFetchMissKeepsTheQuery(t *testing.T) {
 		`no skill matches "how do I fly a kite". Carry on without one, or call load_skill again describing the task differently.`)
 
 	want := strings.Join([]string{
-		"✦ Skill",
-		groupMemberLine("  ┕ how do I fly a kite ⋯ +1 more line"),
+		groupHeaderLine("Skill", 1),
+		groupMemberLine("  ┕ how do I fly a kite ⋯"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("missed skill card mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -805,8 +805,8 @@ func TestSkillFetchesNeverJoinTheToolsSuperGroup(t *testing.T) {
 }
 
 // The umbrella is broken by exactly what breaks a fan-out's: anything that is not a fetch standing
-// at the group's own depth. A narration between two of them leaves two lone cards — the shape a
-// single fetch has always had — rather than one list spanning the sentence.
+// at the group's own depth. A narration between two of them leaves two groups of one — the shape a
+// single fetch has — rather than one list spanning the sentence.
 func TestSkillGroupBreaksAtANarration(t *testing.T) {
 	t.Parallel()
 
@@ -816,13 +816,13 @@ func TestSkillGroupBreaksAtANarration(t *testing.T) {
 	skillFetch(tr, "c2", "cut a release", "<skill: Brew Release>\nTag it.\n</skill>\n")
 
 	want := strings.Join([]string{
-		"✦ Skill",
-		groupMemberLine("  ┕ Coding Standards ⋯ +3 more lines"),
+		groupHeaderLine("Skill", 1),
+		groupMemberLine("  ┕ Coding Standards ⋯"),
 		"",
 		"✦ now the release",
 		"",
-		"✦ Skill",
-		groupMemberLine("  ┕ Brew Release ⋯ +3 more lines"),
+		groupHeaderLine("Skill", 1),
+		groupMemberLine("  ┕ Brew Release ⋯"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("the narration did not break the group:\n--- got ---\n%s\n--- want ---\n%s", got, want)

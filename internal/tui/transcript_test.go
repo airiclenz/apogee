@@ -1466,7 +1466,7 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 	subAgentReport(tr, "s1", "Found 4 gaps\nin the suite\nhere they are", 0)
 
 	collapsed := strings.Join([]string{
-		"✦ Sub-agent",
+		groupHeaderLine("Sub-agents", 1),
 		groupMemberLine("  ┕ survey the tests ✓ ⋯ 2 tool calls · 12k/32k · done"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != collapsed {
@@ -1978,6 +1978,9 @@ func TestSubAgentStreamStaysInsideItsCollapsedRun(t *testing.T) {
 	t.Parallel()
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
+	// The engine starts the child before it streams; without the phase the row would read as queued
+	// (subAgentScheduled).
+	subAgentStarted(tr, "s1", 1)
 
 	streamAt(tr, 1, "child words")
 
@@ -1985,7 +1988,7 @@ func TestSubAgentStreamStaysInsideItsCollapsedRun(t *testing.T) {
 	// beneath it (subAgentHidesPrompt), and the elision rule is about the delegate's WORDS, not
 	// about whether the head can be opened at all.
 	want := strings.Join([]string{
-		"✦ Sub-agent",
+		groupHeaderLine("Sub-agents", 1),
 		leaderEdgeRow("  ┕ survey the tests ⋯", defaultGlyphs.collapsed),
 	}, "\n")
 	got := renderPlain(tr, 80)
@@ -2983,9 +2986,10 @@ func TestTranscriptSuperGroupStateSurvivesAppends(t *testing.T) {
 
 // Adjacent delegations fold into ONE list (subAgentGroup, docs/layout/tool-layout.md Rules), and
 // adjacency here is adjacency of BLOCKS: a delegation's whole span lies between its call and the
-// next call at its own depth, so the walk steps over it. Two are the floor; anything that is not a
-// delegation standing at the group's own depth ends it; and a delegation that left no span at all
-// joins like any other, which is the case the painter's span rule cannot see.
+// next call at its own depth, so the walk steps over it. There is no floor — a lone delegation is a
+// group of one; anything that is not a delegation standing at the group's own depth ends it; and a
+// delegation that left no span at all joins like any other, which is the case the painter's span
+// rule cannot see.
 func TestTranscriptSubAgentGroupFormation(t *testing.T) {
 	t.Parallel()
 
@@ -3010,24 +3014,28 @@ func TestTranscriptSubAgentGroupFormation(t *testing.T) {
 			want: []groupBlock{{at: 0, span: 2}, {at: 3, span: 1}},
 		},
 		{
-			name:    "a lone delegation heads no group",
+			name:    "a lone delegation is a group of one",
 			entries: []entry{subAgentCard("scout", 0), toolCallCard("Read", "a.go", 0)},
 			at:      0,
+			want:    []groupBlock{{at: 0, span: 0}},
 		},
 		{
 			name:    "a note between two delegations breaks the group",
 			entries: []entry{subAgentCard("scout", 0), note, subAgentCard("builder", 0)},
 			at:      0,
+			want:    []groupBlock{{at: 0, span: 0}},
 		},
 		{
 			name:    "a call to another tool breaks the group",
 			entries: []entry{subAgentCard("scout", 0), toolCallCard("Read", "a.go", 0), subAgentCard("builder", 0)},
 			at:      0,
+			want:    []groupBlock{{at: 0, span: 0}},
 		},
 		{
 			name:    "a nested delegation is its parent's span, not its neighbour",
 			entries: []entry{subAgentCard("scout", 0), subAgentCard("deeper", 1)},
 			at:      0,
+			want:    []groupBlock{{at: 0, span: 1}},
 		},
 		{
 			name:    "an ordinary call heads no group",
@@ -3054,7 +3062,7 @@ func TestTranscriptSubAgentGroupFormation(t *testing.T) {
 // subAgentGroupAt answers about the group an entry BELONGS to, at every member of it and not only
 // at the first — the question the painter asks at each block head, which is what keeps a group from
 // growing a second "✦ Sub-agents (N)" header at every row. Everything in no group at all — a nested
-// entry, an ordinary call, a lone delegation — answers false.
+// entry, an ordinary call — answers false.
 func TestTranscriptSubAgentGroupAtEveryMember(t *testing.T) {
 	t.Parallel()
 
@@ -3109,7 +3117,7 @@ func TestTranscriptSubAgentGroupNeverJoinsAnUmbrella(t *testing.T) {
 }
 
 // The group rule is keyed on a NAME, not on delegations: adjacent skill fetches fold under one
-// umbrella by the very walk a fan-out folds by (ownGroup), with the same floor of two and the same
+// umbrella by the very walk a fan-out folds by (ownGroup), with the same group of one and the same
 // breakers. A fetch heads no run, so every member's span is 0 and the walk steps by one — the case
 // the shared step has to survive.
 func TestTranscriptSkillGroupFormation(t *testing.T) {
@@ -3129,23 +3137,32 @@ func TestTranscriptSkillGroupFormation(t *testing.T) {
 			want:    []groupBlock{{at: 0, span: 0}, {at: 1, span: 0}},
 		},
 		{
-			name:    "a lone fetch heads no group",
+			name:    "a lone fetch is a group of one",
 			entries: []entry{skillCard("format Go", 0), toolCallCard("Read", "a.go", 0)},
 			at:      0,
+			want:    []groupBlock{{at: 0, span: 0}},
 		},
 		{
 			name:    "a narration between two fetches breaks the group",
 			entries: []entry{skillCard("format Go", 0), note, skillCard("cut a release", 0)},
 			at:      0,
+			want:    []groupBlock{{at: 0, span: 0}},
 		},
 		{
 			name:    "a call to another tool breaks the group",
 			entries: []entry{skillCard("format Go", 0), toolCallCard("Read", "a.go", 0), skillCard("cut", 0)},
 			at:      0,
+			want:    []groupBlock{{at: 0, span: 0}},
 		},
 		{
 			name:    "a fetch at another depth is no neighbour",
 			entries: []entry{skillCard("format Go", 0), skillCard("cut a release", 1)},
+			at:      0,
+			want:    []groupBlock{{at: 0, span: 0}},
+		},
+		{
+			name:    "a non-fetch heads no group",
+			entries: []entry{toolCallCard("Read", "a.go", 0), skillCard("format Go", 0)},
 			at:      0,
 		},
 	}
@@ -3181,11 +3198,11 @@ func TestTranscriptGroupsAreKeyedOnTheirOwnTool(t *testing.T) {
 	}
 
 	split := []entry{subAgentCard("scout", 0), skillCard("format Go", 0), subAgentCard("builder", 0)}
-	if got := subAgentGroup(split, 0); got != nil {
-		t.Errorf("subAgentGroup(split, 0) = %v; a fetch between two delegations ends their list", got)
+	if got, want := subAgentGroup(split, 0), []groupBlock{{at: 0, span: 0}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("subAgentGroup(split, 0) = %v, want %v; a fetch between two delegations ends their list", got, want)
 	}
-	if _, _, ok := ownGroupAt(split, 1, loadSkillToolName); ok {
-		t.Error("the lone fetch between two delegations reports a group of its own")
+	if group, _, ok := ownGroupAt(split, 1, loadSkillToolName); !ok || len(group) != 1 {
+		t.Errorf("the lone fetch between two delegations = %v (ok %v); want a group of one", group, ok)
 	}
 }
 
@@ -3651,7 +3668,7 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 		// RUNNING delegation from here — the run has a span now, which is the same reading it takes
 		// on its delegate's first committed entry (subAgentScheduled).
 		want := strings.Join([]string{
-			"✦ Sub-agent",
+			groupHeaderLine("Sub-agents", 1),
 			leaderEdgeRow("  ┕ survey the tests ⋯ 0 tool calls", defaultGlyphs.collapsed),
 		}, "\n")
 		if got := renderPlain(tr, 80); got != want {

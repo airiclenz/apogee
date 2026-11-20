@@ -272,7 +272,7 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 			},
 			want: []blockMark{
-				{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-agent"},
+				{line: 0, kind: targetUmbrella, entry: 0, text: groupHeaderLine("Sub-agents", 1)},
 				{line: 1, kind: targetHeader, entry: 0, text: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call")},
 			},
 		},
@@ -292,7 +292,7 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 				}
 			},
 			want: []blockMark{
-				{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-agent"},
+				{line: 0, kind: targetUmbrella, entry: 0, text: groupHeaderLine("Sub-agents", 1)},
 				{line: 1, kind: targetHeader, entry: 0,
 					text: groupMemberLine("  ┕ survey the tests ✓ ⋯ 1 tool call · survey complete")},
 			},
@@ -373,7 +373,7 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 				subAgentReport(tr, "s1", "survey complete", 0)
 				return tr
 			},
-			wantHeader:    "✦ Sub-agent",
+			wantHeader:    groupHeaderLine("Sub-agents", 1),
 			wantCollapsed: defaultGlyphs.collapsed, wantExpanded: defaultGlyphs.collapsed,
 			refusesToggle: true,
 		},
@@ -764,7 +764,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				subAgentCall(tr, "s1", "survey the tests", 0)
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 			},
-			settled: "✦ Sub-agent", flipped: "  Sub-agent",
+			settled: groupHeaderLine("Sub-agents", 1), flipped: blinkedUmbrellaHeaderRow("Sub-agents (1)", glyphExpanded),
 		},
 		{
 			// The mirror case, and the reason the rule asks the span as well as the head: the report
@@ -776,7 +776,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				openRead(tr, "c1", "a.go", 1)
 				subAgentReport(tr, "s1", "survey complete", 0)
 			},
-			settled: "✦ Sub-agent", flipped: "  Sub-agent",
+			settled: groupHeaderLine("Sub-agents", 1), flipped: blinkedUmbrellaHeaderRow("Sub-agents (1)", glyphExpanded),
 		},
 		{
 			name: "a finished run settles",
@@ -785,7 +785,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 				subAgentReport(tr, "s1", "survey complete", 0)
 			},
-			settled: "✦ Sub-agent", flipped: "✦ Sub-agent",
+			settled: groupHeaderLine("Sub-agents", 1), flipped: groupHeaderLine("Sub-agents", 1),
 		},
 		{
 			// The umbrella's star answers for every call under it, the group's rule one level up: the

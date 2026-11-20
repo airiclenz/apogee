@@ -501,7 +501,7 @@ func TestLoneSubAgentRunWearsTheGroupMembersRow(t *testing.T) {
 		loneDelegation(grouped, "s2", "build", "b.go", "all clear")
 		loneDelegation(grouped, "s1", "survey", "a.go", "all clear")
 
-		// Line 0 is the block header ("✦ Sub-agent", "✦ Sub-agents (2)"), then one row per member.
+		// Line 0 is the block header ("✦ Sub-agents (1)", "✦ Sub-agents (2)"), then one row per member.
 		row := strings.Split(renderPlain(lone, 80), "\n")[1]
 		if member := strings.Split(renderPlain(grouped, 80), "\n")[2]; row != member {
 			t.Errorf("lone run's row = %q; want the grouped member's %q", row, member)
@@ -522,7 +522,7 @@ func TestLoneSubAgentRunWearsTheGroupMembersRow(t *testing.T) {
 			t.Fatal("setExpanded(0, true) = true; a run opens as a view, never as a rail")
 		}
 		want := strings.Join([]string{
-			"✦ Sub-agent",
+			groupHeaderLine("Sub-agents", 1),
 			groupMemberLine("  ┕ survey ✓ ⋯ 1 tool call · all clear"),
 			"",
 			"✦ back to parent",
@@ -564,7 +564,7 @@ func TestLoneSubAgentRunWearsTheGroupMembersRow(t *testing.T) {
 				tr := &transcript{}
 				tc.build(tr)
 
-				want := strings.Join([]string{"✦ Sub-agent", groupMemberLine(tc.row)}, "\n")
+				want := strings.Join([]string{groupHeaderLine("Sub-agents", 1), groupMemberLine(tc.row)}, "\n")
 				if got := renderPlain(tr, 80); got != want {
 					t.Errorf("row mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 				}
@@ -923,12 +923,12 @@ func TestFailedDelegationPaintsItsSlotRed(t *testing.T) {
 	// failure, a construct error — agent.runSubAgent) returns an error result and left no span, so
 	// its head wears the bare verdict word (absorbFailure, and the refusal itself behind the ▶) and
 	// that error status is the whole verdict — red, and no ✓ beside a name whose run never happened.
-	// The lone block is collapsed, so the count of what stands behind the ▶ joins the slot after the
-	// same middle dot the stats use, and the red covers the whole of what the slot says.
+	// A lone one is a group of one, so its row is the grouped member's: the verdict word alone, the
+	// refusal behind the ▶.
 	t.Run("a delegation refused before it ran is red and wears no done mark", func(t *testing.T) {
 		t.Parallel()
 
-		const slot = "error · +1 more line"
+		const slot = "error"
 
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "delegate deeper", 0)
@@ -959,16 +959,15 @@ const (
 	refusedTask   = "survey the tests\\nand report back\\nwith detail"
 )
 
-// TestUnframedSubAgentShowsThePromptWhenExpanded is the item's acceptance golden, in both rendering
-// paths. A delegation that never ran is an ordinary tool block, so the prompt it carried has
+// TestUnframedSubAgentShowsThePromptWhenExpanded is the item's acceptance golden, alone and among
+// siblings. A delegation that never ran is an ordinary group member, so the prompt it carried has
 // nowhere to go but the BODY: expanded, the block opens with "task: " and the whole prompt, and the
 // refusal follows a blank line below it. Collapsed it is still exactly one row — the task's first
 // line already rides the header as the name fallback (subAgentTarget), so a second rendering of it
 // would say the same thing twice in two adjacent rows.
 //
-// The two paths are pinned against each OTHER as much as against the goldens: folding changes the
-// frame around a delegation and never what the delegation shows of itself, so the lone block and
-// the grouped member say the same rows in their own frames.
+// The two are pinned against each OTHER as much as against the goldens: a lone delegation is a
+// group of one, so it and a member of a larger group say the same rows.
 func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 	t.Parallel()
 
@@ -984,17 +983,18 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 			t.Fatalf("setExpanded(0, true) = false; want the delegation open")
 		}
 
+		// A lone delegation is a group of one, so it opens onto the grouped member's rows.
 		want := strings.Join([]string{
-			"✦ Sub-agent",
+			groupHeaderLine("Sub-agents", 1),
 			// The promoted refusal leaves the slot for the body so the prompt can stand above it,
 			// and the presenter's typed phrase takes its place (toolView.demoted).
-			leaderEdgeRow("  ┕ survey the tests ⋯ done", glyphExpanded),
-			"    " + prompt[0],
-			"    " + prompt[1],
-			"    " + prompt[2],
-			"",
-			"    " + refusedResult,
-			seeLessFooterLine(t, width),
+			leaderEdgeRow("  ┕ survey the tests ✓ ⋯ done", glyphExpanded),
+			"  │ " + prompt[0],
+			"  │ " + prompt[1],
+			"  │ " + prompt[2],
+			"  │",
+			"  │ " + refusedResult,
+			memberEdgeRow(t, "  │", promptSeeLess, width),
 		}, "\n")
 
 		if got := renderPlain(tr, width); got != want {
@@ -1010,8 +1010,8 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 
 		// The row wears the ▶ that says the prompt above is behind it: the block hides the
 		// delegation's whole task, which no reading of its own lines can see (subAgentHidesPrompt).
-		want := "✦ Sub-agent\n" +
-			leaderEdgeRow("  ┕ survey the tests ⋯ "+refusedResult, defaultGlyphs.collapsed)
+		want := groupHeaderLine("Sub-agents", 1) + "\n" +
+			leaderEdgeRow("  ┕ survey the tests ✓ ⋯ "+refusedResult, defaultGlyphs.collapsed)
 		if got := renderPlain(tr, width); got != want {
 			t.Errorf("collapsed lone refusal mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
@@ -1479,8 +1479,8 @@ func TestSubAgentPromptDetailsLeadsWithTheTask(t *testing.T) {
 // sites above enough. Every construction site marks a delegation solo (presentToolCall, and the
 // decode path that re-derives it), so it is never groupable: it heads no umbrella and lets none
 // span it (toolSuperGroup), and renderSuperGroup's member painter can therefore never be handed
-// one — which is why a delegation that never ran only ever reaches the reader through the lone
-// block above.
+// one — which is why a delegation that never ran only ever reaches the reader through its own
+// Sub-agent group (a group of one, alone).
 //
 // The fixture is the case that WOULD fold if the mark were ever lost: a never-ran delegation
 // between two reads is three adjacent runs of different labels at one depth, an umbrella by every
@@ -1509,13 +1509,13 @@ func TestUnframedSubAgentNeverFoldsIntoASuperGroup(t *testing.T) {
 		}
 	}
 
-	// Its own header, its own leader row, and the prompt beneath them — the lone-block reading.
+	// Its own group-of-one header, its member row, and the prompt beneath them.
 	want := strings.Join([]string{
-		"✦ Sub-agent",
-		leaderEdgeRow("  ┕ survey the tests ⋯ done", glyphExpanded),
-		"    " + unframedSubAgentPromptLead + "survey the tests",
-		"    and report back",
-		"    with detail",
+		groupHeaderLine("Sub-agents", 1),
+		leaderEdgeRow("  ┕ survey the tests ✓ ⋯ done", glyphExpanded),
+		"  │ " + unframedSubAgentPromptLead + "survey the tests",
+		"  │ and report back",
+		"  │ with detail",
 	}, "\n")
 	if got := renderPlain(tr, width); !strings.Contains(got, want) {
 		t.Errorf("a delegation among reads lost its own block:\n--- got ---\n%s\n--- want it to contain ---\n%s", got, want)
@@ -2780,7 +2780,8 @@ func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
 	}
 
 	// A lone skipped delegation — a message queued before the group's only delegation could start
-	// — is the same head in the lone frame: the refusal's shape row for row.
+	// — is the same head in a group of one: the grouped member's rows, wrapped to the member's
+	// column.
 	t.Run("a lone skipped delegation opens onto the same words", func(t *testing.T) {
 		t.Parallel()
 
@@ -2796,8 +2797,8 @@ func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
 		got := renderPlain(tr, width)
 		for _, line := range []string{
 			unframedSubAgentPromptLead + "check",
-			"sub-agent not started: the user sent a message while this group was running;",
-			"delegate again if the task is still needed",
+			"sub-agent not started: the user sent a message while this group was",
+			"running; delegate again if the task is still needed",
 		} {
 			if !strings.Contains(got, line) {
 				t.Errorf("the opened lone skip lacks %q:\n%s", line, got)
@@ -2926,4 +2927,125 @@ func TestCollapsedRunKeepsItsCountWhenTheGistIsDemoted(t *testing.T) {
 			t.Errorf("narrow row does not carry %q:\n%s", capped, got)
 		}
 	})
+}
+
+// ----------------------------------------------------------------------------
+// A lone delegation and a lone skill fetch are groups of one
+// ----------------------------------------------------------------------------
+
+// loneGroupsModel is a model under auto-collapse holding, behind two prompts, a lone reported
+// delegation (entry 1, its read nested at entry 2) and a lone skill fetch (entry 4): idle, so both
+// have settled.
+func loneGroupsModel(t *testing.T) Model {
+	t.Helper()
+	m := newTestModelEng(t, &fakeEngine{}, testOpts)
+	m.transcript.reset()
+	m.transcript.addUser("survey it", nil)
+	loneDelegation(&m.transcript, "s1", "survey", "a.go", "all clear")
+	m.transcript.addUser("load the style guide", nil)
+	skillFetch(&m.transcript, "k1", "format Go", "<skill: Coding Standards>\nUse gofmt.\n</skill>\n")
+	m.transcript.setToolsAutoCollapse(true)
+	m.transcript.setTurnLive(false)
+	m.refreshViewport()
+	return m
+}
+
+// paintsGroupHeader reports whether the model's paint holds the group header labelled label (its
+// "(N)" included) wearing the fold glyph — read by its ends, since the leader between them runs to
+// the model's own width.
+func paintsGroupHeader(m Model, label, glyph string) bool {
+	return slices.ContainsFunc(m.lines, func(line string) bool {
+		row := strings.TrimRight(strip(line), " ")
+		return strings.HasPrefix(row, "✦ "+label+" ⋯") && strings.HasSuffix(row, glyph)
+	})
+}
+
+// paintsMemberRow reports whether the model's paint holds a group member row opening with prefix.
+func paintsMemberRow(m Model, prefix string) bool {
+	return slices.ContainsFunc(m.lines, func(line string) bool { return strings.HasPrefix(strip(line), prefix) })
+}
+
+// TestLoneDelegationAndSkillFetchFoldAsGroupsOfOne pins the group of one for the two tools that
+// group with their own kind: settled under auto-collapse, a lone delegation and a lone skill fetch
+// each stand folded to their group header ("✦ Sub-agents (1)", "✦ Skill (1)"); a click on that
+// header opens the group onto its one member row, and a second click folds it again.
+func TestLoneDelegationAndSkillFetchFoldAsGroupsOfOne(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		head   int
+		label  string
+		member string
+	}{
+		{name: "delegation", head: 1, label: "Sub-agents (1)", member: "  ┕ survey ✓ ⋯"},
+		{name: "skill fetch", head: 4, label: "Skill (1)", member: "  ┕ Coding Standards ⋯"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := loneGroupsModel(t)
+			if !m.transcript.blockFolded(tc.head) || !paintsGroupHeader(m, tc.label, defaultGlyphs.collapsed) ||
+				paintsMemberRow(m, tc.member) {
+				t.Fatalf("the settled lone %s is not folded to its %q header:\n%s", tc.name, tc.label, strings.Join(m.lines, "\n"))
+			}
+
+			m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLineOf(t, m, tc.head)))
+			if m.transcript.blockFolded(tc.head) || !paintsGroupHeader(m, tc.label, glyphExpanded) ||
+				!paintsMemberRow(m, tc.member) {
+				t.Fatalf("the click did not open the group of one onto its member row %q:\n%s",
+					tc.member, strings.Join(m.lines, "\n"))
+			}
+
+			m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLineOf(t, m, tc.head)))
+			if !m.transcript.blockFolded(tc.head) || !paintsGroupHeader(m, tc.label, defaultGlyphs.collapsed) {
+				t.Errorf("the second click did not fold the group of one again:\n%s", strings.Join(m.lines, "\n"))
+			}
+		})
+	}
+}
+
+// TestLoneDelegationMemberRowOpensItsRunView pins the run-view click through a group of one: the
+// opened group's member row is still the delegation's row, so a click on it opens the run's view
+// (ADR 0063) and marks the group touched.
+func TestLoneDelegationMemberRowOpensItsRunView(t *testing.T) {
+	t.Parallel()
+	const head = 1
+
+	m := loneGroupsModel(t)
+	m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLineOf(t, m, head)))
+	m = clickCell(t, m, 4, screenRow(t, m, lastLineMarked(t, m, targetHeader, head)))
+
+	if got, want := m.viewedRun(), m.transcript.entries[head].spawned(); got != want {
+		t.Fatalf("viewed run = %+v after a click on the member row; want the delegation's run %+v", got, want)
+	}
+	if !m.transcript.entries[head].foldTouched {
+		t.Error("entering the lone delegation's run view did not mark its group touched")
+	}
+}
+
+// TestPanelJumpOpensAFoldedLoneDelegation pins the side-panel jump to a lone delegation folded in
+// its group of one: the group opens alone and touched, and its member row paints for the jump to
+// land on.
+func TestPanelJumpOpensAFoldedLoneDelegation(t *testing.T) {
+	t.Parallel()
+	const head = 1
+
+	m := loneGroupsModel(t)
+	if !m.transcript.blockFolded(head) {
+		t.Fatal("setup: the settled lone delegation is not folded")
+	}
+
+	next, _ := m.followPanelTarget(panelTarget{kind: panelTargetBlock, entry: head, run: m.viewedRun()})
+	m = next.(Model)
+
+	if m.transcript.blockFolded(head) || !m.transcript.entries[head].foldTouched {
+		t.Errorf("after the jump: group folded %v, touched %v; want false, true",
+			m.transcript.blockFolded(head), m.transcript.entries[head].foldTouched)
+	}
+	if !slices.ContainsFunc(m.lineTargets, func(target lineTarget) bool {
+		return target.kind == targetHeader && target.entry == head
+	}) {
+		t.Errorf("the jump painted no member row for the delegation:\n%s", strings.Join(m.lines, "\n"))
+	}
 }

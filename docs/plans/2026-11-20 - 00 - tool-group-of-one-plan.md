@@ -119,7 +119,13 @@ Recast at the regression check (2026-11-20).
 - `go test -race -count=1 ./internal/tui/`
 **Commit:** `refactor(tui): retire the lone-call fold path`
 
-## 5. A lone delegation and a lone skill fetch are groups of one
+## 5. A lone delegation and a lone skill fetch are groups of one — ✅ DONE (2026-11-20)
+
+NOTES (2026-11-20): `inFlightFanOut` keeps a floor of two for an unannounced group (new `fanOutFloor` const), so a lone delegation still raises no wave hint or esc-stop count, as before. `announcedMembers` drops its lone-head fallback because `subAgentGroupAt` now answers for every delegation head.
+NOTES (2026-11-20): ported `autocollapse_test.go` ("never folds" → a lone skill fetch or delegation folds as a group of one; task list still never folds) and `autocollapse_turnboundary_test.go` (the lone delegation or skill fetch the boundary folds stays folded and counts (2) when the next Turn grows it). Neither file is in the item's Files, but both pinned the old floor, which the item's Goal reverses.
+NOTES (2026-11-20): consequential edit — internal/tui/render.go: made necessary by dropping `ownGroup`'s floor. The comments on resolveBlock's run branch and on the appendJoined closer no longer say a lone delegation reaches that branch; only a Workflow item's run head does now.
+NOTES (2026-11-20): `TestTranscriptClickTogglesALiveBlockAcrossTheBlink` now presses the live group-of-one header (targetUmbrella) and asserts that the group folds. The blinking star now sits on the group header, not on the member row that opens the run view. `TestSubAgentStreamStaysInsideItsCollapsedRun` gains a started phase, because a phase-less lone delegation now reads `queued`, as a group member does.
+NOTES (2026-11-20): `cmd/apogee` was not run. Item 6 owns its group-of-one assertions.
 
 Depends on item 4.
 

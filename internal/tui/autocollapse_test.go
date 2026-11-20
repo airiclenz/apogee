@@ -312,8 +312,9 @@ func paintsLine(tr *transcript, line string) bool {
 
 // TestAutoCollapseFoldsAGroupOfOne pins the fold of a single groupable call — a group of one: settled and
 // untouched under auto-collapse it paints its one-call Group summary folded, on narration or at the
-// Turn's end; a live one, and every one with auto-collapse off, stands open on its head flag; a solo
-// call and a task-list card never fold; and a Read a folded small umbrella leaves alone when it
+// Turn's end; a live one, and every one with auto-collapse off, stands open on its head flag; a lone
+// delegation and a lone skill fetch fold to their group-of-one header; a task-list card never folds;
+// and a Read a folded small umbrella leaves alone when it
 // dissolves is that umbrella shrunk to a group of one, keeping the fold its head carries.
 func TestAutoCollapseFoldsAGroupOfOne(t *testing.T) {
 	t.Parallel()
@@ -371,26 +372,49 @@ func TestAutoCollapseFoldsAGroupOfOne(t *testing.T) {
 		}
 	})
 
-	for name, place := range map[string]func(tr *transcript){
-		"skill fetch": func(tr *transcript) { skillFetch(tr, "s1", "go style", "# Go style") },
-		"task list": func(tr *transcript) {
-			tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "tl", Tool: "task_list", Arguments: []byte(`{}`)}})
-			tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "tl", Content: "[ ] one"}})
+	t.Run("task list never folds", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		tr.setToolsAutoCollapse(true)
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "tl", Tool: "task_list", Arguments: []byte(`{}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "tl", Content: "[ ] one"}})
+		tr.addNote("saved")
+		if got := tr.blockFoldBy(0); got != foldByNone {
+			t.Errorf("blockFoldBy(0) = %d on a settled task list; want foldByNone", got)
+		}
+	})
+
+	// A lone delegation and a lone skill fetch are groups of one too ("✦ Sub-agents (1)",
+	// "✦ Skill (1)"), so they settle to their group header exactly as a lone groupable call does.
+	for name, tc := range map[string]struct {
+		place  func(tr *transcript)
+		folded string
+	}{
+		"skill fetch": {
+			place:  func(tr *transcript) { skillFetch(tr, "s1", "go style", "# Go style") },
+			folded: umbrellaHeaderRow("Skill (1)", defaultGlyphs.collapsed),
 		},
-		"delegation": func(tr *transcript) {
-			delegationCall(tr, "", "sa1", "scout", "look around", 0)
-			subAgentReport(tr, "sa1", "done", 0)
+		"delegation": {
+			place: func(tr *transcript) {
+				delegationCall(tr, "", "sa1", "scout", "look around", 0)
+				subAgentReport(tr, "sa1", "done", 0)
+			},
+			folded: umbrellaHeaderRow("Sub-agents (1)", defaultGlyphs.collapsed),
 		},
 	} {
-		t.Run(name+" never folds", func(t *testing.T) {
+		t.Run(name+" folds as a group of one", func(t *testing.T) {
 			t.Parallel()
 
 			tr := &transcript{}
 			tr.setToolsAutoCollapse(true)
-			place(tr)
+			tc.place(tr)
 			tr.addNote("saved")
-			if got := tr.blockFoldBy(0); got != foldByNone {
-				t.Errorf("blockFoldBy(0) = %d on a settled %s; want foldByNone", got, name)
+			if got := tr.blockFoldBy(0); got != foldBySettled {
+				t.Errorf("blockFoldBy(0) = %d on a settled %s; want foldBySettled", got, name)
+			}
+			if paint := renderPlain(tr, 80); !strings.HasPrefix(paint, tc.folded+"\n") {
+				t.Errorf("the settled %s does not paint its folded group header %q first:\n%s", name, tc.folded, paint)
 			}
 		})
 	}

@@ -2442,10 +2442,10 @@ func (e entry) waitsOnUser() bool {
 // child whose stretch ends behind host notes parked at the tail — marks nothing ([lastOwnEntry]).
 //
 // Only an entry that ends a FOLDABLE block at this moment is marked ([foldHeadOf]) — an umbrella
-// (a group of one included), a Sub-agent or Skill group — because the mark is what keeps a block the
-// boundary folded folded while the next Turn extends it. A lone delegation or a lone skill fetch
-// is no foldable block, so the boundary folds nothing there, and the group the next Turn's
-// delegation or fetch then forms beside it must stay open while its new member runs.
+// (a group of one included), a Sub-agent or Skill group (a lone delegation or skill fetch is a
+// group of one) — because the mark is what keeps a block the boundary folded folded while the next
+// Turn extends it: a folded "✦ Sub-agents (1)" the next Turn's delegation joins stays folded and
+// counts (2).
 func (t *transcript) closeTurn(run runRef) {
 	at, ok := t.lastOwnEntry(run)
 	if !ok || t.entries[at].turnClosed {
@@ -3012,8 +3012,9 @@ func (e entry) spawned() runRef {
 
 // ownGroup is the group entries[i] opens, or nil when it opens none: the adjacent calls to the tool
 // `name` standing at the same depth, each with the run nested beneath it
-// (docs/layout/tool-layout.md, Rules — "Sub-agent calls group with each other"). Two are the floor,
-// as they are for every other folded shape: a lone call is the block it always was.
+// (docs/layout/tool-layout.md, Rules — "Sub-agent calls group with each other"). There is no floor:
+// a lone call is a group of one ("✦ Sub-agents (1)", "✦ Skill (1)"), which folds, opens and
+// re-folds like any group, exactly as a lone groupable call is an umbrella of one (toolSuperGroup).
 //
 // Adjacency here is adjacency of BLOCKS, not of entries, which is the whole reason this rule cannot
 // be [sameLabelRun] with the solo mark lifted: a delegation's span sits between its call and the
@@ -3040,9 +3041,6 @@ func ownGroup(entries []entry, i int, name string) []groupBlock {
 		group = append(group, groupBlock{at: at, span: span})
 		at += 1 + span
 	}
-	if len(group) < 2 {
-		return nil
-	}
 	return group
 }
 
@@ -3062,7 +3060,7 @@ func subAgentGroup(entries []entry, i int) []groupBlock {
 // the previous member's head whenever there is one.
 //
 // ok is false for anything that is in no group at all, which is every entry that is not a call to
-// that tool and every such call standing alone.
+// that tool; a call to it standing alone is the one member of a group of one.
 func ownGroupAt(entries []entry, i int, name string) (group []groupBlock, pos int, ok bool) {
 	if !ownHeads(entries, i, name) {
 		return nil, 0, false
@@ -3115,12 +3113,18 @@ func (e entry) neverStarted() bool {
 	return len(lines) > 0 && strings.HasPrefix(lines[0].Text, unstartedDelegationPrefix)
 }
 
+// fanOutFloor is the fewest delegations an unannounced group needs to be a wave in flight
+// ([transcript.inFlightFanOut]): the painter's group has no floor (ownGroup), but a lone delegation
+// runs the moment it is called, so there is no member a stop keeps or a message skips.
+const fanOutFloor = 2
+
 // inFlightFanOut counts the open Turn's delegation group by what a stop would do to its members:
 // the members that have finished and handed their report back (a stop keeps it, ADR 0088), and
 // the members still queued behind the Parallel agents cap (a queued user message would skip those
 // instead of stopping the run — preemptDelegation). ok is false wherever no such group is in
-// flight: no top-level delegation at all, a lone one (the group floor is two, as everywhere —
-// ownGroup), or a group that is over and belongs to a finished Turn.
+// flight: no top-level delegation at all, a lone one no announcement anchors (the painter's group
+// of one is no wave: a single delegation runs at once and has nothing to keep or skip —
+// fanOutFloor), or a group that is over and belongs to a finished Turn.
 //
 // The group is the one the most recent top-level run head belongs to (subAgentGroupAt) — a
 // fan-out is one reply's calls, adjacent at depth 0 — and the count reads each head's phase
@@ -3151,7 +3155,7 @@ func (t *transcript) inFlightFanOut() (finished, queued int, ok bool) {
 	members, size, announced := t.announcedMembers(head)
 	if !announced {
 		group, _, grouped := subAgentGroupAt(t.entries, head)
-		if !grouped {
+		if !grouped || len(group) < fanOutFloor {
 			return 0, 0, false
 		}
 		members = group
@@ -3214,16 +3218,16 @@ func (t *transcript) anchorWave(e domain.ToolCallEvent) {
 // announcedMembers is the announced wave's members drawn so far — the group head belongs to, from
 // the wave's anchor onward — and the size it was announced at. ok is false when no anchored wave
 // stands in that group: none was announced, its anchor was dropped, or head opens a different
-// group. Here alone the group floor of two is lifted, because a serial group draws its members one
-// at a time and its first member stands alone until the second is reached; the painter's group
-// (ownGroup, subAgentGroupAt) keeps the floor.
+// group. Here the wave's floor of two ([fanOutFloor]) is lifted, because a serial group draws its
+// members one at a time and its first member stands alone — a group of one (ownGroup) — until the
+// second is reached.
 func (t *transcript) announcedMembers(head int) (members []groupBlock, size int, ok bool) {
 	if !t.wave.anchored {
 		return nil, 0, false
 	}
 	group, _, grouped := subAgentGroupAt(t.entries, head)
 	if !grouped {
-		group = []groupBlock{{at: head, span: subAgentSpan(t.entries, head)}}
+		return nil, 0, false
 	}
 	for k, member := range group {
 		if t.wave.anchors(t.entries[member.at]) {

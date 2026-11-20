@@ -212,13 +212,15 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 		}
 	})
 
-	// A lone delegation and a lone skill fetch are no foldable block, so their boundary folds
-	// nothing; the group the next Turn's call forms beside one must stay open while that new
-	// member runs, as it did before the boundary rule existed.
+	// A lone delegation and a lone skill fetch are groups of one, so the boundary folds them like any
+	// group, and the group the next Turn's call grows them into stays folded, its header counting
+	// the new member (adr-0035-amend-1120b (b)).
 	for name, tc := range map[string]struct {
-		lone  func(tr *transcript)
-		next  func(tr *transcript)
-		group func(entries []entry) int
+		lone   func(tr *transcript)
+		next   func(tr *transcript)
+		group  func(entries []entry) int
+		header string
+		hidden string
 	}{
 		"a lone delegation": {
 			lone: func(tr *transcript) {
@@ -231,6 +233,8 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 				group, _, _ := subAgentGroupAt(entries, 0)
 				return len(group)
 			},
+			header: "✦ Sub-agents (2)",
+			hidden: "look again",
 		},
 		"a lone skill fetch": {
 			lone: func(tr *transcript) {
@@ -243,9 +247,11 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 				group, _, _ := ownGroupAt(entries, 0, loadSkillToolName)
 				return len(group)
 			},
+			header: "✦ Skill (2)",
+			hidden: "cut a release",
 		},
 	} {
-		t.Run("the group "+name+" grows into stays open while its new member runs", func(t *testing.T) {
+		t.Run("the group of one "+name+" folds and stays folded as it grows", func(t *testing.T) {
 			t.Parallel()
 
 			tr := &transcript{}
@@ -253,13 +259,16 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 			tr.setTurnLive(true)
 			tc.lone(tr)
 			tr.apply(turnBoundary(domain.EventBase{}))
+			if !tr.blockFolded(0) {
+				t.Fatalf("the boundary did not fold the group of one:\n%s", renderPlain(tr, 80))
+			}
 			tc.next(tr)
 			if got := tc.group(tr.entries); got != 2 {
 				t.Fatalf("setup: the next Turn's call formed a group of %d; want 2", got)
 			}
-			if got := tr.blockFoldBy(0); got == foldBySettled || tr.blockFolded(0) {
-				t.Errorf("blockFoldBy(0) = %d, folded %v with the new member running; want it open:\n%s",
-					got, tr.blockFolded(0), renderPlain(tr, 80))
+			paint := renderPlain(tr, 80)
+			if !tr.blockFolded(0) || !strings.Contains(paint, tc.header) || strings.Contains(paint, tc.hidden) {
+				t.Errorf("the grown group did not stay folded to %q:\n%s", tc.header, paint)
 			}
 		})
 	}

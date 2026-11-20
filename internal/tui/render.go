@@ -271,8 +271,8 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 	//
 	// closes says what the seam above this block IS where the walk is climbing out of a delegation's
 	// span: the ┊ closing that span when another grouped sub-agent follows it, and the ordinary railed
-	// spacer when nothing of the list does — the spec draws no closer after a group's last member, nor
-	// after a lone delegation, which has no list to resume (docs/layout/tool-layout.md, "Grouped
+	// spacer when nothing of the list does — the spec draws no closer after a group's last member, a
+	// group of one's lone delegation included, which has no list to resume (docs/layout/tool-layout.md, "Grouped
 	// Sub-agents"). Only the block being placed knows which, so the answer rides the block
 	// [transcript.resolveBlock] resolved; the streaming preview, which resumes no list, answers no.
 	appendJoined := func(isUser, closes bool, depth, head int, block blockPaint) {
@@ -926,11 +926,11 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 	// the header (subAgentSummary) and the star asks the span whether anything is still open,
 	// so a nested entry arriving or landing its result is a different block (paintcache.go).
 	//
-	// A delegation reaches this branch with a span of nothing where a reader opened it before its
-	// first entry landed (subAgentFramed): the row is the same row either way, and the streaming
-	// tail behind it is elided with the rest of the run (insideCollapsedRun). A run reaching this
-	// branch closes with no ┊ at all: the closer belongs to a list resuming after one of its
-	// members, and a delegation standing here stands alone.
+	// A delegation never reaches this branch: every one is a member of a Sub-agent group, a lone
+	// one of a group of one (ownGroup), and the group branch above paints it. What reaches it is a
+	// Workflow item's run head (entryWorkflowItem), which heads a run but never groups. A run
+	// reaching this branch closes with no ┊ at all: the closer belongs to a list resuming after one
+	// of its members, and a head standing here stands alone.
 	//
 	// A block heading a Workflow's item runs (a workflow block, a fan_out card) has a span too
 	// (subAgentSpan), but framing is a run head's alone (subAgentFramed), so it never reaches this

@@ -879,8 +879,8 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 		// redirect, asked before the flip, so the mouse and the block cursor's ⏎ — which arrives
 		// through this same call — cannot come to mean different things by the same gesture.
 		// Entering a group member's run is the reader acting on that group, so the group is
-		// marked touched before the view opens (transcript.markBlockTouched; a lone delegation
-		// heads no foldable block and marks nothing): a settled group the reader went into never
+		// marked touched before the view opens (transcript.markBlockTouched; a lone delegation is
+		// a group of one and is marked the same): a settled group the reader went into never
 		// auto-collapses behind them.
 		if _, openable := m.runOpenableAt(target.entry); openable {
 			m.transcript.markBlockTouched(target.entry)
