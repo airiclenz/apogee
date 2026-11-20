@@ -1242,9 +1242,12 @@ in `/settings` at the keystroke, in the file at startup.
 settled lone tool call to the summary an umbrella of that one call would show (`✦ Read 1 file`,
 `✦ Ran 1 command`); and a settled `✦ Sub-agents (N)` or `✦ Skill (N)` group to its header line. A
 block is settled once everything in it has finished — every call returned, every sub-agent
-reported — and the conversation has moved past it — the model's next reply, a note or your next
-message comes after it — or the Turn has ended; one still running, or the last thing a running
-Turn has done, stays as it is. A block you have touched — clicked its header, or opened one of its
+reported — and the conversation has moved past it: the model has started its next step (it folds
+while the model is still thinking or writing, not once the reply lands), or the model's next reply,
+a note or your next message comes after it, or the Turn has ended. One still running, or still
+waiting for the rest of its step's calls, stays as it is. A folded block stays folded when the
+model's next step adds a call to it, unless that call is waiting on you — a question to answer or a
+call to approve — which opens it until you have answered. A block you have touched — clicked its header, or opened one of its
 tools or members — is left alone from then on. Clicking a folded one opens that one only, for this
 session: a lone call opens to the block it always showed and stays open, and nothing is written,
 not even `ui.tools-open`, so a resumed session shows every such block folded again. Turn it off and

@@ -14,13 +14,16 @@ package main
 // tui.Options and the transcript's seed hold together.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
 
@@ -36,8 +39,12 @@ const (
 	autoCollapseAgentsWrapUp  = "Both checks reported."
 	autoCollapseSkillsPrompt  = "Fetch two skills."
 	autoCollapseSkillsWrapUp  = "Both skills fetched."
+	autoCollapseWingsPrompt   = "Delegate two inspections."
+	autoCollapseWingsWrapUp   = "Both wings inspected."
 	autoCollapseNextPrompt    = "Anything else?"
 	autoCollapseNextReply     = "Nothing more to report."
+	// autoCollapseWingsGate is the gate toolsautocollapse.yaml holds the inspections' wrap-up on.
+	autoCollapseWingsGate = "wings"
 	// autoCollapseFailedHeader is the missing-file umbrella's Group summary: one read that failed
 	// and one listing, the failure counted in the summary's outcome half.
 	autoCollapseFailedHeader = "✦ Read 1 file, listed 1 dir · 1 failed"
@@ -49,6 +56,27 @@ const (
 	// is `ui.tools-open`'s.
 	autoCollapseOffLargeOpenConfig = "ui:\n  tools-fold-over: 2\n  tools-open: true\n  tools-auto-collapse: false\n"
 )
+
+// autoCollapseHoldWindow is how long after the held wrap-up request reached the stub the group's
+// fold still counts as seen DURING the hold. It is Fixed because what it measures against is fixed:
+// the stub refuses a held request after its own unscaled ten seconds (stubllm's awaitLimit), and a
+// fold seen after that could be the one the refused request's run end paints rather than the one
+// this test is about. It bounds no wait — the wait itself runs on the kit's scaled default — only
+// which frames may answer it.
+var autoCollapseHoldWindow = testtime.Fixed(9 * time.Second)
+
+// heldWingsRequests is the arrival time of every request the inspections' held wrap-up turn
+// answers: a request whose last message is the south wing's delegation result.
+func heldWingsRequests(stub *stubllm.Server) []time.Time {
+	var held []time.Time
+	for _, req := range stub.Requests() {
+		if n := len(req.Messages); n > 0 && req.Messages[n-1].Role == "tool" &&
+			strings.Contains(req.Messages[n-1].Content, "South wing inspected") {
+			held = append(held, req.At)
+		}
+	}
+	return held
+}
 
 // autoCollapseFailedFolded is the missing-file umbrella folded to its Group summary.
 var autoCollapseFailedFolded = umbrellaHeaderMatch{text: autoCollapseFailedHeader, glyph: "▶"}
@@ -316,4 +344,44 @@ func TestE2EToolsAutoCollapseFoldsASkillGroup(t *testing.T) {
 		open:   "✦ Skill (2)",
 		member: "cut a release",
 	})
+}
+
+// TestE2EToolsAutoCollapseFoldsAGroupWhenTheNextTurnStarts is the settle's timing: a Sub-agents group
+// whose two delegations have reported folds to `✦ Sub-agents (2) ⋯ ▶` as soon as the NEXT Turn
+// starts — the Turn that will write the wrap-up — not once that Turn's reply lands. The fixture
+// holds the wrap-up request on the `wings` gate, so the folded header is seen while no reply has
+// come back, and the group stays folded once the wrap-up is let through.
+func TestE2EToolsAutoCollapseFoldsAGroupWhenTheNextTurnStarts(t *testing.T) {
+	t.Parallel()
+
+	stub := stubllm.New(t, loadScript(t, "toolsautocollapse"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUI(t, drv, stub)
+	// Registered after the launch so it runs before the session's own teardown: a run that failed
+	// with the request still held must not wait out the gate on the way down.
+	t.Cleanup(func() { stub.Release(autoCollapseWingsGate) })
+	folded := umbrellaHeaderMatch{text: "✦ Sub-agents (2)", glyph: "▶"}
+
+	submit(drv, autoCollapseWingsPrompt)
+	// Both children run first, on the kit's scaled default wait: the held request reaching the stub
+	// is the moment the next Turn has started.
+	drv.WaitFor(func() bool { return len(heldWingsRequests(stub)) > 0 },
+		tuitest.Awaiting("the wrap-up request to reach the stub and be held"))
+	// The fold must be seen while that one request is still held: no wrap-up on screen, no second
+	// attempt at it, and inside the hold window — so the fold a refused request's run end would
+	// paint can never answer this wait.
+	drv.WaitFor(func() bool {
+		held := heldWingsRequests(stub)
+		frame := drv.Frame()
+		return len(held) == 1 && time.Since(held[0]) < autoCollapseHoldWindow &&
+			folded.in(frame) && !strings.Contains(frame.String(), autoCollapseWingsWrapUp)
+	}, tuitest.Awaiting(fmt.Sprintf("the %q group header while the wrap-up is held", folded)))
+
+	stub.Release(autoCollapseWingsGate)
+	drv.WaitText(autoCollapseWingsWrapUp)
+	waitIdle(drv)
+	if frame := drv.Frame(); !folded.in(frame) {
+		t.Errorf("the group does not stand folded as %q after the wrap-up:\n%s", folded, frame)
+	}
+	quitCleanly(t, sess)
 }

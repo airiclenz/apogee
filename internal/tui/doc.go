@@ -840,11 +840,11 @@
 // member is painted by its own entry's expanded flag and every row it paints is marked back to that entry
 // ([renderSuperGroup], [renderExpandedMember], [blockPaint.addFor]); the one state a header does
 // carry is the umbrella's own fold, resolved by one rule ([transcript.blockFoldBy]): under
-// `ui.tools-auto-collapse` an umbrella that is SETTLED ([transcript.blockSettled]) and that the
-// reader has not touched folds to its header line whatever its size, and opens alone on a fold of
-// its own ([transcript.openBlockAlone]) — the one rule that folds a settled, untouched lone
-// groupable call to its Group summary and a Sub-agent or Skill group to its header too; otherwise
-// a LARGE umbrella — more type rows than
+// `ui.tools-auto-collapse` an umbrella that is SETTLED ([transcript.blockSettled] — from the
+// moment its run's next Turn starts) and that the reader has not touched folds to its header
+// line whatever its size, and opens alone on a fold of its own ([transcript.openBlockAlone]) —
+// the one rule that folds a settled, untouched lone groupable call to its Group summary and a
+// Sub-agent or Skill group to its header too; otherwise a LARGE umbrella — more type rows than
 // `ui.tools-fold-over` ([transcript.umbrellaIsLarge]) — folds under the shared `ui.tools-open`
 // preference and back, a SMALL one on its head entry's session-only flag ([transcript.blockFolded]),
 // the members' own state kept beneath it either way ([umbrellaFold], [Model.toggleToolsFold])

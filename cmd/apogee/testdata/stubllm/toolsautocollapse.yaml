@@ -1,6 +1,6 @@
 # The upstream the auto-collapse runs talk to (TestE2EToolsAutoCollapse*): two prompts that each make
-# the model issue one batch of groupable calls, three that each make it issue one block of another
-# shape — a lone call, a Sub-agents group, a Skill group — and one that only talks.
+# the model issue one batch of groupable calls, four that each make it issue one block of another
+# shape — a lone call, two Sub-agents groups, a Skill group — and one that only talks.
 #
 #   - "Survey the workspace." issues toolsfold.yaml's three calls of three different tools — Read,
 #     List and Grep — so its umbrella's Group summary is the one e2e_toolsfold_test.go spells
@@ -14,6 +14,10 @@
 #   - "Fetch two skills." issues two load_skill calls in one reply, so they stand as one
 #     `✦ Skill (2)` group. The home carries no skills, so each fetch is a miss — still a successful
 #     result (internal/tools LoadSkill), and the row keeps the query it was asked with.
+#   - "Delegate two inspections." issues two sub_agent calls in one reply, like "Delegate two checks."
+#     but with tasks and answers of their own, and its wrap-up is HELD on the `wings` gate: the
+#     request that carries the group's results waits until the test has seen the group fold, so
+#     the fold is shown to land when that next Turn starts, before its reply commits anything.
 #   - "Anything else?" is the next reply after a settled block: text only, no call.
 #
 # All calls are harmless reads, or delegations whose children only talk: a driven run boots in
@@ -49,6 +53,16 @@ turns:
         tool_result: read_file
       repeat: true
       text: The one file is read.
+    # The inspections' wrap-up, once the south wing's delegation has reported — held on the `wings`
+    # gate until the test has seen the group fold (TestE2EToolsAutoCollapseFoldsAGroupWhenTheNextTurnStarts).
+    # It sits AHEAD of the checks' wrap-up below, and its `last_message` names an answer only the
+    # inspections' second child gives, so the checks' wrap-up is never held.
+    - when:
+        tool_result: sub_agent
+        last_message: South wing inspected
+      repeat: true
+      await: wings
+      text: Both wings inspected.
     # The Sub-agents group's wrap-up, once the second delegation has reported.
     - when:
         tool_result: sub_agent
@@ -96,6 +110,23 @@ turns:
         last_message: ^Check the
       repeat: true
       text: Corner checked.
+    - when:
+        last_message: ^Delegate two inspections
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Inspect the north wing","name":"north"}'
+        - name: sub_agent
+          arguments: '{"task":"Inspect the south wing","name":"south"}'
+    # The inspections' two children, each answering its own wing.
+    - when:
+        last_message: ^Inspect the north wing
+      repeat: true
+      text: North wing inspected.
+    - when:
+        last_message: ^Inspect the south wing
+      repeat: true
+      text: South wing inspected.
     - when:
         last_message: ^Fetch two skills
       repeat: true

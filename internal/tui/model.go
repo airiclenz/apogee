@@ -2607,7 +2607,8 @@ func (m *Model) resumeRunning() tea.Cmd {
 func (m *Model) markRunning() {
 	m.state = stateRunning
 	// The Turn's liveness is a paint input too: the last umbrella of a running Turn stays open until
-	// something follows it or the Turn ends (transcript.blockSettled), and this is the one place
+	// the loop's next Turn starts past it, something follows it, or the Turn ends
+	// (transcript.blockSettled), and this is the one place
 	// a Turn — the human's own or a watched owner's — is marked running.
 	m.transcript.setTurnLive(true)
 }

@@ -101,13 +101,14 @@ type transcript struct {
 	// toolsOpen's reason, and moves through [transcript.setToolsAutoCollapse].
 	toolsAutoCollapse bool
 	// turnLive says the human's own Turn — the watched owner's, while watching — is running: the
-	// fact that keeps the LAST umbrella of the top-level run open while nothing follows it yet
-	// ([transcript.blockSettled]). It mirrors the Model's stateRunning: [Model.markRunning], the
-	// one writer of that state, sets it, and [Model.finishWorker] and [Model.watchIdle] — the two
-	// paths a run ends on, a watched Turn never reaching the first — clear it, through
-	// [transcript.setTurnLive]. reset drops it: a reset opens a conversation with no Turn running
-	// in it — the fresh view a watch paints into starts idle (clearWatchView) until the watched
-	// journal says otherwise, and /clear runs at idle.
+	// whole running Exchange, not one of the loop's Turns inside it. It is the fact that keeps the
+	// LAST umbrella of the top-level run open while nothing follows it yet and the next loop Turn has
+	// not started past it (entry.turnClosed; [transcript.blockSettled]). It mirrors the Model's
+	// stateRunning: [Model.markRunning], the one writer of that state, sets it, and
+	// [Model.finishWorker] and [Model.watchIdle] — the two paths a run ends on, a watched Turn never
+	// reaching the first — clear it, through [transcript.setTurnLive]. reset drops it: a reset opens
+	// a conversation with no Turn running in it — the fresh view a watch paints into starts idle
+	// (clearWatchView) until the watched journal says otherwise, and /clear runs at idle.
 	turnLive bool
 	// root is the run the transcript is currently PAINTED at: the delegation whose own entries fill
 	// the view, with everything above and beside it left out (render.go, [transcript.setRoot]). The
@@ -477,6 +478,17 @@ type entry struct {
 	// grows into an umbrella heads an untouched one, and the Read a dissolved umbrella leaves
 	// alone reads none of the umbrella's flags. Session-only and never persisted for folded's reasons.
 	loneTouched bool
+	// view-only: this entry was its run's LAST own entry when one of that run's Turns reached its
+	// boundary with more Turns to come (a domain.TurnEvent, StatusTurnComplete) — the next Turn has
+	// started past it, which settles the foldable block it belongs to from then on
+	// ([transcript.closeTurn], [transcript.blockSettled]). Session-only and never persisted for
+	// folded's reasons: a replayed block is settled by construction and needs no mark.
+	turnClosed bool
+	// view-only, on a tool call: the engine raised an Approval for it and the human has not decided
+	// it yet ([transcript.holdForApproval]) — a call held on its approval pane, waiting on the user
+	// the way a pending ask_user is, which keeps a Turn-boundary-settled block open while it waits
+	// ([entry.waitsOnUser]). Session-only and never persisted for folded's reasons.
+	heldForApproval bool
 	// view-only fold of the TASK this entry's run was handed, as the run's own view paints it
 	// above the child's work (render.go's rooted paint); never persisted
 	taskExpanded bool
@@ -1446,7 +1458,9 @@ const (
 // the activity line, AuditEvent and WireEvent nothing the transcript draws, and a UsageEvent is a
 // reading rather than a block — it lands ON an entry the run already has, through applyUsage,
 // which foldEvent calls with the window a fill needs and apply cannot see) and fall to the default
-// case with every future variant. Each
+// case with every future variant. A TurnEvent appends none either: a Turn that ends with more
+// Turns to come marks its run's last entry as closed by the boundary, which is the moment the
+// next Turn starts and what settles a finished block under auto-collapse (closeTurn). Each
 // case folds its event: tokens grow the in-progress buffer at the depth that emitted them (the
 // routing every other assistant-text case does through its own e.Depth); a StreamReset discards
 // the buffer its own level owns; a
@@ -1460,7 +1474,8 @@ const (
 // when it landed and a note saying it never did when it did not (addChildInterjection); a
 // ReactionFired is surfaced only in the debug view — a reaction correcting the model's own
 // failure, or shaping what it sees, is engine behaviour rather than user news (addReaction);
-// a Prune says, in one host note, that the
+// an Approval's requested phase marks the call it holds as waiting on the human and its decided
+// phase lifts the mark before its note (holdForApproval); a Prune says, in one host note, that the
 // engine dropped stale tool results from the conversation it keeps (addPrune); a SubAgentGroup
 // appends none either — it records how many members a top-level delegation group will run, as
 // state the wave hints read (announceWave), and the depth-0 ToolCall that follows anchors it to
@@ -1488,10 +1503,16 @@ func (t *transcript) apply(e domain.Event) {
 		t.addChildInterjection(e)
 	case domain.ApprovalEvent:
 		// One note per Approval, not two: the engine announces a gate at both of its phases, and
-		// only the decided one carries a verdict to render. The requested phase exists for
-		// observers that want the WAIT (Reactions, ADR 0073) and folds to nothing here.
-		if e.Phase == domain.ApprovalDecided {
-			t.addApproval(e.Request, e.Decision, e.Rules, runOf(e.EventBase))
+		// only the decided one carries a verdict to render. The requested phase appends nothing:
+		// it marks the WAIT on the call it holds, which keeps that call's block open while the
+		// human decides ([transcript.holdForApproval]), and the decided phase lifts the mark.
+		run := runOf(e.EventBase)
+		switch e.Phase {
+		case domain.ApprovalRequested:
+			t.holdForApproval(e.Request.Tool, run, true)
+		case domain.ApprovalDecided:
+			t.holdForApproval(e.Request.Tool, run, false)
+			t.addApproval(e.Request, e.Decision, e.Rules, run)
 		}
 	case domain.ReactionFiredEvent:
 		t.addReaction(e)
@@ -1509,6 +1530,14 @@ func (t *transcript) apply(e domain.Event) {
 		t.addWorkflowPhase(e)
 	case domain.SubAgentGroupEvent:
 		t.announceWave(e)
+	case domain.TurnEvent:
+		// Only a Turn with more Turns to come starts a next one past its work. Every other status
+		// ends the run — an Exchange complete (a faulted or capped Turn reports that too), a
+		// cancel — and the run's end already settles its blocks: the human's own Turn through
+		// turnLive, a delegated run through its head's report ([transcript.blockSettled]).
+		if e.Status == domain.StatusTurnComplete {
+			t.closeTurn(runOf(e.EventBase))
+		}
 	default:
 		// An unknown future variant: tolerate it. The set is sealed and additively
 		// versioned, so an unrecognised Event is rendered as nothing rather than a panic.
@@ -2258,7 +2287,8 @@ const (
 	// not hold folded — either way there is no fold to read.
 	foldByNone blockFoldRule = iota
 	// foldBySettled: auto-collapse is on and the block — an umbrella, a lone groupable call, or a
-	// Sub-agent or Skill group — is settled and untouched — folded.
+	// Sub-agent or Skill group — is settled (its run's next Turn has started past it, or a later
+	// entry follows it, or its run has ended; [transcript.blockSettled]) and untouched — folded.
 	foldBySettled
 	// foldByShared: a LARGE umbrella under the size rule — folded exactly when !toolsOpen.
 	foldByShared
@@ -2268,7 +2298,8 @@ const (
 )
 
 // blockFoldBy is the ONE statement of how a foldable tool block's fold is resolved, in order: with
-// auto-collapse on (toolsAutoCollapse), a SETTLED block ([transcript.blockSettled]) the reader
+// auto-collapse on (toolsAutoCollapse), a SETTLED block ([transcript.blockSettled] — the next Turn
+// of its run has started past it, or a later entry follows it, or its run is over) the reader
 // has not touched is folded, whatever its size and toolsOpen; a touched one whose reader gave it its
 // own fold (entry.foldOwn) follows its head flag; everything else — a live umbrella, the
 // last entry of a running Turn, a touched one without a fold of its own, and every umbrella with
@@ -2302,9 +2333,11 @@ func (t *transcript) blockFoldBy(head int) blockFoldRule {
 // blockFolded reports whether the umbrella headed by entries[head] stands folded to its header
 // line — the one question the painter asks of a Tools umbrella (render.go's resolveBlock) — as the
 // rule [transcript.blockFoldBy] names answers it: a settled, untouched block under
-// auto-collapse is folded; otherwise a LARGE one is folded exactly when the shared preference is
-// shut (!toolsOpen), its own head flag ignored, and a SMALL one — or a touched one with a fold of
-// its own — exactly when its head's flag says so (entry.folded). A small umbrella that grows
+// auto-collapse is folded — from the moment the next Turn of its run starts, and through that
+// Turn's extending it, unless a member waits on the human ([transcript.blockSettled]); otherwise a
+// LARGE one is folded exactly when the shared preference is shut (!toolsOpen), its own head flag
+// ignored, and a SMALL one — or a touched one with a fold of its own — exactly when its head's
+// flag says so (entry.folded). A small umbrella that grows
 // past the threshold therefore follows the preference from that append on, whatever its flag holds,
 // and follows the flag again if the threshold is raised back over it. An index heading no umbrella
 // answers false.
@@ -2321,30 +2354,59 @@ func (t *transcript) blockFolded(head int) bool {
 }
 
 // blockSettled reports whether the foldable block headed by entries[head] — a Tools umbrella, a
-// lone call, a Sub-agent or Skill group — is SETTLED: the work it folds is over and something has
-// moved on past it. It is derived at paint, like the umbrella's membership (toolSuperGroup), and
-// stored nowhere: every member of it has finished ([entry.reported] — a call returned, a
-// delegation's child reported), AND either a later entry of its own run follows its last member —
-// a narration, a note, a user message, a further block — or nothing follows and its run is no
-// longer running: for the human's own conversation, the Turn ([transcript.turnLive]); for a
-// delegated run, the child, read off its head by the same rule, falling back to the Turn where the
-// list holds no head for it. A replayed block is therefore settled by construction.
+// lone call, a Sub-agent or Skill group — is SETTLED: the work it folds is over and its run has
+// moved on past it. It is derived at paint, like the umbrella's membership (toolSuperGroup), from
+// two facts stored on the members themselves, and it settles by either of two rules.
+//
+// The TURN-BOUNDARY rule comes first, and it is sticky: the block is settled once the next Turn of
+// its own run has STARTED past it — one of its own members carries entry.turnClosed, the mark the
+// boundary leaves on the run's last entry ([transcript.closeTurn]) — and it stays settled when
+// that next Turn extends it with a member of its own (an umbrella or a group grows across Turns
+// while nothing commits between them; toolSuperGroup), so a block the boundary folded does not
+// spring open for every call the next Turn adds. Two things lift it, and the second rule then
+// decides alone: a member WAITING ON THE HUMAN ([entry.waitsOnUser] — a pending ask_user, a call
+// held on its approval pane), which keeps the block open while that wait lasts; and a closing
+// member the reader had OPENED before the block took its present shape (entry.loneTouched on the
+// lone call an extension turned into an umbrella's head), whose block stays open until it settles
+// by the second rule, as it did before the boundary rule existed. The rule never has to ask whether
+// the closing Turn's calls returned: the engine answers every call a Turn issues before it emits
+// that Turn's boundary (the dispatch joins its calls before the Step ends), so a marked member
+// always ends a Turn whose calls all reported, and only the next Turn's own members can be in flight.
+//
+// The COMMITTED-FOLLOWER rule is the one the block always had: every member of it has finished
+// ([entry.reported] — a call returned, a delegation's child reported), AND either a later entry of
+// its own run follows its last member — a narration, a note, a user message, a further block — or
+// nothing follows and its run is no longer running: for the human's own conversation, the Turn
+// ([transcript.turnLive]); for a delegated run, the child, read off its head by the same rule,
+// falling back to the Turn where the list holds no head for it. A replayed block is therefore
+// settled by construction.
 //
 // The walk past the umbrella stops at the first entry standing at the run's own depth or shallower:
 // a run's entries are contiguous behind its head ([transcript.runEnd]), so an entry there either is
 // the run's own next entry or proves the run's stretch has ended — a sibling's, a parent's, a host
 // note parked at the tail. Deeper entries between are runs nested inside this one, and are skipped.
 //
-// The block's span [head, end) is the caller's, read off the head ([foldableHead]), and the
-// "every member finished" check walks only the block's OWN members — the entries at the head's depth
-// in that span — never the deeper entries a group member's run holds, whose narration is never
-// marked done; a delegation member is over when its own head says so, whatever its span holds.
+// The block's span [head, end) is the caller's, read off the head ([foldableHead]), and both rules
+// read only the block's OWN members — the entries at the head's depth in that span — never the
+// deeper entries a group member's run holds, whose narration is never marked done and whose Turns
+// are that child's; a delegation member is over when its own head says so, whatever its span holds.
 func (t *transcript) blockSettled(head, end int) bool {
 	depth := t.entries[head].depth
+	closed, waiting, finished := false, false, true
 	for i := head; i < end; i++ {
-		if t.entries[i].depth == depth && !t.entries[i].reported() {
-			return false
+		e := t.entries[i]
+		if e.depth != depth {
+			continue
 		}
+		closed = closed || (e.turnClosed && !e.loneTouched)
+		waiting = waiting || e.waitsOnUser()
+		finished = finished && e.reported()
+	}
+	if closed && !waiting {
+		return true
+	}
+	if !finished {
+		return false
 	}
 	run := t.entries[head].run()
 	for j := end; j < len(t.entries); j++ {
@@ -2369,6 +2431,81 @@ func (t *transcript) blockSettled(head, end int) bool {
 // call that heads no run never carries a phase, so for it this is done alone.
 func (e entry) reported() bool {
 	return e.done || e.phase == domain.SubAgentFinished
+}
+
+// waitsOnUser reports whether e is a call the run is blocked on the human for: an ask_user
+// question not yet answered, or a call held on its approval pane (entry.heldForApproval). Either
+// keeps a block the Turn boundary settled open while the wait lasts ([transcript.blockSettled]),
+// so the human can see the call they are being asked about.
+func (e entry) waitsOnUser() bool {
+	if e.kind != entryToolCall || e.reported() {
+		return false
+	}
+	return e.heldForApproval || e.tool.name == askUserToolName
+}
+
+// closeTurn marks the boundary of one of run's Turns that has more Turns to come: the run's LAST
+// own entry takes entry.turnClosed, so the foldable block it ends is settled from here on — the
+// next Turn has started past it ([transcript.blockSettled]). It touches only when the mark moves.
+// A run with no entry of its own yet — a delegation whose first Turn committed nothing, a legacy
+// child whose stretch ends behind host notes parked at the tail — marks nothing ([lastOwnEntry]).
+//
+// Only an entry that ends a FOLDABLE block at this moment is marked ([foldHeadOf]) — an umbrella,
+// a lone groupable call, a Sub-agent or Skill group — because the mark is what keeps a block the
+// boundary folded folded while the next Turn extends it. A lone delegation or a lone skill fetch
+// is no foldable block, so the boundary folds nothing there, and the group the next Turn's
+// delegation or fetch then forms beside it must stay open while its new member runs.
+func (t *transcript) closeTurn(run runRef) {
+	at, ok := t.lastOwnEntry(run)
+	if !ok || t.entries[at].turnClosed {
+		return
+	}
+	if _, foldable := foldHeadOf(t.entries, at); !foldable {
+		return
+	}
+	t.entries[at].turnClosed = true
+	t.touch()
+}
+
+// lastOwnEntry is the index of run's last own entry — the one standing at the run's depth and
+// belonging to it — and whether it has one. The walk runs back from the run's end
+// ([transcript.runEnd]) by blockSettled's discipline: deeper entries are runs nested inside this
+// one and are skipped, and the first entry at the run's depth or shallower either is the run's own
+// or proves its stretch holds nothing of its own past that point — a head, a sibling's entry, a
+// host note — and answers none.
+func (t *transcript) lastOwnEntry(run runRef) (int, bool) {
+	for i := t.runEnd(run) - 1; i >= 0; i-- {
+		if t.entries[i].depth > run.depth {
+			continue
+		}
+		return i, t.entries[i].run() == run
+	}
+	return -1, false
+}
+
+// holdForApproval marks (held) or releases the call of run an Approval is about: the engine raises
+// the gate for a call it has already announced, and the request names the call's tool but not its
+// id, so the mark goes on run's LATEST own call to that tool that is still waiting for its result.
+// That is the call the gate is for: a run's leaf calls are dispatched one at a time, each announced
+// and then gated before the next is announced. The release finds the call holding the mark the same
+// way. A call that never hears its decision — a cancel at the gate — is answered not-run, which
+// ends the wait anyway ([entry.waitsOnUser] asks a reported call nothing). The walk stops at the
+// run's last prompt: nothing before it can still be waiting. It touches only when a mark moves.
+func (t *transcript) holdForApproval(tool string, run runRef, held bool) {
+	for i := t.runEnd(run) - 1; i >= 0; i-- {
+		e := t.entries[i]
+		if e.depth > run.depth {
+			continue
+		}
+		if e.run() != run || e.kind == entryUser {
+			return
+		}
+		if e.kind == entryToolCall && e.tool.name == tool && !e.reported() && e.heldForApproval != held {
+			t.entries[i].heldForApproval = held
+			t.touch()
+			return
+		}
+	}
 }
 
 // setToolsAutoCollapse moves the auto-collapse switch ([transcript.toolsAutoCollapse]) and reports

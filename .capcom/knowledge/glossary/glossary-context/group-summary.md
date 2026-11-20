@@ -7,7 +7,8 @@ refs: [docs/layout/tool-layout.md, internal/tui/groupsummary.go]
 The one-line **header of a `✦ Tools` umbrella**, saying in plain words what the umbrella's calls
 did: `✦ Read 3 files, ran 4 commands, edited 2 files +18 −5 · 1 failed`. Every umbrella wears it,
 open, folded, running or settled, and it is the whole row an umbrella folds to once it is settled
-and untouched under `ui.tools-auto-collapse` (`adr-0035-amend-1118`) — and the row a settled,
+and untouched under `ui.tools-auto-collapse` (`adr-0035-amend-1118`; settled from the moment the
+next Turn of its run starts, `adr-0035-amend-1120b`) — and the row a settled,
 untouched LONE groupable tool call folds to as well, the summary an umbrella of that one call would
 wear (`✦ Read 1 file`, `✦ Ran 1 command`; `adr-0035-amend-1120`). A Sub-agent or Skill group,
 which auto-collapse folds too, folds to its own `✦ Sub-agents (N)` / `✦ Skill (N)` header, not to

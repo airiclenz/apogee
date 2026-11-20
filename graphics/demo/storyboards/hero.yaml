@@ -198,7 +198,8 @@ beats:
       Cut: on the rig's model (a 1.3M-token window) the zoom lands on `9k/1.3M 0%`, which sells
       nothing. Pinning a small `context-window:` would make the gauge read well but misstate the
       model on camera. The beat is still performed, so a future clip on a small-window model
-      only has to drop `cut:` and give it a `duration:` (3s). The gauge is the status line's right
+      only has to drop `cut:`, give it a `duration:` (3s), and add a `camera` position on the gauge
+      (`area: status`) with a zoom `to: 2`. The gauge is the status line's right
       slot (layout.md, "The status line's right slot"): used out of the window, then the fill. The
       pattern follows layout.md, "How a size is spelled" — a bare count below a thousand, one
       decimal below ten of a unit.
