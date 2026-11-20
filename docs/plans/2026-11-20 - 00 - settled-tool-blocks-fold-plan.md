@@ -149,7 +149,10 @@ internal/tui/autocollapse_test.go — autoCollapseUmbrella, TestAutoCollapseRunV
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'E2ESubAgent|E2EFanOut|E2ELiveState|E2EQueuedMessage|E2EDelegation|E2EParallel' ./cmd/apogee/` (one run each per the machine rule)
 **Commit:** `feat(tui): auto-collapse settled Sub-agent and Skill groups`
 
-## 6. Drive the widened auto-collapse end to end
+## 6. Drive the widened auto-collapse end to end — ✅ DONE (2026-11-20)
+
+NOTES (2026-11-20): the three tests share one helper, `assertFoldsThenStaysOpen` (with `assertToolsStar` reading the folded line's ✦ cell against `scheme.Default().ToolHeader`); each runs at `autoCollapseTallSize` so the opened block and the next reply stand on one screen. No golden was added: the subject is the fold state and the star's colour, both asserted directly.
+NOTES (2026-11-20): the Skill turn's two `load_skill` queries are misses (the test home carries no skills) — a miss is still a successful result, and the member row keeps its query, which is what the opened group is asserted on.
 
 Depends on item 5.
 **What:**

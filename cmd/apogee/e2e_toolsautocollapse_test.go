@@ -6,7 +6,10 @@ package main
 // the reader has opened something in stays as the reader left it through the next reply; a session
 // resumed with `--continue` paints its replayed, settled umbrellas folded; a failed call keeps its
 // count on the folded header; and `tools-auto-collapse: false` hands the fold back to the size rule
-// and `ui.tools-open`. The settledness, the touched exemption and the live apply are pinned in
+// and `ui.tools-open`. The collapse reaches past the umbrella too (plan "2026-11-20 - 00", item 6):
+// a settled lone call, a settled `✦ Sub-agents (N)` group and a settled `✦ Skill (N)` group each fold
+// to one line whose star wears the tools header colour, open on a click, and stay open through the
+// next reply. The settledness, the touched exemption and the live apply are pinned in
 // internal/tui; only the binary shows that the config default, the composition root's inversion onto
 // tui.Options and the transcript's seed hold together.
 
@@ -16,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
@@ -26,6 +30,12 @@ import (
 const (
 	autoCollapseMissingPrompt = "Read the missing file."
 	autoCollapseMissingWrapUp = "The file is not there."
+	autoCollapseLonePrompt    = "Read the one file."
+	autoCollapseLoneWrapUp    = "The one file is read."
+	autoCollapseAgentsPrompt  = "Delegate two checks."
+	autoCollapseAgentsWrapUp  = "Both checks reported."
+	autoCollapseSkillsPrompt  = "Fetch two skills."
+	autoCollapseSkillsWrapUp  = "Both skills fetched."
 	autoCollapseNextPrompt    = "Anything else?"
 	autoCollapseNextReply     = "Nothing more to report."
 	// autoCollapseFailedHeader is the missing-file umbrella's Group summary: one read that failed
@@ -194,4 +204,116 @@ func TestE2EToolsAutoCollapseOffKeepsTheSizeRule(t *testing.T) {
 			quitCleanly(t, sess)
 		})
 	}
+}
+
+// settledBlock is one non-umbrella tool block the collapse folds, as a driven run reaches it: the
+// prompt toolsautocollapse.yaml answers with the block's calls and the wrap-up that settles it, the
+// block's folded line, the header it stands open under once clicked ("" for a lone call, which opens
+// onto its own block and wears no header toggle), and a word only its opened rows paint.
+type settledBlock struct {
+	prompt string
+	wrapUp string
+	folded umbrellaHeaderMatch
+	open   string
+	member string
+}
+
+// assertFoldsThenStaysOpen drives block's turn under the default config at autoCollapseTallSize, so
+// the opened block, the next prompt and its reply all stand on one screen: the settled block comes
+// to rest folded to its one line, with none of its rows beneath it and its star in the tools
+// header colour; a click on that line opens it onto its rows; and it stays open through the next
+// reply, since the reader has touched it.
+func assertFoldsThenStaysOpen(t *testing.T, block settledBlock) {
+	t.Helper()
+
+	stub := stubllm.New(t, loadScript(t, "toolsautocollapse"))
+	drv := tuitest.NewDriver(t, autoCollapseTallSize)
+	sess := launchTUI(t, drv, stub)
+	submit(drv, block.prompt)
+	drv.WaitText(block.wrapUp)
+	block.folded.await(drv)
+	waitIdle(drv)
+
+	frame := drv.Frame()
+	if strings.Contains(frame.String(), block.member) {
+		t.Errorf("the settled block paints its %q row beneath %q:\n%s", block.member, block.folded, frame)
+	}
+	x, y, ok := block.folded.find(frame)
+	if !ok {
+		t.Fatalf("the frame carries no folded %q line to click:\n%s", block.folded, frame)
+	}
+	assertToolsStar(t, frame, x, y)
+
+	click(drv, x, y)
+	drv.WaitText(block.member)
+	submit(drv, autoCollapseNextPrompt)
+	drv.WaitText(autoCollapseNextReply)
+	waitIdle(drv)
+
+	frame = drv.Frame()
+	if block.folded.in(frame) || !strings.Contains(frame.String(), block.member) {
+		t.Errorf("the touched block does not stand open on its %q row after the next reply:\n%s", block.member, frame)
+	}
+	if opened := (umbrellaHeaderMatch{text: block.open, glyph: "▼"}); block.open != "" && !opened.in(frame) {
+		t.Errorf("the touched block does not stand open as %q after the next reply:\n%s", opened, frame)
+	}
+	quitCleanly(t, sess)
+}
+
+// assertToolsStar fails the test unless the cell at (x, y) is a tool block's leading ✦ painted in
+// the scheme's tools header colour — the tone every tool block's star wears, folded or open.
+func assertToolsStar(t *testing.T, f tuitest.Frame, x, y int) {
+	t.Helper()
+
+	cell := f.Cell(x, y)
+	if cell.Rune != "✦" {
+		t.Fatalf("the cell at (%d, %d) is %q; want the block's ✦:\n%s", x, y, cell.Rune, f)
+	}
+	if want := mustColor(t, scheme.Default().ToolHeader); !tuitest.SameColor(cell.FG, want) {
+		t.Errorf("the block's ✦ at (%d, %d) is painted %v; want the tools header colour %v", x, y, cell.FG, want)
+	}
+}
+
+// TestE2EToolsAutoCollapseFoldsALoneCall is the lone call's fold: a single read, settled by its
+// wrap-up, folds to the Group summary an umbrella of one would paint — `✦ Read 1 file ⋯ ▶` — and a
+// click opens it onto its own block, which stays open.
+func TestE2EToolsAutoCollapseFoldsALoneCall(t *testing.T) {
+	t.Parallel()
+
+	assertFoldsThenStaysOpen(t, settledBlock{
+		prompt: autoCollapseLonePrompt,
+		wrapUp: autoCollapseLoneWrapUp,
+		folded: umbrellaHeaderMatch{text: "✦ Read 1 file", glyph: "▶"},
+		member: "a.txt",
+	})
+}
+
+// TestE2EToolsAutoCollapseFoldsASubAgentGroup is the Sub-agents group's fold: two delegations from
+// one reply, both reported and the wrap-up after them, fold to `✦ Sub-agents (2) ⋯ ▶`, and a click
+// on that header opens it onto its member rows under `▼`, where it stays.
+func TestE2EToolsAutoCollapseFoldsASubAgentGroup(t *testing.T) {
+	t.Parallel()
+
+	assertFoldsThenStaysOpen(t, settledBlock{
+		prompt: autoCollapseAgentsPrompt,
+		wrapUp: autoCollapseAgentsWrapUp,
+		folded: umbrellaHeaderMatch{text: "✦ Sub-agents (2)", glyph: "▶"},
+		open:   "✦ Sub-agents (2)",
+		member: "beta",
+	})
+}
+
+// TestE2EToolsAutoCollapseFoldsASkillGroup is the Skill group's fold: two skill fetches from one
+// reply, both answered and the wrap-up after them, fold to `✦ Skill (2) ⋯ ▶`, and a click on that
+// header opens it onto its member rows under `▼`, where it stays.
+func TestE2EToolsAutoCollapseFoldsASkillGroup(t *testing.T) {
+	t.Parallel()
+
+	assertFoldsThenStaysOpen(t, settledBlock{
+		prompt: autoCollapseSkillsPrompt,
+		wrapUp: autoCollapseSkillsWrapUp,
+		folded: umbrellaHeaderMatch{text: "✦ Skill (2)", glyph: "▶"},
+		open:   "✦ Skill (2)",
+		member: "cut a release",
+	})
 }
