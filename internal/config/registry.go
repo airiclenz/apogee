@@ -1186,14 +1186,15 @@ var KeyRegistry = bindRows([]Key{
 	{
 		// The size rule's override for finished tool work: a bool the renderer applies to itself,
 		// read but never written back — a block the reader opens stays open as view state only. It
-		// reaches every Tools umbrella, lone groupable call and Sub-agent or Skill group (ADR 0035
+		// reaches every Tools umbrella, a group of one included, and Sub-agent or Skill group (ADR 0035
 		// amendment of 2026-11-20). It defaults ON: finished work is history, and its one-row Group
 		// summary or group header is what is worth reading.
 		Path: "ui.tools-auto-collapse", Kind: KindBool, Default: "true",
 		Editable: true,
-		Desc: "Fold settled tool work the reader has not touched to one row: a Tools umbrella or a " +
-			"lone call to its summary, whatever its size, a Sub-agents or Skill group to its header; " +
-			"false leaves every umbrella to `ui.tools-open` and `ui.tools-fold-over` and a lone call open.",
+		Desc: "Fold settled tool work the reader has not touched to one row: a Tools umbrella, a " +
+			"single call's group of one included, to its summary, whatever its size, a Sub-agents or " +
+			"Skill group to its header; false leaves every umbrella to `ui.tools-open` and " +
+			"`ui.tools-fold-over`, so a single call's group starts open.",
 		field: uiBool(domain.UIKeyToolsAutoCollapse, func(u *domain.UIPrefs) *bool { return &u.ToolsAutoCollapse },
 			func(u *uiConfig) *bool { return u.ToolsAutoCollapse }),
 	},

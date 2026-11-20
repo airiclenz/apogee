@@ -7,8 +7,9 @@
 #     List and Grep — so its umbrella's Group summary is the one e2e_toolsfold_test.go spells
 #     (toolsFoldHeader), and the wrap-up that follows it is what settles the umbrella.
 #   - "Read the missing file." issues two calls, one of them a read of a path the workspace does not
-#     hold (e2eWorkspace seeds a.txt only), so the umbrella carries one failed call; two calls,
-#     because an umbrella needs at least two (toolSuperGroup's floor).
+#     hold (e2eWorkspace seeds a.txt only), so the umbrella carries one failed call beside one
+#     that succeeds, and its Group summary (autoCollapseFailedHeader) counts the failure in its
+#     outcome half.
 #   - "Read the one file." issues ONE read_file call — a lone call, which stands as a group of one.
 #   - "Search for a zebra." issues ONE grep call for a pattern the workspace does not hold — a lone
 #     call whose "No matches found" result tells it from the survey's grep — and its wrap-up is
