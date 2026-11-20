@@ -473,12 +473,6 @@ type entry struct {
 	// Session-only and never persisted for folded's reasons: a replayed umbrella is untouched.
 	foldTouched bool
 	foldOwn     bool
-	// view-only, on a LONE groupable call ([loneFoldable]): the reader has acted on it, which
-	// exempts it from auto-collapse. It is the lone call's own mark rather than foldTouched so a
-	// touch never carries between the two shapes one head can take: a touched lone call that
-	// grows into an umbrella heads an untouched one, and the Read a dissolved umbrella leaves
-	// alone reads none of the umbrella's flags. Session-only and never persisted for folded's reasons.
-	loneTouched bool
 	// view-only: this entry was its run's LAST own entry when one of that run's Turns reached its
 	// boundary with more Turns to come (a domain.TurnEvent, StatusTurnComplete) — the next Turn has
 	// started past it, which settles the foldable block it belongs to from then on
@@ -2284,8 +2278,7 @@ func (t *transcript) umbrellaIsLarge(head int) bool {
 type blockFoldRule int
 
 const (
-	// foldByNone: the index heads no foldable block, or heads a lone call that auto-collapse does
-	// not hold folded — either way there is no fold to read.
+	// foldByNone: the index heads no foldable block — there is no fold to read.
 	foldByNone blockFoldRule = iota
 	// foldBySettled: auto-collapse is on and the block — an umbrella (a group of one included), or
 	// a Sub-agent or Skill group — is settled (its run's next Turn has started past it, or a later
@@ -2318,10 +2311,8 @@ func (t *transcript) blockFoldBy(head int) blockFoldRule {
 	}
 	headEntry := t.entries[head]
 	switch {
-	case t.toolsAutoCollapse && !*t.touchedMark(head) && t.blockSettled(head, end):
+	case t.toolsAutoCollapse && !headEntry.foldTouched && t.blockSettled(head, end):
 		return foldBySettled
-	case loneFoldable(t.entries, head):
-		return foldByNone
 	case headEntry.foldTouched && headEntry.foldOwn:
 		return foldByHead
 	case t.umbrellaIsLarge(head):
@@ -2363,15 +2354,15 @@ func (t *transcript) blockFolded(head int) bool {
 // boundary leaves on the run's last entry ([transcript.closeTurn]) — and it stays settled when
 // that next Turn extends it with a member of its own (an umbrella or a group grows across Turns
 // while nothing commits between them; toolSuperGroup), so a block the boundary folded does not
-// spring open for every call the next Turn adds. Two things lift it, and the second rule then
+// spring open for every call the next Turn adds. One thing lifts it, and the second rule then
 // decides alone: a member WAITING ON THE HUMAN ([entry.waitsOnUser] — a pending ask_user, a call
-// held on its approval pane), which keeps the block open while that wait lasts; and a closing
-// member the reader had OPENED before the block took its present shape (entry.loneTouched on the
-// lone call an extension turned into an umbrella's head), whose block stays open until it settles
-// by the second rule, as it did before the boundary rule existed. The rule never has to ask whether
-// the closing Turn's calls returned: the engine answers every call a Turn issues before it emits
-// that Turn's boundary (the dispatch joins its calls before the Step ends), so a marked member
-// always ends a Turn whose calls all reported, and only the next Turn's own members can be in flight.
+// held on its approval pane), which keeps the block open while that wait lasts. A block the reader
+// touched never reaches this question ([transcript.blockFoldBy] asks the head's foldTouched first),
+// so a group of one the reader opened stays open when the next Turn's call grows it. The rule
+// never has to ask whether the closing Turn's calls returned: the engine answers every call a Turn
+// issues before it emits that Turn's boundary (the dispatch joins its calls before the Step ends),
+// so a marked member always ends a Turn whose calls all reported, and only the next Turn's own
+// members can be in flight.
 //
 // The COMMITTED-FOLLOWER rule is the one the block always had: every member of it has finished
 // ([entry.reported] — a call returned, a delegation's child reported), AND either a later entry of
@@ -2398,7 +2389,7 @@ func (t *transcript) blockSettled(head, end int) bool {
 		if e.depth != depth {
 			continue
 		}
-		closed = closed || (e.turnClosed && !e.loneTouched)
+		closed = closed || e.turnClosed
 		waiting = waiting || e.waitsOnUser()
 		finished = finished && e.reported()
 	}
@@ -2596,10 +2587,9 @@ func extendsGroupableStretch(entries []entry, i int) bool {
 // index one past the block's last entry. It is the ONE place a tool-block shape is recognised as
 // foldable — [foldHeadOf] and [transcript.blockFoldBy] both dispatch on it — and it knows the
 // Sub-agent and Skill GROUPS ([toolGroupAt], asked at their first member, the block reaching past
-// the last member's span), the Tools umbrella (toolSuperGroup, the adjacent same-depth calls it
-// folds) and the LONE groupable call ([loneFoldable]), a block of one entry. The groups are asked
-// first, in render.go's resolveBlock order; no entry answers two of them, since a group's members
-// are solo calls.
+// the last member's span) and the Tools umbrella (toolSuperGroup, the adjacent same-depth calls it
+// folds, a lone groupable call as a group of one). The groups are asked first, in render.go's
+// resolveBlock order; no entry answers two of them, since a group's members are solo calls.
 func foldableHead(entries []entry, head int) (end int, ok bool) {
 	if group, pos, inGroup := toolGroupAt(entries, head); inGroup {
 		if pos != 0 {
@@ -2610,9 +2600,6 @@ func foldableHead(entries []entry, head int) (end int, ok bool) {
 	}
 	if sup := toolSuperGroup(entries, head); len(sup) > 0 {
 		return head + sup.calls(), true
-	}
-	if loneFoldable(entries, head) {
-		return head + 1, true
 	}
 	return 0, false
 }
@@ -2627,27 +2614,6 @@ func toolGroupAt(entries []entry, i int) (group []groupBlock, pos int, ok bool) 
 	return ownGroupAt(entries, i, loadSkillToolName)
 }
 
-// loneFoldable reports whether entries[head] is a LONE groupable call: a tool call that could be
-// an umbrella's member row (groupable) yet starts no umbrella (toolSuperGroup) and joins none
-// before it — the standalone block the paint falls through to, which auto-collapse folds to the
-// Group summary an umbrella of that one call would paint (render.go's resolveFoldedCall). A solo
-// call (a skill fetch, a delegation, an answered question), a targetless one (a task-list card)
-// and every other kind are not groupable and answer false.
-func loneFoldable(entries []entry, head int) bool {
-	return sameLabelRun(entries, head) == 1 && len(toolSuperGroup(entries, head)) == 0 &&
-		!extendsGroupableStretch(entries, head)
-}
-
-// touchedMark is the mark that exempts the block entries[head] heads from auto-collapse: a lone
-// call's own (entry.loneTouched) and every other block's entry.foldTouched — kept apart so a touch
-// never carries from one shape a head can take into the other. head must head a foldable block.
-func (t *transcript) touchedMark(head int) *bool {
-	if loneFoldable(t.entries, head) {
-		return &t.entries[head].loneTouched
-	}
-	return &t.entries[head].foldTouched
-}
-
 // markBlockTouched records that the reader acted on the foldable tool block entries[index] belongs
 // to ([foldHeadOf]) — opened a type row, a member or its body, or moved its header's fold —
 // which exempts it from auto-collapse from then on ([transcript.blockFoldBy]), and reports
@@ -2659,11 +2625,11 @@ func (t *transcript) markBlockTouched(index int) bool {
 	if !ok {
 		return false
 	}
-	touched := t.touchedMark(head)
-	if *touched {
+	e := &t.entries[head]
+	if e.foldTouched {
 		return false
 	}
-	*touched = true
+	e.foldTouched = true
 	t.touch()
 	return true
 }
@@ -2679,9 +2645,6 @@ func (t *transcript) markBlockTouched(index int) bool {
 func (t *transcript) openBlockAlone(head int) bool {
 	if _, ok := foldableHead(t.entries, head); !ok {
 		return false
-	}
-	if loneFoldable(t.entries, head) {
-		return t.markBlockTouched(head)
 	}
 	e := &t.entries[head]
 	if e.foldTouched && e.foldOwn && !e.folded {

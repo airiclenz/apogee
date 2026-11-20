@@ -39,7 +39,7 @@ func boundaryUmbrella(t *testing.T) *transcript {
 }
 
 // TestAutoCollapseFoldsWhenTheNextTurnStarts pins the Turn-boundary settle: under auto-collapse a
-// finished, untouched block — a Sub-agents group, a Tools umbrella, a lone call — folds once the
+// finished, untouched block — a Sub-agents group, a Tools umbrella, a group of one — folds once the
 // NEXT Turn of its own run starts (the boundary its Turn emits after every call it issued was
 // answered), not once that next Turn's reply commits an entry. Each shape is driven through the
 // Model's own Event fold (foldEvent) in the order a real Step emits it, and stays open while its
@@ -75,7 +75,7 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 				callEvent(top, "c2", "grep", `{"pattern":"x"}`), resultEvent(top, "c2", "x"),
 			}
 		},
-		"lone call": func() []domain.Event {
+		"group of one": func() []domain.Event {
 			return []domain.Event{callEvent(top, "c1", "read_file", `{"path":"a.go"}`), resultEvent(top, "c1", "a")}
 		},
 	}
@@ -302,7 +302,7 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 		}
 	})
 
-	t.Run("a lone call the reader opened stays open as the next Turn extends it", func(t *testing.T) {
+	t.Run("a group of one the reader opened stays open as the next Turn extends it", func(t *testing.T) {
 		t.Parallel()
 
 		tr := &transcript{}
@@ -310,18 +310,18 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 		tr.setTurnLive(true)
 		readCall(tr, "c1", "a.go", 1, 5, 0)
 		if !tr.openBlockAlone(0) || !tr.entries[0].foldTouched {
-			t.Fatal("setup: opening the lone call did not touch it")
+			t.Fatal("setup: opening the group of one did not touch it")
 		}
 		tr.apply(turnBoundary(domain.EventBase{}))
 		if tr.blockFolded(0) {
-			t.Fatal("the boundary folded a lone call the reader opened")
+			t.Fatal("the boundary folded a group of one the reader opened")
 		}
 		tr.apply(callEvent(domain.EventBase{}, "c2", "grep", `{"pattern":"x"}`))
 		if len(toolSuperGroup(tr.entries, 0)) == 0 {
-			t.Fatal("setup: the next Turn's call did not extend the lone call into an umbrella")
+			t.Fatal("setup: the next Turn's call left entry 0 heading no group")
 		}
 		if tr.blockFolded(0) {
-			t.Errorf("the umbrella the opened lone call grew into folded on the old boundary:\n%s", renderPlain(tr, 80))
+			t.Errorf("the group the opened group of one grew into folded on the old boundary:\n%s", renderPlain(tr, 80))
 		}
 		tr.apply(resultEvent(domain.EventBase{}, "c2", "x"))
 		tr.apply(domain.MessageEvent{Text: "Found it."})

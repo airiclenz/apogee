@@ -1004,11 +1004,6 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 			next: head + calls,
 		}
 	}
-	// A LONE groupable call that auto-collapse holds folded — settled and untouched
-	// (transcript.blockFoldBy) — paints the Group summary an umbrella of that one call would.
-	if in.kind == entryToolCall && t.blockFolded(head) {
-		return resolveFoldedCall(head, in, width, blink, buf)
-	}
 	// One entry, one block. Which kinds can still be waiting, and which head a prompt stop, are the
 	// kind's own answers (entrykind.go); everything else keys as settled and marks no stop.
 	//
@@ -1040,33 +1035,6 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 		// told, so a delegated user block is drawn like a prompt and walked past like a delegate's
 		// entry — ctrl+↑/↓ offer stops the reader actually started a turn at.
 		isUser: in.kind.isUserPrompt() && in.depth == 0,
-	}
-}
-
-// resolveFoldedCall is the block a LONE groupable call ([loneFoldable]) stands as while
-// auto-collapse holds it folded: exactly the header line an umbrella of that one call paints folded
-// (renderSuperGroup under a shut fold) — its Group summary (`✦ Read 1 file`), the fold's ▶, and
-// the targetUmbrella mark, so a click or ⏎ there opens it through the umbrella header's own arm
-// (Model.toggleBlockAt, transcript.openBlockAlone). The fold rides the block into the paint key
-// (resolvedBlock.fold) under the umbrella's shape, so the settle that folds it and the touch that
-// opens it again are each a fresh paint. buf is the walk's record buffer, as resolveBlock states.
-func resolveFoldedCall(head int, in paintInput, width int, blink bool, buf []paintInput) resolvedBlock {
-	ins := append(buf[:0], in)
-	live := anyOpenCall(ins)
-	fold := umbrellaFold{folded: true}
-	// The record's level, read here so draw closes over an int and not the record.
-	depth := in.depth
-	return resolvedBlock{
-		shape: shapeToolSuper,
-		ins:   ins,
-		live:  live,
-		fold:  fold,
-		draw: func(th theme) blockPaint {
-			runs := superRunViews(ins, superGroup{{at: head, n: 1}})
-			return renderSuperGroup(th, runs, railedWidth(width, depth),
-				blockState{live: live, blink: blink}, fold).railed(th, depth)
-		},
-		next: head + 1,
 	}
 }
 

@@ -301,21 +301,21 @@ func TestAutoCollapseWatchedTurn(t *testing.T) {
 	})
 }
 
-// loneCallFoldedRow is the line a folded lone Read of one file paints: the Group summary an
+// groupOfOneFoldedRow is the line a folded group of one — a Read of one file — paints: the Group summary an
 // umbrella of that one call would show, folded.
-var loneCallFoldedRow = umbrellaHeaderRow("Read 1 file", defaultGlyphs.collapsed)
+var groupOfOneFoldedRow = umbrellaHeaderRow("Read 1 file", defaultGlyphs.collapsed)
 
 // paintsLine reports whether the plain paint of tr holds line as one whole row.
 func paintsLine(tr *transcript, line string) bool {
 	return slices.Contains(strings.Split(renderPlain(tr, 80), "\n"), line)
 }
 
-// TestAutoCollapseFoldsALoneCall pins the lone groupable call's fold — a group of one: settled and
+// TestAutoCollapseFoldsAGroupOfOne pins the fold of a single groupable call — a group of one: settled and
 // untouched under auto-collapse it paints its one-call Group summary folded, on narration or at the
 // Turn's end; a live one, and every one with auto-collapse off, stands open on its head flag; a solo
 // call and a task-list card never fold; and a Read a folded small umbrella leaves alone when it
 // dissolves is that umbrella shrunk to a group of one, keeping the fold its head carries.
-func TestAutoCollapseFoldsALoneCall(t *testing.T) {
+func TestAutoCollapseFoldsAGroupOfOne(t *testing.T) {
 	t.Parallel()
 
 	settle := map[string]func(tr *transcript){
@@ -331,8 +331,8 @@ func TestAutoCollapseFoldsALoneCall(t *testing.T) {
 			tr.setTurnLive(true)
 			tr.paints = newPaintCache()
 			readCall(tr, "c1", "a.go", 1, 5, 0)
-			if tr.blockFolded(0) || paintsLine(tr, loneCallFoldedRow) {
-				t.Fatal("the lone call folded while it is the running Turn's last entry; want it open")
+			if tr.blockFolded(0) || paintsLine(tr, groupOfOneFoldedRow) {
+				t.Fatal("the group of one folded while it is the running Turn's last entry; want it open")
 			}
 
 			follow(tr)
@@ -340,8 +340,8 @@ func TestAutoCollapseFoldsALoneCall(t *testing.T) {
 			if got := tr.blockFoldBy(0); got != foldBySettled {
 				t.Errorf("blockFoldBy(0) = %d; want foldBySettled", got)
 			}
-			if !paintsLine(tr, loneCallFoldedRow) {
-				t.Errorf("the settled lone call does not paint %q:\n%s", loneCallFoldedRow, renderPlain(tr, 80))
+			if !paintsLine(tr, groupOfOneFoldedRow) {
+				t.Errorf("the settled group of one does not paint %q:\n%s", groupOfOneFoldedRow, renderPlain(tr, 80))
 			}
 		})
 	}
@@ -354,7 +354,7 @@ func TestAutoCollapseFoldsALoneCall(t *testing.T) {
 		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)}})
 		tr.apply(domain.MessageEvent{Text: "Waiting."})
 		if tr.blockFolded(0) || paintsLine(tr, umbrellaHeaderRow("Reading 1 file", defaultGlyphs.collapsed)) {
-			t.Errorf("a lone call still waiting for its result folded:\n%s", renderPlain(tr, 80))
+			t.Errorf("a group of one still waiting for its result folded:\n%s", renderPlain(tr, 80))
 		}
 	})
 
@@ -413,7 +413,7 @@ func TestAutoCollapseFoldsALoneCall(t *testing.T) {
 		}
 		// The head flag is the group's fold, whatever the group holds: the reader folded it, and
 		// the group it shrank to stays folded until the reader opens it.
-		if !tr.blockFolded(0) || !paintsLine(tr, loneCallFoldedRow) {
+		if !tr.blockFolded(0) || !paintsLine(tr, groupOfOneFoldedRow) {
 			t.Errorf("the Read left alone dropped the fold its head carries:\n%s", renderPlain(tr, 80))
 		}
 	})

@@ -97,7 +97,11 @@ Recast at the regression check (2026-11-20). Fixes the defect from the lone auto
 - `go test -race -count=1 ./internal/tui/`
 **Commit:** `fix(tui): make a lone tool call a group of one that folds again`
 
-## 4. Retire the lone-call fold path
+## 4. Retire the lone-call fold path — ✅ DONE (2026-11-20)
+
+NOTES (2026-11-20): Acceptance 2 (`! rg -n -i 'lone' internal/tui/autocollapse_test.go internal/tui/autocollapse_touch_test.go`) also matches the substring in `alone`, `standalone`, the live production method `openBlockAlone` (called by name from autocollapse_touch_test.go) and the unrelated `TestAutoCollapseTouchOpensOneUmbrellaAlone`; renaming those is outside this item (a package-wide rename touching doc.go, item 7's), so the item's Tests intent — no `lone…` name from the retired path — was met instead: `rg -n -i 'lone' <the two files> | rg -v -i 'alone'` is empty, and every remaining hit is `alone`/`standalone`/`openBlockAlone`/`OneUmbrellaAlone`.
+NOTES (2026-11-20): mouse.go needed no edit — its targetUmbrella arm never named the retired path, and its "a group of one — a lone call — is an umbrella like any other" comment stays true.
+NOTES (2026-11-20): the turnboundary subtest's setup guard `len(toolSuperGroup(...)) == 0` is vacuous since item 3's floor change (entry 0 always heads a group of one); kept rename-only, its message reworded to say what it checks. The file's lone delegation / skill fetch cases are left for item 5.
 
 Depends on item 3.
 
