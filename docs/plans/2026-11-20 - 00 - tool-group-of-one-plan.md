@@ -45,7 +45,7 @@
 - Restyling `th.toolHeader`, the Sub-agent/Skill group header paint (already `toolLabel`), task-list fold.
 - Any engine, config-key or session-record change.
 
-## 1. Land the in-tree turn-boundary auto-collapse work
+## 1. Land the in-tree turn-boundary auto-collapse work — ✅ ALREADY-DONE (159d842c6)
 
 **What:**
 **Goal:** the working tree's uncommitted turn-boundary auto-collapse change (a settled block folds when the next Turn of its run starts, `adr-0035-amend-1120b`) is committed as one commit, and its targeted tests pass.
