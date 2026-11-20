@@ -817,6 +817,9 @@ const (
 
 // openLastRun opens the last DELEGATION in the transcript as its run view — the same ⌥↑ ⏎ reach, on
 // the one block kind that answers it with a view rather than with a body opened in place (ADR 0063).
+// The delegation's `✦ Sub-agents (N)` group — a group of one for a lone delegation — must stand
+// open: a folded group's only cursor stop is its header, where ⏎ opens the group rather than the
+// run, so a caller under the default auto-collapse opens it first ([openSubAgentsGroup]).
 //
 // It presses no esc afterwards, and that is the whole difference from expandLastBlock above: inside
 // a view esc is the way back OUT of it, so the tidy-up that leaves the block cursor would close the

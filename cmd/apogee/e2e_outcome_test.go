@@ -162,8 +162,10 @@ func TestE2EOutcomeCancelledDelegationCarriesTheFailureTone(t *testing.T) {
 		tuitest.Awaiting("the child's request, which the script never answers"))
 
 	// Step 3 — Esc×2 stops it (one press only arms the gesture). The stopped result closes the call
-	// in the live session.
+	// in the live session. The settled delegation is a group of one the default auto-collapse folds
+	// to its `✦ Sub-agents (1)` header, so the group is opened onto its row first.
 	stopRun(t, drv)
+	openSubAgentsGroup(t, drv, 1)
 	drv.WaitText(stoppedSlot)
 	drv.WaitText("cancelled")
 	drv.WaitQuiet(settled)
@@ -176,6 +178,7 @@ func TestE2EOutcomeCancelledDelegationCarriesTheFailureTone(t *testing.T) {
 	drv.WaitFor(func() bool { return len(sess.sessionRecords()) > 0 },
 		tuitest.Awaiting("the cancelled session to reach the store"))
 	next := restoreNewestSession(t, sess)
+	openSubAgentsGroup(t, next, 1)
 
 	restored := next.Frame()
 	if !strings.Contains(flatten(restored.String()), stoppedSlot) {
@@ -197,8 +200,10 @@ func TestE2EOutcomeCancelledDelegationCarriesTheFailureTone(t *testing.T) {
 func TestE2EOutcomeTonePTY(t *testing.T) {
 	t.Parallel()
 
+	// The colour claim is made on the delegation's own row, so auto-collapse, which folds the settled
+	// group of one to its `✦ Sub-agents (1)` header, is switched off.
 	stub := stubllm.New(t, loadScript(t, "outcome"))
-	sess := launchPTY(t, stub)
+	sess := launchPTYConfigured(t, stub, autoCollapseOffConfig)
 
 	submit(sess.drv, doomedPrompt)
 	sess.drv.WaitText(faultedSlot)

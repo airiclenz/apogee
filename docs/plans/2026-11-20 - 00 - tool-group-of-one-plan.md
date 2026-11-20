@@ -141,7 +141,13 @@ Depends on item 4.
 - `go test -race -count=1 ./internal/tui/`
 **Commit:** `feat(tui): make a lone delegation and a lone skill fetch groups of one`
 
-## 6. Drive the group of one end to end
+## 6. Drive the group of one end to end — ✅ DONE (2026-11-20)
+
+NOTES (2026-11-20): the "next Turn starts" proof uses a lone `grep` for `zebra` (its "No matches found" result tells it from the survey's grep), held on a new `zebra` gate, rather than the lone read: a second lone read of a.txt returns the same result as the existing one, so the fixture could not hold one wrap-up and not the other. The wings test's hold-and-wait code was extracted into `awaitFoldedWhileHeld`/`heldRequests` (replacing `heldWingsRequests`) so both held tests share it.
+NOTES (2026-11-20): e2e_toolsfold_test.go and e2e_toolsfold_subagent_test.go needed no edit — they switch auto-collapse off or open the delegation group, and pass on the group-of-one shape; TestE2EToolsFoldLoneCallWithAutoCollapseOff lives in e2e_toolsautocollapse_test.go beside the fixture and constants it uses.
+NOTES (2026-11-20): ported the tests whose lone-delegation row the default auto-collapse now folds: in-process runs open the group with the existing `openSubAgentsGroup(t, drv, 1)` (delegation Kill, step-cap capped/unbounded, judge step-cap, naming x2, cancelled delegation); the two PTY runs (TestE2EDelegationRecordSurvivesSIGKILL, TestE2EOutcomeTonePTY) switch auto-collapse off instead. TestE2ENamingPaintsAGeneratedName passed vacuously (its absence check read a folded header) and now opens the group first.
+NOTES (2026-11-20): consequential edit — cmd/apogee/e2e_support_test.go: made necessary by the group of one — openLastRun's doc now says its ⌥↑ lands on a folded group's header, so a caller opens the group first.
+NOTES (2026-11-20): goldens regenerated with -update (popup-approval, popup-ask-{single,multi,typed,free}, t04-step-cap-block, t15-cancelled-delegation, t17-run-view); workflow-stage-view.txt still matches. Observed in them, from items 3 and 5's shape and left as is: a pending ask_user stands as a group of one headed `✦ Ask User ×1 ▼` (the fallback summary, no phrase), and an opened lone delegation's row loses its `· +7 more lines` tail (t15), as a Sub-agents group member's row does.
 
 Depends on items 2, 3 and 5.
 

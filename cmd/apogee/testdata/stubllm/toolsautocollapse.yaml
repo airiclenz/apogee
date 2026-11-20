@@ -1,6 +1,7 @@
 # The upstream the auto-collapse runs talk to (TestE2EToolsAutoCollapse*): two prompts that each make
-# the model issue one batch of groupable calls, four that each make it issue one block of another
-# shape — a lone call, two Sub-agents groups, a Skill group — and one that only talks.
+# the model issue one batch of groupable calls, six that each make it issue one block of another
+# shape — two lone calls, a lone delegation, two Sub-agents groups, a Skill group — and one that
+# only talks.
 #
 #   - "Survey the workspace." issues toolsfold.yaml's three calls of three different tools — Read,
 #     List and Grep — so its umbrella's Group summary is the one e2e_toolsfold_test.go spells
@@ -8,7 +9,13 @@
 #   - "Read the missing file." issues two calls, one of them a read of a path the workspace does not
 #     hold (e2eWorkspace seeds a.txt only), so the umbrella carries one failed call; two calls,
 #     because an umbrella needs at least two (toolSuperGroup's floor).
-#   - "Read the one file." issues ONE read_file call — a lone call, which no umbrella holds.
+#   - "Read the one file." issues ONE read_file call — a lone call, which stands as a group of one.
+#   - "Search for a zebra." issues ONE grep call for a pattern the workspace does not hold — a lone
+#     call whose "No matches found" result tells it from the survey's grep — and its wrap-up is
+#     HELD on the `zebra` gate, so the group of one is shown to fold when that next Turn starts.
+#   - "Delegate one check." issues ONE sub_agent call — a lone delegation, which stands as a
+#     `✦ Sub-agents (1)` group of one; its child answers with a sentence of its own, so its wrap-up
+#     is told from the two-check group's.
 #   - "Delegate two checks." issues two sub_agent calls in one reply, so they stand as one
 #     `✦ Sub-agents (2)` group; each child answers its task with text alone.
 #   - "Fetch two skills." issues two load_skill calls in one reply, so they stand as one
@@ -33,8 +40,18 @@ turns:
         last_message: The user's first request
       repeat: true
       text: Workspace survey
-    # The survey's wrap-up, once its last result (grep's) has come back. The wrap-ups sit AHEAD of
-    # the prompt turns so a request carrying results can never be answered as a fresh request.
+    # The zebra search's wrap-up, once its lone grep has found nothing — held on the `zebra` gate
+    # until the test has seen the group of one fold (TestE2EToolsAutoCollapseRefoldsALoneCall). It
+    # sits AHEAD of the survey's wrap-up, and its `last_message` names a result only a search that
+    # found nothing gives, so the survey's wrap-up is never held. The wrap-ups sit AHEAD of the
+    # prompt turns so a request carrying results can never be answered as a fresh request.
+    - when:
+        tool_result: grep
+        last_message: ^No matches found
+      repeat: true
+      await: zebra
+      text: Nothing turned up.
+    # The survey's wrap-up, once its last result (grep's) has come back.
     - when:
         tool_result: grep
       repeat: true
@@ -63,6 +80,13 @@ turns:
       repeat: true
       await: wings
       text: Both wings inspected.
+    # The lone delegation's wrap-up, once its one child has reported — matched AHEAD of the checks'
+    # wrap-up below on the answer only that child gives.
+    - when:
+        tool_result: sub_agent
+        last_message: Corner looked over
+      repeat: true
+      text: The one check reported.
     # The Sub-agents group's wrap-up, once the second delegation has reported.
     - when:
         tool_result: sub_agent
@@ -97,6 +121,23 @@ turns:
       tool_calls:
         - name: read_file
           arguments: '{"path":"a.txt"}'
+    - when:
+        last_message: ^Search for a zebra
+      repeat: true
+      tool_calls:
+        - name: grep
+          arguments: '{"pattern":"zebra"}'
+    - when:
+        last_message: ^Delegate one check
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Look over the gamma corner","name":"gamma"}'
+    # The lone delegation's CHILD, answering its one task.
+    - when:
+        last_message: ^Look over the gamma corner
+      repeat: true
+      text: Corner looked over.
     - when:
         last_message: ^Delegate two checks
       repeat: true

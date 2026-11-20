@@ -9,7 +9,10 @@ package main
 // and `ui.tools-open`. The collapse reaches past the umbrella too (plan "2026-11-20 - 00", item 6):
 // a settled lone call, a settled `✦ Sub-agents (N)` group and a settled `✦ Skill (N)` group each fold
 // to one line whose star wears the tools header colour, open on a click, and stay open through the
-// next reply. The settledness, the touched exemption and the live apply are pinned in
+// next reply. Every call is a tool group (plan "2026-11-20 - 00" for the group of one): a lone call
+// and a lone delegation are groups of one that fold when the next Turn starts, open on a click and
+// fold again on a second, and with the collapse off a lone call stands as an open group of one.
+// The settledness, the touched exemption and the live apply are pinned in
 // internal/tui; only the binary shows that the config default, the composition root's inversion onto
 // tui.Options and the transcript's seed hold together.
 
@@ -35,6 +38,10 @@ const (
 	autoCollapseMissingWrapUp = "The file is not there."
 	autoCollapseLonePrompt    = "Read the one file."
 	autoCollapseLoneWrapUp    = "The one file is read."
+	autoCollapseZebraPrompt   = "Search for a zebra."
+	autoCollapseZebraWrapUp   = "Nothing turned up."
+	autoCollapseAgentPrompt   = "Delegate one check."
+	autoCollapseAgentWrapUp   = "The one check reported."
 	autoCollapseAgentsPrompt  = "Delegate two checks."
 	autoCollapseAgentsWrapUp  = "Both checks reported."
 	autoCollapseSkillsPrompt  = "Fetch two skills."
@@ -45,6 +52,8 @@ const (
 	autoCollapseNextReply     = "Nothing more to report."
 	// autoCollapseWingsGate is the gate toolsautocollapse.yaml holds the inspections' wrap-up on.
 	autoCollapseWingsGate = "wings"
+	// autoCollapseZebraGate is the gate toolsautocollapse.yaml holds the zebra search's wrap-up on.
+	autoCollapseZebraGate = "zebra"
 	// autoCollapseFailedHeader is the missing-file umbrella's Group summary: one read that failed
 	// and one listing, the failure counted in the summary's outcome half.
 	autoCollapseFailedHeader = "✦ Read 1 file, listed 1 dir · 1 failed"
@@ -65,17 +74,40 @@ const (
 // which frames may answer it.
 var autoCollapseHoldWindow = testtime.Fixed(9 * time.Second)
 
-// heldWingsRequests is the arrival time of every request the inspections' held wrap-up turn
-// answers: a request whose last message is the south wing's delegation result.
-func heldWingsRequests(stub *stubllm.Server) []time.Time {
+// The marks that tell a held wrap-up turn's request apart: the text only the tool result that
+// turn answers carries — the south wing's delegation result, and the zebra search's empty one.
+const (
+	autoCollapseWingsMark = "South wing inspected"
+	autoCollapseZebraMark = "No matches found"
+)
+
+// heldRequests is the arrival time of every request a held wrap-up turn answers: a request whose
+// last message is a tool result carrying mark.
+func heldRequests(stub *stubllm.Server, mark string) []time.Time {
 	var held []time.Time
 	for _, req := range stub.Requests() {
 		if n := len(req.Messages); n > 0 && req.Messages[n-1].Role == "tool" &&
-			strings.Contains(req.Messages[n-1].Content, "South wing inspected") {
+			strings.Contains(req.Messages[n-1].Content, mark) {
 			held = append(held, req.At)
 		}
 	}
 	return held
+}
+
+// awaitFoldedWhileHeld blocks until the wrap-up request answering the result that carries mark has
+// reached the stub and been held — the moment the next Turn has started — and then until the
+// frame carries folded while that one request is still held: no wrap-up on screen, no second
+// attempt at it, and inside the hold window, so the fold a refused request's run end would paint
+// can never answer this wait. The block's calls run first, on the kit's scaled default wait.
+func awaitFoldedWhileHeld(drv *tuitest.Driver, stub *stubllm.Server, mark, wrapUp string, folded umbrellaHeaderMatch) {
+	drv.WaitFor(func() bool { return len(heldRequests(stub, mark)) > 0 },
+		tuitest.Awaiting("the wrap-up request to reach the stub and be held"))
+	drv.WaitFor(func() bool {
+		held := heldRequests(stub, mark)
+		frame := drv.Frame()
+		return len(held) == 1 && time.Since(held[0]) < autoCollapseHoldWindow &&
+			folded.in(frame) && !strings.Contains(frame.String(), wrapUp)
+	}, tuitest.Awaiting(fmt.Sprintf("the %q group header while the wrap-up is held", folded)))
 }
 
 // autoCollapseFailedFolded is the missing-file umbrella folded to its Group summary.
@@ -234,10 +266,10 @@ func TestE2EToolsAutoCollapseOffKeepsTheSizeRule(t *testing.T) {
 	}
 }
 
-// settledBlock is one non-umbrella tool block the collapse folds, as a driven run reaches it: the
-// prompt toolsautocollapse.yaml answers with the block's calls and the wrap-up that settles it, the
-// block's folded line, the header it stands open under once clicked ("" for a lone call, which opens
-// onto its own block and wears no header toggle), and a word only its opened rows paint.
+// settledBlock is one tool group the collapse folds — a group of one or a Sub-agents or Skill
+// group — as a driven run reaches it: the prompt toolsautocollapse.yaml answers with the group's
+// calls and the wrap-up that settles it, the group's folded header, the header it stands open
+// under once clicked, and a word only its opened rows paint.
 type settledBlock struct {
 	prompt string
 	wrapUp string
@@ -282,7 +314,7 @@ func assertFoldsThenStaysOpen(t *testing.T, block settledBlock) {
 	if block.folded.in(frame) || !strings.Contains(frame.String(), block.member) {
 		t.Errorf("the touched block does not stand open on its %q row after the next reply:\n%s", block.member, frame)
 	}
-	if opened := (umbrellaHeaderMatch{text: block.open, glyph: "▼"}); block.open != "" && !opened.in(frame) {
+	if opened := (umbrellaHeaderMatch{text: block.open, glyph: "▼"}); !opened.in(frame) {
 		t.Errorf("the touched block does not stand open as %q after the next reply:\n%s", opened, frame)
 	}
 	quitCleanly(t, sess)
@@ -302,18 +334,118 @@ func assertToolsStar(t *testing.T, f tuitest.Frame, x, y int) {
 	}
 }
 
+// The lone read's group of one in each of its fold states, and the row only its opened block
+// paints.
+var (
+	autoCollapseLoneFolded = umbrellaHeaderMatch{text: autoCollapseLoneHeader, glyph: "▶"}
+	autoCollapseLoneOpen   = umbrellaHeaderMatch{text: autoCollapseLoneHeader, glyph: "▼"}
+)
+
+const (
+	autoCollapseLoneHeader = "✦ Read 1 file"
+	autoCollapseLoneMember = "a.txt"
+)
+
 // TestE2EToolsAutoCollapseFoldsALoneCall is the lone call's fold: a single read, settled by its
-// wrap-up, folds to the Group summary an umbrella of one would paint — `✦ Read 1 file ⋯ ▶` — and a
-// click opens it onto its own block, which stays open.
+// wrap-up, is a group of one that folds to its Group summary — `✦ Read 1 file ⋯ ▶` — and a click
+// opens it under `✦ Read 1 file ⋯ ▼` onto its own block, which stays open.
 func TestE2EToolsAutoCollapseFoldsALoneCall(t *testing.T) {
 	t.Parallel()
 
 	assertFoldsThenStaysOpen(t, settledBlock{
 		prompt: autoCollapseLonePrompt,
 		wrapUp: autoCollapseLoneWrapUp,
-		folded: umbrellaHeaderMatch{text: "✦ Read 1 file", glyph: "▶"},
-		member: "a.txt",
+		folded: autoCollapseLoneFolded,
+		open:   autoCollapseLoneHeader,
+		member: autoCollapseLoneMember,
 	})
+}
+
+// TestE2EToolsAutoCollapseRefoldsALoneCall is the group of one's whole fold cycle: a lone search
+// folds to `✦ Searched 1 pattern ⋯ ▶` as soon as the NEXT Turn starts — the fixture holds the
+// wrap-up on the `zebra` gate, so the fold is seen while no reply has come back — a click on that
+// header opens it onto its own block under `▼`, and a second click folds it again: a lone call
+// re-folds exactly as a group of many does.
+func TestE2EToolsAutoCollapseRefoldsALoneCall(t *testing.T) {
+	t.Parallel()
+
+	stub := stubllm.New(t, loadScript(t, "toolsautocollapse"))
+	drv := tuitest.NewDriver(t, autoCollapseTallSize)
+	sess := launchTUI(t, drv, stub)
+	// Registered after the launch so it runs before the session's own teardown: a run that failed
+	// with the request still held must not wait out the gate on the way down.
+	t.Cleanup(func() { stub.Release(autoCollapseZebraGate) })
+	folded := umbrellaHeaderMatch{text: "✦ Searched 1 pattern", glyph: "▶"}
+	open := umbrellaHeaderMatch{text: folded.text, glyph: "▼"}
+	const member = "┕ zebra"
+
+	submit(drv, autoCollapseZebraPrompt)
+	awaitFoldedWhileHeld(drv, stub, autoCollapseZebraMark, autoCollapseZebraWrapUp, folded)
+	stub.Release(autoCollapseZebraGate)
+	drv.WaitText(autoCollapseZebraWrapUp)
+	waitIdle(drv)
+	if frame := drv.Frame(); !folded.in(frame) || strings.Contains(frame.String(), member) {
+		t.Errorf("the group of one does not stand folded as %q after the wrap-up:\n%s", folded, frame)
+	}
+
+	clickHeader(t, drv, folded)
+	open.await(drv)
+	drv.WaitText(member)
+
+	clickHeader(t, drv, open)
+	folded.await(drv)
+	drv.WaitGone(member)
+	quitCleanly(t, sess)
+}
+
+// TestE2EToolsAutoCollapseFoldsALoneDelegation is the lone delegation's group of one: a single
+// sub_agent call, reported and the wrap-up after it, renders as `✦ Sub-agents (1)` and folds to
+// that header like any Sub-agents group; a click opens it onto its one member row under `▼`, where
+// it stays.
+func TestE2EToolsAutoCollapseFoldsALoneDelegation(t *testing.T) {
+	t.Parallel()
+
+	assertFoldsThenStaysOpen(t, settledBlock{
+		prompt: autoCollapseAgentPrompt,
+		wrapUp: autoCollapseAgentWrapUp,
+		folded: umbrellaHeaderMatch{text: "✦ Sub-agents (1)", glyph: "▶"},
+		open:   "✦ Sub-agents (1)",
+		member: "gamma",
+	})
+}
+
+// TestE2EToolsFoldLoneCallWithAutoCollapseOff is the group of one with the collapse switched off:
+// the settled lone read stands as an OPEN group of one — `✦ Read 1 file ⋯ ▼` over its own block —
+// and a click on that header folds it to `▶`, its block gone.
+func TestE2EToolsFoldLoneCallWithAutoCollapseOff(t *testing.T) {
+	t.Parallel()
+
+	stub := stubllm.New(t, loadScript(t, "toolsautocollapse"))
+	drv := tuitest.NewDriver(t, autoCollapseTallSize)
+	sess := launchTUIConfigured(t, drv, stub, autoCollapseOffConfig)
+	submit(drv, autoCollapseLonePrompt)
+	drv.WaitText(autoCollapseLoneWrapUp)
+	waitIdle(drv)
+
+	autoCollapseLoneOpen.await(drv)
+	drv.WaitText(autoCollapseLoneMember)
+	clickHeader(t, drv, autoCollapseLoneOpen)
+
+	autoCollapseLoneFolded.await(drv)
+	drv.WaitGone(autoCollapseLoneMember)
+	quitCleanly(t, sess)
+}
+
+// clickHeader clicks header's text on the driver's current frame, failing the test when the frame
+// does not carry it in that fold state.
+func clickHeader(t *testing.T, drv *tuitest.Driver, header umbrellaHeaderMatch) {
+	t.Helper()
+
+	x, y, ok := header.find(drv.Frame())
+	if !ok {
+		t.Fatalf("the frame carries no %q header to click:\n%s", header, drv.Frame())
+	}
+	click(drv, x, y)
 }
 
 // TestE2EToolsAutoCollapseFoldsASubAgentGroup is the Sub-agents group's fold: two delegations from
@@ -363,19 +495,7 @@ func TestE2EToolsAutoCollapseFoldsAGroupWhenTheNextTurnStarts(t *testing.T) {
 	folded := umbrellaHeaderMatch{text: "✦ Sub-agents (2)", glyph: "▶"}
 
 	submit(drv, autoCollapseWingsPrompt)
-	// Both children run first, on the kit's scaled default wait: the held request reaching the stub
-	// is the moment the next Turn has started.
-	drv.WaitFor(func() bool { return len(heldWingsRequests(stub)) > 0 },
-		tuitest.Awaiting("the wrap-up request to reach the stub and be held"))
-	// The fold must be seen while that one request is still held: no wrap-up on screen, no second
-	// attempt at it, and inside the hold window — so the fold a refused request's run end would
-	// paint can never answer this wait.
-	drv.WaitFor(func() bool {
-		held := heldWingsRequests(stub)
-		frame := drv.Frame()
-		return len(held) == 1 && time.Since(held[0]) < autoCollapseHoldWindow &&
-			folded.in(frame) && !strings.Contains(frame.String(), autoCollapseWingsWrapUp)
-	}, tuitest.Awaiting(fmt.Sprintf("the %q group header while the wrap-up is held", folded)))
+	awaitFoldedWhileHeld(drv, stub, autoCollapseWingsMark, autoCollapseWingsWrapUp, folded)
 
 	stub.Release(autoCollapseWingsGate)
 	drv.WaitText(autoCollapseWingsWrapUp)

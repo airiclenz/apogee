@@ -85,7 +85,11 @@ func TestE2ENamingPaintsAGeneratedName(t *testing.T) {
 	waitIdle(drv)
 
 	// And the task's first line is GONE from the block, rather than sitting beside the new name: the
-	// head carries one label, and the rename moves it.
+	// head carries one label, and the rename moves it. The settled delegation is a group of one the
+	// default auto-collapse folds to its `✦ Sub-agents (1)` header, which shows neither, so the
+	// group is opened onto its row first and the row is read with the name on it.
+	openSubAgentsGroup(t, drv, 1)
+	drv.WaitText(namingGenerated)
 	flat := flatten(drv.Frame().String())
 	if strings.Contains(flat, flatten(namingTaskHead)) {
 		t.Errorf("the delegation still shows its task first line beside the generated name:\n%s", drv.Frame())
@@ -162,6 +166,9 @@ func TestE2ENamingIsSilentWithAutoTitleOff(t *testing.T) {
 	if calls := namingRequests(stub); len(calls) != 0 {
 		t.Errorf("auto-title is off and the run still made %d naming requests", len(calls))
 	}
+	// The settled delegation is a group of one the default auto-collapse folds to its
+	// `✦ Sub-agents (1)` header, so the group is opened onto its row first.
+	openSubAgentsGroup(t, drv, 1)
 	flat := flatten(drv.Frame().String())
 	if strings.Contains(flat, flatten(namingGenerated)) {
 		t.Errorf("a name was painted with auto-title off:\n%s", drv.Frame())

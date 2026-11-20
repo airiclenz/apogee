@@ -118,8 +118,11 @@ func TestE2EDelegationRecordSurvivesAKill(t *testing.T) {
 		// Step 4 — the program dies where it stands.
 		drv.Kill()
 
-		// Steps 5 to 7 — reopen on the same home and restore the killed session from /sessions.
+		// Steps 5 to 7 — reopen on the same home and restore the killed session from /sessions. The
+		// replayed delegation is a settled group of one the default auto-collapse folds to its
+		// `✦ Sub-agents (1)` header, so the group is opened onto its row first.
 		next := restoreNewestSession(t, sess)
+		openSubAgentsGroup(t, next, 1)
 
 		// Step 8 — every call that was in flight is closed, and closed as what it was.
 		flat := flatten(next.Frame().String())
@@ -186,8 +189,11 @@ func TestE2EDelegationRecordSurvivesAKill(t *testing.T) {
 func TestE2EDelegationRecordSurvivesSIGKILL(t *testing.T) {
 	t.Parallel()
 
+	// The claim is read off the delegation's own row, so auto-collapse, which folds the replayed
+	// group of one to its `✦ Sub-agents (1)` header, is switched off; the relaunch reads the same
+	// home.
 	stub := stubllm.New(t, loadScript(t, "delegate-hang"))
-	sess := launchPTY(t, stub)
+	sess := launchPTYConfigured(t, stub, autoCollapseOffConfig)
 	drv := sess.drv
 
 	submit(drv, delegatePrompt)
@@ -271,7 +277,10 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		// SHORT. Since a run collapses to that single row, it is the whole of what a reader who
 		// never opens the child sees, so the partial-result envelope the engine wraps the answer in
 		// has to reach it; a row reading "done" over a capped run would report a finish that never
-		// happened.
+		// happened. The delegation is a group of one the default auto-collapse folds to its
+		// `✦ Sub-agents (1)` header once the wrap-up settles it, so the group is opened onto that
+		// row first.
+		openSubAgentsGroup(t, drv, 1)
 		collapsed := drv.Frame()
 		if _, _, ok := collapsed.Find("tool calls · " + stepCapSlot); !ok {
 			t.Errorf("the conversation's row does not say the delegation was capped at its cap:\n%s", collapsed)
@@ -463,6 +472,8 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		if got := childRequests(stub, childTask); got != 4 {
 			t.Errorf("the child made %d requests; unbounded, its script runs four turns", got)
 		}
+		// The settled group of one is folded; opened, the block cursor's last stop is the run's row.
+		openSubAgentsGroup(t, drv, 1)
 		openLastRun(drv)
 		drv.WaitQuiet(settled)
 		flat := flatten(scrollTranscript(drv))
@@ -503,6 +514,8 @@ func TestJudgeDelegationStepCap(t *testing.T) {
 
 	submit(drv, capPrompt)
 	drv.WaitText("The delegate handed back what it had.")
+	// The settled group of one is folded; opened, the block cursor's last stop is the run's row.
+	openSubAgentsGroup(t, drv, 1)
 	openLastRun(drv)
 	drv.WaitQuiet(settled)
 
