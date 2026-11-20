@@ -920,7 +920,8 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 		// with a fold of its own, flips its head flag alone (transcript.setBlockFolded):
 		// in-session, written nowhere, leaving every child's state beneath it exactly as it stood for
 		// the reopen. Either of the last two marks the umbrella touched, so it never auto-collapses
-		// under the reader afterwards.
+		// under the reader afterwards. A folded LONE call wears this header too and is only ever
+		// auto-collapsed, so its click is the first arm's: it opens to its standalone block, touched.
 		switch m.transcript.blockFoldBy(target.entry) {
 		case foldBySettled:
 			m.transcript.openBlockAlone(target.entry)
@@ -937,8 +938,9 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 		return m, nil
 	}
 	// A type row, or a member's row or body, inside an umbrella is the reader acting on that
-	// umbrella: it is touched, and auto-collapse leaves it as the reader arranged it
-	// (transcript.markBlockTouched; a block in no umbrella marks nothing).
+	// umbrella: it is touched, and auto-collapse leaves it as the reader arranged it — and so is a
+	// lone call's own row or body (transcript.markBlockTouched; an entry in no foldable block marks
+	// nothing).
 	if target.kind == targetHeader || target.kind == targetType {
 		m.transcript.markBlockTouched(target.entry)
 	}

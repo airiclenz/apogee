@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -296,6 +297,121 @@ func TestAutoCollapseWatchedTurn(t *testing.T) {
 		m.finishWorker(stateIdle)
 		if !m.transcript.blockFolded(head) {
 			t.Error("blockFolded = false once the Turn finished; want true")
+		}
+	})
+}
+
+// loneCallFoldedRow is the line a folded lone Read of one file paints: the Group summary an
+// umbrella of that one call would show, folded.
+var loneCallFoldedRow = umbrellaHeaderRow("Read 1 file", defaultGlyphs.collapsed)
+
+// paintsLine reports whether the plain paint of tr holds line as one whole row.
+func paintsLine(tr *transcript, line string) bool {
+	return slices.Contains(strings.Split(renderPlain(tr, 80), "\n"), line)
+}
+
+// TestAutoCollapseFoldsALoneCall pins the lone groupable call's fold: settled and untouched under
+// auto-collapse it paints its one-call Group summary folded, on narration or at the Turn's end; a
+// live one, and every one with auto-collapse off, paints today's block; a solo call and a task-list
+// card never fold; and a Read a folded small umbrella leaves alone when it dissolves reads none of
+// the umbrella's flags.
+func TestAutoCollapseFoldsALoneCall(t *testing.T) {
+	t.Parallel()
+
+	settle := map[string]func(tr *transcript){
+		"narration": func(tr *transcript) { tr.apply(domain.MessageEvent{Text: "Read it."}) },
+		"turn end":  func(tr *transcript) { tr.setTurnLive(false) },
+	}
+	for name, follow := range settle {
+		t.Run("settles on "+name, func(t *testing.T) {
+			t.Parallel()
+
+			tr := &transcript{}
+			tr.setToolsAutoCollapse(true)
+			tr.setTurnLive(true)
+			tr.paints = newPaintCache()
+			readCall(tr, "c1", "a.go", 1, 5, 0)
+			if tr.blockFolded(0) || paintsLine(tr, loneCallFoldedRow) {
+				t.Fatal("the lone call folded while it is the running Turn's last entry; want it open")
+			}
+
+			follow(tr)
+
+			if got := tr.blockFoldBy(0); got != foldBySettled {
+				t.Errorf("blockFoldBy(0) = %d; want foldBySettled", got)
+			}
+			if !paintsLine(tr, loneCallFoldedRow) {
+				t.Errorf("the settled lone call does not paint %q:\n%s", loneCallFoldedRow, renderPlain(tr, 80))
+			}
+		})
+	}
+
+	t.Run("live stays open", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		tr.setToolsAutoCollapse(true)
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)}})
+		tr.apply(domain.MessageEvent{Text: "Waiting."})
+		if tr.blockFolded(0) || paintsLine(tr, umbrellaHeaderRow("Reading 1 file", defaultGlyphs.collapsed)) {
+			t.Errorf("a lone call still waiting for its result folded:\n%s", renderPlain(tr, 80))
+		}
+	})
+
+	t.Run("auto-collapse off", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		readCall(tr, "c1", "a.go", 1, 5, 0)
+		tr.addNote("saved")
+		if got := tr.blockFoldBy(0); got != foldByNone || paintsLine(tr, loneCallFoldedRow) {
+			t.Errorf("blockFoldBy(0) = %d with auto-collapse off; want foldByNone and today's block:\n%s",
+				got, renderPlain(tr, 80))
+		}
+	})
+
+	for name, place := range map[string]func(tr *transcript){
+		"skill fetch": func(tr *transcript) { skillFetch(tr, "s1", "go style", "# Go style") },
+		"task list": func(tr *transcript) {
+			tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "tl", Tool: "task_list", Arguments: []byte(`{}`)}})
+			tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "tl", Content: "[ ] one"}})
+		},
+		"delegation": func(tr *transcript) {
+			delegationCall(tr, "", "sa1", "scout", "look around", 0)
+			subAgentReport(tr, "sa1", "done", 0)
+		},
+	} {
+		t.Run(name+" never folds", func(t *testing.T) {
+			t.Parallel()
+
+			tr := &transcript{}
+			tr.setToolsAutoCollapse(true)
+			place(tr)
+			tr.addNote("saved")
+			if got := tr.blockFoldBy(0); got != foldByNone {
+				t.Errorf("blockFoldBy(0) = %d on a settled %s; want foldByNone", got, name)
+			}
+		})
+	}
+
+	t.Run("a dissolved umbrella's Read reads none of its flags", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		readCall(tr, "c1", "a.go", 1, 5, 0)
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "q1", Tool: "ask_user", Arguments: []byte(`{"question":"Which file?"}`)}})
+		if len(toolSuperGroup(tr.entries, 0)) == 0 {
+			t.Fatal("setup: the Read and the pending ask_user form no umbrella")
+		}
+		tr.setBlockFolded(0, true)
+
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "q1", Content: "a.go"}})
+
+		if len(toolSuperGroup(tr.entries, 0)) != 0 {
+			t.Fatal("setup: the answered ask_user did not dissolve the umbrella")
+		}
+		if tr.blockFolded(0) || paintsLine(tr, loneCallFoldedRow) {
+			t.Errorf("the Read left alone painted folded off the dissolved umbrella's flag:\n%s", renderPlain(tr, 80))
 		}
 	})
 }

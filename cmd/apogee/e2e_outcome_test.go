@@ -72,9 +72,11 @@ var linesFixture = []string{
 func TestE2EOutcomeSlotsCarryTheToolsVerdict(t *testing.T) {
 	t.Parallel()
 
+	// The subject is the OPEN row — the slot a lone call wears and the body an edit opens onto — so
+	// auto-collapse, which folds a settled lone call to its Group summary, is switched off.
 	stub := stubllm.New(t, loadScript(t, "outcome"))
 	drv := tuitest.NewDriver(t, e2eSize)
-	sess := launchTUI(t, drv, stub)
+	sess := launchTUIConfigured(t, drv, stub, autoCollapseOffConfig)
 	seedLinesFile(t, sess.Workspace())
 
 	// A FAILED delegation is painted red and wears no ✓ — the verdict rides the branch summary

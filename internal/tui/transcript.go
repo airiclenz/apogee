@@ -467,6 +467,12 @@ type entry struct {
 	// Session-only and never persisted for folded's reasons: a replayed umbrella is untouched.
 	foldTouched bool
 	foldOwn     bool
+	// view-only, on a LONE groupable call ([loneFoldable]): the reader has acted on it, which
+	// exempts it from auto-collapse. It is the lone call's own mark rather than foldTouched so a
+	// touch never carries between the two shapes one head can take: a touched lone call that
+	// grows into an umbrella heads an untouched one, and the Read a dissolved umbrella leaves
+	// alone reads none of the umbrella's flags. Session-only and never persisted for folded's reasons.
+	loneTouched bool
 	// view-only fold of the TASK this entry's run was handed, as the run's own view paints it
 	// above the child's work (render.go's rooted paint); never persisted
 	taskExpanded bool
@@ -2244,7 +2250,8 @@ func (t *transcript) umbrellaIsLarge(head int) bool {
 type blockFoldRule int
 
 const (
-	// foldByNone: the index heads no umbrella, and there is no fold to read.
+	// foldByNone: the index heads no foldable block, or heads a lone call that auto-collapse does
+	// not hold folded — either way there is no fold to read.
 	foldByNone blockFoldRule = iota
 	// foldBySettled: auto-collapse is on and the umbrella is settled and untouched — folded.
 	foldBySettled
@@ -2261,8 +2268,11 @@ const (
 // own fold (entry.foldOwn) follows its head flag; everything else — a live umbrella, the
 // last entry of a running Turn, a touched one without a fold of its own, and every umbrella with
 // auto-collapse off — folds by its size, a LARGE one ([transcript.umbrellaIsLarge]) under the shared
-// preference and a SMALL one on its head flag. The paint ([transcript.blockFolded]) and the
-// reader's fold actions both ask it, so the two can never disagree about which fold a header shows.
+// preference and a SMALL one on its head flag. A LONE groupable call ([loneFoldable]) has the
+// settled fold and no other: settled and untouched under auto-collapse it is folded, and otherwise
+// it answers foldByNone, so a head flag a dissolved small umbrella left on it is never read. The
+// paint ([transcript.blockFolded]) and the reader's fold actions both ask it, so the two can never
+// disagree about which fold a header shows.
 func (t *transcript) blockFoldBy(head int) blockFoldRule {
 	end, ok := foldableHead(t.entries, head)
 	if !ok {
@@ -2270,8 +2280,10 @@ func (t *transcript) blockFoldBy(head int) blockFoldRule {
 	}
 	headEntry := t.entries[head]
 	switch {
-	case t.toolsAutoCollapse && !headEntry.foldTouched && t.blockSettled(head, end):
+	case t.toolsAutoCollapse && !*t.touchedMark(head) && t.blockSettled(head, end):
 		return foldBySettled
+	case loneFoldable(t.entries, head):
+		return foldByNone
 	case headEntry.foldTouched && headEntry.foldOwn:
 		return foldByHead
 	case t.umbrellaIsLarge(head):
@@ -2388,23 +2400,19 @@ func (t *transcript) setBlockFolded(head int, folded bool) bool {
 	return true
 }
 
-// foldHeadOf is the head of the Tools umbrella entries[i] belongs to — the head itself, a
-// type row's head or any member — and whether it belongs to one at all. toolSuperGroup is only
-// correct at a block head, so this finds the head the paint's walk would: back over the adjacent
-// groupable calls at i's own depth, which is the stretch toolSuperGroup consumes whole, to its
-// first call, and then asks whether that call heads an umbrella reaching i. A lone groupable call,
-// a solo call and every other kind belong to none (ownGroupAt is the same walk for the groups that
-// fold with their own kind).
+// foldHeadOf is the head of the foldable tool block entries[i] belongs to — a Tools umbrella's
+// head, a type row's head or any member, or a lone groupable call itself — and whether it belongs
+// to one at all. toolSuperGroup is only correct at a block head, so this finds the head the paint's
+// walk would: back over the adjacent groupable calls at i's own depth, which is the stretch
+// toolSuperGroup consumes whole, to its first call, and then asks whether that call heads a
+// foldable block reaching i ([foldableHead]). A solo call and every other kind belong to none
+// (ownGroupAt is the same walk for the groups that fold with their own kind).
 func foldHeadOf(entries []entry, i int) (int, bool) {
 	if sameLabelRun(entries, i) == 0 {
 		return -1, false
 	}
 	first := i
-	for first > 0 {
-		prev := entries[first-1]
-		if prev.kind != entryToolCall || prev.depth != entries[i].depth || !groupable(prev.tool) {
-			break
-		}
+	for first > 0 && extendsGroupableStretch(entries, first) {
 		first--
 	}
 	if end, ok := foldableHead(entries, first); ok && i < end {
@@ -2413,29 +2421,69 @@ func foldHeadOf(entries []entry, i int) (int, bool) {
 	return -1, false
 }
 
+// extendsGroupableStretch reports whether the entry before entries[i] is a groupable call at i's
+// depth — the stretch toolSuperGroup consumes whole — so entries[i] is not where that stretch
+// starts. i must be a groupable call itself, as both callers ask it only of one.
+func extendsGroupableStretch(entries []entry, i int) bool {
+	if i <= 0 || i >= len(entries) {
+		return false
+	}
+	prev := entries[i-1]
+	return prev.kind == entryToolCall && prev.depth == entries[i].depth && groupable(prev.tool)
+}
+
 // foldableHead reports whether entries[head] heads a foldable tool block and, when it does, the
 // index one past the block's last entry. It is the ONE place a tool-block shape is recognised as
-// foldable — [foldHeadOf] and [transcript.blockFoldBy] both dispatch on it — and today it knows the
-// Tools umbrella alone (toolSuperGroup): the adjacent same-depth calls the umbrella folds.
+// foldable — [foldHeadOf] and [transcript.blockFoldBy] both dispatch on it — and it knows the Tools
+// umbrella (toolSuperGroup), the adjacent same-depth calls the umbrella folds, and the LONE
+// groupable call ([loneFoldable]), a block of one entry.
 func foldableHead(entries []entry, head int) (end int, ok bool) {
 	if sup := toolSuperGroup(entries, head); len(sup) > 0 {
 		return head + sup.calls(), true
 	}
+	if loneFoldable(entries, head) {
+		return head + 1, true
+	}
 	return 0, false
 }
 
-// markBlockTouched records that the reader acted on the Tools umbrella entries[index] belongs
+// loneFoldable reports whether entries[head] is a LONE groupable call: a tool call that could be
+// an umbrella's member row (groupable) yet starts no umbrella (toolSuperGroup) and joins none
+// before it — the standalone block the paint falls through to, which auto-collapse folds to the
+// Group summary an umbrella of that one call would paint (render.go's resolveFoldedCall). A solo
+// call (a skill fetch, a delegation, an answered question), a targetless one (a task-list card)
+// and every other kind are not groupable and answer false.
+func loneFoldable(entries []entry, head int) bool {
+	return sameLabelRun(entries, head) == 1 && len(toolSuperGroup(entries, head)) == 0 &&
+		!extendsGroupableStretch(entries, head)
+}
+
+// touchedMark is the mark that exempts the block entries[head] heads from auto-collapse: a lone
+// call's own (entry.loneTouched) and every other block's entry.foldTouched — kept apart so a touch
+// never carries from one shape a head can take into the other. head must head a foldable block.
+func (t *transcript) touchedMark(head int) *bool {
+	if loneFoldable(t.entries, head) {
+		return &t.entries[head].loneTouched
+	}
+	return &t.entries[head].foldTouched
+}
+
+// markBlockTouched records that the reader acted on the foldable tool block entries[index] belongs
 // to ([foldHeadOf]) — opened a type row, a member or its body, or moved its header's fold —
 // which exempts it from auto-collapse from then on ([transcript.blockFoldBy]), and reports
-// whether the mark moved. It leaves the umbrella's fold where it stands: a touched umbrella without
+// whether the mark moved. It leaves the block's fold where it stands: a touched umbrella without
 // a fold of its own folds by its size again, the fold it showed before it settled. An index in no
-// umbrella changes nothing, and the generation moves only on a move, setBlockFolded's rule.
+// foldable block changes nothing, and the generation moves only on a move, setBlockFolded's rule.
 func (t *transcript) markBlockTouched(index int) bool {
 	head, ok := foldHeadOf(t.entries, index)
-	if !ok || t.entries[head].foldTouched {
+	if !ok {
 		return false
 	}
-	t.entries[head].foldTouched = true
+	touched := t.touchedMark(head)
+	if *touched {
+		return false
+	}
+	*touched = true
 	t.touch()
 	return true
 }
@@ -2444,11 +2492,16 @@ func (t *transcript) markBlockTouched(index int) bool {
 // so auto-collapse leaves it be, and holding its own head flag (entry.foldOwn) open, so
 // neither its size nor the shared `ui.tools-open` preference decides it from here on — the
 // reader's open of an auto-collapsed umbrella, which opens that one and writes nothing (ratified
-// "Large-umbrella click"). A further click flips that same head flag (Model.toggleBlockAt). It
-// reports whether anything moved; an index heading no umbrella changes nothing.
+// "Large-umbrella click"). A further click flips that same head flag (Model.toggleBlockAt). A
+// LONE call has no fold but the settled one, so opening it is its touch alone: it paints its
+// standalone block from then on. It reports whether anything moved; an index heading no foldable
+// block changes nothing.
 func (t *transcript) openBlockAlone(head int) bool {
 	if _, ok := foldableHead(t.entries, head); !ok {
 		return false
+	}
+	if loneFoldable(t.entries, head) {
+		return t.markBlockTouched(head)
 	}
 	e := &t.entries[head]
 	if e.foldTouched && e.foldOwn && !e.folded {
@@ -2463,7 +2516,8 @@ func (t *transcript) openBlockAlone(head int) bool {
 // it needs (Model.followPanelTarget): a folded umbrella opens on a fold of its own
 // ([transcript.openBlockAlone]) — never the shared toggle, whose flip writes `ui.tools-open` —
 // an open one is marked touched, and the TYPE ROW holding the member opens, since a closed type row
-// paints no member line for the jump to land on. An index in no umbrella changes nothing.
+// paints no member line for the jump to land on. A folded lone call opens the same way and has no
+// type row to open. An index in no foldable block changes nothing.
 func (t *transcript) revealBlockMember(index int) {
 	head, ok := foldHeadOf(t.entries, index)
 	if !ok {

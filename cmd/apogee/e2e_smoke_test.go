@@ -31,6 +31,13 @@ import (
 // [testtime.Fixed]: the length is the claim, and scaling it would change what "final" means.
 var settled = testtime.Fixed(250 * time.Millisecond)
 
+// The smoke script's two lone calls as the default config paints them once a reply settles each:
+// folded to the Group summary a one-call Tools umbrella would show (ui.tools-auto-collapse).
+const (
+	smokeListFolded  = "Listed 1 dir"
+	smokeWriteFolded = "Edited 1 file"
+)
+
 // TestE2ESmokeInProcess walks checklist T-25 steps 1–13 through the real composition: the root
 // command, the config resolution, the Agent, the tool layer, the approval gate, the session store
 // and the renderer — everything but the terminal, which is the emulator.
@@ -69,11 +76,11 @@ func TestE2ESmokeInProcess(t *testing.T) {
 
 	// Step 2 — a prompt, a streamed reply, and the tool block the model's call produced.
 	typeSubmit(drv, "What files are in this workspace?")
-	// The block is asserted the way the transcript paints it — a rendered label and an outcome slot
-	// carrying the tool's own data — not the wire's tool name, which the transcript never shows.
-	drv.WaitText("List")
-	drv.WaitText("entries")
+	// The block is asserted the way the transcript paints it once the reply has settled it — under
+	// the default `ui.tools-auto-collapse` the lone call folds to its one-call Group summary — not
+	// the wire's tool name, which the transcript never shows.
 	drv.WaitText("The workspace holds one file")
+	drv.WaitText(smokeListFolded)
 
 	// Step 3 — a write asks first. The approval pane offers all four decisions.
 	typeSubmit(drv, `Append a line saying "smoke test" to a.txt.`)
@@ -220,8 +227,8 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	for _, want := range []string{
 		"What files are in this workspace?",
 		"Append a line saying",
-		"entries",
-		"Write",
+		smokeListFolded,
+		smokeWriteFolded,
 	} {
 		if !strings.Contains(restored, want) {
 			t.Errorf("the restored transcript is missing %q:\n%s", want, restored)
@@ -274,8 +281,8 @@ func TestE2ESmokePTY(t *testing.T) {
 
 	// Step 2 — a prompt, the tool call it produces, and the streamed reply after it.
 	typeSubmit(drv, "What files are in this workspace?")
-	drv.WaitText("entries")
 	drv.WaitText("The workspace holds one file")
+	drv.WaitText(smokeListFolded)
 
 	// Steps 3 and 4 — the write asks first, "a" allows it, and the file on disk carries the line.
 	typeSubmit(drv, `Append a line saying "smoke test" to a.txt.`)

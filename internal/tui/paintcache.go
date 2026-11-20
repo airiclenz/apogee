@@ -68,7 +68,7 @@ type blockShape int
 const (
 	shapeEntry         blockShape = iota // renderEntryLines — one entry, one block
 	shapeSubAgentRun                     // renderSubAgentRun — the call plus the run nested under it
-	shapeToolSuper                       // renderSuperGroup — the umbrella over a run of 2+ groupable calls
+	shapeToolSuper                       // renderSuperGroup — the umbrella over a run of 2+ groupable calls, or a folded lone call
 	shapeSubAgentGroup                   // renderSubAgentGroup — the folded list of adjacent delegations
 	shapeSkillGroup                      // renderSubAgentGroup — the folded list of adjacent skill fetches
 )

@@ -160,17 +160,22 @@ func TestE2EHostileToolResultsKeepOneRowPerEntry(t *testing.T) {
 	red := ansiRed(t)
 
 	drv.WaitText("Send a message")
+	// Each step waits on the wrap-up the result earns and then on the call's folded line: under the
+	// default `ui.tools-auto-collapse` the lone call, settled by that wrap-up, paints its one-call
+	// Group summary rather than its outcome slot.
 	for _, step := range []struct {
 		prompt string
-		slot   string
+		reply  string
+		folded string
 		lines  int
 	}{
-		{"List the workspace root", "6 entries", 7},    // the header line plus six entries
-		{"Find the text files", "4 files", 5},          // the header line plus four hits
-		{"Search the workspace for hello", "1 hit", 2}, // the header line plus one match
+		{"List the workspace root", "That is the whole directory.", "Listed 1 dir", 7},                 // the header line plus six entries
+		{"Find the text files", "Those are the text files.", "Searched 1 pattern", 5},                  // the header line plus four hits
+		{"Search the workspace for hello", "That is where the word appears.", "Searched 1 pattern", 2}, // the header line plus one match
 	} {
 		submit(drv, step.prompt)
-		drv.WaitText(step.slot)
+		drv.WaitText(step.reply)
+		drv.WaitText(step.folded)
 		drv.WaitQuiet(settled)
 
 		result := lastToolResult(t, stub)

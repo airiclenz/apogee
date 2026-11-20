@@ -79,7 +79,14 @@ internal/tui/mouse.go — toggleBlockAt; internal/tui/sidepanel.go — followPan
 - `grep -rn 'umbrellaFoldBy\|umbrellaSettled\|markUmbrellaTouched\|umbrellaTouched\|umbrellaOwnFold' internal/ cmd/` → empty
 **Commit:** `refactor(tui): generalise the umbrella fold to a tool-block fold`
 
-## 3. Fold a settled, untouched lone tool call to its Group summary
+## 3. Fold a settled, untouched lone tool call to its Group summary — ✅ DONE (2026-11-20)
+
+NOTES (2026-11-20): a lone call's touch is its own entry flag (`loneTouched`, read through `transcript.touchedMark`) rather than `foldTouched`, so a touched lone call that grows into an umbrella heads an untouched one and a Read a dissolved umbrella leaves alone reads none of the umbrella's flags; `blockFoldBy` answers `foldByNone` for a lone head that is not auto-collapsed.
+NOTES (2026-11-20): `foldableHead` recognises the lone call through a new `loneFoldable` helper; the walk-back predicate `foldHeadOf` used is now `extendsGroupableStretch`, shared with `loneFoldable` (same rule, one statement).
+NOTES (2026-11-20): the folded lone call is drawn by `renderSuperGroup` under a shut fold with a one-call run (render.go `resolveFoldedCall`, shape `shapeToolSuper`, fold in the paint key); its open state is today's `shapeEntry` block.
+NOTES (2026-11-20): consequential edit — internal/tui/paintcache.go: made necessary by the folded lone call painting under shapeToolSuper (its shape comment named the umbrella only)
+NOTES (2026-11-20): cmd/apogee/e2e_outcome_test.go (TestE2EOutcomeSlotsCarryTheToolsVerdict) launches with `ui.tools-auto-collapse: false`: its subject is the open row's slot and the edit bodies; the hostile and smoke tests follow the folded line instead.
+NOTES (2026-11-20): TestMCPLoginFetch_ContextCancel_ReturnsJoinsInputAndFreesPort failed once in the first whole-package run on "bind: address already in use" for its callback port — an environmental port collision, unrelated to this item.
 
 Depends on item 2.
 **What:**
