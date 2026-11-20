@@ -2257,7 +2257,8 @@ const (
 	// foldByNone: the index heads no foldable block, or heads a lone call that auto-collapse does
 	// not hold folded — either way there is no fold to read.
 	foldByNone blockFoldRule = iota
-	// foldBySettled: auto-collapse is on and the umbrella is settled and untouched — folded.
+	// foldBySettled: auto-collapse is on and the block — an umbrella, a lone groupable call, or a
+	// Sub-agent or Skill group — is settled and untouched — folded.
 	foldBySettled
 	// foldByShared: a LARGE umbrella under the size rule — folded exactly when !toolsOpen.
 	foldByShared
@@ -2303,7 +2304,7 @@ func (t *transcript) blockFoldBy(head int) blockFoldRule {
 // rule [transcript.blockFoldBy] names answers it: a settled, untouched block under
 // auto-collapse is folded; otherwise a LARGE one is folded exactly when the shared preference is
 // shut (!toolsOpen), its own head flag ignored, and a SMALL one — or a touched one with a fold of
-// its own — exactly when its head's flag says so (entry.blockFolded). A small umbrella that grows
+// its own — exactly when its head's flag says so (entry.folded). A small umbrella that grows
 // past the threshold therefore follows the preference from that append on, whatever its flag holds,
 // and follows the flag again if the threshold is raised back over it. An index heading no umbrella
 // answers false.
