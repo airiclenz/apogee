@@ -186,13 +186,15 @@ written; the run itself is in the record, and one click opens it again. The
 exception is the task-list card: its fold is a preference rather than view
 state, remembered in [`ui.task-list-open`](configuration.md#the-terminal-ui--ui),
 so a resumed session paints every card the way you last left it, not the way
-the record found it. Every `✦ Tools` umbrella in a resumed session has
-finished, so with [`ui.tools-auto-collapse`](configuration.md#the-terminal-ui--ui)
-on (the default) each one is folded to its one summary line, whatever its
-size; which umbrellas you had opened is not remembered. With it off, an
-umbrella with more type rows than `ui.tools-fold-over` follows
+the record found it. Every `✦ Tools` umbrella, lone tool call and
+`✦ Sub-agents (N)` or `✦ Skill (N)` group in a resumed session has finished,
+so with [`ui.tools-auto-collapse`](configuration.md#the-terminal-ui--ui) on
+(the default) each one is folded to its one line — an umbrella or a lone call
+to its summary, whatever its size, a group to its header; which ones you had
+opened is not remembered. With it off, an umbrella with more type rows than
+`ui.tools-fold-over` follows
 [`ui.tools-open`](configuration.md#the-terminal-ui--ui), the way you last left
-it, and a smaller one starts open.
+it, a smaller one, a lone call and a group start open.
 
 
 ## Watching a live session

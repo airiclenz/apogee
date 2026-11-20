@@ -1237,16 +1237,22 @@ folds on its own, for this session only: nothing is written, and it starts the n
 `ui.tools-open` (each still folds on its own from its header), and a value below zero is refused —
 in `/settings` at the keystroke, in the file at startup.
 
-`ui.tools-auto-collapse` — **on by default** — folds a *settled* umbrella to its one summary
-line, whatever its size and whatever `ui.tools-open` says. An umbrella is settled once all its
-calls have finished and the conversation has moved past it — the model's next reply, a note or
-your next message comes after it — or the Turn has ended; one still running, or the last thing a
-running Turn has done, stays as it is. An umbrella you have touched — clicked its header, or opened
-one of its tools — is left alone from then on. Clicking a settled umbrella opens that one only, for
-this session: nothing is written, not even `ui.tools-open`, and a resumed session shows every
-umbrella folded again. Turn it off and every umbrella follows `ui.tools-open` and
-`ui.tools-fold-over` alone; the summary header stays either way. The row shows in `/settings`, and
-a hand-edit applies live.
+`ui.tools-auto-collapse` — **on by default** — folds finished tool work to one line: a
+*settled* umbrella to its summary line, whatever its size and whatever `ui.tools-open` says; a
+settled lone tool call to the summary an umbrella of that one call would show (`✦ Read 1 file`,
+`✦ Ran 1 command`); and a settled `✦ Sub-agents (N)` or `✦ Skill (N)` group to its header line. A
+block is settled once everything in it has finished — every call returned, every sub-agent
+reported — and the conversation has moved past it — the model's next reply, a note or your next
+message comes after it — or the Turn has ended; one still running, or the last thing a running
+Turn has done, stays as it is. A block you have touched — clicked its header, or opened one of its
+tools or members — is left alone from then on. Clicking a folded one opens that one only, for this
+session: a lone call opens to the block it always showed and stays open, and nothing is written,
+not even `ui.tools-open`, so a resumed session shows every such block folded again. Turn it off and
+every umbrella follows `ui.tools-open` and `ui.tools-fold-over` alone and a lone call stays open;
+the summary header stays either way. A Sub-agent or Skill group's header folds the group from a
+click whether this is on or off (`▼` open, `▶` folded), for the session only. A lone skill fetch,
+a lone sub-agent and a task-list card never fold this way. The row shows in `/settings`, and a
+hand-edit applies live.
 
 `ui.pointer-shapes` — **off by default** — lets apogee change the mouse pointer to show what a
 click does where it rests: an I-beam over the input box and the transcript's text, a hand over a

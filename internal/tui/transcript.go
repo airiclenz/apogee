@@ -74,8 +74,8 @@ type transcript struct {
 	taskListOpen bool
 	// toolsOpen is the shared fold of every LARGE Tools umbrella — one with more type rows than
 	// toolsFoldOver ([transcript.umbrellaIsLarge]) — that auto-collapse is not holding folded
-	// ([transcript.blockFoldBy]: a settled, untouched umbrella folds first, whatever this field
-	// says), whose record is the `ui.tools-open` key and
+	// ([transcript.blockFoldBy]: auto-collapse folds a settled, untouched one first, whatever this
+	// field says), whose record is the `ui.tools-open` key and
 	// whose fact is nothing but this field: a large umbrella keeps no fold of its own, so the
 	// preference is read at paint (render.go) rather than seeded into an entry; a SMALL one folds on
 	// its head entry's own flag instead (entry.folded, [transcript.blockFolded]). It
@@ -91,10 +91,12 @@ type transcript struct {
 	// paint input and preserved across reset exactly as toolsOpen is; the Model seeds it at
 	// construction and moves it through [transcript.setToolsFoldOver].
 	toolsFoldOver int
-	// toolsAutoCollapse is the `ui.tools-auto-collapse` switch: on, a SETTLED umbrella the reader
-	// has not touched stands folded to its Group summary row whatever its size and toolsOpen say
-	// ([transcript.blockFoldBy]); off, every umbrella folds by its size alone, exactly as before
-	// the switch existed. The zero value is OFF, which is what a hand-built test transcript gets, so
+	// toolsAutoCollapse is the `ui.tools-auto-collapse` switch: on, a SETTLED foldable block the
+	// reader has not touched stands folded — a Tools umbrella to its Group summary row whatever its
+	// size and toolsOpen say, a lone groupable call to the Group summary of one, a Sub-agent or
+	// Skill group to its header ([transcript.blockFoldBy]); off, every umbrella folds by its size
+	// alone, a lone call stays open and a group folds on its head flag alone, exactly as before the
+	// switch existed. The zero value is OFF, which is what a hand-built test transcript gets, so
 	// no test paint written before the rule moves. It is a paint input preserved across reset for
 	// toolsOpen's reason, and moves through [transcript.setToolsAutoCollapse].
 	toolsAutoCollapse bool
@@ -393,8 +395,8 @@ type parkedText struct {
 // or open on its type rows. It is the small umbrella's counterpart to the shared preference a LARGE
 // one follows (transcript.toolsOpen), and a per-entry flag rather than a shared one because the
 // ratified design gives each small umbrella its own session-only fold — never written to config,
-// never serialized, open again every session. Under auto-collapse a settled, untouched umbrella
-// stands folded whatever either says; otherwise which of the two an umbrella reads is its size's
+// never serialized, open again every session. Under auto-collapse an umbrella that is settled and
+// untouched stands folded whatever either says; otherwise which of the two an umbrella reads is its size's
 // answer ([transcript.blockFoldBy]) — save that a touched umbrella given a fold of its own
 // (foldOwn) reads this flag at any size: a small umbrella that grows large follows the
 // preference from then on and this flag is ignored while it is. It is deliberately NOT packed into
@@ -2370,7 +2372,8 @@ func (e entry) reported() bool {
 
 // setToolsAutoCollapse moves the auto-collapse switch ([transcript.toolsAutoCollapse]) and reports
 // whether it moved. It touches only on a move, so a settings apply that leaves it where it stood
-// repaints nothing; a move redraws every settled umbrella through its paint key (paintKey.folded).
+// repaints nothing; a move redraws every settled block — umbrella, lone call, Sub-agent or Skill
+// group — through its paint key (paintKey.folded).
 func (t *transcript) setToolsAutoCollapse(on bool) bool {
 	if t.toolsAutoCollapse == on {
 		return false

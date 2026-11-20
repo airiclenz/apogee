@@ -1155,11 +1155,14 @@ update-check: true
 # no umbrella is ever large, so none follows `tools-open`.
 # Defaults: `tools-open: false`, `tools-fold-over: 5`.
 #
-# `tools-auto-collapse` folds a *settled* umbrella — every call in it finished, and the conversation
-# moved past it or its Turn over — to its one summary line, whatever its size and `tools-open`,
-# until you click it or open one of its tools; opening it then is for this session only and writes
-# nothing.
-# `false` leaves every umbrella to `tools-open` and `tools-fold-over` alone. Default on.
+# `tools-auto-collapse` folds *settled* tool work — everything in it finished, and the conversation
+# moved past it or its Turn over — to one line: an umbrella to its summary line, whatever its size
+# and `tools-open`, a lone tool call to the summary an umbrella of that one call would show
+# ("Read 1 file"), a `✦ Sub-agents (N)` or `✦ Skill (N)` group to its header line — until you click
+# it or open one of its tools or members; opening it then is for this session only and writes
+# nothing. A group's header folds it from a click whether this is on or off.
+# `false` leaves every umbrella to `tools-open` and `tools-fold-over` alone, and a lone call open.
+# Default on.
 #
 # `pointer-shapes` lets apogee change your mouse pointer to show what a click does where it rests:
 # an I-beam over the input box and the transcript's text, a hand over a row or a block a click
@@ -1230,7 +1233,7 @@ ui:
   task-list-open: true   # false = task-list cards start folded; toggling a card writes this back
   tools-open: false      # true = large Tools umbrellas start open; toggling one writes this back
   tools-fold-over: 5     # type rows an umbrella may show before it folds; 0 = never folds
-  tools-auto-collapse: true  # false = settled Tools umbrellas fold by tools-open / tools-fold-over alone
+  tools-auto-collapse: true  # false = finished tool work folds only by tools-open / tools-fold-over or a click
   pointer-shapes: false  # true = text / hand mouse pointer on hover, on a terminal that answers OSC 22
   notify: bell           # off | bell | osc9 | both — how the terminal is told apogee waits on you
   git-fetch: true        # false = no background git fetch; the footer's ↓ counts only what is fetched

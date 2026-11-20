@@ -979,7 +979,7 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 	// whole umbrella and spanFlags packs both levels — a member's expanded at bit 0 and a run
 	// head's typeExpanded at bit 2 — so opening either level is a different key and a fresh
 	// paint (paintcache.go). Its FOLD is the one resolution blockFoldBy states: under
-	// auto-collapse a settled, untouched umbrella is folded first; otherwise its size decides — a
+	// auto-collapse a settled and untouched one is folded first; otherwise its size decides — a
 	// large umbrella, more type rows than the threshold (umbrellaIsLarge), folds to its header line
 	// under the one shared preference (toolsOpen), a small one on its head entry's own flag — and the
 	// resolved answer rides the block into the key (paintKey.large/folded), so a settle (a later

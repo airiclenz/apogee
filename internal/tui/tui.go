@@ -1384,7 +1384,8 @@ type Options struct {
 	// reaches no model; TaskListOpen seeds every task-list card's fold and ToolsOpen/ToolsFoldOver
 	// every large Tools umbrella's ([Model.toggleTaskListFold], [Model.toggleToolsFold]), each written
 	// back through [SettingsHost] silently when a card is toggled (ADR 0035 addendum), while
-	// ToolsAutoCollapse folds a settled, untouched umbrella to its Group summary. A `/settings`
+	// ToolsAutoCollapse folds settled, untouched tool work to one row — a Tools umbrella or a lone
+	// groupable call to its Group summary, a Sub-agent or Skill group to its header. A `/settings`
 	// edit or a hand-edited file moves any of them mid-session (ADR 0037, settingsApplyLocal).
 	UI domain.UIPrefs
 

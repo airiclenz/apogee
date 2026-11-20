@@ -2916,7 +2916,8 @@ type uiConfig struct {
 	// stall-after: yaml's own whole-number parse is the only one there is, and the one judgement
 	// (below zero) is UIPrefs.Validate's.
 	ToolsFoldOver *WholeCount `yaml:"tools-fold-over"`
-	// ToolsAutoCollapse is whether a settled, untouched Tools umbrella folds to its Group summary.
+	// ToolsAutoCollapse is whether settled, untouched tool work folds to one row: a Tools umbrella or
+	// a lone groupable call to its Group summary, a Sub-agent or Skill group to its header.
 	// A pointer for SkillSuggestions's reason: the default is TRUE, so it is the explicit `false`
 	// that must be distinguishable from an absent key.
 	ToolsAutoCollapse *bool `yaml:"tools-auto-collapse"`

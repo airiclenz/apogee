@@ -1025,8 +1025,14 @@ on (the default), a **settled** umbrella — every call returned, and a later en
 after it or its run over — that the reader has not **touched** (clicked, or opened anything inside)
 is folded whatever its size and whatever `ui.tools-open` says; a click on it opens that one alone
 and writes nothing, and touched is session-only view state, so a resumed session shows every
-settled umbrella collapsed. Otherwise — a live umbrella, a touched one, or auto-collapse off — size
-decides whose state the flip is. A **large** umbrella — more type rows than `ui.tools-fold-over`
+umbrella collapsed. The same rule folds three more tool blocks (2026-11-20): a settled, untouched
+LONE groupable call folds to the Group summary an umbrella of that one call would wear (`✦ Read 1
+file ⋯ ▶`) and opens, on a click, to the block it always painted, touched and staying open; and a
+settled, untouched `✦ Sub-agents (N)` or `✦ Skill (N)` group folds to its header line. A group's
+header is a fold whatever auto-collapse says — a leader row running to `▼`/`▶`, flipped by a click
+or `enter` on a session-only flag of its own, live or settled — and an auto-collapsed one opens alone,
+writing nothing (`docs/layout/tool-layout.md`, "Fold states and interaction"). Otherwise — a live
+umbrella, a touched one, or auto-collapse off — size decides whose state the flip is. A **large** umbrella — more type rows than `ui.tools-fold-over`
 (default `5`; `0` makes none large), whatever the Turn is doing and wherever the umbrella sits, in
 the transcript or a run view, live or replayed — shares ONE state with every large umbrella in the
 transcript, the gesture on any of them toggling them all, remembered across sessions in

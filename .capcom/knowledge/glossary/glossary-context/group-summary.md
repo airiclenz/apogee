@@ -6,10 +6,13 @@ refs: [docs/layout/tool-layout.md, internal/tui/groupsummary.go]
 **Group summary**:
 The one-line **header of a `✦ Tools` umbrella**, saying in plain words what the umbrella's calls
 did: `✦ Read 3 files, ran 4 commands, edited 2 files +18 −5 · 1 failed`. Every umbrella wears it,
-open, folded, running or settled, and it is the whole row a settled umbrella folds to under
-`ui.tools-auto-collapse` (`adr-0035-amend-1118`). It reads, in order: **verb phrases**, one per
-kind of work in the order each kind first ran, a phrase being what a tool's presenter row names
-(`read_file` "read N files"; `grep` and `find_files` one "searched N patterns"; the four writing
+open, folded, running or settled, and it is the whole row an umbrella folds to once it is settled
+and untouched under `ui.tools-auto-collapse` (`adr-0035-amend-1118`) — and the row a settled,
+untouched LONE groupable tool call folds to as well, the summary an umbrella of that one call would
+wear (`✦ Read 1 file`, `✦ Ran 1 command`; `adr-0035-amend-1120`). A Sub-agent or Skill group,
+which auto-collapse folds too, folds to its own `✦ Sub-agents (N)` / `✦ Skill (N)` header, not to
+a Group summary. It reads, in order: **verb phrases**, one per kind of work in the order each kind
+first ran, a phrase being what a tool's presenter row names (`read_file` "read N files"; `grep` and `find_files` one "searched N patterns"; the four writing
 tools one "edited N files", never "created"; the git readers "checked git"), counting the distinct
 paths where the phrase says so (three reads of one file read 1 file), and taking its live verb
 (`Reading 2 files`) while one of its calls is in flight; a tool with no phrase, an MCP tool among

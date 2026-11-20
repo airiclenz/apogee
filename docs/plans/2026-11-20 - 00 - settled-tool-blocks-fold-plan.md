@@ -167,7 +167,12 @@ cmd/apogee/e2e_delegation_test.go — assertNoErrorTone (SameColor/StyleRuns pre
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'E2EToolsAutoCollapse' ./cmd/apogee/`
 **Commit:** `test(e2e): drive auto-collapse of lone calls and Sub-agent and Skill groups`
 
-## 7. State the widened rule in docs, ADR and settings text
+## 7. State the widened rule in docs, ADR and settings text — ✅ DONE (2026-11-20)
+
+NOTES (2026-11-20): re-derived from the assumption that the item's Files list names every site the scope grep finds — the Acceptance wording grep also hit umbrella-only comments in internal/tui/render.go (resolveBlock), blocktarget.go (targetUmbrella), toolblock.go (umbrella header doc) and settingsapply.go (UIKeyToolsAutoCollapse apply); each was reworded (comment text only).
+NOTES (2026-11-20): docs/layout/tool-layout.md's heading "Grouped tools folded (settled umbrella)" is renamed "Grouped tools folded (auto-collapsed umbrella)" so the Acceptance wording grep comes back clean; no link or test names the old heading (the closed issue `settled-tool-group-clutter` cites it as historical text). New sections: "Single tool folded (auto-collapsed lone call)", a group-header fold bullet plus folded sketches under Grouped Sub-agents and Grouped Skills, and three Fold-states bullets (group fold, lone call fold, star colour); "first of three" header-alone blocks became "first of four".
+NOTES (2026-11-20): the Acceptance wording grep's only remaining hits are in the active plan document itself (identifiers such as `umbrellaSettled, umbrellaHeadOf` matching case-insensitively, and its own section citations), which this item may not edit.
+NOTES (2026-11-20): `adr-0035-amend-1118`'s own Scope paragraph is left as written (historical); the supersession is named on ADR 0035's Status line and the amend-1120 Note is added to its reading list. No CHANGELOG entry: the behaviour entries came with items 3–5.
 
 Depends on item 5.
 **What:**
