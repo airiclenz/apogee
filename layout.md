@@ -39,17 +39,18 @@
   the answer's own leading and trailing blank lines are trimmed off. Below there is
   the layout of a tool call.
 
+✦ Read 1 file ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
 ✦ Read
   ┕ main.go ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 154 lines
 
-✦ Read (3)
-  ┝ README.md ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 154 lines
-  ┝ TODO.md ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 408 lines
-  ┕ AGENTS.md ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 8 lines
+✦ Read 3 files ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+  ┕ Read (3) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 570 lines ▶
 
+✦ Ran 1 command ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
 ✦ Terminal
   ┕ go test ./... ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ exit 0 · +3 more lines ▶
 
+✦ Diff Preview ×1 ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
 ✦ Diff Preview
   ┕ main.go ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ +2 −2 ▼
     1 - a code line that has been removed
@@ -58,7 +59,7 @@
     2 + another new code line
                                                                             see less…
 
-✦ Sub-agent
+✦ Sub-agents (1) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
   ┕ survey the tests ✓ ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 2 tool calls · 12k/32k · Found 4 gaps ▶
 
 ✦ This is the last message from the LLM. There must always be one empty line between
@@ -806,9 +807,10 @@ so the shell returns to the screen it had.
 **A tool block's shape is specced in [`docs/layout/tool-layout.md`](docs/layout/tool-layout.md),
 and that file is canon.** It draws every row of one — the target on the left, the dotted leader, the
 outcome slot flush against the row's right edge, the state indicator past it — and it rules on
-everything that follows from that shape: what a run of 2+ groupable calls folds into — the
-**super-group** (the `✦ Tools` umbrella), one type row per run of a single tool, whether that is one
-run or several of different tools — the two fold states a call has and the
+everything that follows from that shape: what groupable calls fold into — the **super-group** (the
+`✦ Tools` umbrella), one type row per run of a single tool, whether that is one run or several of
+different tools, and a call standing alone too, as a **group of one** over its own block — the two
+fold states a call has and the
 `see less…` footer that closes an open one, what a click and the keyboard block cursor reach, the
 order things give way in when a row runs out of room, and the per-tool table of labels, collapsed
 detail, outcome stat and expanded rows. Where that file and this one disagree about a tool block,
@@ -816,15 +818,17 @@ detail, outcome stat and expanded rows. Where that file and this one disagree ab
 the colour roles, how a path is spelled, what a body may say, and the blank line between blocks.
 
 **The label.** A tool header is `✦ ` plus the tool's label, **and nothing else — never a target**;
-the super-group's umbrella header is `✦ Tools` plus how its calls divide by tool kind,
-`(3 Read, 4 Terminal)`, on a leader row to the fold's glyph, and the member count `(N)` belongs to a **type row** inside it rather than to a header. That holds for every block
-alike: a lone call, a call still in flight, and the stray-result `result` header. The target always
+the super-group's umbrella header is `✦ ` plus its **Group summary** (`Read 3 files, ran 4
+commands`), on a leader row to the fold's glyph, and the member count `(N)` belongs to a **type row** inside it rather than to a header. That holds for every block
+alike: the call's own block under a group of one's header, a call still in flight, and the
+stray-result `result` header. The target always
 leads the first branch line instead, so the block reshapes around its targets rather than under
 them. The label carries no brackets and is rendered **bold in the scheme's `tool-header` role**
 (`#aea580` under `dark`) — a role of its own rather than the `code` role inline code and fenced
 blocks carry, so the blocks apogee *ran* read apart from the code it *prints*, and either tone can
 be retuned without dragging the other along. The leading `✦` takes that same colour, not bold, on
-every tool block's header — an umbrella, a lone call, a Sub-agents or Skill group — while the text
+every tool block's header — an umbrella (a group of one included), a call's own block, a Sub-agents
+or Skill group — while the text
 after it keeps its own tone; the live star's bare cell and a Firing's `⟳` are left as they were. The styling is uniform too: a known friendly label
 ("Read"), an unknown tool's label, and `result` all look the same. An unknown tool's label is
 its raw name, except an MCP tool's: its raw name `<server>__<tool>` reads `<server> · <tool>`
@@ -929,7 +933,9 @@ the second and third are the own-kind half: the answered `Ask User` block, which
 record of an exchange and reads as a card; the `Sub-agent` call, which heads a whole delegation and,
 per the canon spec, groups with other sub-agent calls alone rather than joining a super-group; and
 the `Skill` fetch, which groups with other fetches under `✦ Skill (N)` for the same reason and no
-other (*Grouped Skills*, `docs/layout/tool-layout.md`). That flag is the one deliberate
+other (*Grouped Skills*, `docs/layout/tool-layout.md`). Neither stands outside a group when it is
+the only one: a delegation alone is a `✦ Sub-agents (1)` group and a fetch alone a `✦ Skill (1)`
+group, exactly as a groupable call alone is a `✦ Tools` group of one (2026-11-20). That flag is the one deliberate
 never-group switch — it replaces an older rule that kept the first two out by accident, through the
 bodies they happen to carry, and so also covers the sub-agent head that got no span at all because
 the delegation was refused at the depth bound. A Firing is not this session's tool call and never
@@ -1028,10 +1034,14 @@ or its run over (2026-11-20; `docs/layout/tool-layout.md`, "Fold states and inte
 the reader has not **touched** (clicked, or opened anything inside)
 is folded whatever its size and whatever `ui.tools-open` says; a click on it opens that one alone
 and writes nothing, and touched is session-only view state, so a resumed session shows every
-umbrella collapsed. The same rule folds three more tool blocks (2026-11-20): a settled, untouched
-LONE groupable call folds to the Group summary an umbrella of that one call would wear (`✦ Read 1
-file ⋯ ▶`) and opens, on a click, to the block it always painted, touched and staying open; and a
-settled, untouched `✦ Sub-agents (N)` or `✦ Skill (N)` group folds to its header line. A group's
+umbrella collapsed. Every tool call is a tool group (2026-11-20, `adr-0035-amend-1120c`): a
+groupable call standing alone is a **group of one**, the umbrella of that one call, its header the
+Group summary that call earns (`✦ Read 1 file ⋯ ▼`) over the call's own block, with no type row;
+it folds to that header line, opens and re-folds from it by every rule an umbrella's fold follows, live or settled,
+auto-collapse on or off. The same rule folds a settled, untouched `✦ Sub-agents (N)` or
+`✦ Skill (N)` group to its header line, a delegation or fetch standing alone being such a group
+of one (`✦ Sub-agents (1)`, `✦ Skill (1)`). A group the reader has touched stays open, as the
+reader left it, when the next Turn's call grows it, and auto-collapse never folds it again. A group's
 header is a fold whatever auto-collapse says — a leader row running to `▼`/`▶`, flipped by a click
 or `enter` on a session-only flag of its own, live or settled — and an auto-collapsed one opens alone,
 writing nothing (`docs/layout/tool-layout.md`, "Fold states and interaction"). Otherwise — a live
@@ -1126,8 +1136,8 @@ name instead of as the last letter of it. Its presence *is* the clickability hin
 affordance and the click-target rule are **one predicate**: an indicator appears exactly where a
 click toggles something, so a row that hides nothing wears none, and a sub-agent run's head wears
 one however short its
-own report is. A delegation that got **no span at all** (above) wears one too, and wears it inside
-a group exactly as it does standing alone: what its folded row holds back is the prompt it
+own report is. A delegation that got **no span at all** (above) wears one too, and wears it in
+a group of one exactly as in a larger group: what its folded row holds back is the prompt it
 carried, which no row of it ever shows, so the click opens onto that prompt. A delegation that
 carried **no prompt at all** — an empty task, or a record replayed from before the text was kept —
 is the exception the same predicate makes: it holds nothing back, so its row wears nothing. It is
@@ -1135,12 +1145,12 @@ granted whatever lifecycle the delegation is in, because there is always a readi
 and only *which* one changes: while the child is still working — queued behind the parallel cap
 included — the row opens that child's **run view** (below), and once the delegation is over it opens
 the prompt in place. A member of a fan-out is therefore a way into its child from the moment it is
-announced, exactly as the same delegation standing alone has always been. The `+N more lines` count is apogee's own word too and is painted as one — the
+announced, exactly as the one member of a `✦ Sub-agents (1)` group is. The `+N more lines` count is apogee's own word too and is painted as one — the
 `tool-marker` role, a soft blue-gray `#A0B0D0` under `dark`, no background and no bold weight, the
 quieter sibling of the prompt block's `see more` (the `prompt-toggle` role) — so a body line
 that happens to open with `+` can never be mistaken for it. It is **no longer a line**: it joins
 the outcome slot on the leader row, after the middle dot the typed stats already speak in
-(`exit 0 · +3 more lines`), so a collapsed lone call is its header and one row. It is also the
+(`exit 0 · +3 more lines`), so a call's own block, collapsed, is its header and one row. It is also the
 first thing that row gives up — ahead of the dots and the target both — on a width too narrow to
 seat it beside a target still worth reading; the `▶` says there is more either way. **The outcome
 slot wears that same role**, in both states, with an open block's slot taking the role's brighter

@@ -1220,8 +1220,9 @@ saves: clicking a card folds — or opens — them all and records the flip in `
 silently, so the next session starts the way you left this one; only a write that fails is
 mentioned. The row shows in `/settings` like the rest, and a hand-edit applies live.
 
-`ui.tools-open` and `ui.tools-fold-over` do the same for the `✦ Tools` umbrella a burst
-of tool calls is grouped under. Every umbrella's header is its *Group summary* — what the calls
+`ui.tools-open` and `ui.tools-fold-over` do the same for the `✦ Tools` umbrella tool calls
+are grouped under — a single call too, as a group of one (`✦ Read 1 file` over the call's own
+block). Every umbrella's header is its *Group summary* — what the calls
 did, in plain words: `✦ Read 3 files, ran 4 commands, edited 2 files +18 −5 · 1 failed`, the
 diffstat summed over the edits and any failed or denied calls counted in red. Every umbrella folds
 to that one header line — `▶` folded, `▼` open — from a click on that header, whether the Turn is
@@ -1238,9 +1239,10 @@ folds on its own, for this session only: nothing is written, and it starts the n
 in `/settings` at the keystroke, in the file at startup.
 
 `ui.tools-auto-collapse` — **on by default** — folds finished tool work to one line: a
-*settled* umbrella to its summary line, whatever its size and whatever `ui.tools-open` says; a
-settled lone tool call to the summary an umbrella of that one call would show (`✦ Read 1 file`,
-`✦ Ran 1 command`); and a settled `✦ Sub-agents (N)` or `✦ Skill (N)` group to its header line. A
+*settled* umbrella to its summary line, whatever its size and whatever `ui.tools-open` says — a
+single tool call included, as a group of one (`✦ Read 1 file`, `✦ Ran 1 command`) — and a settled
+`✦ Sub-agents (N)` or `✦ Skill (N)` group to its header line, a single delegation or skill fetch
+included (`✦ Sub-agents (1)`, `✦ Skill (1)`). A
 block is settled once everything in it has finished — every call returned, every sub-agent
 reported — and the conversation has moved past it: the model has started its next step (it folds
 while the model is still thinking or writing, not once the reply lands), or the model's next reply,
@@ -1248,14 +1250,16 @@ a note or your next message comes after it, or the Turn has ended. One still run
 waiting for the rest of its step's calls, stays as it is. A folded block stays folded when the
 model's next step adds a call to it, unless that call is waiting on you — a question to answer or a
 call to approve — which opens it until you have answered. A block you have touched — clicked its header, or opened one of its
-tools or members — is left alone from then on. Clicking a folded one opens that one only, for this
-session: a lone call opens to the block it always showed and stays open, and nothing is written,
-not even `ui.tools-open`, so a resumed session shows every such block folded again. Turn it off and
-every umbrella follows `ui.tools-open` and `ui.tools-fold-over` alone and a lone call stays open;
-the summary header stays either way. A Sub-agent or Skill group's header folds the group from a
-click whether this is on or off (`▼` open, `▶` folded), for the session only. A lone skill fetch,
-a lone sub-agent and a task-list card never fold this way. The row shows in `/settings`, and a
-hand-edit applies live.
+tools or members — is left alone from then on, and stays as you left it when the model's next step
+adds a call to it. Clicking a folded one opens that one only, for this session — a single call
+opens to its summary header over the block it always showed, and a further click on that header
+folds it again — and nothing is written, not even `ui.tools-open`, so a resumed session shows every
+such block folded again. Turn it off and every umbrella follows `ui.tools-open` and
+`ui.tools-fold-over` alone, so a single call's group starts open; the summary header stays either
+way. A Sub-agent or Skill group's header folds the group from a click whether this is on or off
+(`▼` open, `▶` folded), for the session only, as a small umbrella's does. A task-list card never
+folds this way.
+The row shows in `/settings`, and a hand-edit applies live.
 
 `ui.pointer-shapes` — **off by default** — lets apogee change the mouse pointer to show what a
 click does where it rests: an I-beam over the input box and the transcript's text, a hand over a

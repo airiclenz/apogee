@@ -6,13 +6,17 @@ refs: [docs/layout/tool-layout.md, internal/tui/groupsummary.go]
 **Group summary**:
 The one-line **header of a `✦ Tools` umbrella**, saying in plain words what the umbrella's calls
 did: `✦ Read 3 files, ran 4 commands, edited 2 files +18 −5 · 1 failed`. Every umbrella wears it,
-open, folded, running or settled, and it is the whole row an umbrella folds to once it is settled
-and untouched under `ui.tools-auto-collapse` (`adr-0035-amend-1118`; settled from the moment the
-next Turn of its run starts, `adr-0035-amend-1120b`) — and the row a settled,
-untouched LONE groupable tool call folds to as well, the summary an umbrella of that one call would
-wear (`✦ Read 1 file`, `✦ Ran 1 command`; `adr-0035-amend-1120`). A Sub-agent or Skill group,
-which auto-collapse folds too, folds to its own `✦ Sub-agents (N)` / `✦ Skill (N)` header, not to
-a Group summary. It reads, in order: **verb phrases**, one per kind of work in the order each kind
+open, folded, running or settled — a **group of one** included, the umbrella a groupable call
+standing alone forms, whose summary is that one call's (`✦ Read 1 file`, `✦ Ran 1 command`;
+every tool call is a tool group, `adr-0035-amend-1120c`) — and it is the whole row an umbrella
+folds to, from a click on it, or on its own once it is settled and untouched under
+`ui.tools-auto-collapse` (`adr-0035-amend-1118`; settled from the moment the next Turn of its run
+starts, `adr-0035-amend-1120b`). A Sub-agent or Skill group, which folds the same ways, folds to
+its own `✦ Sub-agents (N)` / `✦ Skill (N)` header, not to a Group summary; a delegation or skill
+fetch standing alone is such a group of one, `(1)`. The phrases, any clipped remainder of them and
+the base of the diffstat counts paint bold in the tools header colour (the scheme's `tool-header`
+role, a tool label's tone); the `✦`, the dot leader, the fold glyph and the outcome counts keep
+their own styles. It reads, in order: **verb phrases**, one per kind of work in the order each kind
 first ran, a phrase being what a tool's presenter row names (`read_file` "read N files"; `grep` and `find_files` one "searched N patterns"; the four writing
 tools one "edited N files", never "created"; the git readers "checked git"), counting the distinct
 paths where the phrase says so (three reads of one file read 1 file), and taking its live verb

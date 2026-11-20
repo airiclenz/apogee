@@ -1143,9 +1143,9 @@ update-check: true
 # a card folds (or opens) them all and records the flip here, silently, so the next session starts
 # the way you left this one. Default on.
 #
-# `tools-open` and `tools-fold-over` do the same for the `✦ Tools` umbrella a burst of
-# tool calls is grouped under, whose header sums up what the calls did ("Read 3 files, ran 4
-# commands · 1 failed"). Every umbrella folds to that one header line from a click on that header,
+# `tools-open` and `tools-fold-over` do the same for the `✦ Tools` umbrella tool calls are
+# grouped under — a single call too, as a group of one ("Read 1 file") — whose header sums up what
+# the calls did ("Read 3 files, ran 4 commands · 1 failed"). Every umbrella folds to that one header line from a click on that header,
 # whether the Turn is running or finished. An umbrella with more type rows than `tools-fold-over`
 # is *large*, and — while it is running, once you have clicked it or opened one of its tools, or
 # with `tools-auto-collapse` off — a large umbrella is folded unless `tools-open` is true; clicking
@@ -1157,11 +1157,13 @@ update-check: true
 #
 # `tools-auto-collapse` folds *settled* tool work — everything in it finished, and the conversation
 # moved past it or its Turn over — to one line: an umbrella to its summary line, whatever its size
-# and `tools-open`, a lone tool call to the summary an umbrella of that one call would show
-# ("Read 1 file"), a `✦ Sub-agents (N)` or `✦ Skill (N)` group to its header line — until you click
-# it or open one of its tools or members; opening it then is for this session only and writes
-# nothing. A group's header folds it from a click whether this is on or off.
-# `false` leaves every umbrella to `tools-open` and `tools-fold-over` alone, and a lone call open.
+# and `tools-open`, a single call's group of one included ("Read 1 file"), a `✦ Sub-agents (N)` or
+# `✦ Skill (N)` group to its header line, a single delegation or skill fetch included ("(1)") —
+# until you click it or open one of its tools or members; opening it then is for this session only
+# and writes nothing, and a further click on its header folds it again. A group's header folds it
+# from a click whether this is on or off.
+# `false` leaves every umbrella to `tools-open` and `tools-fold-over` alone, so a single call's
+# group starts open.
 # Default on.
 #
 # `pointer-shapes` lets apogee change your mouse pointer to show what a click does where it rests:

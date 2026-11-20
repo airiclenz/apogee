@@ -163,7 +163,12 @@ Depends on items 2, 3 and 5.
 - `go test -race -count=1 ./cmd/apogee/`
 **Commit:** `test(e2e): drive a lone call and a lone delegation as groups of one`
 
-## 7. Document the group of one
+## 7. Document the group of one — ✅ DONE (2026-11-20)
+
+NOTES (2026-11-20): tool-layout.md gains "Group of one open" and "Group of one folded" sketch sections in place of "Single tool folded (auto-collapsed lone call)"; "Single tool collapsed" / "Single tool expanded" keep their headings (code comments cite them) and now introduce themselves as a call's own block.
+NOTES (2026-11-20): layout.md's top-of-file screen sketch redrawn to the group-of-one shapes (`✦ Read 1 file`, `✦ Ran 1 command`, `✦ Diff Preview ×1`, `✦ Sub-agents (1)`), and its stale `✦ Read (3)` group (retired 2026-09) redrawn as an umbrella over one type row; the "The label" paragraph's stale `✦ Tools (3 Read, 4 Terminal)` umbrella header (retired 2026-11-18) reworded to the Group summary, since the sentence naming a lone call was being rewritten anyway.
+NOTES (2026-11-20): deliberate `lone` hit left: internal/tui/doc.go:441 "dropped with a lone opening" is about an exchange's opening message under a cancel, not a tool call.
+NOTES (2026-11-20): internal/config/registry.go's `ui.tools-auto-collapse` /settings help ("a lone call open") and internal/domain/uiprefs.go's comment still say "lone call" but remain true of the group of one; outside the item's Files, left as written. "Group of one" has no glossary Note of its own; it could earn one.
 
 Depends on items 2–5.
 

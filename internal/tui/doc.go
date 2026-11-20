@@ -60,7 +60,7 @@
 // the join climbing out of an expanded group member's span INTO the next row of that member's list:
 // there it is the single ┊ closing the span. Every other climb-out keeps its spacer, because the
 // spec draws the closer only where another grouped sub-agent follows the expanded one — a group's
-// last member and a lone delegation alike close against nothing and so show none
+// last member, the one member of a group of one included, closes against nothing and so shows none
 // (docs/layout/tool-layout.md, "Grouped Sub-agents"); the rule is [railJoin]'s and stands. No
 // DELEGATION opens such a span in place since ADR 0063, but a grouped SKILL fetch does — it expands
 // INLINE, over a body the rail runs down — so the seam is drawn where the next row of that group
@@ -807,8 +807,8 @@
 // (trimBlankLines) and interior blank runs collapse outside fenced code, so layout.md's "exactly
 // one empty line between blocks" holds; a tool header drops its square brackets for a bold-gold
 // label (the [theme] toolLabel role, styled before the wrap — the markdown.go posture); and
-// consecutive groupable calls at the same depth fold under one umbrella (toolSuperGroup /
-// groupable) headed by its Group summary ("✦ Read 3 files, ran 4 commands"), one type row per run of a single label — a run of four
+// consecutive groupable calls at the same depth — one standing alone included, as a group of one —
+// fold under one umbrella (toolSuperGroup / groupable) headed by its Group summary ("✦ Read 3 files, ran 4 commands"), one type row per run of a single label — a run of four
 // terminals and a read followed by a terminal take that same shape (plan "2026-09-02 - 01"; the
 // separate "✦ Label (N)" group it replaced is gone). Grouping is render-time only — the append-only
 // entry list, the call/result pairing, and transcript.hasOpenToolCall are untouched, so a call
@@ -822,7 +822,8 @@
 // everyone).
 //
 // The shape a tool call takes is uniform, and one renderer draws it: [renderToolBlock] takes ONE
-// [toolView] — a lone call, the only shape a groupable call keeps outside the umbrella — and emits
+// [toolView] — a solo or targetless call, or the one call of an OPEN group of one, painted directly
+// under its umbrella header with no type row — and emits
 // a ✦ header carrying the **label alone, never a target**, then a ┝/┕ branch led by that call's
 // target ([renderToolBranch]). A call's outcome is split in two, and that split — not any line count —
 // is the grammar: the one-line [toolView] Summary fills the branch row's right-aligned outcome
@@ -842,13 +843,19 @@
 // carry is the umbrella's own fold, resolved by one rule ([transcript.blockFoldBy]): under
 // `ui.tools-auto-collapse` an umbrella that is SETTLED ([transcript.blockSettled] — from the
 // moment its run's next Turn starts) and that the reader has not touched folds to its header
-// line whatever its size, and opens alone on a fold of its own ([transcript.openBlockAlone]) —
-// the one rule that folds a settled, untouched lone groupable call to its Group summary and a
-// Sub-agent or Skill group to its header too; otherwise a LARGE umbrella — more type rows than
-// `ui.tools-fold-over` ([transcript.umbrellaIsLarge]) — folds under the shared `ui.tools-open`
-// preference and back, a SMALL one on its head entry's session-only flag ([transcript.blockFolded]),
-// the members' own state kept beneath it either way ([umbrellaFold], [Model.toggleToolsFold])
-// — where a block of one spends up
+// line whatever its size, and opens alone on a fold of its own ([transcript.openBlockAlone]);
+// otherwise a LARGE umbrella — more type rows than `ui.tools-fold-over`
+// ([transcript.umbrellaIsLarge]) — folds under the shared `ui.tools-open` preference and back, a
+// SMALL one on its head entry's session-only flag ([transcript.blockFolded]), the members' own
+// state kept beneath it either way ([umbrellaFold], [Model.toggleToolsFold]). That one rule folds a
+// group of one too — every groupable call standing alone is the umbrella of that one call,
+// toolSuperGroup's floor being one — and a Sub-agent or Skill group, a delegation or fetch standing
+// alone being a group of one there (ownGroup). A block the reader touched is never auto-folded
+// again, and the touch is its head's, which a group of one shares with the group the next Turn's
+// call grows it into: a group the reader opened stays open as it grows, and the reader folds it by
+// its header — the touched-group-grows rule (adr-0035-amend-1120c), superseding
+// adr-0035-amend-1120b (b)'s "The umbrella stays open until it settles by the earlier rule". A
+// call painted as its own block, by contrast with a member row, spends up
 // to three rows collapsed and toggles from ANY row it paints, header, leader row and body alike, the
 // whole-surface rule the prompt block already followed. The `+N more lines` marker is the one row
 // that does not: it belongs to the collapsed paint, so a click there only ever opens. Whichever

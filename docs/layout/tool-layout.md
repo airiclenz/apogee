@@ -63,11 +63,15 @@ closer is drawn today.
 
 ## Vocabulary
 
-- **run** — the maximal stretch of adjacent calls of one tool type; a lone
-  call is a run of 1. A run is never a block of its own: it is one **type row**
-  of the super-group below.
-- **super-group** — 2+ groupable calls, whether that is one run of a single
-  tool type or adjacent runs of different types. Breakers: any non-tool
+- **run** — the maximal stretch of adjacent calls of one tool type; a call
+  standing alone is a run of 1. A run is never a block of its own: it is one
+  **type row** of the super-group below — save in a group of one, which paints
+  its one call's own block in place of the type row.
+- **super-group** — 1+ groupable calls, whether that is one call, one run of a
+  single tool type or adjacent runs of different types: **every tool call is a
+  tool group** (2026-11-20,
+  [`adr-0035-amend-1120c`](../../.capcom/knowledge/decisions/adr-0035/adr-0035-amend-1120c.md)).
+  Breakers: any non-tool
   entry between calls (narration, note, approval, error), and any block that
   groups with its own kind instead — a sub-agent block or group, a skill block
   or group. The umbrella header is ONE leader row,
@@ -78,11 +82,16 @@ closer is drawn today.
   differ only in that glyph, so every umbrella — open, folded, running or
   settled — reads the same one line (2026-11-18; until then the header was the
   tool-type breakdown `✦ Tools (3 Read, 4 Terminal)`). It forms **live**, the
-  moment the second groupable call is placed; the running call is its last
-  row, wearing the spinner star. Only a LONE groupable call stays a standalone
-  block — which, settled and untouched under `ui.tools-auto-collapse`, folds
-  to the Group summary an umbrella of that one call would wear ("Single tool
-  folded (auto-collapsed lone call)" below).
+  moment the first groupable call is placed; the running call is its last
+  row, wearing the spinner star. A groupable call standing alone is a **group
+  of one**: the umbrella of that one call, headed by its Group summary
+  (`✦ Read 1 file ⋯ ▼`), with the call's own block directly beneath the
+  header and no type row ("Group of one open" below). It folds, opens and
+  re-folds from that header by every rule a larger umbrella does ("Group of
+  one folded" below), and when the next call joins it, it is an umbrella of
+  two in the type-row shape. A delegation and a skill fetch standing alone are
+  groups of one of their own kind, `✦ Sub-agents (1)` and `✦ Skill (1)`
+  ("Grouped Sub-agents", "Grouped Skills" below).
 - **Group summary** — the umbrella header's text, built in the TUI from the
   members' views and their Tool summaries (nothing is added to the engine or
   the record), in this order: the **verb phrases**, then the **diffstat**,
@@ -163,10 +172,12 @@ closer is drawn today.
   for a terminal line that stopped early; a steered delegation with nothing
   after its cause opens onto its whole result. A terminal or python_exec run
   that exited cleanly without printing keeps `exit 0` in the slot and opens onto
-  `(no output)`. Standing alone and collapsed, either counts that one line in
-  the remainder wording below: `exit 0 · +1 more line`, `error: exit 1 · +1 more
-  line`.
-  **Remainder:** while a lone call is collapsed the slot also carries the count
+  `(no output)`. Painted as its own block and collapsed, either counts that one
+  line in the remainder wording below: `exit 0 · +1 more line`, `error: exit 1 ·
+  +1 more line`.
+  **Remainder:** while a call painted as its own block — the one call of an
+  open group of one, a solo or targetless call — is collapsed, the slot also
+  carries the count
   of the body behind it, after the same middle dot the stats use —
   `exit 0 · +3 more lines` — so the block is its header and one row and the
   count never spends a row of its own. It is the first thing the row gives up
@@ -227,7 +238,8 @@ closer is drawn today.
   takes the ordinary targetless shape instead, so a failure is never folded
   away.
 - The umbrella is the second block that folds to its **header alone**, and
-  EVERY umbrella does (2026-09-18). Every umbrella header wears `▶`/`▼` at
+  EVERY umbrella does (2026-09-18), a group of one included (2026-11-20).
+  Every umbrella header wears `▶`/`▼` at
   its leader's edge; a click on it, or `enter` at the block cursor on it, folds
   the umbrella to its Group summary line, `✦ Read 3 files, ran 4 commands ⋯ ▶`
   — no type row beneath, no `+N more lines`, the summary saying what the fold
@@ -251,12 +263,11 @@ closer is drawn today.
   calls join it (calls of two Turns merge while nothing is committed between
   them): the folded header shows the live verb while a new call runs, a group
   its grown count — unless a member waits on the user, a pending `ask_user`
-  or a call held on its approval pane, which opens it while the wait lasts,
-  or the reader had opened the lone call the next Turn's call grew into it,
-  which keeps it open until the second rule settles it. Only a block the
-  boundary folded stays folded this way: a lone delegation or skill fetch is
-  never folded, so the group the next Turn's call forms beside it stays open
-  while the new member runs. Second, as before:
+  or a call held on its approval pane, which opens it while the wait lasts.
+  A group of one is folded by the boundary like any group — a delegation's
+  `✦ Sub-agents (1)` and a skill fetch's `✦ Skill (1)` included — so the next
+  Turn's call, delegation or fetch joins it folded. A group the reader had
+  opened is touched (below) and stays open as it grows. Second, as before:
   every call in it has returned, AND either a later entry of its own run
   follows it — the model's next narration or reply, a note, the next user
   message, a further block — or nothing follows and its run is over: the
@@ -270,9 +281,17 @@ closer is drawn today.
   body in it, or jumped to one of its members from the side panel. A click on
   an auto-collapsed umbrella opens **that one alone**, on a fold of its own,
   and writes nothing — not `ui.tools-open`, whatever the umbrella's size —
-  and every later click flips that same fold. The same rule reaches three
-  more tool blocks — a lone groupable call, a Sub-agent group and a Skill
-  group (2026-11-20; the two bullets after the session log below). (2)
+  and every later click flips that same fold. A **touched group stays open as
+  it grows** (2026-11-20,
+  [`adr-0035-amend-1120c`](../../.capcom/knowledge/decisions/adr-0035/adr-0035-amend-1120c.md)):
+  the touch is its head's, and a group of one and the group the next Turn's
+  call grows it into share that head, so a group the reader opened stays as
+  the reader left it, open, and auto-collapse never folds it again; the
+  reader folds it by a click or `enter` on its header. This supersedes
+  [`adr-0035-amend-1120b`](../../.capcom/knowledge/decisions/adr-0035/adr-0035-amend-1120b.md)
+  (b)'s "The umbrella stays open until it settles by the earlier rule". The
+  same rule reaches the Sub-agent and Skill groups and every group of one
+  (2026-11-20; the two bullets after the session log below). (2)
   Everything else — a live
   umbrella, a touched one, and every umbrella with `ui.tools-auto-collapse`
   off — folds **by size**, the rule as it stood before: an umbrella is
@@ -330,7 +349,10 @@ closer is drawn today.
   routine note paints no log at all.
 - A **Sub-agent or Skill group** is the fourth block that folds to its
   **header alone** (2026-11-20,
-  [`adr-0035-amend-1120`](../../.capcom/knowledge/decisions/adr-0035/adr-0035-amend-1120.md)).
+  [`adr-0035-amend-1120`](../../.capcom/knowledge/decisions/adr-0035/adr-0035-amend-1120.md)),
+  and a delegation or skill fetch standing alone is one too, a group of one:
+  `✦ Sub-agents (1)` or `✦ Skill (1)` over its one member row (2026-11-20,
+  [`adr-0035-amend-1120c`](../../.capcom/knowledge/decisions/adr-0035/adr-0035-amend-1120c.md)).
   Its header is ONE leader row in the umbrella header's shape —
   `✦ Sub-agents (3) ⋯⋯ ▼`, `✦ Skill (2) ⋯⋯ ▼`: the star, the group's label
   and its count, and a dotted leader to the fold's `▶`/`▼` at the block's
@@ -348,23 +370,31 @@ closer is drawn today.
   alone, on a fold of its own, writing nothing. Touching a group is moving its
   header's fold, opening a member — a sub-agent's run view, a skill's body
   inline — or jumping to a member from the side panel.
-- A **lone groupable call** — one that could be an umbrella's member row yet
-  heads none and joins none — has the auto-collapse fold and no other
-  (2026-11-20): with `ui.tools-auto-collapse` on, a settled one (it returned,
-  and its run's next Turn started, a later entry of its run follows it, or its
-  run is over) that the reader
-  has not touched folds to the Group summary an umbrella of that one call
-  paints folded, `✦ Read 1 file ⋯ ▶`, `✦ Ran 1 command ⋯ ▶` ("Single tool
-  folded (auto-collapsed lone call)" below). A click or `enter` on that line
-  opens it to its standalone block exactly as it painted before, and it stays
-  open — touched — for the session; it grows no header toggle, so every click
-  on the open block keeps the meaning it always had. Live, touched, or with
-  auto-collapse off, it paints as it always did. A call that is not groupable
-  — a lone skill fetch, a lone delegation, an answered question, a task-list
-  card — and a workflow block never auto-collapse.
-- Every tool block's leading `✦` — an umbrella's, a lone call's (a task-list
-  card and a lone Skill or delegation block included), a Sub-agent or Skill
-  group's — paints in the scheme's `tool-header` role, not bold, so a folded
+- A **group of one** — a groupable call standing alone, the umbrella of that
+  one call — folds, opens and re-folds exactly as a larger umbrella does
+  (2026-11-20,
+  [`adr-0035-amend-1120c`](../../.capcom/knowledge/decisions/adr-0035/adr-0035-amend-1120c.md),
+  superseding `adr-0035-amend-1120` (b), under which it had the auto-collapse
+  fold and no other). Its header is the Group summary that one call earns,
+  `✦ Read 1 file ⋯ ▼`, `✦ Ran 1 command ⋯ ▼`, in the live verb while the call
+  runs (`✦ Reading 1 file`). Open, the call's own block sits directly beneath
+  the header — its `✦` label header, its target row and, opened, its body —
+  painted exactly as a call standing alone always painted, with no type row
+  ("Group of one open" below). Folded, it is the header line alone under a
+  `▶` ("Group of one folded" below). A click or `enter` on the header flips
+  it, every time, live or settled, auto-collapse on or off: with
+  `ui.tools-auto-collapse` off it starts open and folds on its own
+  session-only flag, a small umbrella's model; with it on, a settled one the
+  reader has not touched is folded, and the first click opens it alone on a
+  fold of its own, after which every click flips that same fold. A click on
+  the call's own block beneath the header toggles that block's body, as it
+  always did. A task-list card, an answered `ask_user` record, a call with no
+  target and a workflow block stay out of every group and never
+  auto-collapse: they have no tool block to fold or no phrase to summarise.
+- Every tool block's leading `✦` — an umbrella's (a group of one included),
+  a solo or targetless call's (a task-list card included), the call's own
+  block inside an open group of one, a Sub-agent or Skill group's — paints in
+  the scheme's `tool-header` role, not bold, so a folded
   line reads as a tool block rather than narration; the live star's blink and
   a Firing's `⟳` are unchanged (2026-11-20; `layout.md`).
 - Failure marking: the red right-slot summary only; no glyph or header color
@@ -397,6 +427,10 @@ available space / width: ||||||||||||||||||||||||||||||||||||||||||||||||||||||
 
 ## Single tool collapsed
 
+A call's own block, collapsed: what a solo or targetless call paints, and what
+an open group of one paints directly beneath its header ("Group of one open"
+below).
+
 ```text
 ✦ <tool-header>
   ┕ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
@@ -406,18 +440,42 @@ where a collapsed call that hides body counts it in that same slot:
 
 ```text
 ✦ Terminal
-  ┕ go test ./... ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ exit 0 · +3 more lines ▶
+  ┕ go test ./... ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ exit 0 · +3 more lines ▶
 ```
 
-## Single tool folded (auto-collapsed lone call)
+## Group of one open
 
-With `ui.tools-auto-collapse` on (the default), a LONE groupable call that has
-**settled** — it returned, and its run's next Turn started, a later entry of its
-run placed after it, or its run over — and that the reader has not **touched**
-folds to the one line an
-umbrella of that one call paints folded: its Group summary, a dotted leader
-and the fold's `▶` ("Fold states and interaction" above). A click or `enter`
-on it opens the block above, exactly, and it stays open for the session.
+A groupable call standing alone is a **group of one** ("Vocabulary", "Fold
+states and interaction" above): open, its header is the Group summary of that
+one call under a `▼`, and directly beneath it stands the call's own block —
+collapsed as in "Single tool collapsed" above, or expanded as in "Single tool
+expanded" below — with no type row. While the call runs the header takes the
+live verb (`✦ Running 1 command`). When the next call joins it, it paints as an
+umbrella of two, one type row per run.
+
+```text
+✦ <group-summary> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+✦ <tool-header>
+  ┕ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
+```
+
+```text
+✦ Ran 1 command ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+✦ Terminal
+  ┕ go test ./... ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ exit 0 · +3 more lines ▶
+```
+
+## Group of one folded
+
+Folded, a group of one is its header line alone: the Group summary of its one
+call, a dotted leader and the fold's `▶`, with none of the call's block
+beneath it. A click or `enter` on the header folds it there, live or settled,
+auto-collapse on or off; and with `ui.tools-auto-collapse` on (the default) a
+group of one that has **settled** — its call returned, and its run's next
+Turn started, a later entry of its run placed after it, or its run over — and
+that the reader has not **touched** is folded there on its own. A click or
+`enter` on the folded header opens it to the shape above, and every later
+gesture on the header folds or opens it again.
 
 ```text
 ✦ Ran 1 command ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
@@ -535,10 +593,10 @@ preference as they were.
 - `^x` stops ONE running sub-agent (ADR 0086 D5; `layout.md`, "Run view"): inside its run view it stops the run on screen — the view's header and the status line then read `esc back · ^x stop` while that run can still be stopped — and on the block cursor it stops the delegation whose row the cursor stands on, a member row of an `✦ Sub-agents (N)` list included — or, with the cursor in the side panel, the sub-agent row it stands on there — leaving the cursor where it was. It needs no confirmation and the parent's Turn goes on: the engine folds what the run had done into the partial result the parent reads, and the row settles on `· stopped by you` once the run reports. On a finished run it does nothing. The whole Turn is cancelled by `esc×2` at the top level, never by `^x`.
 - the inline expanded shape that used to open a delegation's span in place — no `⤷ sub-agent` label on the open row, a colored vertical line down its left — was REMOVED on 2026-08-30 with the run view (ADR 0063), and its sketch went with it.
 - `┊` was only displayed if another grouped sub-agent followed after the expanded sub-agent, and the last sub-agent in the group (if expanded) did not show it. No DELEGATION draws it any more — a member opens its run view rather than a span in place, so every grouped sub-agent is followed by the ordinary separator — but the rule is the group's, not the delegation's, and **Grouped Skills** below is where it fires: a member that opens INLINE is closed by `┊` wherever another member of its list resumes after it, and the list's last member shows none however it ends.
-- a RUNNING sub-agent's `<tool-top-level-details>` reads `N tool calls · <used>/<window> · 80 steps` and names no ongoing action. The call in flight is deliberately not spelled there: it changed several times a second while the two cells beside it held still, and each of those calls already has a block of its own inside the run, one click away. The one live word the slot adds is `· delegating`, and only while the most recent call open inside the run is itself a sub-agent — work the child has handed on, which its own blocks cannot show since the nested run is collapsed too. The trailing cell is the STEP CAP the child runs under, as its started phase carried it (`domain.SubAgentPhaseEvent`): `· 80 steps` for the configured delegate cap or the call's own lower `max_steps`, `· 80 steps (120 asked)` where the call asked for more than the configured cap and was clamped to it, and no cell at all for an unbounded child (`delegate-max-steps: 0`). The row wears it from the child's FIRST TOOL CALL — a started child with nothing behind it has no summary line to carry it — and only while the run works: a finished row ends on its gist, the bound being history once the child has reported. A finished sub-agent's slot is its report's first line, or `· done` where the report became a body — unless the engine wrapped that report in an outcome envelope, which takes the slot instead: `· capped at its step cap` where the step cap cut the run off mid-task (`· capped at its token budget` / `· capped at its time limit` for its sibling bounds — "capped", because on screen "stopped" is the human's word alone, whatever wording the engine's result head carries for the parent model), `· stopped by you` where the human stopped the run with `^x` (ADR 0086 D4) — a queued pooled run stopped before it started, or one a turn cancel caught queued, included — `· not started · your message` where a queued message pre-empted the run before it started (ADR 0025), both of which wear no ✓ and reads in the marker tone, since the run did not finish and nothing failed, `· ended without a report` where the child reached its own boundary but handed back narration of a next step, a paste or the `[delegate returned no report]` marker rather than a report (the row's reading alone — the parent model gets the result exactly as the engine wrote it), and `· steered by 2 messages` appended to whichever verdict stands where the human addressed the child while it ran (ADR 0063 D3); a failed run's red slot carries that same steering cell after its cause. Where the width leaves the row too little of its target to be worth reading, the promote-guard drops the GIST and nothing else: the row reads the same line with the engine's verdict in the gist's place — `1 tool call · done`, `2 tool calls · 12k/32k · capped at its step cap` — so the count and the fill survive every width, and nothing lands in a body, a run's row growing none in place (ADR 0063) and its report being one click away in the run's own view. A run routed to the Sub-agent server (ADR 0045) closes the slot with the model it ran on — `2 tool calls · 12k/32k · Found 4 gaps · qwen3-4b` — and only when that is not the session's own model; a same-model delegation shows no such cell. `<window>` is the CHILD's own window, so a routed run's fill is spelled against the Sub-agent server's window (`7k/8k`) rather than the session's (`7k/128k`); a run reporting no window of its own is spelled against the session's, which is what an unrouted child inherited. This holds for a lone sub-agent exactly as for a grouped member.
-- opening a sub-agent takes nothing back either: the row the reader leaves behind keeps the very `<tool-top-level-details>` it wore — the count, the fill, and the gist or the verdict (`· done`, `· ended without a report`, …) — and the task, the report and the child's own blocks are what the run view shows. This holds for a lone sub-agent exactly as for a grouped member, running and finished alike; a view of a finished or queued run opens read-only.
-- a sub-agent the engine has not started yet is QUEUED: the model asked for it and it is queued behind the `parallel-agents` cap, holding no slot. Its `<tool-top-level-details>` says exactly `queued` (the side panel's word for the same phase) — no tool-call count, no context fill, no gist, none of which exist yet — and its row carries no indicator and no click target, because there is nothing behind it to open. The moment its child starts, the row becomes an ordinary live sub-agent row and opens like any other. A lone sub-agent starts immediately and never shows this.
-- the group's header is a FOLD (2026-11-20; "Fold states and interaction" above): its leader row runs to a `▼` while the member rows show and a `▶` once a click or `enter` on it has folded the group to that header line alone — or `ui.tools-auto-collapse` has, the group being settled (every member reported, and the next Turn started or something after it) and untouched; it stays folded, its count growing, when the next Turn's delegation joins it. The flag is the group's own, session-only and written nowhere; a member still running keeps the folded header's star blinking. A lone sub-agent is no group and never folds this way.
+- a RUNNING sub-agent's `<tool-top-level-details>` reads `N tool calls · <used>/<window> · 80 steps` and names no ongoing action. The call in flight is deliberately not spelled there: it changed several times a second while the two cells beside it held still, and each of those calls already has a block of its own inside the run, one click away. The one live word the slot adds is `· delegating`, and only while the most recent call open inside the run is itself a sub-agent — work the child has handed on, which its own blocks cannot show since the nested run is collapsed too. The trailing cell is the STEP CAP the child runs under, as its started phase carried it (`domain.SubAgentPhaseEvent`): `· 80 steps` for the configured delegate cap or the call's own lower `max_steps`, `· 80 steps (120 asked)` where the call asked for more than the configured cap and was clamped to it, and no cell at all for an unbounded child (`delegate-max-steps: 0`). The row wears it from the child's FIRST TOOL CALL — a started child with nothing behind it has no summary line to carry it — and only while the run works: a finished row ends on its gist, the bound being history once the child has reported. A finished sub-agent's slot is its report's first line, or `· done` where the report became a body — unless the engine wrapped that report in an outcome envelope, which takes the slot instead: `· capped at its step cap` where the step cap cut the run off mid-task (`· capped at its token budget` / `· capped at its time limit` for its sibling bounds — "capped", because on screen "stopped" is the human's word alone, whatever wording the engine's result head carries for the parent model), `· stopped by you` where the human stopped the run with `^x` (ADR 0086 D4) — a queued pooled run stopped before it started, or one a turn cancel caught queued, included — `· not started · your message` where a queued message pre-empted the run before it started (ADR 0025), both of which wear no ✓ and reads in the marker tone, since the run did not finish and nothing failed, `· ended without a report` where the child reached its own boundary but handed back narration of a next step, a paste or the `[delegate returned no report]` marker rather than a report (the row's reading alone — the parent model gets the result exactly as the engine wrote it), and `· steered by 2 messages` appended to whichever verdict stands where the human addressed the child while it ran (ADR 0063 D3); a failed run's red slot carries that same steering cell after its cause. Where the width leaves the row too little of its target to be worth reading, the promote-guard drops the GIST and nothing else: the row reads the same line with the engine's verdict in the gist's place — `1 tool call · done`, `2 tool calls · 12k/32k · capped at its step cap` — so the count and the fill survive every width, and nothing lands in a body, a run's row growing none in place (ADR 0063) and its report being one click away in the run's own view. A run routed to the Sub-agent server (ADR 0045) closes the slot with the model it ran on — `2 tool calls · 12k/32k · Found 4 gaps · qwen3-4b` — and only when that is not the session's own model; a same-model delegation shows no such cell. `<window>` is the CHILD's own window, so a routed run's fill is spelled against the Sub-agent server's window (`7k/8k`) rather than the session's (`7k/128k`); a run reporting no window of its own is spelled against the session's, which is what an unrouted child inherited. This holds for the one member of a `✦ Sub-agents (1)` group exactly as for a member of a larger one.
+- opening a sub-agent takes nothing back either: the row the reader leaves behind keeps the very `<tool-top-level-details>` it wore — the count, the fill, and the gist or the verdict (`· done`, `· ended without a report`, …) — and the task, the report and the child's own blocks are what the run view shows. This holds for the one member of a `✦ Sub-agents (1)` group exactly as for a member of a larger one, running and finished alike; a view of a finished or queued run opens read-only.
+- a sub-agent the engine has not started yet is QUEUED: the model asked for it and it is queued behind the `parallel-agents` cap, holding no slot. Its `<tool-top-level-details>` says exactly `queued` (the side panel's word for the same phase) — no tool-call count, no context fill, no gist, none of which exist yet — and its row carries no indicator and no click target, because there is nothing behind it to open. The moment its child starts, the row becomes an ordinary live sub-agent row and opens like any other. A delegation fanned out alone, the one member of a `✦ Sub-agents (1)` group, starts immediately and never shows this.
+- the group's header is a FOLD (2026-11-20; "Fold states and interaction" above): its leader row runs to a `▼` while the member rows show and a `▶` once a click or `enter` on it has folded the group to that header line alone — or `ui.tools-auto-collapse` has, the group being settled (every member reported, and the next Turn started or something after it) and untouched; it stays folded, its count growing, when the next Turn's delegation joins it. The flag is the group's own, session-only and written nowhere; a member still running keeps the folded header's star blinking. A delegation standing alone is a group of one, `✦ Sub-agents (1)` over its one member row, and folds, opens and re-folds this way like any group (2026-11-20, `adr-0035-amend-1120c`); a click on that member row still opens its run view.
 
 ```text
 ✦ Sub-agents (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
@@ -575,11 +633,11 @@ Example for a fan-out wider than the `parallel-agents` cap: the first sub-agent 
 
 ## Grouped Skills
 
-- skill fetches group with **each other** exactly as sub-agent calls do — `✦ Skill (<group-count>)` over one `┝`/`┕` row per fetch — and never join the mixed `✦ Tools` super-group. Two adjacent fetches are the floor, as they are for a fan-out; a lone fetch keeps the standalone `✦ Skill` block it always had.
+- skill fetches group with **each other** exactly as sub-agent calls do — `✦ Skill (<group-count>)` over one `┝`/`┕` row per fetch — and never join the mixed `✦ Tools` super-group. There is no floor: a fetch standing alone is a group of one, `✦ Skill (1)` over its one member row (2026-11-20, `adr-0035-amend-1120c`; until then two adjacent fetches were the floor and a single fetch kept a standalone `✦ Skill` block).
 - a member row leads with the **loaded skill** and its `<tool-top-level-details>` is deliberately blank, so the dots run to the `▶`. A fetch that loaded nothing keeps the query the model searched by on the row, which is the same slot saying the same thing: what this call is about.
 - expanding a member opens its body **INLINE**, under its own row, and that is the ONE way this group differs from the delegation group whose shape it borrows. A fetch heads no run, so there is no run view to take the transcript slot, no `← main › <name>` breadcrumb and nothing for `esc` to leave; the member's rows sit inside the list, and the list resumes below them.
 - because a member opens in place, the `┊` closer has its occasion here (Grouped Sub-agents, above): the seam between an expanded member and the row resuming the list after it is the closer, and the list's LAST member draws none however it ends.
-- the header folds exactly as a Sub-agent group's does (Grouped Sub-agents, above): `▼` open, `▶` folded to the header line alone, by a click or `enter` on it or — settled (every fetch returned, and the next Turn started or something after it) and untouched — by `ui.tools-auto-collapse`; opening a member's body inline touches the group. A lone fetch keeps its standalone `✦ Skill` block, which never auto-collapses.
+- the header folds exactly as a Sub-agent group's does (Grouped Sub-agents, above): `▼` open, `▶` folded to the header line alone, by a click or `enter` on it or — settled (every fetch returned, and the next Turn started or something after it) and untouched — by `ui.tools-auto-collapse`; opening a member's body inline touches the group. A `✦ Skill (1)` group of one folds, opens and re-folds the same way, and auto-collapse folds it once settled like any group.
 
 ```text
 ✦ Skill (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
