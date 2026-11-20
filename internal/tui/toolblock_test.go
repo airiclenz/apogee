@@ -616,12 +616,12 @@ func TestLoneBlankRunCountsItsOneLine(t *testing.T) {
 			tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: tc.content, IsError: tc.failed}})
 
 			lines := strings.Split(renderPlain(tr, 80), "\n")
-			if len(lines) != 2 {
-				t.Fatalf("lone block painted %d rows, want its header and one leader row:\n%s",
+			if len(lines) != 3 {
+				t.Fatalf("lone block painted %d rows, want its group header, its header and one leader row:\n%s",
 					len(lines), strings.Join(lines, "\n"))
 			}
-			if lines[1] != tc.wantRow {
-				t.Errorf("leader row = %q, want %q", lines[1], tc.wantRow)
+			if lines[2] != tc.wantRow {
+				t.Errorf("leader row = %q, want %q", lines[2], tc.wantRow)
 			}
 		})
 	}
@@ -1185,7 +1185,7 @@ func TestUmbrellaHeader_ShowsTheGroupSummary(t *testing.T) {
 }
 
 // TestToolBlockStarPaintsInTheToolsHeaderColour pins every tool block's leading ✦ — an umbrella, a
-// lone call, a Sub-agents group and a Skill group — to the scheme's tool-header colour (th.toolStar),
+// group of one, a Sub-agents group and a Skill group — to the scheme's tool-header colour (th.toolStar),
 // with the header text after it painted exactly as before: the star alone takes the colour. The
 // live blink's bare cell and a Firing's borrowed ⟳ are the two marks it must leave alone.
 func TestToolBlockStarPaintsInTheToolsHeaderColour(t *testing.T) {
@@ -1221,9 +1221,9 @@ func TestToolBlockStarPaintsInTheToolsHeaderColour(t *testing.T) {
 			after: th.toolHeader.Render(" ") + th.toolLabel.Render("Read 2 files"),
 		},
 		{
-			name:  "lone call",
+			name:  "group of one",
 			build: func(tr *transcript) { runCall(tr, "c1", "go test ./...", "PASS", 0) },
-			after: " " + th.toolLabel.Render("Terminal"),
+			after: th.toolHeader.Render(" ") + th.toolLabel.Render("Ran 1 command"),
 		},
 		{
 			name: "Sub-agents group",
@@ -1280,7 +1280,7 @@ func TestToolBlockStarPaintsInTheToolsHeaderColour(t *testing.T) {
 		tr := &transcript{}
 		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 			ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
-		if got, want := firstLine(t, tr, true), " "+" "+th.toolLabel.Render("Terminal"); !strings.HasPrefix(got, want) {
+		if got, want := firstLine(t, tr, true), th.toolHeader.Render("  ")+th.toolLabel.Render("Running 1 command"); !strings.HasPrefix(got, want) {
 			t.Errorf("blinked-out header:\n got  %q\n want prefix %q", got, want)
 		}
 		if got := firstLine(t, tr, false); !strings.HasPrefix(got, star+" ") {

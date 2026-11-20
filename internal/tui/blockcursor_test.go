@@ -60,16 +60,19 @@ func TestBlockCursorEntersAtTheEndItsKeyPointsAwayFrom(t *testing.T) {
 // marks every line it paints for its own entry, so a click lands anywhere on it, but the walk stops
 // ONCE per surface rather than crawling line by line through it. A single tool block IS one surface
 // — its header, its leader row and, open, every body row and the see-less footer closing them — so
-// it offers exactly one stop in either state, and movement clamps there instead of wrapping. The
-// collapsed paint no longer offers a second one: the `+N more lines` count rides the leader row's
-// outcome slot now rather than a marker line of its own (collapsedRemainder).
+// it offers exactly one stop in either state, beneath the one its group of one's header offers for
+// the fold, and movement clamps at the two ends instead of wrapping. The collapsed paint offers no
+// third: the `+N more lines` count rides the leader row's outcome slot now rather than a marker line
+// of its own (collapsedRemainder).
 func TestBlockCursorWalksOneStopPerSurface(t *testing.T) {
 	t.Parallel()
 
 	m := modelWithToolBlock(t, "ok   a\nok   b\nok   c\nPASS")
+	fold := markedLine(t, m, targetUmbrella)
 	header := markedLine(t, m, targetHeader)
-	if got := cursorStops(m.lineTargets, m.pads); len(got) != 1 || got[0] != header {
-		t.Fatalf("the collapsed block offers stops %v, want the block's header at %d alone", got, header)
+	if got := cursorStops(m.lineTargets, m.pads); !slices.Equal(got, []int{fold, header}) {
+		t.Fatalf("the collapsed block offers stops %v, want its group header at %d and the block's header at %d",
+			got, fold, header)
 	}
 
 	m = step(t, m, keyAltUp())
@@ -81,19 +84,24 @@ func TestBlockCursorWalksOneStopPerSurface(t *testing.T) {
 	if !blockExpanded(t, m, header) {
 		t.Fatal("⏎ on the block's stop did not open it")
 	}
-	if got := cursorStops(m.lineTargets, m.pads); len(got) != 1 || got[0] != header {
-		t.Errorf("the open block offers stops %v, want its header at %d alone — its body rows are the same surface",
-			got, header)
-	}
-
-	m = step(t, m, keyUp())
-	if got := cursorLine(t, m); got != header {
-		t.Errorf("↑ at the only stop moved to line %d, want it clamped at %d", got, header)
+	if got := cursorStops(m.lineTargets, m.pads); !slices.Equal(got, []int{fold, header}) {
+		t.Errorf("the open block offers stops %v, want its group header at %d and its header at %d — its "+
+			"body rows are the same surface", got, fold, header)
 	}
 
 	m = step(t, m, keyDown())
 	if got := cursorLine(t, m); got != header {
-		t.Errorf("↓ at the only stop moved to line %d, want it clamped at %d", got, header)
+		t.Errorf("↓ at the last stop moved to line %d, want it clamped at %d", got, header)
+	}
+
+	m = step(t, m, keyUp())
+	if got := cursorLine(t, m); got != fold {
+		t.Errorf("↑ from the block's header moved to line %d, want its group header at %d", got, fold)
+	}
+
+	m = step(t, m, keyUp())
+	if got := cursorLine(t, m); got != fold {
+		t.Errorf("↑ at the first stop moved to line %d, want it clamped at %d", got, fold)
 	}
 }
 
@@ -196,8 +204,8 @@ func TestBlockCursorEnterTogglesWhatItStandsOn(t *testing.T) {
 	m := modelWithToolBlock(t, "ok   a\nok   b\nok   c\nPASS")
 	header := markedLine(t, m, targetHeader)
 
+	// ⌥↑ lands on the last stop: the call's own header, beneath its group of one's.
 	m = step(t, m, keyAltUp())
-	m = step(t, m, keyUp())
 	if cursorLine(t, m) != header {
 		t.Fatalf("setup: the cursor is at line %d, not on the block's header at %d", m.cursor.line, header)
 	}
@@ -267,8 +275,7 @@ func TestBlockCursorHighlightsTheRowItStandsOn(t *testing.T) {
 	t.Parallel()
 
 	m := modelWithToolBlock(t, "ok   a\nok   b\nok   c\nPASS")
-	m = step(t, m, keyAltUp())
-	m = step(t, m, keyUp())
+	m = step(t, m, keyAltUp()) // the last stop: the call's own header, beneath its group of one's
 	row := m.blockCursorRow()
 	if row < 0 {
 		t.Fatal("the cursor's line is not drawn on any transcript row")

@@ -580,8 +580,8 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 	case domain.UIKeyToolsAutoCollapse:
 		// The switch is a paint input (blockFoldBy), so the setter touches the transcript on a
 		// move: a `/settings` edit or a hand-edited file folds every settled, untouched tool block —
-		// umbrella, lone call, Sub-agent or Skill group — or gives it back its own fold, on the
-		// next frame.
+		// umbrella (a group of one included), Sub-agent or Skill group — or gives it back its own
+		// fold, on the next frame.
 		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err
 		}

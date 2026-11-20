@@ -27,6 +27,7 @@ func TestRenderOneLineOutputRidesTheBranch(t *testing.T) {
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "abc1234\n"}})
 
 	want := strings.Join([]string{
+		umbrellaHeaderRow("Ran 1 command", glyphExpanded),
 		"✦ Terminal",
 		"  ┕ git rev-parse HEAD ⋯ abc1234",
 	}, "\n")
@@ -79,6 +80,7 @@ func TestRenderInFlightStandalone(t *testing.T) {
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}})
 
 	want := strings.Join([]string{
+		umbrellaHeaderRow("Reading 1 file", glyphExpanded),
 		"✦ Read",
 		"  ┕ main.go ⋯",
 	}, "\n")
@@ -423,10 +425,12 @@ func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
 			name: "a multi-key argument object",
 			args: `{"query":"collapse","server":"docs","limit":20}`,
 			wantCollapsed: []string{
+				umbrellaHeaderRow("mcp_search ×1", glyphExpanded),
 				"✦ mcp_search",
 				groupMemberLine("  ┕ collapse ⋯ +6 more lines"),
 			},
 			wantExpanded: []string{
+				umbrellaHeaderRow("mcp_search ×1", glyphExpanded),
 				"✦ mcp_search",
 				leaderEdgeRow("  ┕ collapse ⋯", glyphExpanded),
 				"    query:",
@@ -441,10 +445,12 @@ func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
 			name: "a multi-line value keeps its own lines",
 			args: `{"script":"cd /ws\ngit status\ngit diff"}`,
 			wantCollapsed: []string{
+				umbrellaHeaderRow("mcp_search ×1", glyphExpanded),
 				"✦ mcp_search",
 				groupMemberLine("  ┕ cd /ws ⋯ +4 more lines"),
 			},
 			wantExpanded: []string{
+				umbrellaHeaderRow("mcp_search ×1", glyphExpanded),
 				"✦ mcp_search",
 				leaderEdgeRow("  ┕ cd /ws ⋯", glyphExpanded),
 				"    script:",
@@ -629,11 +635,13 @@ func TestRenderGroupBreakers(t *testing.T) {
 				readCall(tr, "c2", "b.go", 1, 9, 0)
 			},
 			want: []string{
+				umbrellaHeaderRow("Read 1 file", glyphExpanded),
 				"✦ Read",
 				"  ┕ a.go ⋯ 5 lines",
 				"",
 				"· approval allow: read_file",
 				"",
+				umbrellaHeaderRow("Read 1 file", glyphExpanded),
 				"✦ Read",
 				"  ┕ b.go ⋯ 9 lines",
 			},
@@ -645,9 +653,11 @@ func TestRenderGroupBreakers(t *testing.T) {
 				readCall(tr, "c2", "b.go", 1, 9, 1)
 			},
 			want: []string{
+				umbrellaHeaderRow("Read 1 file", glyphExpanded),
 				"✦ Read",
 				"  ┕ a.go ⋯ 5 lines",
 				"", // the descent's own spacer joins at depth 0: the rail starts at the block
+				"│ " + umbrellaHeaderRow("Read 1 file", glyphExpanded),
 				"│ ✦ Read",
 				"│   ┕ b.go ⋯ 9 lines",
 			},
@@ -662,6 +672,7 @@ func TestRenderGroupBreakers(t *testing.T) {
 					Summary: domain.ReadSpan{Start: 1, End: 1, Total: 1}}})
 			},
 			want: []string{
+				umbrellaHeaderRow("Read 1 file", glyphExpanded),
 				"✦ Read",
 				"  ┕ a.go ⋯ 5 lines",
 				"",

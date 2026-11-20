@@ -104,8 +104,9 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 				run(tr, "c1", "go test ./...", "ok   a\nok   b\nok   c\nPASS", 0)
 			},
 			want: []blockMark{
-				{line: 3, kind: targetHeader, entry: 1, text: "✦ Terminal"},
-				{line: 4, kind: targetHeader, entry: 1,
+				{line: 3, kind: targetUmbrella, entry: 1, text: umbrellaHeaderRow("Ran 1 command", glyphExpanded)},
+				{line: 4, kind: targetHeader, entry: 1, text: "✦ Terminal"},
+				{line: 5, kind: targetHeader, entry: 1,
 					text: groupMemberLine("  ┕ go test ./... ⋯ exit 0 · +4 more lines")},
 			},
 		},
@@ -125,25 +126,29 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 				}
 			},
 			want: []blockMark{
-				{line: 3, kind: targetHeader, entry: 1, text: "✦ Terminal"},
-				{line: 4, kind: targetHeader, entry: 1, text: leaderEdgeRow("  ┕ go test ./... ⋯ exit 0", glyphExpanded)},
-				{line: 5, kind: targetHeader, entry: 1, text: "    ok   a"},
-				{line: 6, kind: targetHeader, entry: 1, text: "    ok   b"},
-				{line: 7, kind: targetHeader, entry: 1, text: "    ok   c"},
-				{line: 8, kind: targetHeader, entry: 1, text: "    PASS"},
-				{line: 9, kind: targetHeader, entry: 1, text: seeLessFooterLine(t, 80)},
+				{line: 3, kind: targetUmbrella, entry: 1, text: umbrellaHeaderRow("Ran 1 command", glyphExpanded)},
+				{line: 4, kind: targetHeader, entry: 1, text: "✦ Terminal"},
+				{line: 5, kind: targetHeader, entry: 1, text: leaderEdgeRow("  ┕ go test ./... ⋯ exit 0", glyphExpanded)},
+				{line: 6, kind: targetHeader, entry: 1, text: "    ok   a"},
+				{line: 7, kind: targetHeader, entry: 1, text: "    ok   b"},
+				{line: 8, kind: targetHeader, entry: 1, text: "    ok   c"},
+				{line: 9, kind: targetHeader, entry: 1, text: "    PASS"},
+				{line: 10, kind: targetHeader, entry: 1, text: seeLessFooterLine(t, 80)},
 			},
 		},
 		{
 			// The other half of the rule, on the shape that has a body row to offer: a short call
-			// with no body hides nothing at this width, so not one of its rows is a click target and
-			// a click anywhere on it keeps its selection meaning.
-			name:  "a block that hides nothing marks no row at all",
+			// with no body hides nothing at this width, so not one of its own rows is a click target
+			// and a click anywhere on them keeps its selection meaning. The one mark is the group of
+			// one's header above it, whose fold is a target whatever the call beneath it hides.
+			name:  "a block that hides nothing marks no row of its own",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 			},
-			want: nil,
+			want: []blockMark{
+				{line: 0, kind: targetUmbrella, entry: 0, text: umbrellaHeaderRow("Read 1 file", glyphExpanded)},
+			},
 		},
 		{
 			// A run's calls carry no bodies (that is what made them groupable), so nothing under the
@@ -203,8 +208,9 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 					ID: "c1", Tool: "weird_tool", Arguments: []byte(`"go"`)}})
 			},
 			want: []blockMark{
-				{line: 0, kind: targetHeader, entry: 0, text: "✦ weird_tool"},
-				{line: 1, kind: targetHeader, entry: 0, text: groupMemberLine("  ┕ weird_tool ⋯ +1 more line")},
+				{line: 0, kind: targetUmbrella, entry: 0, text: umbrellaHeaderRow("weird_tool ×1", glyphExpanded)},
+				{line: 1, kind: targetHeader, entry: 0, text: "✦ weird_tool"},
+				{line: 2, kind: targetHeader, entry: 0, text: groupMemberLine("  ┕ weird_tool ⋯ +1 more line")},
 			},
 		},
 		{
@@ -218,14 +224,17 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "1\n2\n3"}})
 			},
 			want: []blockMark{
-				{line: 0, kind: targetHeader, entry: 0, text: "✦ Git"},
-				{line: 1, kind: targetHeader, entry: 0, text: "  Commit"},
+				// The group of one's header spends detail down to its clipped count head at this
+				// width (buildGroupSummary's fallback) and stays one row: a leader row never wraps.
+				{line: 0, kind: targetUmbrella, entry: 0, text: leaderEdgeRow("✦ Too"+clipTail+" ⋯", glyphExpanded)},
+				{line: 1, kind: targetHeader, entry: 0, text: "✦ Git"},
+				{line: 2, kind: targetHeader, entry: 0, text: "  Commit"},
 				// One leader row whatever the width: at eleven columns the target is cut to a single
 				// column and its clip tail, and the leader runs out to the indicator on the floor of
 				// one dot (design call 4). The hidden body is counted nowhere either: a row this
 				// narrow cannot seat the count without spending the target's own floor on it
 				// (affordableSlot).
-				{line: 2, kind: targetHeader, entry: 0, text: leaderEdgeRow("  ┕ a"+clipTail+" ⋯", defaultGlyphs.collapsed)},
+				{line: 3, kind: targetHeader, entry: 0, text: leaderEdgeRow("  ┕ a"+clipTail+" ⋯", defaultGlyphs.collapsed)},
 			},
 		},
 		{
@@ -242,11 +251,13 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 				run(tr, "c2", "go vet ./...", "x\ny", 0)
 			},
 			want: []blockMark{
-				{line: 0, kind: targetHeader, entry: 0, text: "✦ Terminal"},
-				{line: 1, kind: targetHeader, entry: 0,
+				{line: 0, kind: targetUmbrella, entry: 0, text: umbrellaHeaderRow("Ran 1 command", glyphExpanded)},
+				{line: 1, kind: targetHeader, entry: 0, text: "✦ Terminal"},
+				{line: 2, kind: targetHeader, entry: 0,
 					text: groupMemberLine("  ┕ go build ./... ⋯ exit 0 · +3 more lines")},
-				{line: 5, kind: targetHeader, entry: 2, text: "✦ Terminal"},
-				{line: 6, kind: targetHeader, entry: 2,
+				{line: 6, kind: targetUmbrella, entry: 2, text: umbrellaHeaderRow("Ran 1 command", glyphExpanded)},
+				{line: 7, kind: targetHeader, entry: 2, text: "✦ Terminal"},
+				{line: 8, kind: targetHeader, entry: 2,
 					text: groupMemberLine("  ┕ go vet ./... ⋯ exit 0 · +2 more lines")},
 			},
 		},
@@ -295,8 +306,9 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 				run(tr, "c1", "go test", "a\nb\nc", 1)
 			},
 			want: []blockMark{
-				{line: 0, kind: targetHeader, entry: 0, text: "│ ✦ Terminal"},
-				{line: 1, kind: targetHeader, entry: 0,
+				{line: 0, kind: targetUmbrella, entry: 0, text: "│ " + umbrellaHeaderRow("Ran 1 command", glyphExpanded)},
+				{line: 1, kind: targetHeader, entry: 0, text: "│ ✦ Terminal"},
+				{line: 2, kind: targetHeader, entry: 0,
 					text: leaderEdgeRow("│   ┕ go test ⋯ exit 0 · +3 more lines", defaultGlyphs.collapsed)},
 			},
 		},
@@ -337,6 +349,7 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 		wantHeader                  string
 		wantCollapsed, wantExpanded string
 		refusesToggle               bool // the block opens a run view instead of a body (ADR 0063)
+		headerRow                   int  // the row the block's own header stands on: 1 under a group of one's header
 	}{
 		{
 			name: "a hidden body",
@@ -349,6 +362,7 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 			},
 			wantHeader:    "✦ Terminal",
 			wantCollapsed: defaultGlyphs.collapsed, wantExpanded: glyphExpanded,
+			headerRow: 1,
 		},
 		{
 			name: "a sub-agent run's elided span",
@@ -376,16 +390,16 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 
 			tr := tc.build()
 
-			if got := headerStar(t, tr, false); got != tc.wantHeader {
+			if got := headerStarAt(t, tr, false, tc.headerRow); got != tc.wantHeader {
 				t.Errorf("header = %q, want the label alone %q", got, tc.wantHeader)
 			}
-			if got := branchIndicator(t, tr); got != tc.wantCollapsed {
+			if got := branchIndicator(t, tr, tc.headerRow); got != tc.wantCollapsed {
 				t.Errorf("collapsed branch wears %q, want %q", got, tc.wantCollapsed)
 			}
 			if got := tr.toggleExpanded(0); got == tc.refusesToggle {
 				t.Fatalf("toggleExpanded(0) = %v; want %v", got, !tc.refusesToggle)
 			}
-			if got := branchIndicator(t, tr); got != tc.wantExpanded {
+			if got := branchIndicator(t, tr, tc.headerRow); got != tc.wantExpanded {
 				t.Errorf("expanded branch wears %q, want %q", got, tc.wantExpanded)
 			}
 			if tc.refusesToggle {
@@ -394,7 +408,7 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 			if !tr.toggleExpanded(0) {
 				t.Fatal("toggleExpanded(0) = false on the way back; want the block collapsed again")
 			}
-			if got := branchIndicator(t, tr); got != tc.wantCollapsed {
+			if got := branchIndicator(t, tr, tc.headerRow); got != tc.wantCollapsed {
 				t.Errorf("re-collapsed branch wears %q, want %q", got, tc.wantCollapsed)
 			}
 		})
@@ -415,20 +429,21 @@ func TestHeaderIndicatorIsStyledApartFromTheLabel(t *testing.T) {
 		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok\na\nb"}})
 
+	// Row 0 is the group of one's header; the call's own header and branch row are rows 1 and 2.
 	lines := tr.renderLines(th, 80)
 
-	if want := th.toolIndicator.Render(defaultGlyphs.collapsed); !strings.Contains(lines[1], want) {
-		t.Errorf("branch row %q does not carry the detail-toned indicator %q", lines[1], want)
+	if want := th.toolIndicator.Render(defaultGlyphs.collapsed); !strings.Contains(lines[2], want) {
+		t.Errorf("branch row %q does not carry the detail-toned indicator %q", lines[2], want)
 	}
-	if styledIntoTheLabel := th.toolLabel.Render("Run " + defaultGlyphs.collapsed); strings.Contains(lines[0], styledIntoTheLabel) {
-		t.Errorf("header %q paints the indicator inside the label's own run", lines[0])
+	if styledIntoTheLabel := th.toolLabel.Render("Run " + defaultGlyphs.collapsed); strings.Contains(lines[1], styledIntoTheLabel) {
+		t.Errorf("header %q paints the indicator inside the label's own run", lines[1])
 	}
 }
 
 // The "+N more lines" count RIDES the outcome slot rather than standing on a row of its own, and it
 // is painted with that slot in one style — apogee's own marker role, never the body's tone, because
 // the count is apogee's reading of the block and not a line the tool wrote (the issue register,
-// 2026-08-11). The negative half is the whole point of the fold: a collapsed lone call paints its
+// 2026-08-11). The negative half is the whole point of the fold: a collapsed call block paints its
 // header and one row, so no marker line is left for a body line opening with "+" to be mistaken
 // for.
 func TestRemainderCountRidesTheOutcomeSlot(t *testing.T) {
@@ -441,12 +456,12 @@ func TestRemainderCountRidesTheOutcomeSlot(t *testing.T) {
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok   a\nok   b\nPASS"}})
 
 	rendered := tr.renderView(th, 80, false, breadcrumbHint)
-	if len(rendered.lines) != 2 {
-		t.Fatalf("the collapsed block paints %d rows, want its header and one leader row:\n%s",
+	if len(rendered.lines) != 3 {
+		t.Fatalf("the collapsed block paints %d rows, want its group header, its header and one leader row:\n%s",
 			len(rendered.lines), ansi.Strip(strings.Join(rendered.lines, "\n")))
 	}
 	const slot = "exit 0 · +3 more lines"
-	row := rendered.lines[1]
+	row := rendered.lines[2]
 	if want := th.toolMarker.Render(slot); !strings.Contains(row, want) {
 		t.Errorf("leader row = %q; want its slot painted as the marker role's %q", row, want)
 	}
@@ -642,14 +657,14 @@ func TestBlockMarksAgreeWithTheMouseMapping(t *testing.T) {
 // anything the transcript holds, so a test names it outright instead of driving a clock.
 // branchIndicator is the mark a targeted block's BRANCH ROW wears at its right edge — the ▶/▼ the
 // header used to carry — or "" where the row wears none.
-func branchIndicator(t *testing.T, tr *transcript) string {
+func branchIndicator(t *testing.T, tr *transcript, headerRow int) string {
 	t.Helper()
 	lines := strings.Split(renderPlain(tr, 80), "\n")
-	if len(lines) < 2 {
+	if len(lines) < headerRow+2 {
 		t.Fatalf("the block painted %d rows; it has no branch row to check", len(lines))
 	}
 	for _, glyph := range []string{defaultGlyphs.collapsed, glyphExpanded} {
-		if strings.HasSuffix(lines[1], glyph) {
+		if strings.HasSuffix(lines[headerRow+1], glyph) {
 			return glyph
 		}
 	}
@@ -658,11 +673,18 @@ func branchIndicator(t *testing.T, tr *transcript) string {
 
 func headerStar(t *testing.T, tr *transcript, blink bool) string {
 	t.Helper()
+	return headerStarAt(t, tr, blink, 0)
+}
+
+// headerStarAt is headerStar asked of the row a block's own header stands on — row 1 for a call
+// painted under a group of one's header — so a check about the call's block reads that block.
+func headerStarAt(t *testing.T, tr *transcript, blink bool, row int) string {
+	t.Helper()
 	lines := tr.renderView(newTheme(scheme.Default()), 80, blink, breadcrumbHint).lines
-	if len(lines) == 0 {
-		t.Fatal("the transcript rendered nothing at all")
+	if len(lines) <= row {
+		t.Fatalf("the transcript rendered %d rows; it has no row %d", len(lines), row)
 	}
-	return strings.TrimRight(collapseLeader(ansiPattern.ReplaceAllString(lines[0], "")), " ")
+	return strings.TrimRight(collapseLeader(ansiPattern.ReplaceAllString(lines[row], "")), " ")
 }
 
 // TestLiveBlockHeaderStarBlinks is the rule in one table: a block still holding an open call paints
@@ -690,9 +712,11 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 		settled, flipped string
 	}{
 		{
+			// A lone call is a group of one, and its group header's star blinks for it while the
+			// header's live verb says the same thing in words.
 			name:    "a call still awaiting its result blinks",
 			build:   func(_ *testing.T, tr *transcript) { openRun(tr, "c1", "go test ./...") },
-			settled: "✦ Terminal", flipped: "  Terminal",
+			settled: umbrellaHeaderRow("Running 1 command", glyphExpanded), flipped: blinkedUmbrellaHeaderRow("Running 1 command", glyphExpanded),
 		},
 		{
 			name: "a landed result settles the star",
@@ -700,7 +724,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				openRun(tr, "c1", "go test ./...")
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "PASS"}})
 			},
-			settled: "✦ Terminal", flipped: "✦ Terminal",
+			settled: umbrellaHeaderRow("Ran 1 command", glyphExpanded), flipped: umbrellaHeaderRow("Ran 1 command", glyphExpanded),
 		},
 		{
 			// The state is none of the star's business: expanding a block shows more of it, it does
@@ -712,7 +736,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 					t.Fatal("setExpanded(0, true) = false; want the in-flight call expanded")
 				}
 			},
-			settled: "✦ Terminal", flipped: "  Terminal",
+			settled: umbrellaHeaderRow("Running 1 command", glyphExpanded), flipped: blinkedUmbrellaHeaderRow("Running 1 command", glyphExpanded),
 		},
 		{
 			// A same-type run of 2 is an umbrella of one type row, and the umbrella has ONE header for

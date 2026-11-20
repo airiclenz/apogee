@@ -75,7 +75,14 @@
 - `go test -race -count=1 -run 'UmbrellaHeader|ToolBlockStar|GroupSummary' ./internal/tui/`
 **Commit:** `feat(tui): paint the Group summary in the tools header colour`
 
-## 3. A lone groupable call is a group of one that re-folds
+## 3. A lone groupable call is a group of one that re-folds — ✅ DONE (2026-11-20)
+
+NOTES (2026-11-20): blocktarget.go needed no edit — the cursor stops already fall out of the paint: the group header (targetUmbrella) and the call's own header (targetHeader, only when the call hides something) are distinct lineTargets, so the one-call shape is two stops with no code change; spanFlags already keys the member's expanded bit, so the paint cache needed only its shape comment.
+NOTES (2026-11-20): revealBlockMember no longer opens a type row on a group of one (it has none to show, and a flag left there would open one the moment the group grows).
+NOTES (2026-11-20): groupofone_test.go drives the Model in-package (clickCell, block-cursor ⏎, renderPlain) rather than through an internal/tuitest Driver — no internal/tui test runs a tuitest Driver (that harness is the cmd/apogee e2e kit, item 6's); the tests fail with the floor reverted to 2.
+NOTES (2026-11-20): dead code left for item 4 by design — loneFoldable, loneTouched (and blockSettled's `!e.loneTouched` term), resolveFoldedCall and resolveBlock's folded-lone branch, blockFoldBy's loneFoldable case, plus their own doc comments; every other comment `rg -n 'LONE|lone call'` hit outside doc.go that this change made false was reworded (subagentblock.go:390 and transcript.go ownGroup's "a lone call is the block it always was" are item 5's lone delegation/skill wording).
+NOTES (2026-11-20): consequential behaviour, ported in autocollapse_test.go: a small umbrella the reader folded that shrinks to one call (a pending ask_user answered, so it turns solo) is now a group of one keeping its head's fold — it paints `✦ Read 1 file ▶` and opens on a click — where it used to paint the standalone block, ignoring the flag.
+NOTES (2026-11-20): cmd/apogee e2e tests and golden frames that read a lone call's rows will move with this shape; item 6 owns those assertions per the plan, so `go test ./cmd/apogee/` was not run here.
 
 **What:**
 Recast at the regression check (2026-11-20). Fixes the defect from the lone auto-collapse change (`9d509e86d`-era, `adr-0035-amend-1120`): a lone call the reader opened could never be folded again.

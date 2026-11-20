@@ -93,10 +93,10 @@ type transcript struct {
 	toolsFoldOver int
 	// toolsAutoCollapse is the `ui.tools-auto-collapse` switch: on, a SETTLED foldable block the
 	// reader has not touched stands folded — a Tools umbrella to its Group summary row whatever its
-	// size and toolsOpen say, a lone groupable call to the Group summary of one, a Sub-agent or
-	// Skill group to its header ([transcript.blockFoldBy]); off, every umbrella folds by its size
-	// alone, a lone call stays open and a group folds on its head flag alone, exactly as before the
-	// switch existed. The zero value is OFF, which is what a hand-built test transcript gets, so
+	// size and toolsOpen say, a group of one included, a Sub-agent or Skill group to its header
+	// ([transcript.blockFoldBy]); off, every umbrella folds by its size alone — a group of one
+	// stands open until the reader folds it — and a group folds on its head flag alone, exactly as
+	// before the switch existed. The zero value is OFF, which is what a hand-built test transcript gets, so
 	// no test paint written before the rule moves. It is a paint input preserved across reset for
 	// toolsOpen's reason, and moves through [transcript.setToolsAutoCollapse].
 	toolsAutoCollapse bool
@@ -465,10 +465,11 @@ type entry struct {
 	// counterpart to the shared toolsOpen a large umbrella follows — or of the Sub-agent or
 	// Skill group it heads, whose header folds on this flag alone; never persisted
 	folded bool
-	// view-only, on the head of a Tools umbrella or a Sub-agent or Skill group: the reader has
-	// acted on this block, which exempts it from auto-collapse ([transcript.blockFoldBy]); and,
-	// once touched, whether its fold is its own head flag (folded) whatever its size rather than
-	// the size rule's.
+	// view-only, on the head of a Tools umbrella (a group of one included) or a Sub-agent or Skill
+	// group: the reader has acted on this block, which exempts it from auto-collapse
+	// ([transcript.blockFoldBy]); and, once touched, whether its fold is its own head flag (folded)
+	// whatever its size rather than the size rule's. A touch outlives the group's growth: a group
+	// of one the reader opened stays as the reader left it when the next call joins it.
 	// Session-only and never persisted for folded's reasons: a replayed umbrella is untouched.
 	foldTouched bool
 	foldOwn     bool
@@ -2286,8 +2287,8 @@ const (
 	// foldByNone: the index heads no foldable block, or heads a lone call that auto-collapse does
 	// not hold folded — either way there is no fold to read.
 	foldByNone blockFoldRule = iota
-	// foldBySettled: auto-collapse is on and the block — an umbrella, a lone groupable call, or a
-	// Sub-agent or Skill group — is settled (its run's next Turn has started past it, or a later
+	// foldBySettled: auto-collapse is on and the block — an umbrella (a group of one included), or
+	// a Sub-agent or Skill group — is settled (its run's next Turn has started past it, or a later
 	// entry follows it, or its run has ended; [transcript.blockSettled]) and untouched — folded.
 	foldBySettled
 	// foldByShared: a LARGE umbrella under the size rule — folded exactly when !toolsOpen.
@@ -2304,9 +2305,8 @@ const (
 // own fold (entry.foldOwn) follows its head flag; everything else — a live umbrella, the
 // last entry of a running Turn, a touched one without a fold of its own, and every umbrella with
 // auto-collapse off — folds by its size, a LARGE one ([transcript.umbrellaIsLarge]) under the shared
-// preference and a SMALL one on its head flag. A LONE groupable call ([loneFoldable]) has the
-// settled fold and no other: settled and untouched under auto-collapse it is folded, and otherwise
-// it answers foldByNone, so a head flag a dissolved small umbrella left on it is never read. A
+// preference and a SMALL one on its head flag. A lone groupable call is a group of one and folds by
+// exactly these rules, so a reader who opened it can fold it again on its head flag. A
 // Sub-agent or Skill GROUP takes the settled fold like an umbrella and has no size: past it, it
 // folds on its head flag alone, live or settled, auto-collapse on or off. The paint
 // ([transcript.blockFolded]) and the reader's fold actions both ask it, so the two can never
@@ -2353,8 +2353,8 @@ func (t *transcript) blockFolded(head int) bool {
 	return false
 }
 
-// blockSettled reports whether the foldable block headed by entries[head] — a Tools umbrella, a
-// lone call, a Sub-agent or Skill group — is SETTLED: the work it folds is over and its run has
+// blockSettled reports whether the foldable block headed by entries[head] — a Tools umbrella (a
+// group of one included), a Sub-agent or Skill group — is SETTLED: the work it folds is over and its run has
 // moved on past it. It is derived at paint, like the umbrella's membership (toolSuperGroup), from
 // two facts stored on the members themselves, and it settles by either of two rules.
 //
@@ -2450,8 +2450,8 @@ func (e entry) waitsOnUser() bool {
 // A run with no entry of its own yet — a delegation whose first Turn committed nothing, a legacy
 // child whose stretch ends behind host notes parked at the tail — marks nothing ([lastOwnEntry]).
 //
-// Only an entry that ends a FOLDABLE block at this moment is marked ([foldHeadOf]) — an umbrella,
-// a lone groupable call, a Sub-agent or Skill group — because the mark is what keeps a block the
+// Only an entry that ends a FOLDABLE block at this moment is marked ([foldHeadOf]) — an umbrella
+// (a group of one included), a Sub-agent or Skill group — because the mark is what keeps a block the
 // boundary folded folded while the next Turn extends it. A lone delegation or a lone skill fetch
 // is no foldable block, so the boundary folds nothing there, and the group the next Turn's
 // delegation or fetch then forms beside it must stay open while its new member runs.
@@ -2510,8 +2510,8 @@ func (t *transcript) holdForApproval(tool string, run runRef, held bool) {
 
 // setToolsAutoCollapse moves the auto-collapse switch ([transcript.toolsAutoCollapse]) and reports
 // whether it moved. It touches only on a move, so a settings apply that leaves it where it stood
-// repaints nothing; a move redraws every settled block — umbrella, lone call, Sub-agent or Skill
-// group — through its paint key (paintKey.folded).
+// repaints nothing; a move redraws every settled block — umbrella (a group of one included),
+// Sub-agent or Skill group — through its paint key (paintKey.folded).
 func (t *transcript) setToolsAutoCollapse(on bool) bool {
 	if t.toolsAutoCollapse == on {
 		return false
@@ -2556,7 +2556,7 @@ func (t *transcript) setBlockFolded(head int, folded bool) bool {
 }
 
 // foldHeadOf is the head of the foldable tool block entries[i] belongs to — a Tools umbrella's
-// head, a type row's head or any member, a lone groupable call itself, or any member of a
+// head, a type row's head or any member, a group of one's lone call itself, or any member of a
 // Sub-agent or Skill group (the group's first, [toolGroupAt]) — and whether it belongs to one at
 // all. toolSuperGroup is only correct at a block head, so this finds the head the paint's walk
 // would: back over the adjacent groupable calls at i's own depth, which is the stretch
@@ -2672,10 +2672,10 @@ func (t *transcript) markBlockTouched(index int) bool {
 // so auto-collapse leaves it be, and holding its own head flag (entry.foldOwn) open, so
 // neither its size nor the shared `ui.tools-open` preference decides it from here on — the
 // reader's open of an auto-collapsed umbrella, which opens that one and writes nothing (ratified
-// "Large-umbrella click"). A further click flips that same head flag (Model.toggleBlockAt). A
-// LONE call has no fold but the settled one, so opening it is its touch alone: it paints its
-// standalone block from then on. A Sub-agent or Skill group opens like an umbrella. It reports
-// whether anything moved; an index heading no foldable block changes nothing.
+// "Large-umbrella click"). A further click flips that same head flag (Model.toggleBlockAt), so a
+// group of one — a lone call — re-folds like any umbrella. A Sub-agent or Skill group opens like
+// an umbrella. It reports whether anything moved; an index heading no foldable block changes
+// nothing.
 func (t *transcript) openBlockAlone(head int) bool {
 	if _, ok := foldableHead(t.entries, head); !ok {
 		return false
@@ -2696,8 +2696,10 @@ func (t *transcript) openBlockAlone(head int) bool {
 // jump to it needs (Model.followPanelTarget): a folded umbrella or group opens on a fold of its own
 // ([transcript.openBlockAlone]) — never the shared toggle, whose flip writes `ui.tools-open` —
 // an open one is marked touched, and the TYPE ROW holding the member opens, since a closed type row
-// paints no member line for the jump to land on. A folded lone call or group opens the same way and
-// has no type row to open. An index in no foldable block changes nothing.
+// paints no member line for the jump to land on. A folded group of one or Sub-agent or Skill group
+// opens the same way and has no type row to open — a group of one paints its call's own block under
+// the header — so a flag left there would open a type row the moment the group grows. An index in
+// no foldable block changes nothing.
 func (t *transcript) revealBlockMember(index int) {
 	head, ok := foldHeadOf(t.entries, index)
 	if !ok {
@@ -2708,7 +2710,11 @@ func (t *transcript) revealBlockMember(index int) {
 	} else {
 		t.markBlockTouched(head)
 	}
-	for _, run := range toolSuperGroup(t.entries, head) {
+	sup := toolSuperGroup(t.entries, head)
+	if sup.calls() < 2 {
+		return
+	}
+	for _, run := range sup {
 		if index >= run.at && index < run.at+run.n {
 			t.setTypeExpanded(run.at, true)
 			return
@@ -2787,8 +2793,8 @@ func (t *transcript) toggleTaskExpanded(index int) bool {
 // toolRun is one RUN of tool calls: the maximal stretch of adjacent entries carrying the same
 // friendly Label at the same sub-agent depth, every one of them foldable into a member row
 // (groupable). It is the unit the umbrella is built from — one row per run, and an umbrella is one
-// such run of 2+ calls or two or more runs under one header — and a lone call is a run of 1
-// (docs/layout/tool-layout.md, "Vocabulary").
+// such run or two or more runs under one header — and a lone call is a run of 1, the umbrella of
+// a group of one (docs/layout/tool-layout.md, "Vocabulary").
 //
 // It is stated as an index pair rather than as the views it covers because the INDEX is what the
 // levels above it need: the head entry is where the run's type-row state lives (typeExpanded) and
@@ -2845,11 +2851,13 @@ func sameLabelRun(entries []entry, i int) int {
 }
 
 // toolSuperGroup is the umbrella entries[i] heads, or nil when it heads none: the adjacent
-// same-depth runs of groupable calls starting there. TWO CALLS are the floor, whatever their
-// labels (plan "2026-09-02 - 01", item 3) — a run of 2+ same-label calls folds under the umbrella
-// exactly as adjacent runs of different labels do, so four terminals are `✦ Ran 4 commands` over
-// one `┕ Terminal (4)` type row, and a Read followed by a Terminal is that same umbrella over two
-// rows. Only a LONE groupable call heads no umbrella and stays the standalone block it always was.
+// same-depth runs of groupable calls starting there. ONE CALL is the floor (plan
+// "2026-11-20 - 00", item 3; it was two since plan "2026-09-02 - 01", item 3): a LONE groupable
+// call is a group of one — `✦ Read 1 file` over the call's own block — that folds, opens and
+// re-folds by every rule a larger umbrella does. A run of 2+ same-label calls folds under the
+// umbrella exactly as adjacent runs of different labels do, so four terminals are
+// `✦ Ran 4 commands` over one `┕ Terminal (4)` type row, and a Read followed by a Terminal is that
+// same umbrella over two rows.
 //
 // Adjacent runs differ in label BY CONSTRUCTION rather than by a test here: sameLabelRun is maximal,
 // so a call carrying the previous run's label was already absorbed by it and a call that opens a new
@@ -2865,10 +2873,10 @@ func sameLabelRun(entries []entry, i int) int {
 // does a nested call at any other level.
 //
 // Membership is DERIVED here and stored nowhere, which is what makes formation live (design call 2):
-// the umbrella exists the moment the SECOND groupable call is placed, whether it opens a run of its
-// own or extends the first — the running call being its last row, spinner star and all — and grows
-// as further calls append, with no membership recorded anywhere that could fall out of date behind
-// them.
+// the umbrella exists the moment the FIRST groupable call is placed — the running call being its
+// one member, spinner star and all — and grows as further calls append, whether a call opens a run
+// of its own or extends the last, with no membership recorded anywhere that could fall out of date
+// behind them.
 func toolSuperGroup(entries []entry, i int) superGroup {
 	n := sameLabelRun(entries, i)
 	if n == 0 {
@@ -2882,9 +2890,6 @@ func toolSuperGroup(entries []entry, i int) superGroup {
 		}
 		runs = append(runs, toolRun{at: at, n: m})
 		at += m
-	}
-	if runs.calls() < 2 {
-		return nil
 	}
 	return runs
 }

@@ -105,9 +105,10 @@ func TestAutoCollapseTouchWritersMoveTheGeneration(t *testing.T) {
 		t.Errorf("head after openBlockAlone: touched %v, ownFold %v, folded %v; want true, true, false",
 			head.foldTouched, head.foldOwn, head.folded)
 	}
-	if lone := tr.entries[3]; !lone.loneTouched || lone.foldTouched || lone.foldOwn {
-		t.Errorf("lone call after openBlockAlone: loneTouched %v, foldTouched %v, ownFold %v; want true, false, false",
-			lone.loneTouched, lone.foldTouched, lone.foldOwn)
+	// A lone call is a group of one: opening it gives it a fold of its own, as any umbrella's.
+	if lone := tr.entries[3]; !lone.foldTouched || !lone.foldOwn || lone.folded {
+		t.Errorf("lone call after openBlockAlone: foldTouched %v, ownFold %v, folded %v; want true, true, false",
+			lone.foldTouched, lone.foldOwn, lone.folded)
 	}
 }
 
@@ -288,14 +289,13 @@ func autoCollapseLoneModel(t *testing.T, opts Options) Model {
 	return m
 }
 
-// assertLoneCallOpen fails unless the lone Read of a.go at entry lone paints its standalone block —
-// its `┕ a.go` row — and no fold header of its own.
+// assertLoneCallOpen fails unless the lone Read of a.go at entry lone paints as an OPEN group of
+// one: its group header wearing the open fold's ▼, and its own block — its `┕ a.go` row — beneath.
 func assertLoneCallOpen(t *testing.T, m Model, lone int) {
 	t.Helper()
-	if slices.ContainsFunc(m.lineTargets, func(target lineTarget) bool {
-		return target.kind == targetUmbrella && target.entry == lone
-	}) {
-		t.Errorf("the lone call still paints its folded header:\n%s", strings.Join(m.lines, "\n"))
+	header := strip(m.lines[umbrellaHeaderLineOf(t, m, lone)])
+	if !strings.HasSuffix(strings.TrimRight(header, " "), glyphExpanded) {
+		t.Errorf("the lone call's group header %q is not open:\n%s", header, strings.Join(m.lines, "\n"))
 	}
 	if !slices.ContainsFunc(m.lines, func(line string) bool { return strings.Contains(strip(line), "┕ a.go") }) {
 		t.Errorf("the lone call paints no standalone row:\n%s", strings.Join(m.lines, "\n"))
@@ -303,8 +303,9 @@ func assertLoneCallOpen(t *testing.T, m Model, lone int) {
 }
 
 // TestAutoCollapseTouchOpensALoneCall pins the folded lone call's gesture, by mouse and by ⏎: its
-// folded line opens it alone onto today's block, touched and writing nothing, and the settled
-// umbrella beside it stays folded.
+// folded line opens it alone onto its group of one — header and the call's own block — touched and
+// writing nothing, the settled umbrella beside it staying folded; and the same gesture on that
+// header folds it again (the lone-call-no-refold defect).
 func TestAutoCollapseTouchOpensALoneCall(t *testing.T) {
 	t.Parallel()
 	const lone, umbrella = 1, 3
@@ -331,23 +332,33 @@ func TestAutoCollapseTouchOpensALoneCall(t *testing.T) {
 			if m.transcript.blockFolded(lone) {
 				t.Error("the folded lone call is still folded after the gesture")
 			}
-			if !m.transcript.entries[lone].loneTouched {
+			if !m.transcript.entries[lone].foldTouched {
 				t.Error("the opened lone call is not touched")
 			}
 			assertLoneCallOpen(t, m, lone)
 			if !m.transcript.blockFolded(umbrella) {
 				t.Error("the settled umbrella opened with the lone call; want it folded")
 			}
+
+			if way == "mouse" {
+				m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLineOf(t, m, lone)))
+			} else {
+				m = step(t, m, keyEnter())
+			}
+			if !m.transcript.blockFolded(lone) {
+				t.Error("the opened lone call did not fold again on the same gesture")
+			}
 			if len(log.writes) != 0 {
-				t.Errorf("writes = %+v after opening a lone call; want none", log.writes)
+				t.Errorf("writes = %+v after opening and folding a lone call; want none", log.writes)
 			}
 		})
 	}
 }
 
-// TestAutoCollapseTouchedLoneCallLeavesItsUmbrellaUntouched pins that a lone call's touch is its
-// own: a live lone call the reader opened, then joined by a second call, heads an umbrella that
-// still auto-collapses once it settles.
+// TestAutoCollapseTouchedLoneCallLeavesItsUmbrellaUntouched pins the touched-group-grows rule: a
+// live lone call — a group of one — the reader acted on, then joined by a second call, heads the
+// same touched group, which stays as the reader left it, open, and never auto-collapses once it
+// settles; the reader folds it by click.
 func TestAutoCollapseTouchedLoneCallLeavesItsUmbrellaUntouched(t *testing.T) {
 	t.Parallel()
 
@@ -362,11 +373,15 @@ func TestAutoCollapseTouchedLoneCallLeavesItsUmbrellaUntouched(t *testing.T) {
 	runCall(tr, "c2", "go test", "ok", 0)
 	tr.setTurnLive(false)
 
-	if len(toolSuperGroup(tr.entries, 0)) == 0 {
-		t.Fatal("setup: entries[0] heads no umbrella after the second call")
+	if got := toolSuperGroup(tr.entries, 0).calls(); got != 2 {
+		t.Fatalf("setup: entries[0] heads an umbrella of %d calls after the second call; want 2", got)
 	}
-	if got := tr.blockFoldBy(0); got != foldBySettled {
-		t.Errorf("blockFoldBy(0) = %d on the settled umbrella; want foldBySettled — the lone call's touch does not carry", got)
+	if !tr.entries[0].foldTouched {
+		t.Error("the grown group lost the touch its group of one carried")
+	}
+	if got := tr.blockFoldBy(0); got == foldBySettled || tr.blockFolded(0) {
+		t.Errorf("blockFoldBy(0) = %d, folded %v on the settled group; want it open — the touch carries",
+			got, tr.blockFolded(0))
 	}
 }
 
@@ -384,9 +399,9 @@ func TestAutoCollapsePanelJumpRevealsAFoldedLoneCall(t *testing.T) {
 	next, _ := m.followPanelTarget(panelTarget{kind: panelTargetBlock, entry: lone, run: m.viewedRun()})
 	m = next.(Model)
 
-	if m.transcript.blockFolded(lone) || !m.transcript.entries[lone].loneTouched {
+	if m.transcript.blockFolded(lone) || !m.transcript.entries[lone].foldTouched {
 		t.Errorf("after the jump: lone call folded %v, touched %v; want false, true",
-			m.transcript.blockFolded(lone), m.transcript.entries[lone].loneTouched)
+			m.transcript.blockFolded(lone), m.transcript.entries[lone].foldTouched)
 	}
 	assertLoneCallOpen(t, m, lone)
 	if !m.transcript.blockFolded(umbrella) {

@@ -360,6 +360,7 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"",
 		"· approval allow: terminal",
 		"",
+		"│ " + umbrellaHeaderRow("Read 1 file", glyphExpanded),
 		"│ ✦ Read",
 		"│   ┕ main.go ⋯ 154 lines",
 	}, "\n")

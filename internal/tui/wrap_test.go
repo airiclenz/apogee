@@ -671,11 +671,13 @@ func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 				})
 			},
 			want: []string{
+				"│ " + umbrellaHeaderRow("Read 1 file", glyphExpanded),
 				"│ ✦ Read",
 				"│   ┕ a.go ⋯ 5 lines",
 				"│", // both sides sit at depth 1: the rail runs straight through
 				"│ ✦ now the tests",
 				"│",
+				"│ " + umbrellaHeaderRow("Running 1 command", glyphExpanded),
 				"│ ✦ Terminal",
 				"│   ┕ go test ⋯",
 			},

@@ -310,11 +310,11 @@ func paintsLine(tr *transcript, line string) bool {
 	return slices.Contains(strings.Split(renderPlain(tr, 80), "\n"), line)
 }
 
-// TestAutoCollapseFoldsALoneCall pins the lone groupable call's fold: settled and untouched under
-// auto-collapse it paints its one-call Group summary folded, on narration or at the Turn's end; a
-// live one, and every one with auto-collapse off, paints today's block; a solo call and a task-list
-// card never fold; and a Read a folded small umbrella leaves alone when it dissolves reads none of
-// the umbrella's flags.
+// TestAutoCollapseFoldsALoneCall pins the lone groupable call's fold — a group of one: settled and
+// untouched under auto-collapse it paints its one-call Group summary folded, on narration or at the
+// Turn's end; a live one, and every one with auto-collapse off, stands open on its head flag; a solo
+// call and a task-list card never fold; and a Read a folded small umbrella leaves alone when it
+// dissolves is that umbrella shrunk to a group of one, keeping the fold its head carries.
 func TestAutoCollapseFoldsALoneCall(t *testing.T) {
 	t.Parallel()
 
@@ -364,9 +364,10 @@ func TestAutoCollapseFoldsALoneCall(t *testing.T) {
 		tr := &transcript{}
 		readCall(tr, "c1", "a.go", 1, 5, 0)
 		tr.addNote("saved")
-		if got := tr.blockFoldBy(0); got != foldByNone || paintsLine(tr, loneCallFoldedRow) {
-			t.Errorf("blockFoldBy(0) = %d with auto-collapse off; want foldByNone and today's block:\n%s",
-				got, renderPlain(tr, 80))
+		open := umbrellaHeaderRow("Read 1 file", glyphExpanded)
+		if got := tr.blockFoldBy(0); got != foldByHead || !paintsLine(tr, open) {
+			t.Errorf("blockFoldBy(0) = %d with auto-collapse off; want foldByHead and the open group of one %q:\n%s",
+				got, open, renderPlain(tr, 80))
 		}
 	})
 
@@ -394,7 +395,7 @@ func TestAutoCollapseFoldsALoneCall(t *testing.T) {
 		})
 	}
 
-	t.Run("a dissolved umbrella's Read reads none of its flags", func(t *testing.T) {
+	t.Run("a dissolved umbrella's Read keeps its head's fold", func(t *testing.T) {
 		t.Parallel()
 
 		tr := &transcript{}
@@ -407,11 +408,13 @@ func TestAutoCollapseFoldsALoneCall(t *testing.T) {
 
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "q1", Content: "a.go"}})
 
-		if len(toolSuperGroup(tr.entries, 0)) != 0 {
-			t.Fatal("setup: the answered ask_user did not dissolve the umbrella")
+		if got := toolSuperGroup(tr.entries, 0).calls(); got != 1 {
+			t.Fatalf("setup: the answered ask_user left an umbrella of %d calls; want the Read's group of one", got)
 		}
-		if tr.blockFolded(0) || paintsLine(tr, loneCallFoldedRow) {
-			t.Errorf("the Read left alone painted folded off the dissolved umbrella's flag:\n%s", renderPlain(tr, 80))
+		// The head flag is the group's fold, whatever the group holds: the reader folded it, and
+		// the group it shrank to stays folded until the reader opens it.
+		if !tr.blockFolded(0) || !paintsLine(tr, loneCallFoldedRow) {
+			t.Errorf("the Read left alone dropped the fold its head carries:\n%s", renderPlain(tr, 80))
 		}
 	})
 }

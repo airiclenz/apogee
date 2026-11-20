@@ -966,13 +966,13 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 	if grp, pos, ok := ownGroupAt(t.entries, head, loadSkillToolName); ok {
 		return t.resolveGroup(head, in, width, blink, root, buf, grp, pos, shapeSkillGroup)
 	}
-	// Any run of 2+ groupable calls folds under one umbrella (toolSuperGroup) — a single same-label
-	// run and adjacent runs of DIFFERENT tools alike, because a run is a ROW of the umbrella rather
-	// than a block of its own, and only a LONE groupable call falls through to the single block
-	// below. The question is only ever asked at a block head — the walk's index is one by
-	// construction, since every shape either advances by a single entry or steps over a whole
-	// block — and toolSuperGroup is only correct there: asked mid-run it would answer with a
-	// partial first run.
+	// Every groupable call folds under an umbrella (toolSuperGroup) — a lone call as a group of one,
+	// a single same-label run and adjacent runs of DIFFERENT tools alike, because a run is a ROW of
+	// the umbrella rather than a block of its own, so only a call that groups with nothing (a solo or
+	// targetless one) falls through to the single block below. The question is only ever asked at
+	// a block head — the walk's index is one by construction, since every shape either advances by
+	// a single entry or steps over a whole block — and toolSuperGroup is only correct there: asked
+	// mid-run it would answer with a partial first run.
 	//
 	// The umbrella covers its calls and nothing else (superGroup.calls), so the walk steps
 	// over exactly them. Its per-entry state is in the paint key already: blockKey spans the

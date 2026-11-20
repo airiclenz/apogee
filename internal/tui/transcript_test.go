@@ -121,6 +121,7 @@ func TestTranscriptToolTurnGolden(t *testing.T) {
 		strings.Repeat(glyphPadBelow, 80), // the prompt's ▀ half row stands in for the separator
 		"✦ Let me read it.",
 		"",
+		umbrellaHeaderRow("Read 1 file", glyphExpanded),
 		"✦ Read",
 		"  ┕ main.go ⋯ 1 line",
 		"",
@@ -381,6 +382,7 @@ func TestTranscriptTrimsNarrationBlankLines(t *testing.T) {
 	want := strings.Join([]string{
 		"✦ Reading it.",
 		"",
+		umbrellaHeaderRow("Reading 1 file", glyphExpanded),
 		"✦ Read",
 		"  ┕ main.go ⋯",
 	}, "\n")
@@ -2780,11 +2782,11 @@ func skillCard(query string, depth int) entry {
 	}, "", workspaceRoot{})}
 }
 
-// A super-group forms at TWO groupable calls at one depth — one same-label run of 2+, or adjacent
-// runs of different labels, a lone call counting as a run of 1 — and ends at the first thing that is
-// not such a run: a non-tool entry, a sub-agent block, a call standing at another depth, a call the
-// presenter left unfoldable. Only a single groupable call heads no umbrella
-// (docs/layout/tool-layout.md, "Vocabulary"; plan "2026-09-02 - 01", item 3).
+// A super-group forms at ONE groupable call at one depth — a lone call is a group of one, a run of 1
+// — and takes in every adjacent same-label run of 2+ or run of a different label after it, ending at
+// the first thing that is not such a run: a non-tool entry, a sub-agent block, a call standing at
+// another depth, a call the presenter left unfoldable (docs/layout/tool-layout.md, "Vocabulary";
+// plan "2026-11-20 - 00", item 3).
 func TestTranscriptSuperGroupFormation(t *testing.T) {
 	t.Parallel()
 
@@ -2828,9 +2830,11 @@ func TestTranscriptSuperGroupFormation(t *testing.T) {
 			calls: 3,
 		},
 		{
-			name:    "a lone call heads nothing",
+			name:    "a lone call is a group of one",
 			entries: []entry{toolCallCard("Read", "a.go", 0)},
 			at:      0,
+			want:    superGroup{{at: 0, n: 1}},
+			calls:   1,
 		},
 		{
 			name:    "a sub-agent run of 2 is no umbrella either",
@@ -2841,6 +2845,8 @@ func TestTranscriptSuperGroupFormation(t *testing.T) {
 			name:    "a note between two runs breaks the umbrella",
 			entries: []entry{toolCallCard("Read", "a.go", 0), note, toolCallCard("Terminal", "go build", 0)},
 			at:      0,
+			want:    superGroup{{at: 0, n: 1}},
+			calls:   1,
 		},
 		{
 			name: "the umbrella resumes after the breaker",
@@ -2854,6 +2860,8 @@ func TestTranscriptSuperGroupFormation(t *testing.T) {
 			name:    "a sub-agent block breaks the umbrella",
 			entries: []entry{toolCallCard("Read", "a.go", 0), subAgentCard("surveyor", 0), toolCallCard("Terminal", "go build", 0)},
 			at:      0,
+			want:    superGroup{{at: 0, n: 1}},
+			calls:   1,
 		},
 		{
 			name:    "a sub-agent call heads no umbrella of its own",
@@ -2864,11 +2872,15 @@ func TestTranscriptSuperGroupFormation(t *testing.T) {
 			name:    "a deeper call belongs to another level and does not join",
 			entries: []entry{toolCallCard("Read", "a.go", 0), toolCallCard("Terminal", "go build", 1)},
 			at:      0,
+			want:    superGroup{{at: 0, n: 1}},
+			calls:   1,
 		},
 		{
 			name:    "a call with no target cannot be a member row",
 			entries: []entry{toolCallCard("Read", "a.go", 0), toolCallCard("HTTP", "", 0), toolCallCard("Terminal", "go build", 0)},
 			at:      0,
+			want:    superGroup{{at: 0, n: 1}},
+			calls:   1,
 		},
 		{
 			name:    "an index naming no entry heads nothing",
@@ -2892,9 +2904,10 @@ func TestTranscriptSuperGroupFormation(t *testing.T) {
 	}
 }
 
-// Formation is LIVE (design call 2): the umbrella exists the moment the SECOND groupable call is
-// placed — same label or not, while it is still open — and grows as calls append, because membership
-// is derived from the entries every time it is asked rather than recorded when a call lands.
+// Formation is LIVE (design call 2): the umbrella exists the moment the FIRST groupable call is
+// placed — a group of one, while it is still open — and grows as calls append, same label or not,
+// because membership is derived from the entries every time it is asked rather than recorded when a
+// call lands.
 func TestTranscriptSuperGroupFormsLiveAndGrows(t *testing.T) {
 	t.Parallel()
 
@@ -2903,8 +2916,8 @@ func TestTranscriptSuperGroupFormsLiveAndGrows(t *testing.T) {
 		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: id, Tool: tool, Arguments: []byte(args)}})
 	}
 	call("c1", "read_file", `{"path":"a.go"}`)
-	if got := toolSuperGroup(tr.entries, 0); got != nil {
-		t.Fatalf("one call formed %v; a lone call is no umbrella on its own", got)
+	if got, want := toolSuperGroup(tr.entries, 0), (superGroup{{at: 0, n: 1}}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("one call formed %v; want %v — a lone call is a group of one", got, want)
 	}
 
 	// The second call carries the SAME label and is still open — no result has folded into it — and
@@ -3086,9 +3099,11 @@ func TestTranscriptSubAgentGroupNeverJoinsAnUmbrella(t *testing.T) {
 	if got := subAgentGroup(entries, 1); !reflect.DeepEqual(got, want) {
 		t.Fatalf("the two delegations = %v; want the group %v", got, want)
 	}
-	for at := 0; at < len(entries); at++ {
-		if got := toolSuperGroup(entries, at); got != nil {
-			t.Errorf("toolSuperGroup(…, %d) = %v; a delegation neither heads an umbrella nor lets one span it", at, got)
+	// The Read and the Terminal beside them are each a group of one, cut off by the delegations.
+	for at, want := range []superGroup{{{at: 0, n: 1}}, nil, nil, {{at: 3, n: 1}}} {
+		if got := toolSuperGroup(entries, at); !reflect.DeepEqual(got, want) {
+			t.Errorf("toolSuperGroup(…, %d) = %v, want %v; a delegation neither heads an umbrella nor lets one span it",
+				at, got, want)
 		}
 	}
 }

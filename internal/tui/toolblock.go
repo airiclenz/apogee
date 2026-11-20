@@ -7,8 +7,9 @@ import (
 	lipgloss "charm.land/lipgloss/v2"
 )
 
-// renderToolBlock renders one tool-call block — a LONE call, which is the only shape a groupable
-// call keeps outside the umbrella — in the one uniform shape layout.md sketches: a ✦ header
+// renderToolBlock renders one tool-call block — a call that groups with no other (a solo or
+// targetless one), and the body of an OPEN group of one, which paints a lone groupable call's block
+// under its umbrella header (renderSuperGroup) — in the one uniform shape layout.md sketches: a ✦ header
 // carrying the **label alone — never a target** (plus the ▶/▼ state indicator, below, where the
 // header is one), then one ┝/┕ branch whose first column is the call's target. The target never
 // sits on the header, so the target COLUMN does not move the moment a second call arrives and the
@@ -126,10 +127,13 @@ const (
 	superKindSeparator = ", "
 )
 
-// renderSuperGroup paints the umbrella: a run of 2+ groupable calls — one run of a single tool, or
-// adjacent runs of different tools — folded under one "✦ Read 3 files, ran 4 commands" header, one
-// row per run in time order (docs/layout/tool-layout.md, "Grouped tools collapsed (super-group)"). It is a LIST whose rows stand for RUNS rather than for calls, and everything
-// about the shape follows from that:
+// renderSuperGroup paints the umbrella: groupable calls — one run of a single tool, or adjacent
+// runs of different tools — folded under one "✦ Read 3 files, ran 4 commands" header, one row per
+// run in time order (docs/layout/tool-layout.md, "Grouped tools collapsed (super-group)"). It is a
+// LIST whose rows stand for RUNS rather than for calls, and everything about the shape follows from
+// that — save for a GROUP OF ONE, a lone call, whose open shape is the call's own standalone block
+// (renderToolBlock) directly under the header, with no type row: one call has no run to list, and
+// the block it paints there is the very one it painted before a lone call folded at all.
 //
 //   - a TYPE ROW is the leader row about a whole run (leaderRowIn): the label and its "(N)" where a
 //     call would put its target, the run's aggregate in the outcome slot (runAggregate), and a ▶/▼
@@ -172,6 +176,16 @@ func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState,
 	var out blockPaint
 	out.add([]string{umbrellaHeader(th, runs, state, room, width, !fold.folded)}, targetUmbrella)
 	if fold.folded {
+		return out
+	}
+	if len(runs) == 1 && len(runs[0].views) == 1 {
+		// The block marks its own lines for member 0 — the umbrella's head, the call itself — so a
+		// click there flips the call's body while the header above folds the group.
+		out.join(renderToolBlock(th, runs[0].views[0], width, blockState{
+			expanded: runs[0].memberExpanded(0),
+			live:     !runs[0].memberDone(0),
+			blink:    state.blink,
+		}))
 		return out
 	}
 
@@ -315,7 +329,7 @@ func paintHeaderMarker(th theme, marker string, _ bool) string {
 }
 
 // paintStar dresses a tool block's header star (blockState.star) in the tools header colour
-// (th.toolStar) — the ✦ of an umbrella, a lone call and a Sub-agent or Skill group alike. Only the
+// (th.toolStar) — the ✦ of an umbrella, a standalone call and a Sub-agent or Skill group alike. Only the
 // ✦ takes it: the live blink's bare cell stays a bare cell, so a blinking header paints no SGR run
 // around a space, and a borrowed glyph (blockState.glyph, a Firing's ⟳) keeps the tone it was
 // always painted in. The header text beside the star is not this function's: it keeps its own.

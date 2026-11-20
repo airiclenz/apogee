@@ -309,7 +309,7 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 		tr.setToolsAutoCollapse(true)
 		tr.setTurnLive(true)
 		readCall(tr, "c1", "a.go", 1, 5, 0)
-		if !tr.openBlockAlone(0) || !tr.entries[0].loneTouched {
+		if !tr.openBlockAlone(0) || !tr.entries[0].foldTouched {
 			t.Fatal("setup: opening the lone call did not touch it")
 		}
 		tr.apply(turnBoundary(domain.EventBase{}))
@@ -325,8 +325,10 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 		}
 		tr.apply(resultEvent(domain.EventBase{}, "c2", "x"))
 		tr.apply(domain.MessageEvent{Text: "Found it."})
-		if got := tr.blockFoldBy(0); got != foldBySettled {
-			t.Errorf("blockFoldBy(0) = %d once the umbrella settled by what followed; want foldBySettled", got)
+		// The touched group grows and stays as the reader left it: settled, it is still open.
+		if got := tr.blockFoldBy(0); got == foldBySettled || tr.blockFolded(0) {
+			t.Errorf("blockFoldBy(0) = %d, folded %v once the umbrella settled; want the touched group open",
+				got, tr.blockFolded(0))
 		}
 	})
 

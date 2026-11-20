@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -1500,9 +1501,11 @@ func TestUnframedSubAgentNeverFoldsIntoASuperGroup(t *testing.T) {
 		}
 	}
 
-	for at := range tr.entries {
-		if got := toolSuperGroup(tr.entries, at); got != nil {
-			t.Errorf("toolSuperGroup(…, %d) = %v; a delegation neither heads an umbrella nor lets one span it", at, got)
+	// Each read is a group of one, cut off by the delegation between them.
+	for at, want := range []superGroup{{{at: 0, n: 1}}, nil, {{at: 2, n: 1}}} {
+		if got := toolSuperGroup(tr.entries, at); !reflect.DeepEqual(got, want) {
+			t.Errorf("toolSuperGroup(…, %d) = %v, want %v; a delegation neither heads an umbrella nor lets one span it",
+				at, got, want)
 		}
 	}
 

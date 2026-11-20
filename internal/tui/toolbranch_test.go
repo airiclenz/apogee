@@ -65,6 +65,7 @@ func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 	readCall(tr, "c1", "main.go", 1, 154, 0)
 
 	want := strings.Join([]string{
+		umbrellaHeaderRow("Read 1 file", glyphExpanded),
 		"✦ Read",
 		"  ┕ main.go ⋯ 154 lines",
 	}, "\n")
@@ -105,6 +106,7 @@ func TestRenderMultiDetailStandalone(t *testing.T) {
 	}})
 
 	want := strings.Join([]string{
+		umbrellaHeaderRow("Ran 1 command", glyphExpanded),
 		"✦ Terminal", // a hidden body is something to reveal, and the branch row's ▶ says so
 		groupMemberLine("  ┕ go test ./... ⋯ exit 0 · +3 more lines"),
 	}, "\n")
@@ -131,6 +133,7 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
+		umbrellaHeaderRow("Diff Preview ×1", glyphExpanded),
 		"✦ Diff Preview",
 		leaderEdgeRow("  ┕ main.go ⋯ +1 −1", glyphExpanded),
 		"    1 - a removed line",
@@ -159,8 +162,8 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 		kind detailKind
 		text string
 	}{
-		{2, detailDiffRemoved, "- a removed line"},
-		{3, detailDiffAdded, "+ an added line"},
+		{3, detailDiffRemoved, "- a removed line"},
+		{4, detailDiffAdded, "+ an added line"},
 	} {
 		band := detailStyle(th, tc.kind, true)
 		want := band.Background(lipgloss.NoColor{}).Render(hang) +
@@ -193,6 +196,7 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
+		umbrellaHeaderRow("Diff Preview ×1", glyphExpanded),
 		"✦ Diff Preview",
 		leaderEdgeRow("  ┕ main.go ⋯ +2 −2", glyphExpanded),
 		"    1 - a code line that has been removed",
@@ -206,7 +210,7 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 	}
 
 	th := newTheme(scheme.Default())
-	if got, want := tr.renderLines(th, 80)[1], th.toolMarkerBright.Render("+2 −2"); !strings.Contains(got, want) {
+	if got, want := tr.renderLines(th, 80)[2], th.toolMarkerBright.Render("+2 −2"); !strings.Contains(got, want) {
 		t.Errorf("diffstat branch = %q; want its outcome slot in the marker tone of an OPEN block %q", got, want)
 	}
 }
@@ -227,11 +231,11 @@ func TestRenderDiffStatSurvivesTheBodyCap(t *testing.T) {
 
 	lines := strings.Split(renderPlain(tr, 80), "\n")
 	hidden := strconv.Itoa(longDiff)
-	if got, want := lines[1], groupMemberLine("  ┕ main.go ⋯ +"+hidden+" −0 · +"+hidden+" more lines"); got != want {
+	if got, want := lines[2], groupMemberLine("  ┕ main.go ⋯ +"+hidden+" −0 · +"+hidden+" more lines"); got != want {
 		t.Errorf("capped diff branch = %q, want %q (the stat spans the whole diff)", got, want)
 	}
-	if len(lines) != 2 {
-		t.Errorf("the collapsed diff paints %d rows, want its header and one branch:\n%s",
+	if len(lines) != 3 {
+		t.Errorf("the collapsed diff paints %d rows, want its group header, its header and one branch:\n%s",
 			len(lines), strings.Join(lines, "\n"))
 	}
 }
@@ -294,15 +298,15 @@ func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 			if got := tr.entries[0].tool.Details.len(); got != tc.wantKept {
 				t.Errorf("retained body = %d lines, want the whole %d", got, tc.wantKept)
 			}
-			// The collapsed block is a header and a branch line and nothing else: what it made of
-			// the retained lines is the count in that branch's outcome slot.
+			// The collapsed block is a header and a branch line under its group header and nothing
+			// else: what it made of the retained lines is the count in that branch's outcome slot.
 			lines := strings.Split(renderPlain(tr, 80), "\n")
-			if len(lines) != 2 {
-				t.Fatalf("the collapsed block paints %d rows, want its header and one branch:\n%s",
+			if len(lines) != 3 {
+				t.Fatalf("the collapsed block paints %d rows, want its group header, its header and one branch:\n%s",
 					len(lines), strings.Join(lines, "\n"))
 			}
-			if !strings.HasSuffix(lines[1], leaderEdgeRow(tc.wantCount, defaultGlyphs.collapsed)) {
-				t.Errorf("collapsed branch = %q; want its slot to end in the count %q", lines[1], tc.wantCount)
+			if !strings.HasSuffix(lines[2], leaderEdgeRow(tc.wantCount, defaultGlyphs.collapsed)) {
+				t.Errorf("collapsed branch = %q; want its slot to end in the count %q", lines[2], tc.wantCount)
 			}
 		})
 	}
@@ -372,18 +376,18 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 
 			tr := &transcript{}
 			tc.build(tr)
-			// The block is a header, a branch line, then its body: everything past the branch is
-			// what the block's state made of the retained lines — nothing at all while it is
-			// collapsed, the count for it riding the branch row's own slot.
+			// The block is its group header, a header, a branch line, then its body: everything past
+			// the branch is what the block's state made of the retained lines — nothing at all while
+			// it is collapsed, the count for it riding the branch row's own slot.
 			rows := func() []string { return strings.Split(renderPlain(tr, 80), "\n") }
-			body := func() string { return strings.Join(rows()[2:], "\n") }
+			body := func() string { return strings.Join(rows()[3:], "\n") }
 			collapsed := func(t *testing.T, when string) {
 				t.Helper()
-				if lines := rows(); len(lines) != 2 {
-					t.Errorf("%s paint stands %d rows, want its header and one branch:\n%s",
+				if lines := rows(); len(lines) != 3 {
+					t.Errorf("%s paint stands %d rows, want its group header, its header and one branch:\n%s",
 						when, len(lines), strings.Join(lines, "\n"))
-				} else if !strings.HasSuffix(lines[1], leaderEdgeRow(tc.wantCount, defaultGlyphs.collapsed)) {
-					t.Errorf("%s branch = %q; want its slot to end in the count %q", when, lines[1], tc.wantCount)
+				} else if !strings.HasSuffix(lines[2], leaderEdgeRow(tc.wantCount, defaultGlyphs.collapsed)) {
+					t.Errorf("%s branch = %q; want its slot to end in the count %q", when, lines[2], tc.wantCount)
 				}
 			}
 
@@ -436,27 +440,28 @@ func TestExpandedBlockLiftsItsDetailTone(t *testing.T) {
 			Arguments: []byte(`{"command":"go test ./..."}`)}})
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok   a\nPASS"}})
 
-		// Row 0 is the header and row 2 the remainder marker — chrome with roles of their own — so
-		// row 1, the branch line, is the whole of what the collapsed paint says about the call. Its
-		// own leader and indicator are chrome too, so the tone is asserted on the TARGET it carries.
+		// Row 0 is the group header and row 1 the call's own header — chrome with roles of their
+		// own — so row 2, the branch line, is the whole of what the collapsed paint says about the
+		// call. Its own leader and indicator are chrome too, so the tone is asserted on the TARGET
+		// it carries.
 		collapsed := tr.renderLines(th, 80)
-		if want := th.toolDetail.Render("go test ./..."); !strings.Contains(collapsed[1], want) {
-			t.Errorf("collapsed branch = %q; want its target in the dim tone %q", collapsed[1], want)
+		if want := th.toolDetail.Render("go test ./..."); !strings.Contains(collapsed[2], want) {
+			t.Errorf("collapsed branch = %q; want its target in the dim tone %q", collapsed[2], want)
 		}
 
 		if !tr.setExpanded(0, true) {
 			t.Fatal("setExpanded(0, true) = false; want the block opened")
 		}
 		open := tr.renderLines(th, 80)
-		if want := th.toolDetailBright.Render("go test ./..."); !strings.Contains(open[1], want) {
-			t.Errorf("open branch = %q; want its target in the brighter tone %q", open[1], want)
+		if want := th.toolDetailBright.Render("go test ./..."); !strings.Contains(open[2], want) {
+			t.Errorf("open branch = %q; want its target in the brighter tone %q", open[2], want)
 		}
 		// Open, every body row below the branch is the call's own text and lifts whole — the
 		// see-less footer closing the body apart, which is apogee's own affordance and wears the
 		// marker tone (seeLessFooter).
-		for i, row := range open[2 : len(open)-1] {
+		for i, row := range open[3 : len(open)-1] {
 			if want := th.toolDetailBright.Render(strip(row)); row != want {
-				t.Errorf("open row %d = %q; want the brighter tone %q", i+2, row, want)
+				t.Errorf("open row %d = %q; want the brighter tone %q", i+3, row, want)
 			}
 		}
 	})
@@ -614,19 +619,21 @@ func TestCollapsedBlockStandsAtMostTwoRows(t *testing.T) {
 		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"` + command + `"}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok\nPASS\ndone"}})
 
+	// Row 0 is the group of one's own header; the call's block is the two rows beneath it.
 	lines := strings.Split(renderPlain(tr, width), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("the collapsed block stands %d rows tall, want the budget's 2:\n%s", len(lines), strings.Join(lines, "\n"))
+	if len(lines) != 3 {
+		t.Fatalf("the collapsed block stands %d rows tall under its group header, want the budget's 2:\n%s",
+			len(lines), strings.Join(lines, "\n"))
 	}
-	if want := "✦ Terminal"; lines[0] != want {
-		t.Errorf("header = %q, want %q — the indicator rides the branch row now", lines[0], want)
+	if want := "✦ Terminal"; lines[1] != want {
+		t.Errorf("header = %q, want %q — the indicator rides the branch row now", lines[1], want)
 	}
-	if !strings.HasSuffix(lines[1], defaultGlyphs.collapsed) || !strings.Contains(lines[1], clipTail) {
+	if !strings.HasSuffix(lines[2], defaultGlyphs.collapsed) || !strings.Contains(lines[2], clipTail) {
 		t.Errorf("branch row = %q, want the target cut short with %q and the row wearing %q",
-			lines[1], clipTail, defaultGlyphs.collapsed)
+			lines[2], clipTail, defaultGlyphs.collapsed)
 	}
-	if want := "+3 more lines"; !strings.Contains(lines[1], want) {
-		t.Errorf("branch row = %q, want its slot to count the hidden body with %q", lines[1], want)
+	if want := "+3 more lines"; !strings.Contains(lines[2], want) {
+		t.Errorf("branch row = %q, want its slot to count the hidden body with %q", lines[2], want)
 	}
 	th := newTheme(scheme.Default())
 	for i, ln := range lines {
@@ -653,22 +660,25 @@ func TestClippedTargetAloneIsNoToggleTarget(t *testing.T) {
 		t.Fatalf("the fixture's call carries %d body lines, want the bodiless case", got)
 	}
 
+	// Row 0 is the group of one's header, whose fold is a target of its own at any width; the
+	// call's block beneath it is what this rule is about.
 	collapsed := strings.Split(renderPlain(tr, width), "\n")
-	if len(collapsed) != 2 || !strings.Contains(collapsed[1], clipTail) {
-		t.Errorf("collapsed paint = %d rows, last %q, want 2 rows with the clip tail in the branch:\n%s",
+	if len(collapsed) != 3 || !strings.Contains(collapsed[2], clipTail) {
+		t.Errorf("collapsed paint = %d rows, last %q, want 3 rows with the clip tail in the branch:\n%s",
 			len(collapsed), collapsed[len(collapsed)-1], strings.Join(collapsed, "\n"))
 	}
-	for i, ln := range collapsed {
+	for i, ln := range collapsed[1:] {
 		if strings.HasSuffix(ln, defaultGlyphs.collapsed) || strings.HasSuffix(ln, glyphExpanded) {
-			t.Errorf("row %d = %q wears an indicator; a cut target reveals nothing", i, ln)
+			t.Errorf("row %d = %q wears an indicator; a cut target reveals nothing", i+1, ln)
 		}
 	}
-	if got := blockMarks(t, tr, width); got != nil {
-		t.Errorf("marks on a bodiless block = %+v, want none", got)
-	}
-	// And the same call at a width its target fits is no target either — one rule, not two.
-	if got := blockMarks(t, tr, 200); got != nil {
-		t.Errorf("marks at a width the target fits = %+v, want none", got)
+	for _, w := range []int{width, 200} {
+		// And the same call at a width its target fits is no target either — one rule, not two.
+		for _, mark := range blockMarks(t, tr, w) {
+			if mark.kind != targetUmbrella {
+				t.Errorf("at %d columns the bodiless block marks %+v, want only its group header", w, mark)
+			}
+		}
 	}
 }
 
@@ -780,8 +790,11 @@ func TestAnsweredAskUserBlockIsAToggleTarget(t *testing.T) {
 		tr := &transcript{}
 		askUserCall(tr, "c1", question, "")
 
-		if got := blockMarks(t, tr, 80); got != nil {
-			t.Errorf("pending question marks = %+v, want none — the popup is its live view", got)
+		// A pending question is a group of one: its group header folds, its own block marks nothing.
+		for _, mark := range blockMarks(t, tr, 80) {
+			if mark.kind != targetUmbrella {
+				t.Errorf("pending question marks %+v, want only its group header — the popup is its live view", mark)
+			}
 		}
 	})
 }
@@ -920,19 +933,19 @@ func editWithRegions(regions []domain.EditRegion) *transcript {
 }
 
 // openBodyRows is what an EXPANDED single block painted BENEATH its branch row: its body, less the
-// see-less footer every open block closes with (seeLessFooter). The header and the branch row are
-// the two rows above it, whichever reading filled the body.
+// see-less footer every open block closes with (seeLessFooter). The group of one's header, the
+// call's own header and the branch row are the three rows above it, whichever reading filled the body.
 func openBodyRows(t *testing.T, tr *transcript, width int) []string {
 	t.Helper()
 	rows := strings.Split(renderPlain(tr, width), "\n")
-	if len(rows) < 4 {
-		t.Fatalf("block painted %d rows at width %d, want a header, a branch, a body and a footer:\n%s",
+	if len(rows) < 5 {
+		t.Fatalf("block painted %d rows at width %d, want a group header, a header, a branch, a body and a footer:\n%s",
 			len(rows), width, strings.Join(rows, "\n"))
 	}
 	if got, want := rows[len(rows)-1], seeLessFooterLine(t, width); got != want {
 		t.Fatalf("last row = %q, want the see-less footer %q", got, want)
 	}
-	return rows[2 : len(rows)-1]
+	return rows[3 : len(rows)-1]
 }
 
 // TestSplitDiffPaintsInAnExpandedBlockWhereItFits is the paint integration for the ungrouped block: one
