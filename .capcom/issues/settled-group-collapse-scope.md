@@ -16,3 +16,5 @@ This was scoped out of the first cut to keep that change small (owner, 2026-11-1
 ## Acceptance
 
 - A decision recorded for each of the three surfaces (collapse or not, and what the one row says), then implemented or declined with the reason.
+
+Decided by the owner 2026-11-20: all three collapse; implemented under `lone-tools-never-fold`.
