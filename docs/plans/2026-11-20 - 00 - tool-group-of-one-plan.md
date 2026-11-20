@@ -62,7 +62,7 @@
 - `git show --stat HEAD` names no `graphics/` path and `git status --short` lists neither `CHANGELOG.md` nor `.capcom/issues/lone-call-no-refold.md`.
 **Commit:** `feat(tui): fold a settled tool block when the next Turn of its run starts`
 
-## 2. Paint the Group summary in the tools header colour
+## 2. Paint the Group summary in the tools header colour — ✅ DONE (2026-11-20)
 
 **What:**
 **Goal:** on a `✦` group header the Group summary phrases, their clipped remainder and the diffstat counts' base foreground paint in `th.toolLabel` (bold, `tool-header` scheme role); the `✦`, dot leaders, `▶`/`▼` and failure outcome keep their current styles.

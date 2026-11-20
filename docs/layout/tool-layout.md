@@ -86,7 +86,10 @@ closer is drawn today.
 - **Group summary** — the umbrella header's text, built in the TUI from the
   members' views and their Tool summaries (nothing is added to the engine or
   the record), in this order: the **verb phrases**, then the **diffstat**,
-  then the **outcome counts**:
+  then the **outcome counts**. The phrases, any clipped remainder of them and
+  the diffstat counts' base paint in the tools header colour (the scheme's
+  `tool-header` role, bold); the `✦`, the dot leader, the `▶`/`▼` and the
+  outcome counts keep their own styles:
 
   ```text
   ✦ Read 3 files, searched 1 pattern, ran 4 commands, edited 2 files +18 −5 ⋯ ▶
@@ -135,7 +138,8 @@ closer is drawn today.
     diffstat goes, then the phrases give way to the bare total `Tools (N
     calls)` — `Tools` in the tool label's bold gold, the parenthetical in the
     faint count tone — and last that head is clipped the way a type row's
-    label is. The outcome counts survive every step and are the last thing
+    label is; a phrase the clip reached into keeps the tools header colour
+    (bold) up to its `…`. The outcome counts survive every step and are the last thing
     the clip takes, so the header is always one line and a failure stays on
     it as long as anything does.
 - `<tool-header>` — short human label of one call ("Read", "Terminal", …).

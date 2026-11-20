@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	lipgloss "charm.land/lipgloss/v2"
+
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
 )
@@ -1086,12 +1088,16 @@ func TestUmbrellaHeader_ShowsTheGroupSummary(t *testing.T) {
 		}
 	})
 
-	t.Run("paints the phrases in the header's tone, the dots as a leader and the star with them", func(t *testing.T) {
+	t.Run("paints the phrases in the tools header colour, the dots as a leader and the star with them", func(t *testing.T) {
 		t.Parallel()
 
+		if !th.toolLabel.GetBold() || th.toolLabel.GetForeground() != th.toolStar.GetForeground() {
+			t.Fatalf("toolLabel is not the bold tools header colour: bold=%v fg=%v, want bold and %v",
+				th.toolLabel.GetBold(), th.toolLabel.GetForeground(), th.toolStar.GetForeground())
+		}
 		got := headerAt(interleaved(t), 80, false)
 		dots := strings.Count(strip(got), defaultGlyphs.leaderDot)
-		want := th.toolStar.Render(defaultGlyphs.assistant) + th.toolHeader.Render(" ") + th.toolHeader.Render(summary) + " " +
+		want := th.toolStar.Render(defaultGlyphs.assistant) + th.toolHeader.Render(" ") + th.toolLabel.Render(summary) + " " +
 			th.toolLeader.Render(strings.Repeat(defaultGlyphs.leaderDot, dots)) +
 			strings.Repeat(" ", groupIndicatorGap) + th.toolIndicator.Render(glyphExpanded)
 		if got != want {
@@ -1112,7 +1118,7 @@ func TestUmbrellaHeader_ShowsTheGroupSummary(t *testing.T) {
 			Arguments: []byte(`{"command":"go test"}`)}})
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c3", Content: "FAIL", IsError: true}})
 		got := headerAt(tr, 80, false)
-		if want := th.toolHeader.Render("Read 1 file, ran 2 commands") + th.errorText.Render(" · 1 failed") + " "; !strings.Contains(got, want) {
+		if want := th.toolLabel.Render("Read 1 file, ran 2 commands") + th.errorText.Render(" · 1 failed") + " "; !strings.Contains(got, want) {
 			t.Errorf("styled header %q does not carry %q", got, want)
 		}
 		counted := headerAt(tr, fitWidth("Read 1 file, ran 2 commands · 1 failed")-1, false)
@@ -1122,7 +1128,7 @@ func TestUmbrellaHeader_ShowsTheGroupSummary(t *testing.T) {
 		}
 	})
 
-	t.Run("paints the diffstat's halves on the diff bands, the gap before each unbanded", func(t *testing.T) {
+	t.Run("paints the diffstat's halves on the diff bands over the tools header colour, the gap before each unbanded", func(t *testing.T) {
 		t.Parallel()
 
 		summary := groupSummary{
@@ -1131,14 +1137,37 @@ func TestUmbrellaHeader_ShowsTheGroupSummary(t *testing.T) {
 			{text: " −5", tone: groupToneRemoved},
 		}
 		got := umbrellaHeaderPaint(th, summary)(summary.text())
-		want := th.toolHeader.Render("Edited 2 files") +
-			th.toolHeader.Render(" ") + th.diffAdded.Inherit(th.toolHeader).Render("+18") +
-			th.toolHeader.Render(" ") + th.diffRemoved.Inherit(th.toolHeader).Render("−5")
+		want := th.toolLabel.Render("Edited 2 files") +
+			th.toolHeader.Render(" ") + th.diffAdded.Inherit(th.toolLabel).Render("+18") +
+			th.toolHeader.Render(" ") + th.diffRemoved.Inherit(th.toolLabel).Render("−5")
 		if got != want {
 			t.Errorf("styled diffstat:\n got  %q\n want %q", got, want)
 		}
+		for _, band := range []lipgloss.Style{th.diffAdded.Inherit(th.toolLabel), th.diffRemoved.Inherit(th.toolLabel)} {
+			if !band.GetBold() || band.GetForeground() != th.toolLabel.GetForeground() {
+				t.Errorf("a diffstat half's base is not the bold tools header colour: bold=%v fg=%v",
+					band.GetBold(), band.GetForeground())
+			}
+		}
 		if clipped := umbrellaHeaderPaint(th, summary)("Edited 2 f…"); strip(clipped) != "Edited 2 f…" {
 			t.Errorf("a clipped head painted as %q, want the survivor alone", strip(clipped))
+		}
+	})
+
+	t.Run("paints a clipped phrase and any remainder past the summary in the tools header colour", func(t *testing.T) {
+		t.Parallel()
+
+		summary := groupSummary{
+			{text: "Read 3 files", tone: groupTonePhrase},
+			{text: " · 1 failed", tone: groupToneOutcome},
+		}
+		if got, want := umbrellaHeaderPaint(th, summary)("Read 3 f…"), th.toolLabel.Render("Read 3 f…"); got != want {
+			t.Errorf("clipped phrase:\n got  %q\n want %q", got, want)
+		}
+		phrase := summary[:1]
+		got := umbrellaHeaderPaint(th, phrase)("Read 3 files…")
+		if want := th.toolLabel.Render("Read 3 files") + th.toolLabel.Render("…"); got != want {
+			t.Errorf("remainder past the summary:\n got  %q\n want %q", got, want)
 		}
 	})
 
@@ -1179,7 +1208,8 @@ func TestToolBlockStarPaintsInTheToolsHeaderColour(t *testing.T) {
 		name  string
 		build func(tr *transcript)
 		// after is the styled header text the star leads, exactly as it painted before the star
-		// took its colour.
+		// took its colour — save the umbrella's Group summary, which now paints in the tools header
+		// colour (th.toolLabel) beside it.
 		after string
 	}{
 		{
@@ -1188,7 +1218,7 @@ func TestToolBlockStarPaintsInTheToolsHeaderColour(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				readCall(tr, "c2", "util.go", 1, 42, 0)
 			},
-			after: th.toolHeader.Render(" ") + th.toolHeader.Render("Read 2 files"),
+			after: th.toolHeader.Render(" ") + th.toolLabel.Render("Read 2 files"),
 		},
 		{
 			name:  "lone call",

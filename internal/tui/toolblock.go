@@ -237,12 +237,14 @@ func umbrellaGroupCalls(runs []toolRunView) []groupCall {
 }
 
 // umbrellaHeaderPaint dresses whatever of the Group summary survived the row's clip, segment by
-// segment in the tone each one states (groupTone): the phrases in the header's own tone, the count
-// fallback as the `Tools (N calls)` header it has always been (umbrellaCountPaint), the diffstat's
-// halves on the diff bands (diffAdded / diffRemoved — the scheme's only diff colours, so a header's
-// +18 −5 reads in the colours its edits' bodies do), and the failed/denied counts in the failure
-// red. The summary is built to fit the row, so the clip normally hands every segment back whole; a
-// segment the clip reached into is painted as far as it survived, in its own tone, and ends the row.
+// segment in the tone each one states (groupTone): the phrases, and any remainder past them, in the
+// tools header colour (th.toolLabel — bold, the scheme's `tool-header` role), the count fallback as
+// the `Tools (N calls)` header it has always been (umbrellaCountPaint), the diffstat's halves on the
+// diff bands (diffAdded / diffRemoved — the scheme's only diff colours, so a header's +18 −5 reads
+// in the colours its edits' bodies do) over that same tools header foreground, and the
+// failed/denied counts in the failure red. The summary is built to fit the row, so the clip
+// normally hands every segment back whole; a segment the clip reached into is painted as far as it
+// survived, in its own tone, and ends the row.
 func umbrellaHeaderPaint(th theme, summary groupSummary) func(string) string {
 	return func(clipped string) string {
 		var b strings.Builder
@@ -262,7 +264,7 @@ func umbrellaHeaderPaint(th theme, summary groupSummary) func(string) string {
 			}
 		}
 		if rest != "" {
-			b.WriteString(th.toolHeader.Render(rest))
+			b.WriteString(th.toolLabel.Render(rest))
 		}
 		return b.String()
 	}
@@ -282,11 +284,11 @@ func paintGroupSegment(th theme, seg groupSegment) string {
 		}
 		count := strings.TrimLeft(seg.text, " ")
 		lead := seg.text[:len(seg.text)-len(count)]
-		return th.toolHeader.Render(lead) + band.Inherit(th.toolHeader).Render(count)
+		return th.toolHeader.Render(lead) + band.Inherit(th.toolLabel).Render(count)
 	case groupToneOutcome:
 		return th.errorText.Render(seg.text)
 	default:
-		return th.toolHeader.Render(seg.text)
+		return th.toolLabel.Render(seg.text)
 	}
 }
 
