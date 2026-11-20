@@ -4119,7 +4119,7 @@ func TestUmbrellaIsLargeBySizeAlone(t *testing.T) {
 	})
 }
 
-// umbrellaFolded is the one fold question the painter asks of a Tools umbrella, and its size picks
+// blockFolded is the one fold question the painter asks of a Tools umbrella, and its size picks
 // the answer's source: a LARGE umbrella follows the shared preference and ignores its head's flag,
 // a SMALL one follows its head's flag and starts open. The same umbrella crosses the line as the
 // threshold moves, so a flag set while it was small is silent while it is large and speaks again
@@ -4140,18 +4140,18 @@ func TestUmbrellaFoldedFollowsSizeThenFlag(t *testing.T) {
 		t.Parallel()
 
 		tr := build(t, 2)
-		if !tr.umbrellaFolded(0) {
-			t.Error("umbrellaFolded(0) = false under the folded default preference; want true")
+		if !tr.blockFolded(0) {
+			t.Error("blockFolded(0) = false under the folded default preference; want true")
 		}
 		tr.setToolsOpen(true)
-		if tr.umbrellaFolded(0) {
-			t.Error("umbrellaFolded(0) = true under toolsOpen; want false")
+		if tr.blockFolded(0) {
+			t.Error("blockFolded(0) = true under toolsOpen; want false")
 		}
-		if !tr.setUmbrellaFolded(0, true) {
-			t.Fatal("setUmbrellaFolded(0, true) = false; want the head flag to move")
+		if !tr.setBlockFolded(0, true) {
+			t.Fatal("setBlockFolded(0, true) = false; want the head flag to move")
 		}
-		if tr.umbrellaFolded(0) {
-			t.Error("umbrellaFolded(0) = true on a large umbrella with its head flag set; want false — a large umbrella reads the preference alone")
+		if tr.blockFolded(0) {
+			t.Error("blockFolded(0) = true on a large umbrella with its head flag set; want false — a large umbrella reads the preference alone")
 		}
 	})
 
@@ -4159,24 +4159,24 @@ func TestUmbrellaFoldedFollowsSizeThenFlag(t *testing.T) {
 		t.Parallel()
 
 		tr := build(t, 3)
-		if tr.umbrellaFolded(0) {
-			t.Error("umbrellaFolded(0) = true on a fresh small umbrella; want false — a small umbrella starts open")
+		if tr.blockFolded(0) {
+			t.Error("blockFolded(0) = true on a fresh small umbrella; want false — a small umbrella starts open")
 		}
 		tr.setToolsOpen(false)
-		if tr.umbrellaFolded(0) {
-			t.Error("umbrellaFolded(0) = true on a small umbrella under the folded preference; want false — the preference is the large umbrella's alone")
+		if tr.blockFolded(0) {
+			t.Error("blockFolded(0) = true on a small umbrella under the folded preference; want false — the preference is the large umbrella's alone")
 		}
-		if !tr.setUmbrellaFolded(0, true) {
-			t.Fatal("setUmbrellaFolded(0, true) = false; want the head flag to move")
+		if !tr.setBlockFolded(0, true) {
+			t.Fatal("setBlockFolded(0, true) = false; want the head flag to move")
 		}
-		if !tr.umbrellaFolded(0) {
-			t.Error("umbrellaFolded(0) = false with the head flag set; want true")
+		if !tr.blockFolded(0) {
+			t.Error("blockFolded(0) = false with the head flag set; want true")
 		}
-		if tr.setUmbrellaFolded(0, true) {
-			t.Error("setUmbrellaFolded(0, true) = true a second time; want false — the flag did not move")
+		if tr.setBlockFolded(0, true) {
+			t.Error("setBlockFolded(0, true) = true a second time; want false — the flag did not move")
 		}
-		if !tr.setUmbrellaFolded(0, false) || tr.umbrellaFolded(0) {
-			t.Error("setUmbrellaFolded(0, false) did not open the small umbrella again")
+		if !tr.setBlockFolded(0, false) || tr.blockFolded(0) {
+			t.Error("setBlockFolded(0, false) did not open the small umbrella again")
 		}
 	})
 
@@ -4184,20 +4184,20 @@ func TestUmbrellaFoldedFollowsSizeThenFlag(t *testing.T) {
 		t.Parallel()
 
 		tr := build(t, 3)
-		if !tr.setUmbrellaFolded(0, true) {
-			t.Fatal("setUmbrellaFolded(0, true) = false; want the head flag to move")
+		if !tr.setBlockFolded(0, true) {
+			t.Fatal("setBlockFolded(0, true) = false; want the head flag to move")
 		}
 		tr.setToolsOpen(true)
 		runCall(tr, "c4", "go vet", "ok", 0) // a fourth type row: over the threshold of 3
 		if !tr.umbrellaIsLarge(0) {
 			t.Fatal("umbrellaIsLarge(0) = false after the fourth type row; want true")
 		}
-		if tr.umbrellaFolded(0) {
-			t.Error("umbrellaFolded(0) = true once large under toolsOpen; want false — the head flag is ignored while large")
+		if tr.blockFolded(0) {
+			t.Error("blockFolded(0) = true once large under toolsOpen; want false — the head flag is ignored while large")
 		}
 		tr.setToolsFoldOver(4) // small again: the flag it kept speaks once more
-		if !tr.umbrellaFolded(0) {
-			t.Error("umbrellaFolded(0) = false once small again with its flag still set; want true")
+		if !tr.blockFolded(0) {
+			t.Error("blockFolded(0) = false once small again with its flag still set; want true")
 		}
 	})
 
@@ -4207,11 +4207,11 @@ func TestUmbrellaFoldedFollowsSizeThenFlag(t *testing.T) {
 		tr := build(t, 2)
 		tr.addUser("and then?", nil)
 		prompt := len(tr.entries) - 1
-		if tr.umbrellaFolded(prompt) {
-			t.Error("umbrellaFolded on a prompt = true; want false")
+		if tr.blockFolded(prompt) {
+			t.Error("blockFolded on a prompt = true; want false")
 		}
-		if tr.setUmbrellaFolded(prompt, true) || tr.setUmbrellaFolded(99, true) || tr.setUmbrellaFolded(-1, true) {
-			t.Error("setUmbrellaFolded on a prompt or out of range = true; want false and no move")
+		if tr.setBlockFolded(prompt, true) || tr.setBlockFolded(99, true) || tr.setBlockFolded(-1, true) {
+			t.Error("setBlockFolded on a prompt or out of range = true; want false and no move")
 		}
 	})
 }
@@ -4272,7 +4272,7 @@ func TestTranscriptWritersBumpTheGeneration(t *testing.T) {
 		{"setExpanded", func(tr *transcript) { tr.setExpanded(3, true) }},
 		{"toggleExpanded", func(tr *transcript) { tr.toggleExpanded(3) }},
 		{"setTypeExpanded", func(tr *transcript) { tr.setTypeExpanded(3, true) }},
-		{"setUmbrellaFolded", func(tr *transcript) { tr.setUmbrellaFolded(3, true) }},
+		{"setBlockFolded", func(tr *transcript) { tr.setBlockFolded(3, true) }},
 		{"setTaskExpanded", func(tr *transcript) { tr.setTaskExpanded(2, true) }},
 		{"replay", func(tr *transcript) { tr.replay([]entry{{kind: entryAssistant, text: "stored"}}) }},
 		{"reset", func(tr *transcript) { tr.reset() }},
@@ -4297,8 +4297,8 @@ func TestTranscriptWritersBumpTheGeneration(t *testing.T) {
 	}{
 		{"hasOpenToolCall", func(tr *transcript) { tr.hasOpenToolCall() }},
 		{"renderView", func(tr *transcript) { tr.renderView(newTheme(scheme.Default()), 80, false, "") }},
-		{"setUmbrellaFolded at the value it already holds", func(tr *transcript) { tr.setUmbrellaFolded(3, false) }},
-		{"setUmbrellaFolded refused on a prompt", func(tr *transcript) { tr.setUmbrellaFolded(1, true) }},
+		{"setBlockFolded at the value it already holds", func(tr *transcript) { tr.setBlockFolded(3, false) }},
+		{"setBlockFolded refused on a prompt", func(tr *transcript) { tr.setBlockFolded(1, true) }},
 		{"setExpanded refused out of range", func(tr *transcript) { tr.setExpanded(99, true) }},
 		{"setExpanded refused on an open run head", func(tr *transcript) { tr.setExpanded(2, true) }},
 		{"setTaskExpanded refused on a plain call", func(tr *transcript) { tr.setTaskExpanded(3, true) }},

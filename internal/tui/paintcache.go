@@ -217,8 +217,8 @@ type paintKey struct {
 	// more type rows than the threshold ([transcript.umbrellaIsLarge]) and whether it stands shut to
 	// its header line — settled and untouched under auto-collapse first, else under the shared
 	// preference (transcript.toolsOpen) when large, on its head entry's own flag
-	// (entry.umbrellaFolded) when small, one RESOLVED answer either way
-	// ([transcript.umbrellaFoldBy], reaching the key as fold.folded). A settle moves it with no flag
+	// (entry.folded) when small, one RESOLVED answer either way
+	// ([transcript.blockFoldBy], reaching the key as fold.folded). A settle moves it with no flag
 	// flipped on the umbrella's own entries — a later entry appended past it, the Turn's end — which
 	// is one more reason it is keyed as the answer rather than its inputs. Neither rides spanFlags, the
 	// small fold's head flag deliberately included: both are named as the facts the paint moves on
@@ -253,7 +253,7 @@ type paintKey struct {
 // a delegation not yet started, one running, and one whose child has reported ahead of the group's
 // result burst (entry.phase). Every per-entry view FACT
 // belongs here, whether or not a painter reads it yet — the one exception is a small umbrella's
-// head fold (entry.umbrellaFolded), which reaches the key as [paintKey.folded], the slot a large
+// head fold (entry.folded), which reaches the key as [paintKey.folded], the slot a large
 // umbrella's fold already travels in: a state a key ignores is a stale paint served
 // after a click that changed something, and that is a failure no golden can see, since the paint it
 // asserts is the one the painter would have produced anyway.
@@ -504,7 +504,7 @@ func blockKey(shape blockShape, ins []paintInput, th theme, width int, blink, li
 // says the umbrella has more type rows than the threshold ([transcript.umbrellaIsLarge]) — the
 // condition under which, unless auto-collapse holds it folded as settled, it obeys the shared
 // preference rather than its own head flag — and folded says whichever rule it obeys has it shut to
-// its header line ([transcript.umbrellaFoldBy], [transcript.umbrellaFolded]).
+// its header line ([transcript.blockFoldBy], [transcript.blockFolded]).
 // The painter draws folded alone — every umbrella's header wears the fold's ▶/▼ and is a fold
 // target whatever its size (renderSuperGroup) — while large names which fold that is, so the key
 // still turns over when a threshold or preference edit carries the umbrella across the line.

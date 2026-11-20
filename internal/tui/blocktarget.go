@@ -43,13 +43,13 @@ package tui
 // and then open a member to its body. targetUmbrella is the umbrella header — marked on EVERY
 // umbrella, small or large, open or folded, live or done, wearing the fold's ▶/▼ at its leader's edge
 // (renderSuperGroup). Its click folds the umbrella to its header line and back, and which fold it
-// moves is answered by the fold rule (transcript.umbrellaFoldBy) — a settled, untouched umbrella
+// moves is answered by the fold rule (transcript.blockFoldBy) — a settled, untouched umbrella
 // under auto-collapse first, which opens alone on a fold of its own and writes nothing
-// (transcript.openUmbrellaAlone), then the umbrella's size (transcript.umbrellaIsLarge): a LARGE one
+// (transcript.openBlockAlone), then the umbrella's size (transcript.umbrellaIsLarge): a LARGE one
 // follows the shared `ui.tools-open` preference (Model.toggleToolsFold), a small one — or a touched
-// one with a fold of its own — its own head flag alone (transcript.setUmbrellaFolded), with every
+// one with a fold of its own — its own head flag alone (transcript.setBlockFolded), with every
 // child's state left as it stood beneath either fold. A click on any of the three levels marks the
-// umbrella touched (transcript.markUmbrellaTouched), so auto-collapse never folds it again.
+// umbrella touched (transcript.markBlockTouched), so auto-collapse never folds it again.
 //
 // targetStage is one stage row of a workflow block that draws them (renderWorkflowStages): the row a Recipe's
 // stage stands on, one per stage of its Plan. It names the block's entry like every other kind, and

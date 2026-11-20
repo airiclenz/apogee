@@ -1384,8 +1384,8 @@ func (m Model) followPanelTarget(target panelTarget) (tea.Model, tea.Cmd) {
 		}
 		// A member of a Tools umbrella paints no line while the umbrella is folded or its type row
 		// is shut: open both first, on the umbrella's own fold — the jump never moves the shared
-		// `ui.tools-open` fold, whose flip is a write (transcript.revealUmbrellaMember).
-		m.transcript.revealUmbrellaMember(target.entry)
+		// `ui.tools-open` fold, whose flip is a write (transcript.revealBlockMember).
+		m.transcript.revealBlockMember(target.entry)
 		m.transcript.setExpanded(target.entry, true)
 		m.revealEntry(target.entry)
 		return m, nil

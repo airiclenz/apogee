@@ -61,9 +61,9 @@ func TestUmbrellaHeadOfFindsTheHeadFromAnyMember(t *testing.T) {
 	tr.addNote("saved")                   // 4
 	runCall(tr, "t2", "go vet", "ok", 0)  // 5: a lone call
 	for i, want := range []int{-1, 1, 1, 1, -1, -1} {
-		head, ok := umbrellaHeadOf(tr.entries, i)
+		head, ok := foldHeadOf(tr.entries, i)
 		if ok != (want >= 0) || (ok && head != want) {
-			t.Errorf("umbrellaHeadOf(%d) = %d, %v; want %d, %v", i, head, ok, want, want >= 0)
+			t.Errorf("foldHeadOf(%d) = %d, %v; want %d, %v", i, head, ok, want, want >= 0)
 		}
 	}
 }
@@ -81,12 +81,12 @@ func TestAutoCollapseTouchWritersMoveTheGeneration(t *testing.T) {
 		act   func() bool
 		moves bool
 	}{
-		{"markUmbrellaTouched from a member", func() bool { return tr.markUmbrellaTouched(1) }, true},
-		{"markUmbrellaTouched again", func() bool { return tr.markUmbrellaTouched(0) }, false},
-		{"markUmbrellaTouched outside an umbrella", func() bool { return tr.markUmbrellaTouched(2) }, false},
-		{"openUmbrellaAlone", func() bool { return tr.openUmbrellaAlone(0) }, true},
-		{"openUmbrellaAlone again", func() bool { return tr.openUmbrellaAlone(0) }, false},
-		{"openUmbrellaAlone on a member", func() bool { return tr.openUmbrellaAlone(2) }, false},
+		{"markBlockTouched from a member", func() bool { return tr.markBlockTouched(1) }, true},
+		{"markBlockTouched again", func() bool { return tr.markBlockTouched(0) }, false},
+		{"markBlockTouched outside an umbrella", func() bool { return tr.markBlockTouched(2) }, false},
+		{"openBlockAlone", func() bool { return tr.openBlockAlone(0) }, true},
+		{"openBlockAlone again", func() bool { return tr.openBlockAlone(0) }, false},
+		{"openBlockAlone on a member", func() bool { return tr.openBlockAlone(2) }, false},
 	} {
 		before := tr.generation
 		if got := tc.act(); got != tc.moves {
@@ -96,9 +96,9 @@ func TestAutoCollapseTouchWritersMoveTheGeneration(t *testing.T) {
 			t.Errorf("%s moved the generation: %v; want %v", tc.name, moved, tc.moves)
 		}
 	}
-	if head := tr.entries[0]; !head.umbrellaTouched || !head.umbrellaOwnFold || head.umbrellaFolded {
-		t.Errorf("head after openUmbrellaAlone: touched %v, ownFold %v, folded %v; want true, true, false",
-			head.umbrellaTouched, head.umbrellaOwnFold, head.umbrellaFolded)
+	if head := tr.entries[0]; !head.foldTouched || !head.foldOwn || head.folded {
+		t.Errorf("head after openBlockAlone: touched %v, ownFold %v, folded %v; want true, true, false",
+			head.foldTouched, head.foldOwn, head.folded)
 	}
 }
 
@@ -139,14 +139,14 @@ func TestAutoCollapseTouchMarksEveryTargetKind(t *testing.T) {
 					m = step(t, m, keyEnter())
 				}
 
-				if !m.transcript.entries[live].umbrellaTouched {
+				if !m.transcript.entries[live].foldTouched {
 					t.Errorf("the %s gesture left the umbrella untouched", tc.name)
 				}
-				if m.transcript.entries[settled].umbrellaTouched {
+				if m.transcript.entries[settled].foldTouched {
 					t.Error("the other umbrella was marked touched by a gesture on this one")
 				}
 				m.transcript.setTurnLive(false)
-				if got := m.transcript.umbrellaFoldBy(live); got == foldBySettled {
+				if got := m.transcript.blockFoldBy(live); got == foldBySettled {
 					t.Error("the touched umbrella auto-collapsed once the Turn ended; want it exempt")
 				}
 			})
@@ -165,17 +165,17 @@ func TestAutoCollapseTouchOpensOneUmbrellaAlone(t *testing.T) {
 	opts := testOpts
 	opts.Settings = fakeSettingsHost{write: log.write}
 	m := autoCollapseLargeModel(t, opts, false)
-	if !m.transcript.umbrellaFolded(first) || !m.transcript.umbrellaFolded(second) {
+	if !m.transcript.blockFolded(first) || !m.transcript.blockFolded(second) {
 		t.Fatal("setup: the two settled umbrellas are not both folded")
 	}
 
 	m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLineOf(t, m, first)))
 
-	if m.transcript.umbrellaFolded(first) {
+	if m.transcript.blockFolded(first) {
 		t.Error("the clicked auto-collapsed umbrella is still folded")
 	}
 	typeRowLine(t, m, first) // it lists its type rows
-	if !m.transcript.umbrellaFolded(second) {
+	if !m.transcript.blockFolded(second) {
 		t.Error("the other settled umbrella opened with it; want it folded")
 	}
 	if m.opts.UI.ToolsOpen || m.transcript.toolsOpen {
@@ -187,11 +187,11 @@ func TestAutoCollapseTouchOpensOneUmbrellaAlone(t *testing.T) {
 
 	m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLineOf(t, m, first)))
 
-	if !m.transcript.umbrellaFolded(first) {
+	if !m.transcript.blockFolded(first) {
 		t.Error("a second click left the umbrella open; want it folded on its own flag")
 	}
-	if got := m.transcript.umbrellaFoldBy(first); got != foldByHead {
-		t.Errorf("umbrellaFoldBy(first) = %d after the second click; want foldByHead", got)
+	if got := m.transcript.blockFoldBy(first); got != foldByHead {
+		t.Errorf("blockFoldBy(first) = %d after the second click; want foldByHead", got)
 	}
 	if len(log.writes) != 0 {
 		t.Errorf("writes = %+v after folding it again; want none", log.writes)
@@ -215,14 +215,14 @@ func TestAutoCollapseTouchLiveLargeClickStillWrites(t *testing.T) {
 	if want := []settingEdit{{path: "ui.tools-open", value: "true"}}; !reflect.DeepEqual(log.writes, want) {
 		t.Errorf("writes = %+v, want exactly %+v", log.writes, want)
 	}
-	if m.transcript.umbrellaFolded(live) {
+	if m.transcript.blockFolded(live) {
 		t.Error("the live large umbrella did not open")
 	}
-	if !m.transcript.umbrellaFolded(settled) {
+	if !m.transcript.blockFolded(settled) {
 		t.Error("the settled umbrella opened with the shared fold; want it still auto-collapsed")
 	}
 	m.transcript.setTurnLive(false)
-	if m.transcript.umbrellaFolded(live) {
+	if m.transcript.blockFolded(live) {
 		t.Error("the touched umbrella folded when the Turn ended; want it exempt")
 	}
 }
@@ -242,19 +242,19 @@ func TestAutoCollapsePanelJumpRevealsAFoldedMember(t *testing.T) {
 	next, _ := m.followPanelTarget(panelTarget{kind: panelTargetBlock, entry: member, run: m.viewedRun()})
 	m = next.(Model)
 
-	if m.transcript.umbrellaFolded(head) {
+	if m.transcript.blockFolded(head) {
 		t.Error("the jump left the member's umbrella folded")
 	}
-	if !m.transcript.entries[head].umbrellaTouched || !m.transcript.entries[run].typeExpanded {
+	if !m.transcript.entries[head].foldTouched || !m.transcript.entries[run].typeExpanded {
 		t.Errorf("after the jump: umbrella touched %v, member's type row open %v; want both true",
-			m.transcript.entries[head].umbrellaTouched, m.transcript.entries[run].typeExpanded)
+			m.transcript.entries[head].foldTouched, m.transcript.entries[run].typeExpanded)
 	}
 	if !slices.ContainsFunc(m.lineTargets, func(target lineTarget) bool {
 		return target.kind == targetHeader && target.entry == member
 	}) {
 		t.Errorf("the jump painted no row for the member:\n%s", strings.Join(m.lines, "\n"))
 	}
-	if !m.transcript.umbrellaFolded(other) {
+	if !m.transcript.blockFolded(other) {
 		t.Error("the other settled umbrella opened with the jump; want it folded")
 	}
 	if len(log.writes) != 0 || m.opts.UI.ToolsOpen {

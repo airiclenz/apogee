@@ -21,6 +21,13 @@ func autoCollapseUmbrella(t *testing.T) *transcript {
 	return tr
 }
 
+// settledAt asks blockSettled of the block entries[head] heads, its end read off the head's shape
+// (foldableHead) as every production caller reads it; an index heading no block answers false.
+func settledAt(tr *transcript, head int) bool {
+	end, ok := foldableHead(tr.entries, head)
+	return ok && tr.blockSettled(head, end)
+}
+
 // TestAutoCollapseSettlesOnWhatFollows pins the settle half of the rule: a done umbrella folds the
 // moment a later entry of its own run follows it — narration, a note, a user message — or, with
 // nothing after it, the moment its Turn ends.
@@ -40,18 +47,18 @@ func TestAutoCollapseSettlesOnWhatFollows(t *testing.T) {
 			t.Parallel()
 
 			tr := autoCollapseUmbrella(t)
-			if tr.umbrellaFolded(0) {
-				t.Fatal("umbrellaFolded(0) = true before anything follows a running Turn's last umbrella; want false")
+			if tr.blockFolded(0) {
+				t.Fatal("blockFolded(0) = true before anything follows a running Turn's last umbrella; want false")
 			}
 			tc.follow(tr)
-			if !tr.umbrellaSettled(0) {
-				t.Error("umbrellaSettled(0) = false; want true")
+			if !settledAt(tr, 0) {
+				t.Error("blockSettled(0) = false; want true")
 			}
-			if !tr.umbrellaFolded(0) {
-				t.Error("umbrellaFolded(0) = false on a settled, untouched umbrella under auto-collapse; want true")
+			if !tr.blockFolded(0) {
+				t.Error("blockFolded(0) = false on a settled, untouched umbrella under auto-collapse; want true")
 			}
-			if got := tr.umbrellaFoldBy(0); got != foldBySettled {
-				t.Errorf("umbrellaFoldBy(0) = %d; want foldBySettled", got)
+			if got := tr.blockFoldBy(0); got != foldBySettled {
+				t.Errorf("blockFoldBy(0) = %d; want foldBySettled", got)
 			}
 		})
 	}
@@ -71,11 +78,11 @@ func TestAutoCollapseKeepsLiveUmbrellasOpen(t *testing.T) {
 		tr.setTurnLive(false)
 		readCall(tr, "c1", "a.go", 1, 5, 0)
 		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "terminal", Arguments: []byte(`{"command":"go test"}`)}})
-		if tr.umbrellaSettled(0) {
-			t.Error("umbrellaSettled(0) = true with a call still open; want false")
+		if settledAt(tr, 0) {
+			t.Error("blockSettled(0) = true with a call still open; want false")
 		}
-		if tr.umbrellaFolded(0) {
-			t.Error("umbrellaFolded(0) = true on a live umbrella; want false — it folds by its size as before")
+		if tr.blockFolded(0) {
+			t.Error("blockFolded(0) = true on a live umbrella; want false — it folds by its size as before")
 		}
 	})
 
@@ -83,11 +90,11 @@ func TestAutoCollapseKeepsLiveUmbrellasOpen(t *testing.T) {
 		t.Parallel()
 
 		tr := autoCollapseUmbrella(t)
-		if tr.umbrellaSettled(0) {
-			t.Error("umbrellaSettled(0) = true on the last entry of a running Turn; want false")
+		if settledAt(tr, 0) {
+			t.Error("blockSettled(0) = true on the last entry of a running Turn; want false")
 		}
-		if got := tr.umbrellaFoldBy(0); got != foldByHead {
-			t.Errorf("umbrellaFoldBy(0) = %d; want foldByHead — a small unsettled umbrella keeps its head flag", got)
+		if got := tr.blockFoldBy(0); got != foldByHead {
+			t.Errorf("blockFoldBy(0) = %d; want foldByHead — a small unsettled umbrella keeps its head flag", got)
 		}
 	})
 }
@@ -104,12 +111,12 @@ func TestAutoCollapseFoldsLargeDespiteToolsOpen(t *testing.T) {
 	if !tr.umbrellaIsLarge(0) {
 		t.Fatal("umbrellaIsLarge(0) = false; want a large umbrella for this test")
 	}
-	if tr.umbrellaFolded(0) {
-		t.Fatal("umbrellaFolded(0) = true on an unsettled large umbrella under toolsOpen; want false")
+	if tr.blockFolded(0) {
+		t.Fatal("blockFolded(0) = true on an unsettled large umbrella under toolsOpen; want false")
 	}
 	tr.setTurnLive(false)
-	if !tr.umbrellaFolded(0) {
-		t.Error("umbrellaFolded(0) = false on a settled large umbrella under toolsOpen; want true — settled comes before size")
+	if !tr.blockFolded(0) {
+		t.Error("blockFolded(0) = false on a settled large umbrella under toolsOpen; want true — settled comes before size")
 	}
 }
 
@@ -123,9 +130,9 @@ func TestAutoCollapseExemptsTouchedUmbrellas(t *testing.T) {
 
 		tr := autoCollapseUmbrella(t)
 		tr.setTurnLive(false)
-		tr.entries[0].umbrellaTouched = true
-		if tr.umbrellaFolded(0) {
-			t.Error("umbrellaFolded(0) = true on a touched, settled small umbrella; want false — touched is exempt")
+		tr.entries[0].foldTouched = true
+		if tr.blockFolded(0) {
+			t.Error("blockFolded(0) = true on a touched, settled small umbrella; want false — touched is exempt")
 		}
 	})
 
@@ -135,17 +142,17 @@ func TestAutoCollapseExemptsTouchedUmbrellas(t *testing.T) {
 		tr := autoCollapseUmbrella(t)
 		tr.setTurnLive(false)
 		tr.setToolsFoldOver(1)
-		tr.entries[0].umbrellaTouched = true
-		tr.entries[0].umbrellaOwnFold = true
-		if got := tr.umbrellaFoldBy(0); got != foldByHead {
-			t.Fatalf("umbrellaFoldBy(0) = %d; want foldByHead", got)
+		tr.entries[0].foldTouched = true
+		tr.entries[0].foldOwn = true
+		if got := tr.blockFoldBy(0); got != foldByHead {
+			t.Fatalf("blockFoldBy(0) = %d; want foldByHead", got)
 		}
-		if tr.umbrellaFolded(0) {
-			t.Error("umbrellaFolded(0) = true with the head flag open; want false — the shared shut preference is not read")
+		if tr.blockFolded(0) {
+			t.Error("blockFolded(0) = true with the head flag open; want false — the shared shut preference is not read")
 		}
-		tr.setUmbrellaFolded(0, true)
-		if !tr.umbrellaFolded(0) {
-			t.Error("umbrellaFolded(0) = false with the head flag shut; want true")
+		tr.setBlockFolded(0, true)
+		if !tr.blockFolded(0) {
+			t.Error("blockFolded(0) = false with the head flag shut; want true")
 		}
 	})
 }
@@ -158,19 +165,19 @@ func TestAutoCollapseOffIsTodaysFold(t *testing.T) {
 	tr := autoCollapseUmbrella(t)
 	tr.setToolsAutoCollapse(false)
 	tr.setTurnLive(false)
-	if !tr.umbrellaSettled(0) {
-		t.Fatal("umbrellaSettled(0) = false; want a settled umbrella for this test")
+	if !settledAt(tr, 0) {
+		t.Fatal("blockSettled(0) = false; want a settled umbrella for this test")
 	}
-	if tr.umbrellaFolded(0) {
-		t.Error("umbrellaFolded(0) = true on a small umbrella with auto-collapse off; want false")
+	if tr.blockFolded(0) {
+		t.Error("blockFolded(0) = true on a small umbrella with auto-collapse off; want false")
 	}
 	tr.setToolsFoldOver(1)
-	if !tr.umbrellaFolded(0) {
-		t.Error("umbrellaFolded(0) = false on a large umbrella under the shut default; want true")
+	if !tr.blockFolded(0) {
+		t.Error("blockFolded(0) = false on a large umbrella under the shut default; want true")
 	}
 	tr.setToolsOpen(true)
-	if tr.umbrellaFolded(0) {
-		t.Error("umbrellaFolded(0) = true on a large umbrella under toolsOpen with auto-collapse off; want false")
+	if tr.blockFolded(0) {
+		t.Error("blockFolded(0) = true on a large umbrella under toolsOpen with auto-collapse off; want false")
 	}
 }
 
@@ -186,8 +193,8 @@ func TestAutoCollapseFoldsReplayedUmbrellas(t *testing.T) {
 	tr := &transcript{}
 	tr.setToolsAutoCollapse(true)
 	tr.replay(append([]entry(nil), src.entries...))
-	if !tr.umbrellaFolded(0) {
-		t.Error("umbrellaFolded(0) = false on a replayed umbrella under auto-collapse; want true")
+	if !tr.blockFolded(0) {
+		t.Error("blockFolded(0) = false on a replayed umbrella under auto-collapse; want true")
 	}
 }
 
@@ -208,16 +215,16 @@ func TestAutoCollapseRunViewFoldsOnChildReport(t *testing.T) {
 	if len(toolSuperGroup(tr.entries, head)) == 0 {
 		t.Fatalf("entries[%d] heads no umbrella; want the child's two reads under one", head)
 	}
-	if tr.umbrellaFolded(head) {
-		t.Fatal("umbrellaFolded = true while the child is still running; want false")
+	if tr.blockFolded(head) {
+		t.Fatal("blockFolded = true while the child is still running; want false")
 	}
 	subAgentReport(tr, "sa1", "done", 0)
-	if !tr.umbrellaFolded(head) {
-		t.Error("umbrellaFolded = false once the child reported; want true")
+	if !tr.blockFolded(head) {
+		t.Error("blockFolded = false once the child reported; want true")
 	}
 	tr.setRoot(tr.entries[0].spawned())
-	if got := tr.umbrellaFoldBy(head); got != foldBySettled {
-		t.Errorf("umbrellaFoldBy = %d in the run view; want foldBySettled", got)
+	if got := tr.blockFoldBy(head); got != foldBySettled {
+		t.Errorf("blockFoldBy = %d in the run view; want foldBySettled", got)
 	}
 }
 
@@ -265,12 +272,12 @@ func TestAutoCollapseWatchedTurn(t *testing.T) {
 		runCall(&m.transcript, "c2", "go test", "ok", 0)
 		head := len(m.transcript.entries) - 2
 		m.watchRunning()
-		if m.transcript.umbrellaFolded(head) {
-			t.Fatal("umbrellaFolded = true while the watched Turn runs; want false")
+		if m.transcript.blockFolded(head) {
+			t.Fatal("blockFolded = true while the watched Turn runs; want false")
 		}
 		m.watchIdle()
-		if !m.transcript.umbrellaFolded(head) {
-			t.Error("umbrellaFolded = false once the watched Turn went idle; want true")
+		if !m.transcript.blockFolded(head) {
+			t.Error("blockFolded = false once the watched Turn went idle; want true")
 		}
 	})
 
@@ -283,12 +290,12 @@ func TestAutoCollapseWatchedTurn(t *testing.T) {
 		readCall(&m.transcript, "c1", "a.go", 1, 5, 0)
 		runCall(&m.transcript, "c2", "go test", "ok", 0)
 		head := len(m.transcript.entries) - 2
-		if m.transcript.umbrellaFolded(head) {
-			t.Fatal("umbrellaFolded = true while the Turn runs; want false")
+		if m.transcript.blockFolded(head) {
+			t.Fatal("blockFolded = true while the Turn runs; want false")
 		}
 		m.finishWorker(stateIdle)
-		if !m.transcript.umbrellaFolded(head) {
-			t.Error("umbrellaFolded = false once the Turn finished; want true")
+		if !m.transcript.blockFolded(head) {
+			t.Error("blockFolded = false once the Turn finished; want true")
 		}
 	})
 }

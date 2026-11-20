@@ -212,7 +212,7 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 		}
 	})
 
-	// A SMALL umbrella's fold is its head entry's own flag (transcript.setUmbrellaFolded): open, the
+	// A SMALL umbrella's fold is its head entry's own flag (transcript.setBlockFolded): open, the
 	// header wears ▼ over every type row; folded, it is the header line alone under a ▶, and the type
 	// row a reader opened is untouched beneath it.
 	t.Run("small, open: ▼ over every type row", func(t *testing.T) {
@@ -238,8 +238,8 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 		if !tr.setTypeExpanded(readHead, true) {
 			t.Fatalf("setTypeExpanded(%d, true) = false; want the Read run's type row open under the fold", readHead)
 		}
-		if !tr.setUmbrellaFolded(readHead, true) {
-			t.Fatalf("setUmbrellaFolded(%d, true) = false; want the small umbrella folded on its own flag", readHead)
+		if !tr.setBlockFolded(readHead, true) {
+			t.Fatalf("setBlockFolded(%d, true) = false; want the small umbrella folded on its own flag", readHead)
 		}
 		want := umbrellaHeaderRow("Read 2 files, ran 1 command", defaultGlyphs.collapsed)
 		if got := renderPlain(tr, 80); got != want {
@@ -988,8 +988,8 @@ func TestUmbrellaHeader_ShowsTheGroupSummary(t *testing.T) {
 		if got, want := collapseLeader(strip(open)), umbrellaHeaderRow(summary, glyphExpanded); got != want {
 			t.Errorf("open header = %q, want %q", got, want)
 		}
-		if !tr.setUmbrellaFolded(0, true) {
-			t.Fatal("setUmbrellaFolded(0, true) = false; want the small umbrella folded on its own flag")
+		if !tr.setBlockFolded(0, true) {
+			t.Fatal("setBlockFolded(0, true) = false; want the small umbrella folded on its own flag")
 		}
 		folded := headerAt(tr, 80, false)
 		if want := strings.Replace(strip(open), glyphExpanded, defaultGlyphs.collapsed, 1); strip(folded) != want {

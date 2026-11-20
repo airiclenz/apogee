@@ -578,7 +578,7 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		// umbrella the new threshold moves across the line gains or loses its glyph on the next frame.
 		m.transcript.setToolsFoldOver(m.opts.UI.ToolsFoldOver)
 	case domain.UIKeyToolsAutoCollapse:
-		// The switch is a paint input (umbrellaFoldBy), so the setter touches the transcript on a
+		// The switch is a paint input (blockFoldBy), so the setter touches the transcript on a
 		// move: a `/settings` edit or a hand-edited file folds every settled, untouched umbrella — or
 		// gives it back its size fold — on the next frame.
 		if err := m.opts.UI.Set(path, value); err != nil {
@@ -812,7 +812,7 @@ func (m *Model) setToolsOpen(open bool) {
 
 // toggleToolsFold is what a click on a LARGE Tools umbrella's header, or ⏎ at the block cursor on
 // one, means (toggleBlockAt) while the shared preference is what holds its fold
-// (transcript.umbrellaFoldBy's foldByShared) — an auto-collapsed umbrella, or one the reader gave a
+// (transcript.blockFoldBy's foldByShared) — an auto-collapsed umbrella, or one the reader gave a
 // fold of its own, moves its own head flag and writes nothing. The shared fold flips on every large
 // umbrella, and the flip is PERSISTED through [SettingsHost.Write] as `ui.tools-open` — toggleTaskListFold's whole contract,
 // mirrored: the pane's own write and journal entry (recordSettingEdit), no note on success, one

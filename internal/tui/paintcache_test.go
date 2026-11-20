@@ -495,14 +495,14 @@ func TestPaintCacheRepaintsWhenTheFoldFlips(t *testing.T) {
 		tr := build(t)
 		tr.setToolsFoldOver(2) // two type rows: at the threshold, so small
 		open := check(t, "small and open by default", tr)
-		if !tr.setUmbrellaFolded(head, true) {
-			t.Fatal("setUmbrellaFolded(head, true) = false; want the head flag to move")
+		if !tr.setBlockFolded(head, true) {
+			t.Fatal("setBlockFolded(head, true) = false; want the head flag to move")
 		}
 		folded := check(t, "folded on the head flag", tr)
 		if equalLines(open.lines, folded.lines) {
 			t.Error("the small umbrella painted identically open and folded — the head flag served the stale rows")
 		}
-		tr.setUmbrellaFolded(head, false)
+		tr.setBlockFolded(head, false)
 		if again := check(t, "opened again on the head flag", tr); !equalLines(open.lines, again.lines) {
 			t.Error("opening again painted something other than the first open paint")
 		}

@@ -2607,7 +2607,7 @@ func (m *Model) resumeRunning() tea.Cmd {
 func (m *Model) markRunning() {
 	m.state = stateRunning
 	// The Turn's liveness is a paint input too: the last umbrella of a running Turn stays open until
-	// something follows it or the Turn ends (transcript.umbrellaSettled), and this is the one place
+	// something follows it or the Turn ends (transcript.blockSettled), and this is the one place
 	// a Turn — the human's own or a watched owner's — is marked running.
 	m.transcript.setTurnLive(true)
 }
@@ -2712,7 +2712,7 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// stop" on an already-idle status line for the rest of the window (handleKey's esc case).
 	m.lastEsc = time.Time{}
 	m.state = next
-	// The Turn is over, so its last umbrella settles (transcript.umbrellaSettled) — markRunning's
+	// The Turn is over, so its last umbrella settles (transcript.blockSettled) — markRunning's
 	// inverse for the watcher's own run; a watched Turn ends in watchIdle instead.
 	m.transcript.setTurnLive(false)
 	// A background prompt the human dismissed during or before this Exchange is offered again now

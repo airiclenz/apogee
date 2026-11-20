@@ -145,7 +145,7 @@ const (
 //     rows' glyphs stand in — ▼ while the rows are showing and ▶ while the umbrella stands folded
 //     to its header line, nothing else on the row differing — and the header line is marked
 //     targetUmbrella whether small or large, open or shut, live or done, so a click or ⏎ there
-//     always has a fold to answer with. Which fold it is, [transcript.umbrellaFoldBy] says: under
+//     always has a fold to answer with. Which fold it is, [transcript.blockFoldBy] says: under
 //     `ui.tools-auto-collapse` a SETTLED umbrella the reader has not touched is folded first;
 //     otherwise the umbrella's SIZE decides — a LARGE one, more type rows than `ui.tools-fold-over`
 //     ([transcript.umbrellaIsLarge]), follows the shared `ui.tools-open` preference, a SMALL one

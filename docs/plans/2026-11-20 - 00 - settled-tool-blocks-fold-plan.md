@@ -61,7 +61,10 @@ internal/tui/wrap.go — hangingWrap, hangingPrefixes; internal/tui/render.go �
 - `go build ./...`
 **Commit:** `feat(tui): paint every tool block's star in the tools header colour`
 
-## 2. Generalise the umbrella fold machinery to a tool-block fold
+## 2. Generalise the umbrella fold machinery to a tool-block fold — ✅ DONE (2026-11-20)
+
+NOTES (2026-11-20): foldableHead is a free function `foldableHead(entries []entry, head int) (end int, ok bool)` rather than a transcript method, since the free foldHeadOf must dispatch on it too.
+NOTES (2026-11-20): blockSettled now takes (head, end); the four autocollapse_test.go calls go through a new test helper settledAt(tr, head) that reads end off foldableHead — assertions unchanged.
 
 **What:**
 **Goal:** One fold-resolution helper answers for any foldable tool-block head (today: the umbrella only), and settledness is computed from a block's head and end rather than from `toolSuperGroup`; behaviour is byte-for-byte unchanged (pure refactor).

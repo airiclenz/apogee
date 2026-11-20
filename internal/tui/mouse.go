@@ -815,12 +815,12 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 // A super-group's two extra kinds are the same rule at its two extra levels (renderSuperGroup): a
 // TYPE ROW flips the second state of the run it heads — its member rows, not their bodies — and the
 // UMBRELLA HEADER — marked on every umbrella, wearing the fold's ▶/▼ — answers by the fold rule
-// (transcript.umbrellaFoldBy): an auto-collapsed one opens alone and writes nothing
-// (transcript.openUmbrellaAlone); otherwise by its size, a LARGE one folding to its header line and
+// (transcript.blockFoldBy): an auto-collapsed one opens alone and writes nothing
+// (transcript.openBlockAlone); otherwise by its size, a LARGE one folding to its header line and
 // back under the one preference every large umbrella shares, written back as `ui.tools-open`
 // (toggleToolsFold), while a small one — or a touched one with a fold of its own — folds on its own
-// session-only head flag (setUmbrellaFolded). Every action on an umbrella, at any of its levels,
-// marks it touched (transcript.markUmbrellaTouched), exempting it from auto-collapse. A run view's TASK
+// session-only head flag (setBlockFolded). Every action on an umbrella, at any of its levels,
+// marks it touched (transcript.markBlockTouched), exempting it from auto-collapse. A run view's TASK
 // ROW is the same rule again at the level ADR 0063 added: it flips the fold of the task the viewed
 // run was handed, which is the view's own state and not the head's block state (render.go's rooted
 // paint marks the row, transcript.setTaskExpanded holds it). A workflow's STAGE ROW opens rather
@@ -912,24 +912,24 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 		}
 	case targetUmbrella:
 		// Every umbrella's header is a fold, and the gesture moves the fold that is actually
-		// holding it — the one rule the paint reads too (transcript.umbrellaFoldBy), never a second
+		// holding it — the one rule the paint reads too (transcript.blockFoldBy), never a second
 		// derivation of it. An AUTO-COLLAPSED one (settled, untouched) opens alone on a fold of its
-		// own and writes nothing (openUmbrellaAlone). A LARGE one under the shared preference flips
+		// own and writes nothing (openBlockAlone). A LARGE one under the shared preference flips
 		// it, which is also a write of `ui.tools-open` (toggleToolsFold) — asked first for the
 		// task-list card's reason, one rule for the mouse and for ⏎. A SMALL one, or a touched one
-		// with a fold of its own, flips its head flag alone (transcript.setUmbrellaFolded):
+		// with a fold of its own, flips its head flag alone (transcript.setBlockFolded):
 		// in-session, written nowhere, leaving every child's state beneath it exactly as it stood for
 		// the reopen. Either of the last two marks the umbrella touched, so it never auto-collapses
 		// under the reader afterwards.
-		switch m.transcript.umbrellaFoldBy(target.entry) {
+		switch m.transcript.blockFoldBy(target.entry) {
 		case foldBySettled:
-			m.transcript.openUmbrellaAlone(target.entry)
+			m.transcript.openBlockAlone(target.entry)
 		case foldByShared:
 			m = m.toggleToolsFold()
-			m.transcript.markUmbrellaTouched(target.entry)
+			m.transcript.markBlockTouched(target.entry)
 		case foldByHead:
-			m.transcript.setUmbrellaFolded(target.entry, !m.transcript.umbrellaFolded(target.entry))
-			m.transcript.markUmbrellaTouched(target.entry)
+			m.transcript.setBlockFolded(target.entry, !m.transcript.blockFolded(target.entry))
+			m.transcript.markBlockTouched(target.entry)
 		default:
 			return m, nil
 		}
@@ -938,9 +938,9 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 	}
 	// A type row, or a member's row or body, inside an umbrella is the reader acting on that
 	// umbrella: it is touched, and auto-collapse leaves it as the reader arranged it
-	// (transcript.markUmbrellaTouched; a block in no umbrella marks nothing).
+	// (transcript.markBlockTouched; a block in no umbrella marks nothing).
 	if target.kind == targetHeader || target.kind == targetType {
-		m.transcript.markUmbrellaTouched(target.entry)
+		m.transcript.markBlockTouched(target.entry)
 	}
 	m.refreshViewportAnchored(line, releaseRow)
 	return m, nil

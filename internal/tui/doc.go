@@ -839,12 +839,12 @@
 // block's right edge, and a member opens ALONE — the umbrella header carries no member's state, each
 // member is painted by its own entry's expanded flag and every row it paints is marked back to that entry
 // ([renderSuperGroup], [renderExpandedMember], [blockPaint.addFor]); the one state a header does
-// carry is the umbrella's own fold, resolved by one rule ([transcript.umbrellaFoldBy]): under
-// `ui.tools-auto-collapse` a SETTLED umbrella the reader has not touched ([transcript.umbrellaSettled])
+// carry is the umbrella's own fold, resolved by one rule ([transcript.blockFoldBy]): under
+// `ui.tools-auto-collapse` a SETTLED umbrella the reader has not touched ([transcript.blockSettled])
 // folds to its header line whatever its size, and opens alone on a fold of its own
-// ([transcript.openUmbrellaAlone]); otherwise a LARGE umbrella — more type rows than
+// ([transcript.openBlockAlone]); otherwise a LARGE umbrella — more type rows than
 // `ui.tools-fold-over` ([transcript.umbrellaIsLarge]) — folds under the shared `ui.tools-open`
-// preference and back, a SMALL one on its head entry's session-only flag ([transcript.umbrellaFolded]),
+// preference and back, a SMALL one on its head entry's session-only flag ([transcript.blockFolded]),
 // the members' own state kept beneath it either way ([umbrellaFold], [Model.toggleToolsFold])
 // — where a block of one spends up
 // to three rows collapsed and toggles from ANY row it paints, header, leader row and body alike, the

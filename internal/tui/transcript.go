@@ -74,11 +74,11 @@ type transcript struct {
 	taskListOpen bool
 	// toolsOpen is the shared fold of every LARGE Tools umbrella — one with more type rows than
 	// toolsFoldOver ([transcript.umbrellaIsLarge]) — that auto-collapse is not holding folded
-	// ([transcript.umbrellaFoldBy]: a settled, untouched umbrella folds first, whatever this field
+	// ([transcript.blockFoldBy]: a settled, untouched umbrella folds first, whatever this field
 	// says), whose record is the `ui.tools-open` key and
 	// whose fact is nothing but this field: a large umbrella keeps no fold of its own, so the
 	// preference is read at paint (render.go) rather than seeded into an entry; a SMALL one folds on
-	// its head entry's own flag instead (entry.umbrellaFolded, [transcript.umbrellaFolded]). It
+	// its head entry's own flag instead (entry.folded, [transcript.blockFolded]). It
 	// lives here beside taskListOpen for the same reason and with the same preservation across
 	// reset: /clear opens a new session under the human's preference. The zero value is FOLDED —
 	// the auto-fold the config key defaults to — and what a hand-built test transcript gets; under
@@ -93,14 +93,14 @@ type transcript struct {
 	toolsFoldOver int
 	// toolsAutoCollapse is the `ui.tools-auto-collapse` switch: on, a SETTLED umbrella the reader
 	// has not touched stands folded to its Group summary row whatever its size and toolsOpen say
-	// ([transcript.umbrellaFoldBy]); off, every umbrella folds by its size alone, exactly as before
+	// ([transcript.blockFoldBy]); off, every umbrella folds by its size alone, exactly as before
 	// the switch existed. The zero value is OFF, which is what a hand-built test transcript gets, so
 	// no test paint written before the rule moves. It is a paint input preserved across reset for
 	// toolsOpen's reason, and moves through [transcript.setToolsAutoCollapse].
 	toolsAutoCollapse bool
 	// turnLive says the human's own Turn — the watched owner's, while watching — is running: the
 	// fact that keeps the LAST umbrella of the top-level run open while nothing follows it yet
-	// ([transcript.umbrellaSettled]). It mirrors the Model's stateRunning: [Model.markRunning], the
+	// ([transcript.blockSettled]). It mirrors the Model's stateRunning: [Model.markRunning], the
 	// one writer of that state, sets it, and [Model.finishWorker] and [Model.watchIdle] — the two
 	// paths a run ends on, a watched Turn never reaching the first — clear it, through
 	// [transcript.setTurnLive]. reset drops it: a reset opens a conversation with no Turn running
@@ -388,15 +388,15 @@ type parkedText struct {
 // reader unfolded inside a view is a fact about the view, not a rail in the conversation below it.
 // It is view-only and unpersisted for exactly expanded's reasons.
 //
-// umbrellaFolded is the FOURTH, the fold of a SMALL Tools umbrella, and it means something only on
+// folded is the FOURTH, the fold of a SMALL Tools umbrella, and it means something only on
 // the umbrella's own head (toolSuperGroup): whether the umbrella stands folded to its header line
 // or open on its type rows. It is the small umbrella's counterpart to the shared preference a LARGE
 // one follows (transcript.toolsOpen), and a per-entry flag rather than a shared one because the
 // ratified design gives each small umbrella its own session-only fold — never written to config,
 // never serialized, open again every session. Under auto-collapse a settled, untouched umbrella
 // stands folded whatever either says; otherwise which of the two an umbrella reads is its size's
-// answer ([transcript.umbrellaFoldBy]) — save that a touched umbrella given a fold of its own
-// (umbrellaOwnFold) reads this flag at any size: a small umbrella that grows large follows the
+// answer ([transcript.blockFoldBy]) — save that a touched umbrella given a fold of its own
+// (foldOwn) reads this flag at any size: a small umbrella that grows large follows the
 // preference from then on and this flag is ignored while it is. It is deliberately NOT packed into
 // the paint key's per-entry flags (spanFlags) — the fold reaches the key as paintKey.folded, the
 // one slot both shapes' folds already travel in — and it is view-only and unpersisted for exactly
@@ -460,13 +460,13 @@ type entry struct {
 	typeExpanded bool
 	// view-only fold of the SMALL Tools umbrella this entry heads — the head's own, session-only
 	// counterpart to the shared toolsOpen a large umbrella follows; never persisted
-	umbrellaFolded bool
+	folded bool
 	// view-only, on the head of a Tools umbrella: the reader has acted on this umbrella, which
-	// exempts it from auto-collapse ([transcript.umbrellaFoldBy]); and, once touched, whether its
-	// fold is its own head flag (umbrellaFolded) whatever its size rather than the size rule's.
-	// Session-only and never persisted for umbrellaFolded's reasons: a replayed umbrella is untouched.
-	umbrellaTouched bool
-	umbrellaOwnFold bool
+	// exempts it from auto-collapse ([transcript.blockFoldBy]); and, once touched, whether its
+	// fold is its own head flag (folded) whatever its size rather than the size rule's.
+	// Session-only and never persisted for folded's reasons: a replayed umbrella is untouched.
+	foldTouched bool
+	foldOwn     bool
 	// view-only fold of the TASK this entry's run was handed, as the run's own view paints it
 	// above the child's work (render.go's rooted paint); never persisted
 	taskExpanded bool
@@ -2221,10 +2221,10 @@ func (t *transcript) setToolsFoldOver(n int) bool {
 
 // umbrellaIsLarge reports whether the umbrella headed by entries[head] is LARGE — the shape whose
 // fold is the shared preference's (toolsOpen) rather than its own head flag's
-// ([transcript.umbrellaFolded]). An umbrella is large by its SIZE alone: more type rows than
+// ([transcript.blockFolded]). An umbrella is large by its SIZE alone: more type rows than
 // toolsFoldOver, under a threshold above 0, since a threshold of 0 says no umbrella is ever large.
 // Nothing else enters — not whether the Turn is running, not whether every member is done; those
-// are the settled rule's, which auto-collapse asks BEFORE size ([transcript.umbrellaFoldBy]) — so
+// are the settled rule's, which auto-collapse asks BEFORE size ([transcript.blockFoldBy]) — so
 // the answer is the same at every depth, in every view, live or replayed: a folded umbrella with a call
 // still running paints its header live (blockState.live) rather than springing open, and the
 // umbrella a sub-agent's run view shows while the parent Turn runs folds exactly as the transcript's
@@ -2237,41 +2237,42 @@ func (t *transcript) umbrellaIsLarge(head int) bool {
 	return len(sup) > 0 && t.toolsFoldOver > 0 && len(sup) > t.toolsFoldOver
 }
 
-// umbrellaFoldRule names which rule decides an umbrella's fold ([transcript.umbrellaFoldBy]) — the
+// blockFoldRule names which rule decides an umbrella's fold ([transcript.blockFoldBy]) — the
 // answer the painter reads as a fold and the reader's actions branch on, so a click on an
 // auto-collapsed umbrella and one on a large umbrella under the shared preference can each move the
 // fold that is actually holding it.
-type umbrellaFoldRule int
+type blockFoldRule int
 
 const (
 	// foldByNone: the index heads no umbrella, and there is no fold to read.
-	foldByNone umbrellaFoldRule = iota
+	foldByNone blockFoldRule = iota
 	// foldBySettled: auto-collapse is on and the umbrella is settled and untouched — folded.
 	foldBySettled
 	// foldByShared: a LARGE umbrella under the size rule — folded exactly when !toolsOpen.
 	foldByShared
-	// foldByHead: the head's own flag (entry.umbrellaFolded) — a SMALL umbrella under the size
-	// rule, or a touched one whose reader gave it a fold of its own (entry.umbrellaOwnFold).
+	// foldByHead: the head's own flag (entry.folded) — a SMALL umbrella under the size
+	// rule, or a touched one whose reader gave it a fold of its own (entry.foldOwn).
 	foldByHead
 )
 
-// umbrellaFoldBy is the ONE statement of how a Tools umbrella's fold is resolved, in order: with
-// auto-collapse on (toolsAutoCollapse), a SETTLED umbrella ([transcript.umbrellaSettled]) the reader
+// blockFoldBy is the ONE statement of how a Tools umbrella's fold is resolved, in order: with
+// auto-collapse on (toolsAutoCollapse), a SETTLED umbrella ([transcript.blockSettled]) the reader
 // has not touched is folded, whatever its size and toolsOpen; a touched one whose reader gave it its
-// own fold (entry.umbrellaOwnFold) follows its head flag; everything else — a live umbrella, the
+// own fold (entry.foldOwn) follows its head flag; everything else — a live umbrella, the
 // last entry of a running Turn, a touched one without a fold of its own, and every umbrella with
 // auto-collapse off — folds by its size, a LARGE one ([transcript.umbrellaIsLarge]) under the shared
-// preference and a SMALL one on its head flag. The paint ([transcript.umbrellaFolded]) and the
+// preference and a SMALL one on its head flag. The paint ([transcript.blockFolded]) and the
 // reader's fold actions both ask it, so the two can never disagree about which fold a header shows.
-func (t *transcript) umbrellaFoldBy(head int) umbrellaFoldRule {
-	if len(toolSuperGroup(t.entries, head)) == 0 {
+func (t *transcript) blockFoldBy(head int) blockFoldRule {
+	end, ok := foldableHead(t.entries, head)
+	if !ok {
 		return foldByNone
 	}
 	headEntry := t.entries[head]
 	switch {
-	case t.toolsAutoCollapse && !headEntry.umbrellaTouched && t.umbrellaSettled(head):
+	case t.toolsAutoCollapse && !headEntry.foldTouched && t.blockSettled(head, end):
 		return foldBySettled
-	case headEntry.umbrellaTouched && headEntry.umbrellaOwnFold:
+	case headEntry.foldTouched && headEntry.foldOwn:
 		return foldByHead
 	case t.umbrellaIsLarge(head):
 		return foldByShared
@@ -2279,28 +2280,28 @@ func (t *transcript) umbrellaFoldBy(head int) umbrellaFoldRule {
 	return foldByHead
 }
 
-// umbrellaFolded reports whether the umbrella headed by entries[head] stands folded to its header
+// blockFolded reports whether the umbrella headed by entries[head] stands folded to its header
 // line — the one question the painter asks of a Tools umbrella (render.go's resolveBlock) — as the
-// rule [transcript.umbrellaFoldBy] names answers it: a settled, untouched umbrella under
+// rule [transcript.blockFoldBy] names answers it: a settled, untouched umbrella under
 // auto-collapse is folded; otherwise a LARGE one is folded exactly when the shared preference is
 // shut (!toolsOpen), its own head flag ignored, and a SMALL one — or a touched one with a fold of
-// its own — exactly when its head's flag says so (entry.umbrellaFolded). A small umbrella that grows
+// its own — exactly when its head's flag says so (entry.blockFolded). A small umbrella that grows
 // past the threshold therefore follows the preference from that append on, whatever its flag holds,
 // and follows the flag again if the threshold is raised back over it. An index heading no umbrella
 // answers false.
-func (t *transcript) umbrellaFolded(head int) bool {
-	switch t.umbrellaFoldBy(head) {
+func (t *transcript) blockFolded(head int) bool {
+	switch t.blockFoldBy(head) {
 	case foldBySettled:
 		return true
 	case foldByShared:
 		return !t.toolsOpen
 	case foldByHead:
-		return t.entries[head].umbrellaFolded
+		return t.entries[head].folded
 	}
 	return false
 }
 
-// umbrellaSettled reports whether the umbrella headed by entries[head] is SETTLED — the work it
+// blockSettled reports whether the umbrella headed by entries[head] is SETTLED — the work it
 // folds is over and something has moved on past it. It is derived at paint, like the umbrella's
 // membership (toolSuperGroup), and stored nowhere: every call in it has returned (no open call,
 // anyOpenCall's rule), AND either a later entry of its own run follows its last call — a narration,
@@ -2313,15 +2314,14 @@ func (t *transcript) umbrellaFolded(head int) bool {
 // a run's entries are contiguous behind its head ([transcript.runEnd]), so an entry there either is
 // the run's own next entry or proves the run's stretch has ended — a sibling's, a parent's, a host
 // note parked at the tail. Deeper entries between are runs nested inside this one, and are skipped.
-// An index heading no umbrella answers false.
-func (t *transcript) umbrellaSettled(head int) bool {
-	sup := toolSuperGroup(t.entries, head)
-	if len(sup) == 0 {
-		return false
-	}
-	end := head + sup.calls()
+//
+// The block's span [head, end) is the caller's, read off the head's shape ([foldableHead]), and the
+// "every call returned" check walks only the block's OWN members — the entries at the head's depth
+// in that span — never the deeper entries a member's run holds, whose narration is never marked done.
+func (t *transcript) blockSettled(head, end int) bool {
+	depth := t.entries[head].depth
 	for i := head; i < end; i++ {
-		if !t.entries[i].done {
+		if t.entries[i].depth == depth && !t.entries[i].done {
 			return false
 		}
 	}
@@ -2367,35 +2367,35 @@ func (t *transcript) setTurnLive(live bool) bool {
 	return true
 }
 
-// setUmbrellaFolded folds the SMALL umbrella headed by entries[head] to its header line or opens it
-// again (entry.umbrellaFolded) and reports whether the flag moved. It sits where setTypeExpanded
+// setBlockFolded folds the SMALL umbrella headed by entries[head] to its header line or opens it
+// again (entry.folded) and reports whether the flag moved. It sits where setTypeExpanded
 // sits and takes its posture: only a tool call can head an umbrella, so every other kind and an
 // index outside the slice answer false and change nothing, and it does NOT ask whether the entry
 // heads an umbrella today, or a small one — the flag is written on the head and read only where the
-// fold rule says to ([transcript.umbrellaFoldBy]: an unsettled or touched umbrella the size calls
+// fold rule says to ([transcript.blockFoldBy]: an unsettled or touched umbrella the size calls
 // small, or a touched one with a fold of its own), so a flag on an umbrella that has since grown large is
 // a flag nothing reads until the threshold moves back over it. It touches only on a move, so the
 // generation compare that reads it never repaints for a fold set to where it already stood.
-func (t *transcript) setUmbrellaFolded(head int, folded bool) bool {
+func (t *transcript) setBlockFolded(head int, folded bool) bool {
 	if head < 0 || head >= len(t.entries) || t.entries[head].kind != entryToolCall {
 		return false
 	}
-	if t.entries[head].umbrellaFolded == folded {
+	if t.entries[head].folded == folded {
 		return false
 	}
-	t.entries[head].umbrellaFolded = folded
+	t.entries[head].folded = folded
 	t.touch()
 	return true
 }
 
-// umbrellaHeadOf is the head of the Tools umbrella entries[i] belongs to — the head itself, a
+// foldHeadOf is the head of the Tools umbrella entries[i] belongs to — the head itself, a
 // type row's head or any member — and whether it belongs to one at all. toolSuperGroup is only
 // correct at a block head, so this finds the head the paint's walk would: back over the adjacent
 // groupable calls at i's own depth, which is the stretch toolSuperGroup consumes whole, to its
 // first call, and then asks whether that call heads an umbrella reaching i. A lone groupable call,
 // a solo call and every other kind belong to none (ownGroupAt is the same walk for the groups that
 // fold with their own kind).
-func umbrellaHeadOf(entries []entry, i int) (int, bool) {
+func foldHeadOf(entries []entry, i int) (int, bool) {
 	if sameLabelRun(entries, i) == 0 {
 		return -1, false
 	}
@@ -2407,61 +2407,72 @@ func umbrellaHeadOf(entries []entry, i int) (int, bool) {
 		}
 		first--
 	}
-	if sup := toolSuperGroup(entries, first); len(sup) > 0 && i < first+sup.calls() {
+	if end, ok := foldableHead(entries, first); ok && i < end {
 		return first, true
 	}
 	return -1, false
 }
 
-// markUmbrellaTouched records that the reader acted on the Tools umbrella entries[index] belongs
-// to ([umbrellaHeadOf]) — opened a type row, a member or its body, or moved its header's fold —
-// which exempts it from auto-collapse from then on ([transcript.umbrellaFoldBy]), and reports
+// foldableHead reports whether entries[head] heads a foldable tool block and, when it does, the
+// index one past the block's last entry. It is the ONE place a tool-block shape is recognised as
+// foldable — [foldHeadOf] and [transcript.blockFoldBy] both dispatch on it — and today it knows the
+// Tools umbrella alone (toolSuperGroup): the adjacent same-depth calls the umbrella folds.
+func foldableHead(entries []entry, head int) (end int, ok bool) {
+	if sup := toolSuperGroup(entries, head); len(sup) > 0 {
+		return head + sup.calls(), true
+	}
+	return 0, false
+}
+
+// markBlockTouched records that the reader acted on the Tools umbrella entries[index] belongs
+// to ([foldHeadOf]) — opened a type row, a member or its body, or moved its header's fold —
+// which exempts it from auto-collapse from then on ([transcript.blockFoldBy]), and reports
 // whether the mark moved. It leaves the umbrella's fold where it stands: a touched umbrella without
 // a fold of its own folds by its size again, the fold it showed before it settled. An index in no
-// umbrella changes nothing, and the generation moves only on a move, setUmbrellaFolded's rule.
-func (t *transcript) markUmbrellaTouched(index int) bool {
-	head, ok := umbrellaHeadOf(t.entries, index)
-	if !ok || t.entries[head].umbrellaTouched {
+// umbrella changes nothing, and the generation moves only on a move, setBlockFolded's rule.
+func (t *transcript) markBlockTouched(index int) bool {
+	head, ok := foldHeadOf(t.entries, index)
+	if !ok || t.entries[head].foldTouched {
 		return false
 	}
-	t.entries[head].umbrellaTouched = true
+	t.entries[head].foldTouched = true
 	t.touch()
 	return true
 }
 
-// openUmbrellaAlone opens the Tools umbrella headed by entries[head] on a fold of its own: touched,
-// so auto-collapse leaves it be, and holding its own head flag (entry.umbrellaOwnFold) open, so
+// openBlockAlone opens the Tools umbrella headed by entries[head] on a fold of its own: touched,
+// so auto-collapse leaves it be, and holding its own head flag (entry.foldOwn) open, so
 // neither its size nor the shared `ui.tools-open` preference decides it from here on — the
 // reader's open of an auto-collapsed umbrella, which opens that one and writes nothing (ratified
 // "Large-umbrella click"). A further click flips that same head flag (Model.toggleBlockAt). It
 // reports whether anything moved; an index heading no umbrella changes nothing.
-func (t *transcript) openUmbrellaAlone(head int) bool {
-	if len(toolSuperGroup(t.entries, head)) == 0 {
+func (t *transcript) openBlockAlone(head int) bool {
+	if _, ok := foldableHead(t.entries, head); !ok {
 		return false
 	}
 	e := &t.entries[head]
-	if e.umbrellaTouched && e.umbrellaOwnFold && !e.umbrellaFolded {
+	if e.foldTouched && e.foldOwn && !e.folded {
 		return false
 	}
-	e.umbrellaTouched, e.umbrellaOwnFold, e.umbrellaFolded = true, true, false
+	e.foldTouched, e.foldOwn, e.folded = true, true, false
 	t.touch()
 	return true
 }
 
-// revealUmbrellaMember makes the umbrella member entries[index] paintable, as a side-panel jump to
+// revealBlockMember makes the umbrella member entries[index] paintable, as a side-panel jump to
 // it needs (Model.followPanelTarget): a folded umbrella opens on a fold of its own
-// ([transcript.openUmbrellaAlone]) — never the shared toggle, whose flip writes `ui.tools-open` —
+// ([transcript.openBlockAlone]) — never the shared toggle, whose flip writes `ui.tools-open` —
 // an open one is marked touched, and the TYPE ROW holding the member opens, since a closed type row
 // paints no member line for the jump to land on. An index in no umbrella changes nothing.
-func (t *transcript) revealUmbrellaMember(index int) {
-	head, ok := umbrellaHeadOf(t.entries, index)
+func (t *transcript) revealBlockMember(index int) {
+	head, ok := foldHeadOf(t.entries, index)
 	if !ok {
 		return
 	}
-	if t.umbrellaFolded(head) {
-		t.openUmbrellaAlone(head)
+	if t.blockFolded(head) {
+		t.openBlockAlone(head)
 	} else {
-		t.markUmbrellaTouched(head)
+		t.markBlockTouched(head)
 	}
 	for _, run := range toolSuperGroup(t.entries, head) {
 		if index >= run.at && index < run.at+run.n {

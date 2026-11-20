@@ -1730,7 +1730,7 @@ func TestGroupMemberClickTogglesOnlyThatMember(t *testing.T) {
 				header, m.lineTargets[header].kind)
 		}
 		m = clickCell(t, m, 2, screenRow(t, m, header))
-		if !m.transcript.umbrellaFolded(groupHead) {
+		if !m.transcript.blockFolded(groupHead) {
 			t.Fatal("a click on the umbrella header did not fold it")
 		}
 		if !m.transcript.entries[middle].expanded || !m.transcript.entries[groupHead].typeExpanded {
@@ -3934,7 +3934,7 @@ func TestSuperGroupClickTogglesEachLevel(t *testing.T) {
 		}
 		before := len(m.lines)
 		m = clickLine(t, m, header)
-		if !m.transcript.umbrellaFolded(readRun) {
+		if !m.transcript.blockFolded(readRun) {
 			t.Fatal("a click on the shut umbrella's header did not fold it; every umbrella folds")
 		}
 		if got, want := umbrellaHeaders(t, m), []string{umbrellaHeaderRow("Read 2 files, ran 2 commands", defaultGlyphs.collapsed)}; !reflect.DeepEqual(got, want) {
@@ -4266,7 +4266,7 @@ func modelWithMixedUmbrellas(t *testing.T, opts Options) Model {
 
 // TestSmallUmbrellaHeaderFoldsItselfOnly is the small umbrella's fold: an umbrella with no more type
 // rows than the threshold folds to its header line on a click there like any other, but on its OWN
-// head flag (transcript.setUmbrellaFolded) — so the fold moves that umbrella alone, leaves the
+// head flag (transcript.setBlockFolded) — so the fold moves that umbrella alone, leaves the
 // shared preference and every other umbrella where they stood, writes nothing to the settings seam
 // and journals nothing, and hides the children opened beneath it without resetting them: they paint
 // again on the reopen.
@@ -4298,9 +4298,9 @@ func TestSmallUmbrellaHeaderFoldsItselfOnly(t *testing.T) {
 	if got := umbrellaHeaders(t, m); !reflect.DeepEqual(got, folded) {
 		t.Errorf("after the click on the Runs header the headers are %q, want that one alone folded %q", got, folded)
 	}
-	if m.transcript.umbrellaFolded(readsHead) || !m.transcript.umbrellaFolded(runsHead) || !m.transcript.umbrellaFolded(largeHead) {
+	if m.transcript.blockFolded(readsHead) || !m.transcript.blockFolded(runsHead) || !m.transcript.blockFolded(largeHead) {
 		t.Errorf("folded: reads=%v runs=%v large=%v; want only the clicked small umbrella to move (the large one stays under the shut preference)",
-			m.transcript.umbrellaFolded(readsHead), m.transcript.umbrellaFolded(runsHead), m.transcript.umbrellaFolded(largeHead))
+			m.transcript.blockFolded(readsHead), m.transcript.blockFolded(runsHead), m.transcript.blockFolded(largeHead))
 	}
 	if m.opts.UI.ToolsOpen || m.transcript.toolsOpen {
 		t.Error("a small umbrella's header moved the shared fold; only a large one's does")
