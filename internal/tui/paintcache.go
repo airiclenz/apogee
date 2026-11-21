@@ -51,28 +51,6 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// blockShape names which shape [transcript.resolveBlock] answered with for a block — the shape
-// itself, not anything derived from it. Every value is spent by that one resolver, as the shape
-// field of the [resolvedBlock] it returns, so the enum and the decision that picks from it cannot
-// drift apart.
-//
-// It was redundant when there were three, and deliberately kept: a head that changed branches also
-// changed the length of its span, so the flags string already differed (a sub-agent call whose first
-// nested entry has not arrived is an ordinary one-entry tool block, and becomes a two-entry run's
-// head the moment it does). That redundancy was an accident of the branches renderView happened to
-// have, not a property of the design — and the cost of relying on it was that a fourth painter
-// sharing a span length with a third would serve the wrong paint with no test able to see it.
-// Naming the branch costs an int.
-type blockShape int
-
-const (
-	shapeEntry         blockShape = iota // renderEntryLines — one entry, one block
-	shapeSubAgentRun                     // renderSubAgentRun — the call plus the run nested under it
-	shapeToolSuper                       // renderSuperGroup — the umbrella over groupable calls, a group of one included
-	shapeSubAgentGroup                   // renderSubAgentGroup — the folded list of adjacent delegations
-	shapeSkillGroup                      // renderSubAgentGroup — the folded list of adjacent skill fetches
-)
-
 // entryState is the half of one entry a painter reads that MOVES: the view flags a click flips, the
 // pairing that lands a result, and the reading a delegation folds in while its child works. It is
 // stated apart from the content beside it because it is exactly the half [paintKey] has to name —

@@ -40,7 +40,7 @@
 - 4: recast (writer's decision on the agreement asserts; remaining reviewer guards folded)
 - 4 (re-check, second pass): guard folded — Goal rewritten to the guard's narrowed contract (the "replaces the Goal's" sentence deleted); Acceptance gains greps for the agreement test's presence and the retired direct `groupable`/`toolSuperGroup` asserts
 
-## 1. Move the tool-block walk primitives into blockshape.go
+## 1. Move the tool-block walk primitives into blockshape.go — ✅ DONE (2026-11-21)
 
 **What:**
 **Goal:** `internal/tui/blockshape.go` exists and defines `blockShape` and its constants, `toolRun`, `superGroup` (with `calls`), `toolSuperGroup`, `sameLabelRun`, `groupBlock`, `ownHeads`, `ownGroup`, `ownGroupAt` and `subAgentGroupAt`; none of them is defined in `transcript.go` or `paintcache.go`; `doc.go` names `blockshape.go`.
