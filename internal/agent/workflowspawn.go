@@ -295,8 +295,8 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 		registry: s.children,
 		runID:    runID,
 		sub:      sub,
-		// The LAST act before Run, as runDelegate's: anything that ends the frame before it leaves a
-		// child that never ran.
+		// The LAST act before Run, as a delegation's bracket reads its own (childBracket.runChild):
+		// anything that ends the frame before it leaves a child that never ran.
 		onArmed: func(context.Context) { ran = true },
 	})
 	ending := runEnding(res, runErr, stopped)
@@ -321,39 +321,31 @@ func (a *Agent) stageChildTools(stage workflow.Stage) ([]string, error) {
 
 // spawnSubAgent runs an item on the sub_agent path (workflow.Stage.SubAgent, ADR 0094): the stage's
 // sub_agent arguments run through runDelegate exactly as the blocking call's do, under the
-// spawner's call and on its registry and retained set, bracketed by the same started/finished pair
-// runDelegation emits, its finished phase carrying the delegation result the blocking parent would
-// have read. Every refusal and fault is that result, never an error, and its recover boundary is
-// runDelegate's. A cancel before the child starts is EndStopped, as Spawn's is.
+// spawner's call and on its registry and retained set, inside a child bracket of their own
+// (childBracket) — the same started/finished pair runDelegation emits, its finished phase carrying
+// the delegation result the blocking parent would have read, and no ledger row: the workflow
+// folder is the item's record. Every refusal and fault is that result, never an error, and its
+// recover boundary is the bracket's. A cancel before the child starts is EndStopped, as Spawn's
+// is.
 func (s *workflowSpawner) spawnSubAgent(ctx context.Context, spec workflow.ItemSpec) workflow.Outcome {
 	a := s.parent
 	if ctx.Err() != nil {
 		return workflow.Outcome{Ending: workflow.EndStopped}
 	}
 	call := domain.ToolCall{ID: s.call.ID, Tool: tools.SubAgentToolName, Arguments: spec.Stage.SubAgent}
-	runID := a.runIDs.mint()
+	var runID string
+	b := a.openBracket(s.turn, call, &runID, nil)
 	if s.observer != nil {
-		s.observer.itemStarted(spec, runID)
+		s.observer.itemStarted(spec, b.mintRunID())
 	}
-	applied, requested := a.stepCapFor(call)
-	a.emitSubAgentPhase(s.turn, s.call, runID, domain.SubAgentPhaseEvent{
-		Phase:        domain.SubAgentStarted,
-		StepCap:      applied,
-		CapRequested: requested,
-	})
-	var end delegateEnd
 	site := delegateSite{
 		turn: func() int { return s.turn }, children: s.children, retained: s.retained,
 		isPastExchange: s.isBackground,
 	}
-	result, dispatched := a.runDelegate(ctx, call, runID, site, &end)
-	if dispatched == dispatchCancelled {
-		result = errorToolResult(s.call.ID, cancelledQueuedDelegationContent)
-	}
+	result, end := a.runDelegate(ctx, b, site)
 	if end.seatFallback {
 		s.fellBack.Store(true)
 	}
-	a.emitSubAgentPhase(s.turn, s.call, runID, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Result: result})
 	ending := end.ending.workflowEnding()
 	if ending == workflow.EndStopped {
 		return workflow.Outcome{Ending: ending, Transcript: end.transcript}

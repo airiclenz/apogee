@@ -829,7 +829,7 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 // returns the sub-agent's final message as this call's tool result. A cancellation of the parent's
 // Turn STOPS a running child exactly as the human's stop does — folded, answered with the stopped
 // partial result, retained — and one that reached the call before its child was built returns
-// dispatchCancelled, which the dispatch answers with the not-started result (ADR 0088 D2);
+// dispatchCancelled with the not-started result (ADR 0088 D2);
 // a FAULTED child Exchange — abandoned rather than completed, which closes on the same
 // StatusExchangeComplete a real completion does — returns an ERROR result naming the fault
 // instead of the child's last assistant text (StepResult.Faulted). A STEP-CAPPED child
@@ -840,54 +840,37 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 // returned ToolResult is what the PARENT model sees on its next Turn (the delegated work
 // summarised back into the parent conversation).
 //
-// This frame is the ONE recover boundary of every delegation (ADR 0039 decision 4: each child
-// keeps panic recovery at its own boundary). Every delegation enters here through runDelegation —
-// on the dispatching goroutine at width 1, on a pool worker above it — so a panic raised anywhere
-// in the child's life becomes this call's error result at every width, and the parent Step
-// carries on with it exactly as it carries on with a recovered leaf-tool panic (executeTool). The defer is registered FIRST so it
-// runs LAST: after the reaping defer below has unregistered the child, closed its mailbox and
-// released its resources, and still around it, so a panic raised inside that teardown is caught
-// here too. The ErrorEvent is stamped with this Agent's current Turn — the same value dispatchTools
-// carries as `turn` — read live through its delegateSite (ownDelegateSite), because the signature
-// stays the shared `(ctx, call)` one.
-//
-// That same defer is the ONE site the delegate ledger is written from for a call that REACHES this
-// frame (children.go, apogee-clb): it runs last of all, after the recover has settled the named
-// results, so every way out of this frame — a refusal before any child exists, a cancel, a fault, a
-// cap, a completion, a recovered panic — is classified from the ToolResult and dispatchOutcome
-// actually returned (delegateEnding) and lands as one row. Four calls that never reach it book
-// their rows themselves: a delegation refused past the reply's fan-out ceiling, which dispatchGroup
-// books (recordCeilingRefusal, dispatch.go) — the ceiling's own site — a pooled
-// delegation the human stopped before a worker took it, which the pool books at the dequeue
-// (stopQueuedDelegation, dispatch.go), one the user's cancel reached before it started
-// (settleCancelledDelegation, dispatch.go), and one a queued message pre-empted, booked `skipped`
-// where the pre-emption is read (preemptDelegation, dispatch.go). The spawn index is taken FIRST, under the ledger's
-// lock — the one a pooled group reserved for this call in call order (dispatchGroup), else the next
-// — because a pool fan-out runs several of these frames at once and neither its dequeue nor its
-// completion order is the model's call order; the row records the child's RESOLVED output target,
-// never the unresolved argument. It is also where the messages the child's mailbox still held at
-// the end are reported undelivered, after the ledger row, because the reason each carries is that
-// same ending (childEnding.undelivered).
+// It runs the delegation OUTSIDE a dispatch: inside a phase-less, ledger-less bracket
+// (childBracket) under runID as given — the recover boundary, and no started/finished phase and no
+// ledger row. Every dispatched delegation enters through runDelegation instead, whose bracket
+// carries both; this entry is kept for callers that read the delegation's result alone. The
+// bracket's Turn is this Agent's current one, and 0 for an Agent with no Turn lifecycle yet (a
+// bare value that only reaches the argument checks).
 func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID string) (domain.ToolResult, dispatchOutcome) {
-	return a.runDelegate(ctx, call, runID, a.ownDelegateSite(), nil)
+	turn := 0
+	if a.turns != nil {
+		turn = a.turns.index
+	}
+	b := a.openBracket(turn, call, &runID, nil)
+	b.isPhaseless = true
+	result, end := a.runDelegate(ctx, b, a.ownDelegateSite())
+	return result, end.dispatchOutcome()
 }
 
 // delegateSite is where a delegation's parent keeps what the run touches beyond the child itself:
 // the Turn its events are stamped with (turn, read as each one is emitted), the registry the
-// running child is addressable and stoppable through, the set a retained child is kept in and a
-// continuation taken from, and the delegate ledger its row is booked in. A sub_agent call's site is its own Agent's (ownDelegateSite). A
-// background workflow's item on the sub_agent path runs off a launch-time snapshot (backgroundHost)
-// whose own registry and retained set nobody reads, so its spawner hands in the top-level Agent's —
-// pointers, never copies of their mutexes — and no ledger: the ledger is the open Exchange's
-// account of its own delegations, and the workflow folder is the background child's record. Its
-// run rides no Turn of the Exchange open on the top-level Agent, so its site also retains and
+// running child is addressable and stoppable through, and the set a retained child is kept in and a
+// continuation taken from. Its ledger row is the bracket's (childBracket). A sub_agent call's site
+// is its own Agent's (ownDelegateSite). A background workflow's item on the sub_agent path runs off
+// a launch-time snapshot (backgroundHost) whose own registry and retained set nobody reads, so its
+// spawner hands in the top-level Agent's — pointers, never copies of their mutexes. Its run rides
+// no Turn of the Exchange open on the top-level Agent, so its site also retains and
 // takes past that Exchange (isPastExchange): an abort of it keeps what the background child left.
 type delegateSite struct {
 	turn           func() int
 	children       *childRegistry
 	retained       *retainedDelegates
-	ledger         *delegationLedger // nil books no row
-	isPastExchange bool              // retain and take write through to the Exchange-start copy (retainPastExchange)
+	isPastExchange bool // retain and take write through to the Exchange-start copy (retainPastExchange)
 }
 
 // retain keeps d in the site's retained set — written through past the open Exchange for a
@@ -914,97 +897,90 @@ func (s delegateSite) take(name string) (retainedDelegate, bool) {
 func (a *Agent) ownDelegateSite() delegateSite {
 	return delegateSite{
 		turn:     func() int { return a.turns.index },
-		children: &a.children, retained: &a.retained, ledger: &a.delegations,
+		children: &a.children, retained: &a.retained,
 	}
 }
 
-// openRow takes the delegation's spawn index from the site's ledger; 0 when it keeps none.
-func (s delegateSite) openRow(callID string) int {
-	if s.ledger == nil {
-		return 0
-	}
-	return s.ledger.open(callID)
-}
-
-// recordRow books the delegation's row in the site's ledger, when it keeps one.
-func (s delegateSite) recordRow(r delegationRecord) {
-	if s.ledger != nil {
-		s.ledger.record(r)
-	}
-}
-
-// delegateEnd is what a caller of runDelegate reads beyond the result: how the delegation ended
-// (delegateEnding), the child's conversation, and whether the child fell back from the Sub-agent
-// server to the session's (Agent.seatFallback).
+// delegateEnd is what a caller of runDelegate reads beyond the result: how the delegation ended,
+// as its bracket decided it (childBracket.run), the child's conversation, and whether the child
+// fell back from the Sub-agent server to the session's (Agent.seatFallback).
 type delegateEnd struct {
 	ending       childEnding
 	transcript   []domain.Message
 	seatFallback bool
 }
 
-// runDelegate is runSubAgent's body: the one blocking sub_agent path, run against site, which a
-// workflow item on the sub_agent path (workflowSpawner.spawnSubAgent, ADR 0094) runs too. end, when
-// non-nil, is filled as the call returns, after the ledger's classification.
-func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID string, site delegateSite, end *delegateEnd) (result domain.ToolResult, outcome dispatchOutcome) {
+// dispatchOutcome is the outcome the delegation's call is committed with: cancelled for an ending
+// the cancel decided — the call then carries the not-started result — and done for every other.
+func (e delegateEnd) dispatchOutcome() dispatchOutcome {
+	if e.ending.kind == delegationCancelled {
+		return dispatchCancelled
+	}
+	return dispatchDone
+}
+
+// runDelegate runs the one blocking sub_agent path inside b, the delegation's bracket
+// (childBracket), against site: the path a dispatched sub_agent call (runDelegation) and a workflow
+// item on the sub_agent path (workflowSpawner.spawnSubAgent, ADR 0094) both take. The started
+// phase announces the step cap the child runs under (stepCapFor); the body is delegate.
+//
+// The bracket is the ONE recover boundary of the delegation (ADR 0039 decision 4: each child keeps
+// panic recovery at its own boundary): a panic raised anywhere in the child's life — its teardown
+// included — becomes this call's error result naming the panicked tool, at every width, and the
+// parent Step carries on with it exactly as it carries on with a recovered leaf-tool panic
+// (executeTool). The bracket also decides the ending once, after the recover, books the ledger row
+// (children.go, apogee-clb) and reports what the child's mailbox still held as undelivered under
+// that ending (childEnding.undelivered). Four calls that never reach a run book their rows where
+// they are settled: a delegation refused past the reply's fan-out ceiling (recordCeilingRefusal,
+// dispatch.go), a pooled delegation the human stopped before a worker took it
+// (stopQueuedDelegation), one the user's cancel reached before it started
+// (settleCancelledDelegation) and one a queued message pre-empted (preemptDelegation). The spawn
+// index is taken as the bracket opens, under the ledger's lock — the one a pooled group reserved
+// for this call in call order (dispatchGroup), else the next — because a pool fan-out runs several
+// of these frames at once and neither its dequeue nor its completion order is the model's call
+// order; the row records the child's RESOLVED output target, never the unresolved argument.
+func (a *Agent) runDelegate(ctx context.Context, b *childBracket, site delegateSite) (domain.ToolResult, delegateEnd) {
+	var end delegateEnd
+	applied, requested := a.stepCapFor(b.call)
+	result, ending := b.run(
+		domain.SubAgentPhaseEvent{StepCap: applied, CapRequested: requested},
+		func(any) domain.ToolResult {
+			return errorToolResult(b.call.ID, fmt.Sprintf("tool %q panicked", b.call.Tool))
+		},
+		func() (domain.ToolResult, childEnding) { return a.delegate(ctx, b, site, &end) },
+	)
+	end.ending = ending
+	return result, end
+}
+
+// delegate is runDelegate's body, run inside b: it parses the delegated task, refuses what it
+// cannot run before any child exists, builds the child, runs it through the bracket
+// (childBracket.runChild), renders its result and retains it where the run asks for that. It
+// returns the result and the ending it read, and fills end's transcript and seat fallback.
+func (a *Agent) delegate(ctx context.Context, b *childBracket, site delegateSite, end *delegateEnd) (domain.ToolResult, childEnding) {
+	call, runID := b.call, *b.runID
 	var (
-		spawnIndex   = site.openRow(call.ID)
-		ledgerName   string
-		ledgerTarget string
-		ran          bool
-		res          domain.StepResult
+		res domain.StepResult
 		// stopped is set once a human's stop (StopChild) or the cancel of the whole Turn is known
-		// to have cut the child's Run short; the ledger reads it before any error case
-		// (delegateEnding).
+		// to have cut the child's Run short; the bracket reads it before any error case
+		// (childBracket.settle).
 		stopped bool
 		// stopLeftover is what the child's mailbox held when a stopped run's result was rendered:
-		// the result lists it, and the reaping defer still reports it undelivered.
+		// the result lists it, and the reaping defer still hands it to the bracket undelivered.
 		stopLeftover []domain.UserInput
-		// transcript and seatFallback are what end reports beyond the classification, read off the
-		// child once its run is over.
-		transcript   []domain.Message
-		seatFallback bool
-		// reportLeftover is set by the reaping defer below and called here, once the delegation
-		// is classified: that defer runs FIRST, before any outcome exists, so it only takes what
-		// the closed mailbox still held and leaves the reporting — which says why it never
-		// landed — to this one.
-		reportLeftover func(domain.UndeliveredReason)
 	)
-	defer func() {
-		if r := recover(); r != nil {
-			a.cfg.Events.Emit(domain.ErrorEvent{
-				EventBase: a.base(site.turn()),
-				Source:    call.Tool,
-				Err:       fmt.Sprintf("panic: %v", r),
-			})
-			result = errorToolResult(call.ID, fmt.Sprintf("tool %q panicked", call.Tool))
-			outcome = dispatchDone
-		}
-		ended := delegateEnding(result, outcome, ran, stopped, res)
-		if end != nil {
-			*end = delegateEnd{ending: ended, transcript: transcript, seatFallback: seatFallback}
-		}
-		site.recordRow(ended.ledgerRecord(delegationRecord{
-			spawnIndex: spawnIndex,
-			callID:     call.ID,
-			name:       delegationLabel(ledgerName, call),
-			outputPath: ledgerTarget,
-		}, result.Content))
-		if reportLeftover != nil {
-			reportLeftover(ended.undelivered())
-		}
-	}()
 	if a.depth >= a.maxDepth() {
 		// Defensive floor: the tool is withheld from the menu at the bound, but refuse here
 		// too so the bound holds even if a model emits the call anyway.
-		return errorToolResult(call.ID, depthLimitReason(a.maxDepth())), dispatchDone
+		return errorToolResult(call.ID, depthLimitReason(a.maxDepth())), refusedEnding()
 	}
 
 	var args tools.SubAgentArgs
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
-		return errorToolResult(call.ID, "invalid sub_agent arguments: "+err.Error()), dispatchDone
+		return errorToolResult(call.ID, "invalid sub_agent arguments: "+err.Error()), refusedEnding()
 	}
 	if args.Task == "" {
-		return errorToolResult(call.ID, "sub_agent requires a non-empty task"), dispatchDone
+		return errorToolResult(call.ID, "sub_agent requires a non-empty task"), refusedEnding()
 	}
 
 	// A CONTINUATION (P6 of plan 2026-09-18 - 00; ADR 0086 D2): the call names a delegation this
@@ -1037,7 +1013,7 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 		var ok bool
 		prior, ok = site.take(args.Continue)
 		if !ok {
-			return errorToolResult(call.ID, unknownContinueResult(args.Continue, site.retained.names())), dispatchDone
+			return errorToolResult(call.ID, unknownContinueResult(args.Continue, site.retained.names())), refusedEnding()
 		}
 		continuing = true
 		giveBack = func() { site.retain(prior) }
@@ -1068,7 +1044,7 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 		asked, err := parseDelegationSeat(args.RunOn)
 		if err != nil {
 			giveBack()
-			return errorToolResult(call.ID, err.Error()), dispatchDone
+			return errorToolResult(call.ID, err.Error()), refusedEnding()
 		}
 		seat = asked
 	}
@@ -1079,7 +1055,7 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 	narrowed, err := a.requestedChildTools(args.Tools)
 	if err != nil {
 		giveBack()
-		return errorToolResult(call.ID, err.Error()), dispatchDone
+		return errorToolResult(call.ID, err.Error()), refusedEnding()
 	}
 
 	// The `context` files, read BEFORE the child is built for the same reason again: an unreadable
@@ -1091,7 +1067,7 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 	shared, refusal := a.readDelegationContext(ctx, args.Context)
 	if refusal != "" {
 		giveBack()
-		return errorToolResult(call.ID, refusal), dispatchDone
+		return errorToolResult(call.ID, refusal), refusedEnding()
 	}
 
 	// A cancel of the parent's Turn that reached the call before its child exists settles it
@@ -1099,14 +1075,14 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 	// the call with the not-started result (runDelegation, ADR 0088 D2).
 	if ctx.Err() != nil {
 		giveBack()
-		return domain.ToolResult{}, dispatchCancelled
+		return errorToolResult(call.ID, cancelledQueuedDelegationContent), unstartedCancelled()
 	}
 	sub, err := a.newChildAgentOn(seat, call.ID, runID, task, delegationName(args.Name))
 	if err != nil {
 		giveBack()
-		return errorToolResult(call.ID, "could not construct sub-agent: "+err.Error()), dispatchDone
+		return errorToolResult(call.ID, "could not construct sub-agent: "+err.Error()), refusedEnding()
 	}
-	seatFallback = sub.seatFallback
+	end.seatFallback = sub.seatFallback
 	// Applied to the child's own registry rather than threaded through construction: the spawn
 	// signatures stay as they are, and a per-spawn field on the PARENT would race across the
 	// siblings a fan-out builds at once (ADR 0039). Subset over the set the child was built with is
@@ -1123,7 +1099,7 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 	// named no path, or a Plan-mode child whose ladder refuses every write, was never in a position
 	// to write and reads `none` rather than `missing`.
 	if sub.outputTarget != "" && sub.Mode() != domain.ModePlan {
-		ledgerTarget = sub.outputTarget
+		b.rowTarget = sub.outputTarget
 	}
 	// And the file's state BEFORE the child runs, the reference a faulted child's draft note is
 	// read against (draftOutputSurvives): the same pre/post pair the ledger column reads presence
@@ -1161,18 +1137,16 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 		// Unregister and close the mailbox before the child's resources go: after this the child
 		// is no longer addressable, and anything a human queued for it that never reached a
 		// boundary is reported undelivered rather than left unaccounted for (ADR 0063 D2). The
-		// report itself waits for the outer defer, which alone knows how the run ended and so why
-		// the message did not land — this defer runs before a recovered panic is even classified.
-		leftover, turn := append(stopLeftover, reapChild(site.children, runID, sub)...), sub.turns.index
-		reportLeftover = func(reason domain.UndeliveredReason) {
-			sub.reportUndelivered(turn, leftover, reason)
-		}
+		// report itself waits for the bracket (childBracket.reap), which alone knows how the run
+		// ended and so why the message did not land — this defer runs before a recovered panic is
+		// even classified.
+		b.reap(site.children, sub, stopLeftover)
 		_ = sub.Close()
 	}()
 
 	if err := sub.Submit(domain.UserInput{Text: sub.contextPrefix(shared) + task}); err != nil {
 		giveBack()
-		return errorToolResult(call.ID, "could not start sub-agent: "+err.Error()), dispatchDone
+		return errorToolResult(call.ID, "could not start sub-agent: "+err.Error()), refusedEnding()
 	}
 	// The child runs on the shared child-run lifecycle (runChild): published under its run id — the
 	// engine-minted identity the child stamps on every Event it emits, so a Driver addresses it by
@@ -1185,7 +1159,7 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 	// stop in: arm cancels the context at once, and the run is stopped like any other. A STOP is read
 	// where something cut the Run short and that something is the human's stop or the cancel of the
 	// parent's whole Turn (childRunStopped, ADR 0088 D2).
-	res, stopped, stopLeftover, err = runChild(ctx, childRun{
+	res, stopped, stopLeftover, err = b.runChild(ctx, childRun{
 		registry: site.children,
 		runID:    runID,
 		sub:      sub,
@@ -1203,8 +1177,8 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 			// completion before starting the work would buy a better label at the price of the
 			// thing it labels.
 			stopNaming = a.startDelegationNaming(ctx, site.turn(), call.ID, sub, &naming)
-			// The LAST act before Run: a panic anywhere earlier reads as a refused delegation.
-			ran = true
+			// The bracket counts the child as started once this has run (childBracket.runChild):
+			// a panic anywhere earlier reads as a refused delegation.
 		},
 		settled: func() {
 			// The namer is stopped and JOINED here, before the run is read, rather than left to the
@@ -1217,21 +1191,21 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 				stopNaming()
 			}
 			naming.Wait()
-			ledgerName = sub.displayName()
+			b.rowName = sub.displayName()
 		},
 		foldStopped: func(ctx context.Context) {
-			// stopped is set BEFORE the fold, so a fold that panics still reads stopped. runChild
-			// closes the mailbox after it, so the result can list what the human wrote to the child
-			// that never reached it; the reaping defer still reports each one undelivered.
-			stopped = true
+			// The bracket reads the run as stopped BEFORE the fold (childBracket.runChild), so a
+			// fold that panics still reads stopped. runChild closes the mailbox after it, so the
+			// result can list what the human wrote to the child that never reached it; the reaping
+			// defer still hands each one to the bracket undelivered.
 			a.foldStoppedChild(ctx, site.children, runID, sub)
 		},
 	})
 	if stopped {
 		sub.stoppedByUser, sub.stopUndelivered = true, stopLeftover
 	}
-	transcript = sub.conv.Messages()
-	result, outcome = sub.delegationResult(call.ID, res, err)
+	end.transcript = sub.conv.Messages()
+	result, outcome := sub.delegationResult(call.ID, res, err)
 	// A child the engine stopped at a bound is RETAINED for the rest of the session (P6; ADR 0086
 	// D1) — the fold and closing text the result carried as its first round, and everything the
 	// call asked for, so the parent can continue the work rather than re-spawn it from nothing. A child whose
@@ -1269,7 +1243,12 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 		}
 		site.retain(entry.withRound(round))
 	}
-	return result, outcome
+	if outcome == dispatchCancelled {
+		// A run cancelled with neither stop behind it: the call is answered with the not-started
+		// result, as a call the cancel reached before its child was built is (delegationResult).
+		result = errorToolResult(call.ID, cancelledQueuedDelegationContent)
+	}
+	return result, delegateEnding(result, outcome, b.hasStarted, stopped, res)
 }
 
 // foldStoppedChild writes the engine fold of a child a stop cut short — the human's stop
@@ -1351,18 +1330,18 @@ func (a *Agent) roundReport(result domain.ToolResult, res domain.StepResult, err
 	}
 }
 
-// delegateEnding is how a delegation that reached runDelegate ended, read off what that frame is
-// returning for it — the result, the dispatch outcome, whether the child's Run was reached (ran),
-// whether a human's stop or the Turn's cancel cut it short (stopped) and what it returned (res) —
-// once, as the childEnding every word for it is projected from. A cancel is read first: it returns
-// no result at all, and one that reached the call before its child existed is an unstarted one. A
-// stop is read next, ahead of every error case, because a stopped run's result is the non-error
-// partial result whatever state the stop left the child in. An error result is then a refusal
-// when no child ever ran (every early return, and a Submit that failed) and a fault otherwise —
-// the child's own fault, a Run error, a recovered panic, or a completed reply the engine would not
-// hand over as a report (completedResult's error shapes) — ahead of the bound, so a capped run
-// whose rendering or retention panicked is a fault, never capped. A non-error result is capped
-// when the child's Run said so and completed otherwise.
+// delegateEnding is how a delegation that reached runDelegate ended, read off what its body
+// (delegate) is returning for it — the result, the dispatch outcome, whether the child's Run was
+// reached (ran), whether a human's stop or the Turn's cancel cut it short (stopped) and what it
+// returned (res) — once, as the childEnding every word for it is projected from. A cancel is read
+// first: one that reached the call before its child existed is an unstarted one. A stop is read
+// next, ahead of every error case, because a stopped run's result is the non-error partial result
+// whatever state the stop left the child in. An error result is then a refusal when no child ever
+// ran (every early return, and a Submit that failed) and a fault otherwise — the child's own fault,
+// a Run error, a recovered panic, or a completed reply the engine would not hand over as a report
+// (completedResult's error shapes) — ahead of the bound, so a capped run whose rendering or
+// retention panicked is a fault, never capped. A non-error result is capped when the child's Run
+// said so and completed otherwise.
 func delegateEnding(result domain.ToolResult, outcome dispatchOutcome, ran, stopped bool, res domain.StepResult) childEnding {
 	ending := childEnding{hasStarted: ran}
 	switch {

@@ -286,7 +286,13 @@ The ending's order is `classifyDelegation`'s: cancelled, then stopped, then refu
 - `go build ./... && go test -count=1 -run 'TestChildBracket|TestChildRun' ./internal/agent/`
 **Commit:** `refactor(agent): childBracket owns a delegation's phases, recover and row`
 
-## 8. Started sub_agent runs on the bracket
+## 8. Started sub_agent runs on the bracket — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): runDelegate now takes the bracket and returns `(domain.ToolResult, delegateEnd)` (no `end *delegateEnd` out-param); its old body is split into `delegate(ctx, b, site, end) (domain.ToolResult, childEnding)`, run as `childBracket.run`'s body. The cancel-before-child and cancelled-run paths answer with the not-started content themselves; the dispatch outcome is projected from the decided ending (`delegateEnd.dispatchOutcome`: cancelled kind → dispatchCancelled).
+NOTES (2026-11-21): the post-run ending the body returns is still `delegateEnding(result, outcome, b.hasStarted, stopped, res)` (kept live; children_test/childending_test/stop_test call it), so ledger rows classify exactly as before; early refusals return `refusedEnding()`, the pre-child cancel `unstartedCancelled()`.
+NOTES (2026-11-21): `delegateSite.ledger`, `openRow` and `recordRow` deleted — the bracket books the row; `runDelegation` opens its bracket on `&a.delegations`, spawnSubAgent and runSubAgent on nil.
+NOTES (2026-11-21): `childBracket` gains `isPhaseless` (no started/finished phase, no run-id mint) for runSubAgent's bracket; runSubAgent reads its Turn as 0 when `a.turns` is nil, because TestSubAgent_RejectsEmptyAndBadArgs drives a bare `&Agent{}` whose Turn the old code only read lazily on a panic.
+NOTES (2026-11-21): consequential edit — internal/agent/children.go: made necessary by moving runSubAgent's reaping defer into `delegate` (retainedDelegate doc named "runSubAgent's defer").
 
 Depends on item 7.
 

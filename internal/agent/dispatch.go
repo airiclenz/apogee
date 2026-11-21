@@ -189,9 +189,9 @@ func (a *Agent) askedSeat(call domain.ToolCall) delegationSeat {
 // Every tool call, leaf or delegation, crosses ONE pipeline of three phases. prepareCall carries a
 // call from its ToolCallEvent through the pre-tool-exec Moment, the dispatch facts, the Resolution
 // and the gate stage to a verdict — or to a final result when nothing may run. runCall executes
-// the verdict: a leaf's run/gate/confine arm, or the child run behind runSubAgent's recover
-// boundary. commitCall lands the result: the audit record a delegation earns, the post-tool-result
-// Moment, and the append into history. Width is the one parameter (dispatchGroup). At width 1 the
+// the verdict: a leaf's run/gate/confine arm, or the child run inside its delegation's bracket
+// (childBracket). commitCall lands the result: the audit record a delegation earns, the
+// post-tool-result Moment, and the append into history. Width is the one parameter (dispatchGroup). At width 1 the
 // three phases run per call, in emitted order — a call's result is in history before the next
 // call's ToolCallEvent is emitted, the loop this dispatch has always been (ADR 0039 decision 1:
 // a cap of 1 reproduces that behaviour exactly; decision 3: a child's own delegations run serially
@@ -522,7 +522,7 @@ func (a *Agent) refusePastCeiling(turn, index, group int, slot *dispatchSlot) bo
 
 // recordCeilingRefusal books the delegate-ledger row a ceiling-refused slot is owed (children.go)
 // and does nothing for any other slot. It is the ceiling's OWN write, one of the ledger's sites
-// besides runSubAgent's defer (subagent.go), beside the pre-emption's (preemptDelegation), the
+// besides the delegation bracket's (childBracket, childrun.go), beside the pre-emption's (preemptDelegation), the
 // human's stop's (stopQueuedDelegation) and the cancel's (settleCancelledDelegation): opened and
 // recorded on the dispatching goroutine, so a pooled group's refused rows take their indices
 // after every reserved slot. The row reads as any
@@ -877,51 +877,35 @@ func (a *Agent) skipDelegation(turn int, slot *dispatchSlot, result domain.ToolR
 	return result
 }
 
-// runDelegation drives the sub_agent recursion point (a nested Agent) to its boundary, bracketed
-// by the lifecycle phases a Driver reads (domain.SubAgentPhaseEvent): started as the child is
-// reached — the instant a pool worker dequeues it, or the instant the width-1 loop arrives at it,
-// which is what makes a slot-less delegation observably queued rather than silently pending — and
-// finished, carrying the result, as the child returns. A child the user's cancel found running
-// returns its stopped result like any other (runSubAgent); a call the cancel reached before its
-// child was built returns dispatchCancelled, and is answered here with the not-started result
-// (cancelledQueuedDelegationContent), carried
-// on its finished phase like every other (ADR 0088 D2, superseding ADR 0075
-// decision 12) — the slot commits it, so no delegation ends without a result.
+// runDelegation drives the sub_agent recursion point (a nested Agent) to its boundary inside the
+// delegation's bracket (childBracket), opened here on this Agent's delegate ledger: started as the
+// child is reached — the instant a pool worker dequeues it, or the instant the width-1 loop arrives
+// at it, which is what makes a slot-less delegation observably queued rather than silently pending
+// — and finished, carrying the result, as the child returns (domain.SubAgentPhaseEvent). A child
+// the user's cancel found running returns its stopped result like any other (runDelegate); a call
+// the cancel reached before its child was built returns dispatchCancelled with the not-started
+// result (cancelledQueuedDelegationContent), carried on its finished phase like every other (ADR
+// 0088 D2, superseding ADR 0075 decision 12) — the slot commits it, so no delegation ends without
+// a result.
 //
 // The recover that keeps a child's panic from crossing a pool worker's top frame — which would
-// take the process down with it — sits in runSubAgent's own frame, inside every caller's chain,
-// so the per-child fault boundary ADR 0007 promises is the child's boundary at every width: a
-// recovered child becomes an error tool-result its sibling and the parent Exchange survive (ADR
-// 0039 decision 4). runSubAgent keeps its own defensive depth check too — belt-and-braces with the
+// take the process down with it — is the bracket's (childBracket.run), inside every caller's
+// chain, so the per-child fault boundary ADR 0007 promises is the child's boundary at every width:
+// a recovered child becomes an error tool-result its sibling and the parent Exchange survive (ADR
+// 0039 decision 4). runDelegate keeps its own defensive depth check too — belt-and-braces with the
 // resolver's depth-bound row and the withheld-tool floor (ADR 0013 defence in depth) — so the
 // bound holds even if the call is reached by another route. The audit record is NOT booked here:
 // it is commitCall's, on the dispatching goroutine (dispatchSlot.delegated).
 //
-// The slot's run id is the child's (dispatchSlot.runID). A slot that reaches here without one — a
-// call a pre-tool-exec Reaction redirected INTO sub_agent after its ToolCallEvent went out
-// unminted — is minted one now, before the started phase, so every event of the delegation itself
-// still carries an id; only its head event lacks it, and a reader falls back to (depth, call id)
-// there.
+// The slot's run id is the child's (dispatchSlot.runID): the bracket reads and writes it through
+// the slot. A slot that reaches here without one — a call a pre-tool-exec Reaction redirected INTO
+// sub_agent after its ToolCallEvent went out unminted — is minted one by the bracket before the
+// started phase (childBracket.mintRunID), so every event of the delegation itself still carries an
+// id and commitCall stamps it on the result; only its head event lacks it, and a reader falls back
+// to (depth, call id) there.
 func (a *Agent) runDelegation(ctx context.Context, turn int, slot *dispatchSlot) (domain.ToolResult, dispatchOutcome) {
-	call := slot.call
-	if slot.runID == "" {
-		slot.runID = a.runIDs.mint()
-	}
-	runID := slot.runID
-	applied, requested := a.stepCapFor(call)
-	a.emitSubAgentPhase(turn, call, runID, domain.SubAgentPhaseEvent{
-		Phase:        domain.SubAgentStarted,
-		StepCap:      applied,
-		CapRequested: requested,
-	})
-	result, outcome := a.runSubAgent(ctx, call, runID)
-	if outcome == dispatchCancelled {
-		result = errorToolResult(call.ID, cancelledQueuedDelegationContent)
-		a.emitSubAgentPhase(turn, call, runID, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Result: result})
-		return result, dispatchCancelled
-	}
-	a.emitSubAgentPhase(turn, call, runID, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Result: result})
-	return result, dispatchDone
+	result, end := a.runDelegate(ctx, a.openBracket(turn, slot.call, &slot.runID, &a.delegations), a.ownDelegateSite())
+	return result, end.dispatchOutcome()
 }
 
 // stepCapFor reports the step cap one sub_agent call's child will run under and the ask it clamps

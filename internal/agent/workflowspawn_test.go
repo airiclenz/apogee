@@ -991,6 +991,68 @@ func TestWorkflowSpawn_ASubAgentItemRunsTheBlockingSubAgentPath(t *testing.T) {
 	})
 }
 
+// TestWorkflowSpawn_ASubAgentItemPanicIsRecoveredOnce pins the recover boundary of an item on the
+// sub_agent path: a panic raised inside its child is recovered ONCE, at the item's own bracket
+// (childBracket) — one ErrorEvent naming it, one started/finished pair under one run id whose
+// finished phase carries the panic result, and no ledger row — and the item ends faulted with that
+// result as its report, never as a spawn error.
+func TestWorkflowSpawn_ASubAgentItemPanicIsRecoveredOnce(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.Mode = domain.ModeAskBefore
+	registry := domain.NewToolRegistry()
+	_ = registry.Register(fakeTool{name: "read_thing", readOnly: true, result: "package main"})
+	cfg.Tools = registry
+	upstream := newRoutedResponder().route("explode", func(context.Context) { panic("item child boom") }, nil)
+	a, err := newAgent(cfg, upstream)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	outcome := spawnItem(t, a, subAgentItemSpec(subAgentArgs("explode")))
+
+	wantReport := fmt.Sprintf("tool %q panicked", tools.SubAgentToolName)
+	if outcome.Ending != workflow.EndFaulted || outcome.Report != wantReport {
+		t.Fatalf("outcome = %+v, want faulted reporting %q", outcome, wantReport)
+	}
+	var (
+		recovered []domain.ErrorEvent
+		phases    []domain.SubAgentPhaseEvent
+	)
+	for _, event := range sink.events {
+		switch e := event.(type) {
+		case domain.ErrorEvent:
+			if strings.Contains(e.Err, "item child boom") {
+				recovered = append(recovered, e)
+			}
+		case domain.SubAgentPhaseEvent:
+			phases = append(phases, e)
+		}
+	}
+	if len(recovered) != 1 {
+		t.Fatalf("recovered-panic ErrorEvents = %+v, want exactly one", recovered)
+	}
+	if recovered[0].Depth != 0 || recovered[0].Source != tools.SubAgentToolName {
+		t.Errorf("recovered ErrorEvent at depth %d from %q, want depth 0 from %q",
+			recovered[0].Depth, recovered[0].Source, tools.SubAgentToolName)
+	}
+	if len(phases) != 2 || phases[0].Phase != domain.SubAgentStarted || phases[1].Phase != domain.SubAgentFinished {
+		t.Fatalf("phases = %+v, want one started then one finished", phases)
+	}
+	if phases[0].RunID == "" || phases[1].RunID != phases[0].RunID || phases[1].CallID != fanOutCall.ID {
+		t.Errorf("phase run ids %q/%q under call %q, want one minted id under %q",
+			phases[0].RunID, phases[1].RunID, phases[1].CallID, fanOutCall.ID)
+	}
+	if finished := phases[1].Result; !finished.IsError || finished.Content != wantReport {
+		t.Errorf("finished phase result = %+v, want the error result %q", finished, wantReport)
+	}
+	if rows := a.delegations.rows(); len(rows) != 0 {
+		t.Errorf("ledger rows = %+v, want none — the workflow folder is the record", rows)
+	}
+}
+
 func TestWorkflowSpawn_ACompletedSubAgentItemRunsOnceAndTalliesOK(t *testing.T) {
 	t.Parallel()
 

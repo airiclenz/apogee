@@ -9,8 +9,9 @@ package agent
 // can continue it (ADR 0086 D4). A workflow item's child (workflowSpawner.Spawn) runs on it with
 // fold off: a stopped item is re-run on resume, so nothing of it is kept.
 //
-// The helper owns no recover frame (each caller keeps its own, so a panic is classified where the
-// caller can report it) and takes the registry explicitly: a background workflow's children are
+// The helper owns no recover frame: a delegation's is its bracket's (childBracket.run), and a
+// workflow item's off the sub_agent path its spawner's (Spawn), so a panic is classified where it
+// can be reported. It takes the registry explicitly: a background workflow's children are
 // listed on the top-level Agent the Driver addresses, not on the launch-time snapshot that runs the
 // workflow (backgroundHost).
 //
@@ -18,7 +19,9 @@ package agent
 // run id, the started/finished phase pair a Driver reads, the recover boundary a child's panic stops
 // at (ADR 0039 D4), the ending read once, and the one ledger row. A delegation settled before its
 // child started takes a lone finished phase and its row (neverStarted); one that runs takes the
-// whole pair around its body (run), the child inside it run through the bracket (runChild).
+// whole pair around its body (run), the child inside it run through the bracket (runChild). A
+// sub_agent call run outside a dispatch (runSubAgent) runs in a phase-less, ledger-less bracket:
+// the recover boundary and the ending, nothing a Driver or the ledger reads.
 
 import (
 	"context"
@@ -121,6 +124,9 @@ type childBracket struct {
 	// reportLeftover reports what the child's mailbox still held as undelivered under the ending's
 	// reason (reap); nil while nothing was reaped.
 	reportLeftover func(domain.UndeliveredReason)
+	// isPhaseless is a bracket that emits no phase, and so mints no run id: the run keeps the id it
+	// was opened with (runSubAgent).
+	isPhaseless bool
 }
 
 // openBracket opens the bracket of one delegation answering call, its phases stamped with turn.
@@ -157,8 +163,8 @@ func (b *childBracket) neverStarted(unstarted childEnding) domain.ToolResult {
 	return result
 }
 
-// run runs body inside the bracket: the started phase (started, its Phase set here) under the run
-// id (mintRunID), then body, which returns the result the finished phase carries and the ending it
+// run runs body inside the bracket: the started phase (started, its Phase set here; none in a
+// phase-less bracket) under the run id (mintRunID), then body, which returns the result the finished phase carries and the ending it
 // read. Whatever way body leaves — returned or panicked — the bracket closes in this order:
 //
 //  1. a panic is recovered and reported (an ErrorEvent naming it), and onPanic gives the result
@@ -170,8 +176,10 @@ func (b *childBracket) neverStarted(unstarted childEnding) domain.ToolResult {
 //
 // It returns the result and the decided ending.
 func (b *childBracket) run(started domain.SubAgentPhaseEvent, onPanic func(recovered any) domain.ToolResult, body func() (domain.ToolResult, childEnding)) (result domain.ToolResult, ending childEnding) {
-	started.Phase = domain.SubAgentStarted
-	b.host.emitSubAgentPhase(b.turn, b.call, b.mintRunID(), started)
+	if !b.isPhaseless {
+		started.Phase = domain.SubAgentStarted
+		b.host.emitSubAgentPhase(b.turn, b.call, b.mintRunID(), started)
+	}
 	defer func() {
 		recovered := recover()
 		isPanicked := recovered != nil
@@ -268,7 +276,11 @@ func (b *childBracket) bookRow(ending childEnding, resultContent string) {
 }
 
 // emitFinished emits the finished phase carrying result, under the delegation's run id as it
-// stands — "" for a delegation that never started and never had one.
+// stands — "" for a delegation that never started and never had one. A phase-less bracket emits
+// none.
 func (b *childBracket) emitFinished(result domain.ToolResult) {
+	if b.isPhaseless {
+		return
+	}
 	b.host.emitSubAgentPhase(b.turn, b.call, *b.runID, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Result: result})
 }

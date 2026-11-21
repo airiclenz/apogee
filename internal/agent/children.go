@@ -225,7 +225,7 @@ var errDelegationStopped = errors.New("delegation stopped by the user")
 // ORIGINAL task and the roster and output path the latest call asked for, and one round per run
 // under the name (ADR 0086 D2), oldest first. It is a value: every field is copied at retention,
 // after the child's run has been read and reported, so nothing here aliases a child that
-// runSubAgent's defer is about to close; rounds is never appended to in place (withRound).
+// delegate's reaping defer is about to close; rounds is never appended to in place (withRound).
 type retainedDelegate struct {
 	task       string               // the ORIGINAL delegated task, as the first spawning call spelled it — a continuation never replaces it
 	name       string               // the display name the child ended its latest run wearing — the key it is retained under
