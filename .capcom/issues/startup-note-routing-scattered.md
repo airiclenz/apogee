@@ -1,11 +1,13 @@
 ---
 title: "The start-up chrome routes every note (architecture review 2026-11-21 #2)"
-status: open
+status: done
 type: task
 priority: 3
 labels: [tui]
 plan: 2026-11-21 - 02 - startup-notes-plan.md
 created: 2026-11-21T12:27:13Z
+closed: 2026-11-21T20:58:53Z
+reason: Acceptance met by plan 2026-11-21 - 02 - startup-notes-plan.md (43bf2196); the two leftover heartbeat notes are tracked in server-switch-notes-unrouted.
 ---
 
 Found by docs/reviews/architecture-review-2026-11-21.html, verified 2026-11-21 at 171d210f.
