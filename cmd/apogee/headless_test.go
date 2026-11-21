@@ -34,6 +34,7 @@ import (
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/testtime"
@@ -5184,4 +5185,120 @@ func TestHeadlessStopsAtItsBudget(t *testing.T) {
 		out, errOut, home, err := headlessBudgetRun(t, runner, "--max-wall-time", "30m", eventLinesPrompt)
 		wantBudgetStop(t, out, errOut, home, err, "apogee: run stopped at its max-wall-time budget (30m0s)")
 	})
+}
+
+// skillReportProbe is the stderr a skill-report test reads: it keeps every byte written and, the
+// first time marker appears in them, records how many chat requests the upstream had received by
+// then — so "printed before the model was asked anything" is an observation, not an ordering of
+// two buffers read after the fact.
+type skillReportProbe struct {
+	upstream *stubllm.Server
+	marker   string
+	written  bytes.Buffer
+	// requestsAtMarker is the upstream's chat-request count when marker first appeared; -1 until then.
+	requestsAtMarker int
+}
+
+// Write keeps p and, on the write that first completes marker, reads the upstream's request log.
+// headless serialises its own stderr (serialWriter), so writes never overlap.
+func (p *skillReportProbe) Write(b []byte) (int, error) {
+	n, err := p.written.Write(b)
+	if p.requestsAtMarker < 0 && strings.Contains(p.written.String(), p.marker) {
+		p.requestsAtMarker = len(p.upstream.Requests())
+	}
+	return n, err
+}
+
+// skillReportHeadless runs a plain-prompt `apogee headless` through the real run.Once against an
+// upstream that answers "done", after layout has written SKILL.md files into the apogee home and
+// the workspace. It returns stdout, the stderr probe watching for marker, and the error.
+func skillReportHeadless(
+	t *testing.T,
+	marker string,
+	layout func(home, workspace string),
+) (out string, errOut *skillReportProbe, err error) {
+	t.Helper()
+	assertNoAmbientApogeeConfig(t)
+	t.Setenv(config.EnvMode, "")
+
+	upstream := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: headlessBeatModel}},
+	}, Turns: []stubllm.Turn{{Text: "done"}}})
+	home := eventLinesHome(t, upstream.URL, headlessBeatModel)
+	workspace := e2eWorkspace(t)
+	layout(home, workspace)
+
+	cmd := newHeadlessCommandWith(headlessDeps{runner: run.Once})
+	var outBuf bytes.Buffer
+	errOut = &skillReportProbe{upstream: upstream, marker: marker, requestsAtMarker: -1}
+	cmd.SetOut(&outBuf)
+	cmd.SetErr(errOut)
+	cmd.SetArgs([]string{"--config", home, "--workspace", workspace, "--mode", "plan", "say done"})
+	err = cmd.ExecuteContext(context.Background())
+	return outBuf.String(), errOut, err
+}
+
+// writeSkillFile writes body as dir/SKILL.md, creating dir.
+func writeSkillFile(t *testing.T, dir, body string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create the skill folder: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write the skill: %v", err)
+	}
+}
+
+// TestHeadlessNamesASkillThatFailedToLoad pins the headless half of the failed-skill report: a
+// project SKILL.md whose header will not parse is named on stderr — in skills.FailedLines' words —
+// before the first request reaches the model, and stdout stays the model's answer alone.
+func TestHeadlessNamesASkillThatFailedToLoad(t *testing.T) {
+	const name = "half-quoted"
+
+	out, errOut, err := skillReportHeadless(t, "  "+name+" — ", func(_, workspace string) {
+		writeSkillFile(t, filepath.Join(workspace, ".apogee", "skills", name), "---\nnope: \"unbalanced\n---\nbody")
+	})
+
+	stderr := errOut.written.String()
+	if err != nil {
+		t.Fatalf("headless: %v (stderr: %q)", err, stderr)
+	}
+	if !strings.Contains(stderr, "1 skill found but not loaded:\n  "+name+" — ") {
+		t.Fatalf("stderr does not name the skill that failed to load:\n%s", stderr)
+	}
+	if errOut.requestsAtMarker != 0 {
+		t.Errorf("the report was printed after %d request(s) reached the model; want it before the first", errOut.requestsAtMarker)
+	}
+	if strings.TrimSpace(out) != "done" {
+		t.Errorf("stdout = %q; want the model's answer alone", out)
+	}
+}
+
+// TestHeadlessSaysNothingForAShadowedSkill pins the other half: a skill shadowed by a same-named
+// one in the home library is a working skill, so a headless run reports nothing about it — the
+// shadow stays the /skills report's to disclose.
+func TestHeadlessSaysNothingForAShadowedSkill(t *testing.T) {
+	const twin = "---\nname: twin\ndescription: one of two copies\n---\nbody\n"
+	var home, workspace string
+
+	out, errOut, err := skillReportHeadless(t, "twin", func(h, w string) {
+		home, workspace = h, w
+		writeSkillFile(t, filepath.Join(home, "skills", "twin"), twin)
+		writeSkillFile(t, filepath.Join(workspace, ".apogee", "skills", "twin"), twin)
+	})
+
+	stderr := errOut.written.String()
+	if err != nil {
+		t.Fatalf("headless: %v (stderr: %q)", err, stderr)
+	}
+	// The fixture must really shadow, or the silence below would prove nothing.
+	if skips := skills.NewProvider(skills.Sources{Home: home, Workspace: workspace}).Skipped(); len(skills.ShadowedLines(skips)) == 0 {
+		t.Fatalf("the fixture shadows nothing; skips = %v", skips)
+	}
+	if strings.Contains(stderr, "twin") || strings.Contains(stderr, "not loaded") {
+		t.Errorf("stderr reports the shadowed skill:\n%s", stderr)
+	}
+	if strings.TrimSpace(out) != "done" {
+		t.Errorf("stdout = %q; want the model's answer alone", out)
+	}
 }

@@ -68,9 +68,10 @@ type firingInputs struct {
 	// prompt as an ordinary message.
 	recipe *domain.RecipeLaunch
 	// skills is the catalog the run resolves attached skill IDs through and mounts the read roots
-	// of; nil builds a fresh Provider from roots. A session passes its LIVE provider so a
-	// `use-project-skills` flip keeps following its Firings (design call 5); headless and the
-	// daemon pass nil, each having no longer-lived catalog to share.
+	// of; nil builds a fresh one through firingSkillProvider. A session passes its LIVE provider so
+	// a `use-project-skills` flip keeps following its Firings (design call 5). Headless builds its
+	// own through firingSkillProvider before it raises, so the catalog it reports failed skills
+	// from is the one the run resolves through; the daemon passes nil.
 	skills *skills.Provider
 	// beat is this run's ONE observation of the server it is bound to; nil takes observeServer, the
 	// one-shot beat standing in for the heartbeat an unattended run has none of. It is one seam
@@ -167,6 +168,24 @@ type firingBinding struct {
 	notices []string
 }
 
+// firingSkillProvider builds the skill catalog an unattended run resolves through, from the
+// Firing's own layered options (project-adopted) and resolved roots. It is the one construction
+// bindFiringConfig falls back to and a Driver builds ahead of raise when it reports the catalog's
+// skips itself, so the catalog a Driver reports failed skills from is the catalog its run uses.
+func firingSkillProvider(opts config.Options, roots stateRoots) *skills.Provider {
+	return skills.NewProvider(skills.Sources{
+		Home:             roots.config,
+		Workspace:        roots.workspace,
+		ProjectRoot:      roots.project,
+		UseProjectSkills: opts.UseProjectSkills,
+		// Both skill gates come off the SAME resolved options a session reads, so an unattended
+		// run's catalog is the session's catalog (ADR 0031's Driver parity). Leaving this one out
+		// would hand a Firing the zero value — shipped skills off — and a `/debugging` token in a
+		// headless prompt would resolve in the TUI and silently stay prose here.
+		UseShippedSkills: opts.UseShippedSkills,
+	})
+}
+
 // bindFiringConfig composes the firingBinding: the model fallback, the key, the spec, the skill
 // catalog, the toolchain probe's start, the shared projection and the entry-derived overlay, in
 // firingConfig's own order. It observes nothing and writes nothing — the two facts the offline
@@ -256,17 +275,7 @@ func bindFiringConfig(in firingInputs) (firingBinding, error) {
 	// below). A fresh one is per run because the project half of it is per workspace.
 	skillProvider := in.skills
 	if skillProvider == nil {
-		skillProvider = skills.NewProvider(skills.Sources{
-			Home:             in.roots.config,
-			Workspace:        in.roots.workspace,
-			ProjectRoot:      in.roots.project,
-			UseProjectSkills: in.opts.UseProjectSkills,
-			// Both skill gates come off the SAME resolved options a session reads, so an unattended
-			// run's catalog is the session's catalog (ADR 0031's Driver parity). Leaving this one out
-			// would hand a Firing the zero value — shipped skills off — and a `/debugging` token in a
-			// headless prompt would resolve in the TUI and silently stay prose here.
-			UseShippedSkills: in.opts.UseShippedSkills,
-		})
+		skillProvider = firingSkillProvider(in.opts, in.roots)
 	}
 
 	// The toolchain roots' probe, started here for the Drivers that reach this composer with no

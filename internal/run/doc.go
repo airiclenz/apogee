@@ -18,7 +18,9 @@
 // prose. A missing or escaping ref — and an unknown skill ID — is skipped WITHOUT notice: the
 // loop reports one as an ErrorEvent, and a Firing has no event sink that would carry it (the
 // daemon leaves Config.Events nil, and headless wires only its own narration sink, which
-// renders prunes, tool calls and sub-agent phases and never an ErrorEvent).
+// renders prunes, tool calls and sub-agent phases and never an ErrorEvent). A skill that failed
+// to LOAD is a different case and is not silent: the catalog records it (skills.Provider.Skipped),
+// and the Driver that built the catalog reports it before the run — headless prints it on stderr.
 //
 // # Nothing waits for a human
 //

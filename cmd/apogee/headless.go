@@ -30,6 +30,7 @@ import (
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/title"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
@@ -1095,11 +1096,23 @@ func runHeadlessBody(
 	// whichever lane it came from.
 	reportReaction := func(line string) { cmd.PrintErrln(line) }
 
+	// The skill catalog this run resolves through, built here rather than left to raise's default so
+	// the SAME catalog both serves the run and reports what it could not load. A SKILL.md that failed
+	// to load is otherwise silent in an unattended run — a `/name` in the prompt would stay prose
+	// with nothing to say why — so its report goes to stderr before the model is asked anything, in
+	// the wording the TUI's /skills report uses (skills.FailedLines). Only failures are reported: a
+	// shadowed skill is a working one, and saying so stays the /skills report's job. Escape-stripped
+	// because the names, reasons and paths trace to files the repo authored.
+	skillCatalog := firingSkillProvider(*opts, roots)
+	for _, line := range skills.FailedLines(skillCatalog.Skipped()) {
+		cmd.PrintErrln(sanitize.StripEscapes(line))
+	}
+
 	// The one act every unattended run is (raise, wire_firing.go), reached from this Driver's own
-	// inputs: the startup selection as the bound entry, this invocation's roots and mode, and no key
-	// resolver, skill catalog or width source of its own — a command that runs once has no
-	// longer-lived facility to share, so the composer's own defaults are exactly right here. No
-	// Schedule: a headless run belongs to none, so its Reactions stamp none onto their payloads.
+	// inputs: the startup selection as the bound entry, this invocation's roots and mode, the skill
+	// catalog built above, and no key resolver or width source of its own — a command that runs once
+	// has no longer-lived facility to share, so the composer's own defaults are exactly right there.
+	// No Schedule: a headless run belongs to none, so its Reactions stamp none onto their payloads.
 	//
 	// What comes back beside the Result is the per-model rebind's narration: a built-in Model
 	// profile announcing itself, and the roster delta such a profile carries. It goes to stderr,
@@ -1118,6 +1131,7 @@ func runHeadlessBody(
 		confiner: confiner,
 		mode:     mode,
 		recipe:   launch,
+		skills:   skillCatalog,
 		report:   reportReaction,
 		// The user's run budgets ride on this Driver's own runner, never on raise (budgetedRunner).
 		runner: budgetedRunner(deps.runner, run.Budget{

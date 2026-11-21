@@ -96,7 +96,10 @@ internal/skills/skill.go — SkipError, ShadowedError; cmd/apogee/e2e_hostile_te
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'Hostile' ./cmd/apogee/`
 **Commit:** `refactor(skills): move the skip-report wording beside Catalog.Skipped`
 
-## 4. Headless names skills that failed to load, before submit
+## 4. Headless names skills that failed to load, before submit — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): "nothing on stdout" is asserted as stdout holding the model's answer alone (`done`), since a headless run's stdout always carries the answer; the report never reaches it.
+NOTES (2026-11-21): the stderr ordering check uses a small test writer (`skillReportProbe`) that records the stubllm chat-request count at the moment the skill's report line is written, and the shadow test checks its own fixture really produces a shadow (via `skills.NewProvider`) so its silence assertion is not vacuous.
 
 **What:** Depends on item 3. Covers the headless half of `firing-skill-skips-silent`.
 **Goal:** In a project with a malformed SKILL.md, a headless run prints the failed-skill report (`skills.FailedLines`, escape-stripped) on stderr before the model is called. A run with no failed skills prints nothing new, and a shadowed skill adds no line.

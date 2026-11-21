@@ -23,7 +23,9 @@ error line — and under `--format json` arrives as an `error` line; the saved r
 either way. `/id` tokens are
 **skill references** on the same terms: a token naming a skill in this run's catalog
 attaches that skill's instructions to the message exactly as typing it into a session
-would, and any other slash word — a path, a typo — stays plain text.
+would, and any other slash word — a path, a typo — stays plain text. A `SKILL.md` that
+failed to load is named on stderr before the model is asked anything, with the reason and
+the file to fix, in the same words `/skills` uses in a session.
 
 `--recipe <id>` runs a **recipe** skill — one whose header declares the stages the engine
 runs as a workflow, like the shipped `audit` — instead of a prompt: `apogee headless
