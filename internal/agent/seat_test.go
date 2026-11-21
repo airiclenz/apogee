@@ -359,7 +359,7 @@ func TestSeat_ChildRosterDropsTheRunOnArgument(t *testing.T) {
 		t.Errorf("the child's sub_agent schema = %s, want the plain schema %s", spawner.Schema(), want)
 	}
 	// The parent is untouched, and so is every other tool it delegates.
-	if !publishesSeatChoice(parent.tools) {
+	if !parent.delegationOffer().seatChoice {
 		t.Error("narrowing the child's roster took the parameter off the PARENT's tool too")
 	}
 	if _, hasLeaf := roster.Lookup("w"); !hasLeaf {

@@ -339,7 +339,7 @@ func (a *Agent) backgroundSubAgentResult(ctx context.Context, turn int, call dom
 		return errorToolResult(call.ID, subAgentBackgroundNoTask)
 	}
 	seat := seatConfigured
-	if publishesSeatChoice(a.tools) {
+	if a.delegationOffer().seatChoice {
 		asked, err := parseDelegationSeat(args.RunOn)
 		if err != nil {
 			return errorToolResult(call.ID, err.Error())
@@ -591,12 +591,12 @@ func (a *Agent) workflowWidthOn(seat delegationSeat) int {
 
 // fanOutSeat resolves the Delegation seat a fan_out call's `run_on` names, or the refusal an
 // invalid one earns — sub_agent's own text (parseDelegationSeat), which names the two spellings. It
-// is read only where this Agent's fan_out published `run_on` (seatChoosingFanOut), the rule
+// is read only where this Agent's fan_out published `run_on` (delegationOffer), the rule
 // runSubAgent applies to sub_agent: anywhere else the argument was never offered and is ignored,
 // and the call runs on seatConfigured. Arguments that are not an object name no seat either;
 // parseFanOutPlan reports them.
 func (a *Agent) fanOutSeat(raw json.RawMessage) (delegationSeat, string) {
-	if _, published := seatChoosingFanOut(a.tools); !published {
+	if !a.delegationOffer().fanOutSeatChoice {
 		return seatConfigured, ""
 	}
 	var args struct {

@@ -2201,7 +2201,7 @@ func (a *Agent) maxOutputTokensFor(b domain.Budget) int {
 // A sub-agent's registry is already the narrowed one its spawn built — the parent's minus the
 // human-seat tools and the workflow control tool no child gets, with sub_agent and fan_out
 // publishing neither `run_on` nor `background`, minus whatever the call's `tools` argument took away
-// (defaultSubAgentTools, withoutSeatChoice, requestedChildTools) — so the child's menu reads that
+// (defaultSubAgentTools, tools.ChildRoster, requestedChildTools) — so the child's menu reads that
 // set and needs no filter of its own.
 //
 // The filter keys on planOffers (resolution.go) — the SAME blast-radius classification the

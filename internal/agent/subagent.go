@@ -1060,13 +1060,13 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 	// is the only place the model can be told it read the menu wrong.
 	//
 	// `run_on` is only ever READ where this Agent's own sub_agent tool published it. A child's tool
-	// publishes no `run_on` (withoutSeatChoice), and neither does any tool built under
+	// publishes no `run_on` (tools.ChildRoster), and neither does any tool built under
 	// `sub-agents-choice: fixed`, so a seat named against either is a value the model was never
 	// offered: it is IGNORED rather than honoured or refused, which is the identity rule — below the
 	// first hop a delegation keeps the seat it landed on (ADR 0069 decision 3) — and which keeps a
 	// hallucinated argument from being an error the model cannot act on.
 	seat := seatConfigured
-	if publishesSeatChoice(a.tools) {
+	if a.delegationOffer().seatChoice {
 		asked, err := parseDelegationSeat(args.RunOn)
 		if err != nil {
 			giveBack()
@@ -2025,7 +2025,7 @@ var topLevelOnlyTools = []string{tools.WorkflowToolName}
 // fan_out, and only in the narrowing direction: a parent offering seat choice hands the child a
 // sub_agent without `run_on`, so `run_on` is a depth-0 offer (ADR 0069 decision 3), and a parent whose fan_out
 // publishes `run_on` or `background` hands the child the plain fan_out, since a background
-// workflow is the top-level Agent's too (withoutSeatChoice, ADR 0089 D1).
+// workflow is the top-level Agent's too (tools.ChildRoster, ADR 0089 D1).
 func (a *Agent) defaultSubAgentTools() *domain.ToolRegistry {
 	if a.tools == nil {
 		return nil
@@ -2050,7 +2050,7 @@ func (a *Agent) defaultSubAgentTools() *domain.ToolRegistry {
 		}
 		names = append(names, t.Name())
 	}
-	return withoutSeatChoice(a.tools.Subset(names...))
+	return tools.ChildRoster(a.tools.Subset(names...))
 }
 
 // requestedChildTools turns the `tools` argument of one sub_agent call into the name-list the
@@ -2114,130 +2114,6 @@ func isRecursionTool(name string) bool {
 	return name == tools.SubAgentToolName || name == tools.FanOutToolName
 }
 
-// withoutSeatChoice returns roster with its sub_agent tool swapped for one that publishes neither
-// `run_on` nor `background` — the PLAIN variant, or the context-only one — when the one it holds
-// publishes either, and its fan_out tool for the PLAIN variant when
-// that one publishes `run_on` or `background` — the depth-0-only rule of ADR 0069 decision 3,
-// applied where a child's tool set is built, and ADR 0089 D1's for `background` (ADR 0094 D1 for
-// sub_agent's): a background workflow belongs to the top-level Agent, so on a delegate the argument
-// would run blocking (offersBackground).
-// Below the first hop a delegation keeps the seat it landed on and runs its fan_outs in the
-// foreground, so the child is never offered either parameter: removing it from the schema rather
-// than accepting and discarding it is the honest form, because a schema advertising a knob the
-// engine ignores teaches the model a lie about its own leverage.
-//
-// `context` is the one sub_agent argument that survives the swap: the `sub-agents-context` gate
-// covers nested children too, and the files a delegation names are read by the engine wherever
-// the call is made, so the child's sub_agent keeps it when the parent's published it.
-//
-// It is never a privilege change in either direction — both variants are the same recursion point
-// under the same name, and the narrowed one publishes no argument the parent's did not — so the ADR
-// 0005 subset property Subset gives is untouched. A roster whose sub_agent and fan_out publish
-// neither `run_on` nor `background`, or which holds neither (the depth bound withheld them, or the
-// parent had no tools), comes back as it went in.
-func withoutSeatChoice(roster *domain.ToolRegistry) *domain.ToolRegistry {
-	fanOutChoice := publishesFanOutChoice(roster)
-	if !publishesSubAgentChoice(roster) && !fanOutChoice {
-		return roster
-	}
-	plain := domain.NewToolRegistry()
-	for _, tool := range roster.All() {
-		switch {
-		case tool.Name() == tools.SubAgentToolName:
-			tool = tools.NewSubAgentWith(tools.SubAgentOptions{Context: offersContext(tool)})
-		case tool.Name() == tools.FanOutToolName && fanOutChoice:
-			tool = tools.NewFanOut()
-		}
-		// Cannot fail: the names come from a registry, so each is non-empty and appears once.
-		_ = plain.Register(tool)
-	}
-	return plain
-}
-
-// offersContext reports whether a sub_agent tool published the `context` argument; a foreign tool
-// under the name reports false.
-func offersContext(tool domain.Tool) bool {
-	spawner, ok := tool.(*tools.SubAgent)
-	return ok && spawner.OffersContext()
-}
-
-// seatChoosingFanOut returns roster's fan_out tool and whether it published the `run_on`
-// argument; a nil roster, one without fan_out and a foreign tool under the name report false.
-func seatChoosingFanOut(roster *domain.ToolRegistry) (*tools.FanOut, bool) {
-	if roster == nil {
-		return nil, false
-	}
-	t, ok := roster.Lookup(tools.FanOutToolName)
-	if !ok {
-		return nil, false
-	}
-	fanOut, ok := t.(*tools.FanOut)
-	return fanOut, ok && fanOut.OffersSeatChoice()
-}
-
-// publishesFanOutChoice reports whether roster's fan_out tool published an argument that only the
-// top-level Agent honours — `run_on` or `background` — so a child's roster must carry the plain
-// variant instead; a nil roster, one without fan_out and a foreign tool under the name report false.
-func publishesFanOutChoice(roster *domain.ToolRegistry) bool {
-	fanOut, seatChoice := seatChoosingFanOut(roster)
-	return seatChoice || (fanOut != nil && fanOut.OffersBackground())
-}
-
-// publishesSubAgentChoice reports whether roster's sub_agent tool published an argument that only
-// the top-level Agent honours — `run_on` or `background` — so a child's roster must carry the plain
-// variant instead. It is withoutSeatChoice's question alone: publishesSeatChoice stays the one
-// that gates the seat bullet, the reading of `run_on` and the width, so a `sub-agents-choice:
-// fixed` session that lifts the workflow tool still reads no seat. A nil roster, one without
-// sub_agent and a foreign tool under the name report false.
-func publishesSubAgentChoice(roster *domain.ToolRegistry) bool {
-	if publishesSeatChoice(roster) {
-		return true
-	}
-	if roster == nil {
-		return false
-	}
-	t, ok := roster.Lookup(tools.SubAgentToolName)
-	if !ok {
-		return false
-	}
-	spawner, ok := t.(*tools.SubAgent)
-	return ok && spawner.OffersBackground()
-}
-
-// publishesSeatChoice reports whether roster's sub_agent tool published the `run_on` argument —
-// the ONE question that decides whether a spawn reads the seat a call names, and half of whether the
-// child's own roster must be narrowed (publishesSubAgentChoice adds `background`). Asking the tool
-// rather than tracking a flag on the Agent is what keeps the answers from ever disagreeing: the
-// published schema is the only thing the model was actually told, and a mid-session SwapTools moves
-// it.
-//
-// A nil roster, a roster without sub_agent, and a foreign tool registered under the name all report
-// false — none of them published the argument, and the false answer is the safe one in every
-// caller (the seat is ignored, the child's roster is left alone).
-func publishesSeatChoice(roster *domain.ToolRegistry) bool {
-	if roster == nil {
-		return false
-	}
-	t, ok := roster.Lookup(tools.SubAgentToolName)
-	if !ok {
-		return false
-	}
-	spawner, ok := t.(*tools.SubAgent)
-	return ok && spawner.OffersSeatChoice()
-}
-
-// publishesContext reports whether roster's sub_agent tool published the `context` argument — the
-// `sub-agents-context` gate as the model was told it, asked of the tool for publishesSeatChoice's
-// reason. A nil roster, one without sub_agent and a foreign tool under the name report false, and
-// a call's `context` is then ignored rather than read.
-func publishesContext(roster *domain.ToolRegistry) bool {
-	if roster == nil {
-		return false
-	}
-	t, ok := roster.Lookup(tools.SubAgentToolName)
-	return ok && offersContext(t)
-}
-
 // subAgentContextShape refuses a `context` argument that is not the array of file paths the schema
 // publishes, naming the argument so the model knows which one it spelled wrong.
 const subAgentContextShape = "invalid sub_agent context: want an array of file paths"
@@ -2260,12 +2136,12 @@ type sharedFile struct {
 // child and no workflow folder: a missing, out-of-scope, binary or image path refuses the whole
 // call with the refusal returned, which names that path; an empty refusal means the call may run.
 //
-// The argument is only READ where this Agent's own sub_agent tool published it (publishesContext):
+// The argument is only READ where this Agent's own sub_agent tool published it (delegationOffer):
 // with the gate off a stray `context` of any shape is ignored, as an unoffered `run_on` is, and the
 // answer is nil. With the gate on, a value that is not an array of strings is refused naming
 // `context`. ctx bounds a PDF's text extraction.
 func (a *Agent) readDelegationContext(ctx context.Context, raw json.RawMessage) ([]sharedFile, string) {
-	if !publishesContext(a.tools) || len(raw) == 0 {
+	if !a.delegationOffer().context || len(raw) == 0 {
 		return nil, ""
 	}
 	var paths []string

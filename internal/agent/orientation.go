@@ -197,7 +197,7 @@ func (a *Agent) orientationBlock() string {
 // sub_agent, whichever variant — a delegate below the depth bound holds the plain one and is told
 // its own bounds (width 1, ceiling `rounds`), a delegate AT the bound holds none and is told
 // nothing, since a bound on a tool it cannot call is noise. A nil roster is a tool-less Agent and
-// reports nothing, as publishesSeatChoice does.
+// reports nothing, as delegationOffer does.
 //
 // The clauses, in order: the width (always — a group runs at least one at a time), the fan-out
 // ceiling (only with `delegate-fanout-rounds` on — 0 is no ceiling and no clause), the
@@ -231,7 +231,7 @@ func (a *Agent) delegationBounds() string {
 //
 // The ROSTER is the gate, and the only one: the bullet is rendered exactly when this Agent's own
 // sub_agent tool published `run_on`, so the model is told about a choice precisely when it has one.
-// A child's tool publishes no `run_on` (withoutSeatChoice), and neither does any tool built under
+// A child's tool publishes no `run_on` (tools.ChildRoster), and neither does any tool built under
 // `sub-agents-choice: fixed`, which is why nothing here needs a depth check or a flag of its own —
 // asking the published schema is what keeps the prompt and the tool menu from ever disagreeing.
 //
@@ -242,7 +242,7 @@ func (a *Agent) delegationBounds() string {
 // two values are still legal, and item 11's result note is what tells a parent where its work
 // actually ran.
 func (a *Agent) delegationSeats() string {
-	if !publishesSeatChoice(a.tools) {
+	if !a.delegationOffer().seatChoice {
 		return ""
 	}
 	// The session seat is the Upstream this Agent is bound to, read from the live Config the way

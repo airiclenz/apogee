@@ -6142,7 +6142,7 @@ func TestSubAgent_ChildRosterDropsTheBackgroundArgument(t *testing.T) {
 
 // TestSubAgent_BackgroundAloneOffersNoSeat is the regression guard on the seat gate: a
 // `sub-agents-choice: fixed` session that lifts the workflow tool publishes sub_agent's `background`
-// but no `run_on`, and publishesSeatChoice — the one question behind the Delegations seat bullet,
+// but no `run_on`, and the offer's seatChoice — the one question behind the Delegations seat bullet,
 // the reading of `run_on` and the delegation width — must stay false. Widening it would hand that
 // session a seat bullet and read a `run_on` the model was never offered.
 func TestSubAgent_BackgroundAloneOffersNoSeat(t *testing.T) {
@@ -6155,8 +6155,8 @@ func TestSubAgent_BackgroundAloneOffersNoSeat(t *testing.T) {
 	}
 	a.SetDelegationTarget(routedTarget())
 
-	if publishesSeatChoice(a.tools) {
-		t.Error("publishesSeatChoice = true for a sub_agent that published background alone")
+	if a.delegationOffer().seatChoice {
+		t.Error("delegationOffer().seatChoice = true for a sub_agent that published background alone")
 	}
 	if got := a.delegationSeats(); got != "" {
 		t.Errorf("delegationSeats = %q, want no seat bullet without run_on", got)

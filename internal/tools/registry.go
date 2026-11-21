@@ -109,7 +109,7 @@ type HostTools struct {
 	// `sub-agents-context: on` gate. False is the default and the whole of `off`: the schema is the
 	// one built before the argument existed, and a `context` a call carries anyway is ignored. Like
 	// SubAgentSeatChoice it shapes the tool this build carries, never whether it carries it; unlike
-	// it, the argument survives into a child's roster (internal/agent's withoutSeatChoice), so a
+	// it, the argument survives into a child's roster (ChildRoster), so a
 	// nested delegation is offered it too.
 	SubAgentContext bool
 

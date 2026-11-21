@@ -149,7 +149,9 @@
 // names it by, moved only where the human moves the key (ADR 0069). delegationwidth.go is the one
 // module every delegation width is answered from: the width stated to the model, the width a
 // batch runs at (seat-aware), the fan-out ceiling, and the far-width stickiness those two doors
-// move (ADR 0039, ADR 0069 decision 6).
+// move (ADR 0039, ADR 0069 decision 6). delegationoffer.go is the one value every seat, context and
+// background reader asks what the live roster's sub_agent and fan_out offer, read per call through
+// tools.OfferOf and never cached.
 // standingblocks.go is the standing system message as one ordered table — each block's render,
 // its forgery fences and whether it rides along — that standingSystem composes from and the
 // context-file fence is derived from, and the one ride-along-gated walk of it both the seed and

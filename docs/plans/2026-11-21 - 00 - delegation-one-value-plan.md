@@ -110,7 +110,11 @@ NOTES (2026-11-21): consequential edit — internal/tools/doc.go: made necessary
 - `go test -count=1 -run 'TestOfferOf|TestDelegationOffer|TestChildRoster|TestDelegationSchemas|TestSubAgent|TestFanOut|TestBuiltinTool' ./internal/tools/`
 **Commit:** `refactor(tools): one DelegationOffer value for sub_agent and fan_out`
 
-## 3. The agent asks one offer for seat and context
+## 3. The agent asks one offer for seat and context — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): consequential edit — internal/agent/doc.go: made necessary by the new delegationoffer.go (TestDocMapNamesEveryFile requires every file in the map); one sentence after the delegationwidth.go entry.
+NOTES (2026-11-21): added TestDelegationOffer_JoinsThePublishedOfferWithTheLiveFacts beside the named zero-offer test (delegate drops both backgrounds, sub_agent background needs scratch dir and workspace, fan_out's does not).
+NOTES (2026-11-21): resolution.go held no comment naming a deleted helper at this base, so it needed no edit; offersBackground/offersBackgroundSubAgent (workflowcall.go) still type-assert for `background` — the offer's background/fanOutBackground fields are built for item 4 to wire them.
 
 Depends on item 2.
 

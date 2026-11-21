@@ -137,7 +137,7 @@ func partitionDispatch(calls []domain.ToolCall, backgroundOffered bool) (leaves,
 // it will never use, where an error would abandon a whole reply's fan-out over one malformed
 // argument.
 func (a *Agent) seatsAreSplit(calls []domain.ToolCall, target *DelegationTarget) bool {
-	if target == nil || !publishesSeatChoice(a.tools) {
+	if target == nil || !a.delegationOffer().seatChoice {
 		return false
 	}
 	var onSession, onSubAgentsServer bool

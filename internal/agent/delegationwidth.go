@@ -141,10 +141,10 @@ func (a *Agent) fanOutWidthFor(calls []domain.ToolCall) int {
 		// ADR 0069 decision 7, the one case fanOutWidth gets wrong: with a target latched
 		// delegationCap answers with the TARGET's cap, but a reply whose every call asked for
 		// the session seat runs entirely on the session server and must be sized by ITS cap.
-		// Gated beside the target on publishesSeatChoice exactly as seatsAreSplit is — under
+		// Gated beside the target on the offer's seatChoice exactly as seatsAreSplit is — under
 		// `sub-agents-choice: fixed` run_on is ignored (subagent.go), so an all-session reply
 		// still runs on the target and keeps the target's cap.
-		if target != nil && publishesSeatChoice(a.tools) && a.allAskedSession(calls) {
+		if target != nil && a.delegationOffer().seatChoice && a.allAskedSession(calls) {
 			if width := a.parallelAgentsCap(); width > 1 {
 				return min(width, len(calls))
 			}
