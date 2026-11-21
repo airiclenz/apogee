@@ -31,6 +31,7 @@ import (
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/skills"
 )
 
 // daemonWiring turns one Firing into one unattended run. It is the value wired into
@@ -440,6 +441,23 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// serves both lanes of the `reactions:` list (firingInputs.report).
 	reportReaction := func(line string) { _, _ = daemonLogWriter{log: w.log}.Write([]byte(line)) }
 
+	// The skill catalog this Firing resolves through, built here from the Firing's OWN layered
+	// options rather than left to raise's default, so the SAME catalog both serves the run and
+	// reports what it could not load. A SKILL.md that failed to load is otherwise silent in an
+	// unattended run — a `/name` in the prompt stays prose with nothing to say why — so its report
+	// goes on the daemon log before the Firing submits, in the wording the TUI's /skills report uses
+	// (skills.FailedLines). Only failures are reported: a shadowed skill is a working one. Latched
+	// once per project root and report text (latchProjectNotice), because the same broken file would
+	// otherwise be named on every tick of a nightly schedule until someone fixes it; a changed report
+	// is said again. Through daemonLogWriter, which strips the repo-authored names, reasons and paths
+	// to the journal's one line per event.
+	skillCatalog := firingSkillProvider(opts, roots)
+	if failed := skills.FailedLines(skillCatalog.Skipped()); len(failed) > 0 {
+		if report := strings.Join(failed, "\n"); w.latchProjectNotice(roots.project, report) {
+			_, _ = daemonLogWriter{log: w.log}.Write([]byte(report))
+		}
+	}
+
 	// The one act every unattended run is (raise, wire_firing.go), reached from this Driver's own
 	// facts: the bound entry, that entry's roots, the options its Project config layered, the
 	// daemon's own key resolver — so an
@@ -459,9 +477,9 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// because the daemon never actuates the launcher (decision 3): nothing serving means this Firing
 	// is refused before it starts and the next tick behaves normally.
 	//
-	// No skills catalog and no width source: a daemon holds no longer-lived provider to share and
-	// has no heartbeat to take a slot count off, which is exactly what the composer's nil defaults
-	// answer with. No onID: a daemon stamps the id on no stream, and the record raise files under it
+	// The skill catalog is the one built above, so the catalog that reported its failures is the one
+	// the run resolves through. No width source: a daemon has no heartbeat to take a slot count off,
+	// which is exactly what the composer's nil default answers with. No onID: a daemon stamps the id on no stream, and the record raise files under it
 	// is the account a supervisor opens. The narrate hook is the one Event the daemon says as it
 	// happens — a Server fallback's switch (ADR 0105), one log line per switch (daemonSwitchSink) —
 	// and it wraps whatever sink the composition built rather than replacing it.
@@ -492,6 +510,8 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		// The daemon's one stats recorder, so this Firing's upstream attempts land in the home's
 		// server-stats.jsonl exactly as a headless run's or a session's do (ADR 0085).
 		stats: w.stats,
+		// The catalog built above, which already reported what it could not load.
+		skills: skillCatalog,
 	}, prompt, &reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.store, nil,
 		func(_ string, _ apogee.Config, sink domain.EventSink) domain.EventSink {
 			return daemonSwitchSink{inner: sink, schedule: entry.Name, log: w.log}

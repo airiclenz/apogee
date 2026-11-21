@@ -115,7 +115,11 @@ internal/skills/provider.go — NewProvider, Provider.Skipped; internal/run/doc.
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestHeadlessNamesASkill|TestHeadlessSaysNothingForAShadowed' ./cmd/apogee/`
 **Commit:** `feat(headless): name skills that failed to load before the run`
 
-## 5. The daemon logs skills that failed to load, once per root
+## 5. The daemon logs skills that failed to load, once per root — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): consequential edit — cmd/apogee/wire_firing.go: made necessary by the daemon now building its own catalog (the firingInputs.skills doc said "the daemon passes nil")
+NOTES (2026-11-21): consequential edit — internal/run/doc.go: made necessary by the daemon now reporting failed skills (the package doc named headless alone as the reporting Driver)
+NOTES (2026-11-21): the joined FailedLines report is logged as ONE daemon-log entry (daemonLogWriter folds its line breaks to spaces), per the item's regression guard; per-line entries would lose the report's indentation to the writer's TrimSpace anyway
 
 **What:** Depends on items 3 and 4.
 **Goal:** On a Firing whose skill roots hold a malformed SKILL.md, the daemon writes the failed-skill report to its stdout log once per project root and report text. A second Firing with the same root and text logs nothing new. A changed report, or a different root, logs again.

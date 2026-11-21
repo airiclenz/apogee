@@ -99,7 +99,9 @@ The daemon's log narrates each firing as well: what resolving the schedule's bin
 say — a model the server does not advertise, say — as the firing starts, and afterwards only
 what the run found *wrong* with the workspace's context files: a file that is present but
 unreadable, or standing content that has outgrown its share of the window. The plain list of
-what loaded stays off the log; it is in the record.
+what loaded stays off the log; it is in the record. A `SKILL.md` that failed to load is named
+in the log before the firing runs, with the reason and the file to fix, in the same words
+`/skills` uses in a session — once per project, and again only when that report changes.
 
 Afterwards the log names what the firing **changed**: a `changed — 2 file(s) this run:` header and
 one indented path per file, in the order the run first touched each — everything its writes touched,

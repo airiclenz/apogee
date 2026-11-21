@@ -1582,3 +1582,61 @@ func TestDaemonLoadingLineSaysTheWait(t *testing.T) {
 		t.Errorf("the sink forwarded %d events, want the wait", len(forwarded))
 	}
 }
+
+// A Firing whose skill roots hold a SKILL.md that failed to load names it on the daemon log, in
+// skills.FailedLines' words, once per project root and report text: a nightly schedule over a
+// broken file would otherwise write the same report into the journal every tick until it is fixed.
+// The per-root half is pinned by a skill in the HOME library, which every workspace's catalog
+// shares, so the second workspace earns the identical text and is still told; the per-text half by
+// a second broken skill under one workspace's own .apogee/skills, which changes the report.
+func TestDaemonFireLogsAFailedSkillOncePerRoot(t *testing.T) {
+	const (
+		homeSkill      = "home-half-quoted"
+		workspaceSkill = "workspace-half-quoted"
+		malformed      = "---\nnope: \"unbalanced\n---\nbody"
+		oneFailed      = "1 skill found but not loaded:"
+		twoFailed      = "2 skills found but not loaded:"
+	)
+	home := t.TempDir()
+	writeSkillFile(t, filepath.Join(home, "skills", homeSkill), malformed)
+	harness := newDaemonFireHarness(t, config.Options{
+		ConfigDir: home,
+		Servers:   []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+	})
+	first := entryFor(t, "nightly", daemon.Action{Server: "box"})
+	second := entryFor(t, "nightly", daemon.Action{Server: "box"})
+
+	// count reports how many times the log holds s.
+	count := func(s string) int { return strings.Count(harness.logged.String(), s) }
+
+	harness.fire(t, first)
+	harness.fire(t, first)
+	if got := count(oneFailed); got != 1 {
+		t.Fatalf("two firings on one workspace logged the failed-skill report %d times, want exactly 1; "+
+			"the log holds:\n%s", got, harness.logged.String())
+	}
+	if got := count("  " + homeSkill + " — "); got != 1 {
+		t.Fatalf("the report does not name the home skill that failed to load once; the log holds:\n%s",
+			harness.logged.String())
+	}
+	if !strings.Contains(harness.logged.String(), filepath.Join(home, "skills", homeSkill, "SKILL.md")) {
+		t.Errorf("the report does not name the file to fix; the log holds:\n%s", harness.logged.String())
+	}
+
+	harness.fire(t, second)
+	if got := count(oneFailed); got != 2 {
+		t.Fatalf("a firing on a second workspace logged the identical report %d times in all, want 2 — "+
+			"the latch is per project root; the log holds:\n%s", got, harness.logged.String())
+	}
+
+	writeSkillFile(t, filepath.Join(first.Run.Workspace, ".apogee", "skills", workspaceSkill), malformed)
+	harness.fire(t, first)
+	if got := count(twoFailed); got != 1 {
+		t.Fatalf("a changed report on a root already told logged %d times, want 1; the log holds:\n%s",
+			got, harness.logged.String())
+	}
+	if got := count("  " + workspaceSkill + " — "); got != 1 {
+		t.Errorf("the changed report does not name the workspace skill once; the log holds:\n%s",
+			harness.logged.String())
+	}
+}

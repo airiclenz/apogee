@@ -69,9 +69,9 @@ type firingInputs struct {
 	recipe *domain.RecipeLaunch
 	// skills is the catalog the run resolves attached skill IDs through and mounts the read roots
 	// of; nil builds a fresh one through firingSkillProvider. A session passes its LIVE provider so
-	// a `use-project-skills` flip keeps following its Firings (design call 5). Headless builds its
-	// own through firingSkillProvider before it raises, so the catalog it reports failed skills
-	// from is the one the run resolves through; the daemon passes nil.
+	// a `use-project-skills` flip keeps following its Firings (design call 5). Headless and the
+	// daemon build their own through firingSkillProvider before they raise, so the catalog they
+	// report failed skills from is the one the run resolves through.
 	skills *skills.Provider
 	// beat is this run's ONE observation of the server it is bound to; nil takes observeServer, the
 	// one-shot beat standing in for the heartbeat an unattended run has none of. It is one seam
