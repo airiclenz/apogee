@@ -91,11 +91,12 @@ type UIPrefs struct {
 	ToolsFoldOver int
 	// ToolsAutoCollapse is whether SETTLED tool work — everything in it done, its Turn over or the
 	// conversation moved past it — that the reader has not touched folds on its own to one row: a
-	// Tools umbrella or a lone groupable call to its Group summary, whatever its size and whatever
-	// ToolsOpen says, a Sub-agent or Skill group to its header. Default TRUE: a finished burst is
-	// history, and its summary is the part worth reading. Off, every umbrella follows the size rule
-	// above alone and a lone call stays open. Screen-only, like ToolsOpen: nothing about it reaches
-	// the model.
+	// Tools umbrella to its Group summary, whatever its size and whatever ToolsOpen says, a single
+	// call included as a group of one (`✦ Read 1 file`); a Sub-agent or Skill group to its header,
+	// a single delegation or skill fetch included (`✦ Sub-agents (1)`). Default TRUE: a finished
+	// burst is history, and its summary is the part worth reading. Off, every umbrella follows the
+	// size rule above alone, so a single call's group starts open. Screen-only, like ToolsOpen:
+	// nothing about it reaches the model.
 	ToolsAutoCollapse bool
 	// Glyphs names the set the screen's symbols are drawn from: [GlyphsUnicode], the look apogee
 	// has always had, or [GlyphsSafe], which swaps every symbol a terminal font may lack for one

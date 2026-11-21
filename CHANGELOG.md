@@ -12,6 +12,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **Docs:** the `UIPrefs.ToolsAutoCollapse` comment in `internal/domain/uiprefs.go` now describes a single tool call as a group of one and a single delegation or skill fetch as a group of one, and no longer names the retired lone call.
+
 ## [0.35.7] — 2026-11-21
 
 - Every tool block's leading `✦` — the `✦ Tools` umbrella, a lone tool call, and the `✦ Sub-agents (N)` and `✦ Skill (N)` groups — now paints in the colour scheme's tools header colour; the header text beside it, the live star's blink and a scheduled Firing's `⟳` look as before.
