@@ -188,6 +188,12 @@ not resolve, or `schedules.yaml` is invalid when it starts — prints why on std
 exits `1`, with nothing scheduled: fix the cause and start it again. A supervisor that
 restarts on failure meets the same refusal on every restart until the cause is fixed.
 
+A daemon that does start says once on stderr, never in its log, what an interactive session would
+offer to fix in `config.yaml`: an `api-key:` stored in plain text (unless the entry carries
+`plaintext-key-ok: true`) and a retired `sub-agents: true` flag. The daemon never prompts, so
+these are notices only — the same ones `apogee headless` prints, described in
+[configuration](configuration.md).
+
 ```console
 $ apogee daemon
 2026-08-22T21:00:00+02:00 created   nightly-audit — on the clock

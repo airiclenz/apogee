@@ -54,7 +54,10 @@ internal/config/configmigrate.go — RetiredSubAgentsEntries; cmd/apogee/keymigr
 - `make lint`
 **Commit:** `refactor(headless): produce the config-hygiene notices from one shared function`
 
-## 2. The daemon prints the config-hygiene notices on stderr
+## 2. The daemon prints the config-hygiene notices on stderr — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): the notices print right after `probe.ResidualNotice` (after the lock and `newDaemonWiring`), so a daemon refused by the lock or by wiring says neither; the config path is `filepath.Join(home, "config.yaml")` with `home` from the `config.ApogeeHome` call `runDaemonWith` already makes (headless's `resolveRoots` derives `roots.config` the same way).
+NOTES (2026-11-21): the tests repoint the harness at a `plaintextConfig` home through a small `daemonHarness.rehome` helper (plus `startAndStop` / `assertNarrationClean`), as the plan's Read-first note allows; the plaintext-key fixture is `onePlaintextServer`, the body `plaintextConfig` takes.
 
 **What:** Depends on item 1. Finishes `daemon-config-notice-gap`. This is a Driver-parity gap (ADR 0031), not a regression.
 **Goal:** `apogee daemon` started with an unacknowledged plaintext `api-key:` entry, or with a `sub-agents: true` entry, prints the item-1 notices with the daemon clause on stderr, once at start-up. It prints nothing for an entry with `plaintext-key-ok: true`. A daemon refused by the lock prints neither notice, and the stdout log carries neither notice.

@@ -254,6 +254,17 @@ func runDaemonWith(ctx context.Context, opts *config.Options, changed func(strin
 		wiring.confiner.Capabilities(), domain.ModeAuto, opts.ConfineToWorkspace); notice != "" {
 		_, _ = fmt.Fprintln(errOut, notice)
 	}
+	// A plaintext `api-key:` and a retired `sub-agents: true` flag in config.yaml are said here as
+	// headless says them, in the daemon's own clause (ADR 0047, ADR 0045, ADR 0083 §5): only said,
+	// because the migration offers are the TUI's and an unattended process has nobody to consent to
+	// an edit of the human's file (ADR 0036 D8). They follow the lock, so a refused second daemon
+	// repeats none of what the running one already said, and go to stderr, never the narration. A
+	// file the flag scan stumbles on is silent rather than fatal, so its error is dropped — the
+	// plaintext notice survives it.
+	hygiene, _ := configHygieneNotices(opts.Servers, filepath.Join(home, "config.yaml"), neverPromptsDaemon)
+	for _, notice := range hygiene {
+		_, _ = fmt.Fprintln(errOut, notice)
+	}
 
 	// The facts internal/daemon's validation cannot learn from the file, resolved once: config.yaml
 	// is startup-only (ADR 0055), so the same host answers every reload as answered the first load.

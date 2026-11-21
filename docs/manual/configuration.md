@@ -2515,8 +2515,9 @@ one edit — `move it` writes `sub-agents-server: <name>`, drops the retired fla
 and re-points this session's delegations at that entry there and then. `not now`
 leaves the file exactly as it is and the offer comes back at the next start-up.
 The pane arms like the plaintext-key offer: a `⏎` already in flight when it
-appears answers nothing. An unattended `apogee headless` run never prompts, so it gets a stderr notice
-naming the entries instead — the same bargain a plaintext key gets:
+appears answers nothing. An unattended `apogee headless` run never prompts, and neither does
+`apogee daemon`, so each gets a stderr notice naming the entries instead — the same bargain a
+plaintext key gets (the daemon's says "the daemon never prompts"):
 
     apogee: cheaper still carries the retired sub-agents: true flag in ~/.apogee/config.yaml, and headless runs never prompt, so apogee cannot offer to migrate it. The flag no longer routes anything — set sub-agents-server: <entry> at the root of the file and drop the flag.
 
@@ -2999,8 +3000,9 @@ and layout untouched. "Not now" asks again next start; "never for this entry"
 writes `plaintext-key-ok: true` beside the key and is not asked again. Like the
 approval prompt, the offer takes no `⏎` for a moment after it appears, so a key
 you were already pressing cannot answer it. A machine
-with no usable store — and every unattended `apogee headless` run — gets a notice
-naming the entries and the alternatives instead.
+with no usable store — and every unattended `apogee headless` run, and `apogee daemon`
+at start-up (the daemon never prompts either) — gets a notice naming the entries and the
+alternatives instead.
 
 A move that fails ends with the two commands that finish it by hand. The usual
 case is a locked keyring on a machine with no GUI agent to unlock it: `secret-tool`

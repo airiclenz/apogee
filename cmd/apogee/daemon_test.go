@@ -460,6 +460,117 @@ func TestDaemonDisclosesTheFenceResidualAtStartup(t *testing.T) {
 	}
 }
 
+// daemonNeverPrompts is the daemon's own clause in the config-hygiene notices — the substring
+// every notice test below looks for, on stderr and nowhere else.
+const daemonNeverPrompts = "the daemon never prompts"
+
+// rehome points the harness at a fresh apogee home whose config.yaml is body (plaintextConfig),
+// so a test about what the config file says starts the daemon over that file alone.
+func (h *daemonHarness) rehome(t *testing.T, body string) {
+	t.Helper()
+	home, _ := plaintextConfig(t, body)
+	h.home = home
+	h.dir = filepath.Join(home, daemonDirName)
+	h.schedules = filepath.Join(h.dir, schedulesFileName)
+}
+
+// startAndStop runs the harness's daemon to a clean exit and returns its stderr.
+func (h *daemonHarness) startAndStop(t *testing.T) string {
+	t.Helper()
+	h.stop()
+	wait := h.run(t)
+	if err := wait(); err != nil {
+		t.Fatalf("daemon: %v\n%s", err, h.errOut.String())
+	}
+	return h.errOut.String()
+}
+
+// assertNarrationClean fails when a config-hygiene notice reached the daemon's stdout log, which a
+// supervisor journals as the daemon's own narration.
+func (h *daemonHarness) assertNarrationClean(t *testing.T) {
+	t.Helper()
+	if strings.Contains(h.out.String(), daemonNeverPrompts) {
+		t.Errorf("a config-hygiene notice reached the daemon's log: %q", h.out.String())
+	}
+}
+
+// A key stored in config.yaml is said once at startup, on stderr, in the daemon's own words: the
+// headless notice with the daemon's clause (ADR 0047, ADR 0083 §5) — the migration offer is the
+// TUI's, and nobody is there to consent to it.
+func TestDaemonNoticesPlaintextKeysOnStderr(t *testing.T) {
+	h := newDaemonHarness(t)
+	h.rehome(t, onePlaintextServer)
+
+	errOut := h.startAndStop(t)
+
+	if !strings.Contains(errOut, "the api-key for workstation is stored in plain text in "+
+		filepath.Join(h.home, "config.yaml")) {
+		t.Errorf("stderr does not name the entry and the file holding its key: %q", errOut)
+	}
+	if !strings.Contains(errOut, daemonNeverPrompts+", so apogee cannot offer to move it into a secret store") {
+		t.Errorf("the plaintext notice does not give the daemon's reason: %q", errOut)
+	}
+	if got := strings.Count(errOut, daemonNeverPrompts); got != 1 {
+		t.Errorf("the notice was said %d times; want once at startup: %q", got, errOut)
+	}
+	h.assertNarrationClean(t)
+}
+
+// The retired `sub-agents: true` flag is named the same way (ADR 0045): which entry carries it, and
+// that the daemon cannot offer the move.
+func TestDaemonNoticesTheRetiredSubAgentsFlagOnStderr(t *testing.T) {
+	h := newDaemonHarness(t)
+	h.rehome(t, subAgentsFlagYAML)
+
+	errOut := h.startAndStop(t)
+
+	want := "cheaper still carries the retired sub-agents: true flag in " +
+		filepath.Join(h.home, "config.yaml") + ", and " + daemonNeverPrompts
+	if !strings.Contains(errOut, want) {
+		t.Errorf("stderr = %q; want the flag notice %q", errOut, want)
+	}
+	if got := strings.Count(errOut, daemonNeverPrompts); got != 1 {
+		t.Errorf("the notice was said %d times; want once at startup: %q", got, errOut)
+	}
+	h.assertNarrationClean(t)
+}
+
+// A second daemon refused by the lock says nothing about the config: the running one already did,
+// and the refusal is the one thing the human needs to read.
+func TestDaemonNoticesNothingWhenTheLockIsHeld(t *testing.T) {
+	h := newDaemonHarness(t)
+	h.rehome(t, strings.Replace(onePlaintextServer, "server: workstation\n",
+		"  - name: cheaper\n    endpoint: http://127.0.0.1:3333\n    sub-agents: true\nserver: workstation\n", 1))
+	acquireDaemonLock = func(path string) (func(), error) {
+		return nil, &platform.LockHeldError{Path: path, PID: 4242}
+	}
+
+	wait := h.run(t)
+	if err := wait(); err == nil {
+		t.Fatal("a second daemon started while the lock was held")
+	}
+
+	if strings.Contains(h.errOut.String(), daemonNeverPrompts) {
+		t.Errorf("a daemon refused by the lock still printed a config notice: %q", h.errOut.String())
+	}
+	h.assertNarrationClean(t)
+}
+
+// `plaintext-key-ok: true` is the human's own "never" (ADR 0047), and the daemon honours it as
+// headless does: the entry is not reported.
+func TestDaemonPlaintextKeyOkSilencesTheNotice(t *testing.T) {
+	h := newDaemonHarness(t)
+	h.rehome(t, strings.Replace(onePlaintextServer, "    max-output-tokens: 4096\n",
+		"    max-output-tokens: 4096\n    plaintext-key-ok: true\n", 1))
+
+	errOut := h.startAndStop(t)
+
+	if strings.Contains(errOut, daemonNeverPrompts) {
+		t.Errorf("an acknowledged plaintext key was still reported: %q", errOut)
+	}
+	h.assertNarrationClean(t)
+}
+
 // ----------------------------------------------------------------------------
 // Adoption and the run
 // ----------------------------------------------------------------------------
