@@ -4,6 +4,7 @@ status: open
 type: task
 priority: 3
 labels: [tui]
+plan: 2026-11-21 - 03 - startup-notes-followups-plan.md
 created: 2026-11-21T20:27:34Z
 ---
 

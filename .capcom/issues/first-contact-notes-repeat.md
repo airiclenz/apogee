@@ -4,6 +4,7 @@ status: open
 type: bug
 priority: 3
 labels: [tui]
+plan: 2026-11-21 - 03 - startup-notes-followups-plan.md
 created: 2026-11-21T19:28:55Z
 ---
 
