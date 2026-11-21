@@ -1051,8 +1051,13 @@ func (m *Model) noteContextFiles() {
 	for _, n := range notice.ContextFileNotices(report) {
 		text := stripEscapes(n.Text)
 		// An anomaly — a file present but unreadable, standing content over its share — needs the
-		// human, so it keeps its own line; the plain record of what loaded is a routine note.
+		// human, so its kind is loud and keeps its own line; the plain record of what loaded is a
+		// routine note.
+		kind := kindContextLoaded
 		if n.Anomaly {
+			kind = kindContextAnomaly
+		}
+		if classOf(kind) == classLoud {
 			m.transcript.addEphemeralNote(text)
 			continue
 		}
@@ -1100,7 +1105,7 @@ func (m *Model) noteColorSchemeWarnings(warnings []string) {
 func (m *Model) noteStartupNotices(notices []Notice) {
 	for _, n := range notices {
 		for _, note := range n.transcriptNotes() {
-			if n.Loud {
+			if n.loud() {
 				m.transcript.addEphemeralNote(note)
 				continue
 			}

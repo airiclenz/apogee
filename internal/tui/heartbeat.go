@@ -427,7 +427,7 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 		m.noteRebindRoutine(intent, note)
 	}
 	for _, notice := range result.Notices {
-		if notice.Loud {
+		if notice.loud() {
 			m.transcript.addNote(notice.Text)
 			continue
 		}

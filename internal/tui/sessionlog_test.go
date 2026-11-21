@@ -56,7 +56,7 @@ func TestSessionLogLeavesAnAnomalyOnItsOwnLine(t *testing.T) {
 		{Name: "BROKEN.md", Err: "permission denied"},
 	}}}
 	m := newModel(context.Background(), eng, Options{
-		StartupNotices: []Notice{{Text: "apogee: WARNING — auto mode is running UNCONFINED.", Loud: true}},
+		StartupNotices: []Notice{{Text: "apogee: WARNING — auto mode is running UNCONFINED.", Kind: NoticeAutoUnconfined}},
 		UI:             testUIPrefs,
 	}, nil)
 
@@ -80,7 +80,7 @@ func TestSessionLogAbsentWithoutRoutineNotes(t *testing.T) {
 
 	m := newModel(context.Background(), &fakeEngine{}, Options{
 		ColorSchemeWarnings: []string{`color-scheme "mine.yaml": unknown — using default`},
-		StartupNotices:      []Notice{{Text: "apogee: degraded", Loud: true}},
+		StartupNotices:      []Notice{{Text: "apogee: degraded", Kind: NoticeAutoDegraded}},
 		UI:                  testUIPrefs,
 	}, nil)
 	m.refreshViewport()

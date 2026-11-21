@@ -1294,14 +1294,29 @@ type Notice struct {
 	Text string
 
 	// Log is the transcript's own wording, when the stderr text does not read right there: one
-	// note each, in order, placed where Text would have been (its own line when Loud, the session
+	// note each, in order, placed where Text would have been (its own line when loud, the session
 	// log when routine). The residual disclosure sets it — stderr's header over indented clause
 	// lines becomes one "<backend> cannot fence <token> — <consequence>" note per residual. Empty
 	// ⇒ Text is the one note. It is read ONLY from Options.StartupNotices: a Notice handed back in
 	// RebindResult.Notices has Log ignored, and no rebind producer sets it.
 	Log []string
 
+	// Kind names what the notice is about; its class — loud or routine — is read from the TUI's own
+	// table ([noticeKinds]), not decided by the producer. The zero value is loud.
+	Kind NoticeKind
+
+	// Loud is the producer-decided class a notice with no Kind still carries, read only while Kind
+	// is the zero value ([Notice.loud]).
 	Loud bool
+}
+
+// loud reports whether the notice keeps its own note line: its Kind's class from [noticeKinds]
+// when it names one, otherwise the producer's own Loud.
+func (n Notice) loud() bool {
+	if n.Kind != kindUnset {
+		return classOf(n.Kind) == classLoud
+	}
+	return n.Loud
 }
 
 // transcriptNotes is what the transcript places for this notice: Log's notes when it has any,
@@ -1768,9 +1783,9 @@ func (o Options) colorScheme() scheme.Scheme {
 // lines worth telling the human (a validated set that matched the new model, say), surfaced in
 // order as transcript notes. The TUI renders it and never derives it: which window won, and why, is
 // the binary's decision, so the renderer needs no knowledge of the pin at all. Each notice carries
-// its loudness ([Notice]), which the binary decides: a routine one raised by the session's
-// first-contact beat joins the start-up session log while it is open, and a loud one always keeps
-// its own line.
+// its kind, whose class the TUI's own table declares ([Notice.loud]): a routine one raised by the
+// session's first-contact beat joins the start-up session log while it is open, and a loud one
+// always keeps its own line.
 type RebindResult struct {
 	Model         string   // the model id now bound; what the footer and the start-up box show
 	ContextWindow int      // the BOUND window in tokens (a pin wins over the observation); 0 ⇒ unknown

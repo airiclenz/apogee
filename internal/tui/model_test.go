@@ -8976,7 +8976,7 @@ func TestStartupNoticesPostAsEphemeralNotes(t *testing.T) {
 	)
 	m := newModel(context.Background(), &fakeEngine{}, Options{
 		ColorSchemeWarnings: []string{schemeWarning},
-		StartupNotices:      []Notice{{Text: loud, Loud: true}, {Text: routine}},
+		StartupNotices:      []Notice{{Text: loud, Kind: NoticeAutoUnconfined}, {Text: routine, Kind: NoticeFenceResidual}},
 		UI:                  testUIPrefs,
 	}, nil)
 
@@ -9037,8 +9037,9 @@ func TestStartupNoticesPlaceTheirLogWordingOneNoteEach(t *testing.T) {
 			"landlock cannot fence truncate(2) — a confined command can still empty an existing file",
 			"landlock cannot fence connect(2) AF_UNIX — a same-user socket service can run commands outside the fence",
 		},
+		Kind: NoticeFenceResidual,
 	}
-	loud := Notice{Text: "apogee: loud stderr text", Log: []string{"loud first", "loud second"}, Loud: true}
+	loud := Notice{Text: "apogee: loud stderr text", Log: []string{"loud first", "loud second"}, Kind: NoticeAutoDegraded}
 
 	m := newModel(context.Background(), &fakeEngine{}, Options{
 		StartupNotices: []Notice{routine, loud},

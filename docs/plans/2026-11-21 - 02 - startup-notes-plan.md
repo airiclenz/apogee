@@ -41,7 +41,9 @@
 - Any change to `internal/notice`, `internal/probe` wording, headless or daemon routing.
 - The other triage clusters.
 
-## 1. Notice kinds for the TUI's start-up notices
+## 1. Notice kinds for the TUI's start-up notices — ✅ DONE (2026-11-21)
+NOTES (2026-11-21): context-file kinds are sourceAmbient (re-derived from the workspace at every session boundary), start-up notices sourceBoundary, rebind notices sourceBeat; the zero kind is spelled kindUnset, the lookup is kindRow/classOf, and an undeclared kind falls back to the zero kind's row (loud).
+NOTES (2026-11-21): test Notice literals that set Loud: true now set a loud Kind instead of Loud (the field is no longer set in any internal/tui test); TestNoticeKindClasses also fails when the table gains a kind the test does not pin.
 
 **What:**
 **Goal:** `internal/tui` declares `type NoticeKind` with one table `noticeKinds` mapping each kind to a class (`classRoutine`/`classLoud`) and a source (`sourceBoundary`, `sourceAmbient`, `sourceBeat`); `tui.Notice` carries a `Kind`; context-file notes and start-up notices take their loudness from the table; a unit test pins each declared kind's class.

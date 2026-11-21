@@ -1456,7 +1456,7 @@ func TestRebindNoticesSurfaceAsNotes(t *testing.T) {
 	t.Parallel()
 
 	rb := &fakeRebind{answer: func(model string, window int) (RebindResult, error) {
-		return RebindResult{Model: model, ContextWindow: window, Notices: []Notice{{Text: "validated set: strict-json"}}}, nil
+		return RebindResult{Model: model, ContextWindow: window, Notices: []Notice{{Text: "validated set: strict-json", Kind: NoticeModelBinding}}}, nil
 	}}
 	m := wireRebind(t, unbound(testOpts), &fakeHeartbeat{}, rb)
 
@@ -1483,7 +1483,7 @@ const seededStartupNote = "context: AGENTS.md (3.1 KiB)"
 
 // withSeededStartupNote is opts launching with seededStartupNote as its one routine start-up notice.
 func withSeededStartupNote(opts Options) Options {
-	opts.StartupNotices = []Notice{{Text: seededStartupNote}}
+	opts.StartupNotices = []Notice{{Text: seededStartupNote, Kind: NoticeFenceResidual}}
 	return opts
 }
 
@@ -1585,7 +1585,7 @@ func TestSessionLogLeavesTheFirstBeatsLoudNotesOnTheirOwnLine(t *testing.T) {
 			loud    = "tools: the profile roster for served-model was not applied (busy) — it applies at the next model switch"
 		)
 		rb := &fakeRebind{answer: func(model string, window int) (RebindResult, error) {
-			return RebindResult{Model: model, ContextWindow: window, Notices: []Notice{{Text: routine}, {Text: loud, Loud: true}}}, nil
+			return RebindResult{Model: model, ContextWindow: window, Notices: []Notice{{Text: routine, Kind: NoticeModelBinding}, {Text: loud, Kind: NoticeRosterUnapplied}}}, nil
 		}}
 		m := wireRebind(t, withSeededStartupNote(unbound(testOpts)), &fakeHeartbeat{}, rb)
 
@@ -1655,7 +1655,7 @@ func TestSessionLogLeavesAFallbackSettleOnItsOwnLine(t *testing.T) {
 	seams.list, seams.switchTo, seams.follow = staticServers(twoServers), (&fakeSwitch{}).switchTo, (&fakeFollow{}).follow
 	m, rb := seededPicker(t, opts)
 	rb.answer = func(model string, window int) (RebindResult, error) {
-		return RebindResult{Model: model, ContextWindow: window, Notices: []Notice{{Text: notice}}}, nil
+		return RebindResult{Model: model, ContextWindow: window, Notices: []Notice{{Text: notice, Kind: NoticeModelBinding}}}, nil
 	}
 
 	m = step(t, m, eventMsg{Event: sessionSwitch(0)})
