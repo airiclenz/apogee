@@ -396,7 +396,13 @@ Depends on item 10.
 - `go test -count=1 -run 'TestParseDelegationRequest|TestPartitionDispatch|TestFanOutWidth|TestSeat_|TestDelegationRefusals|TestDispatchGroup' ./internal/agent/`
 **Commit:** `refactor(agent): one delegationRequest parser for sub_agent arguments`
 
-## 12. Parse once per dispatch slot
+## 12. Parse once per dispatch slot — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): re-derived from runDelegate taking (ctx, call, req, …) — items 7-11 made it runDelegate(ctx, b *childBracket, site) and moved the ledger label into childBracket.bookRow (childrun.go), so the request now rides the bracket: openBracket(turn, call, request, runID, ledger) stores it, runDelegate reads b.request and bookRow labels from b.request; every dispatch.go bracket (preemptDelegation, refusePastCeiling, settleCancelledDelegation, stopQueuedDelegation, runDelegation) passes slot.request, runSubAgent and spawnSubAgent parse their own call, and workflow Spawn's ledger-less bracket passes delegationRequest{}.
+NOTES (2026-11-21): dispatchSlot.request is parsed only for a sub_agent call (zero otherwise) and dispatchSlot.isDelegation() (isSubAgentCall && request.blocking()) replaces the post-prepare isDelegationCall reads; workflowCallResult gained a request parameter to hand it to backgroundSubAgentResult; isBackgroundSubAgentCall had no caller left and was deleted (comment citations in dispatch.go and resolution.go now name delegationRequest.background).
+NOTES (2026-11-21): consequential edit — internal/agent/childbracket_test.go: made necessary by openBracket's new request parameter (ten call sites take bracketRequest(), a new helper parsing bracketCall()).
+NOTES (2026-11-21): consequential edit — internal/agent/delegationrefusal_pin_test.go: made necessary by backgroundSubAgentResult's new request parameter (call site only, line 107; no pinned value changed).
+NOTES (2026-11-21): TestPrepareCall_ParsesTheRequestAfterThePreToolExecMoment was bite-checked by temporarily parsing the pre-Moment call in prepareCall: it failed on both the child's submitted task and the ledger label, then the mutation was reverted.
 
 Depends on item 11.
 

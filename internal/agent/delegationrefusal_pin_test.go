@@ -104,7 +104,7 @@ func TestDelegationRefusals_AreByteIdentical(t *testing.T) {
 			call := domain.ToolCall{ID: "sa1", Tool: tools.SubAgentToolName, Arguments: json.RawMessage(tc.args)}
 
 			blocking, outcome := a.runSubAgent(context.Background(), call, "")
-			background := a.backgroundSubAgentResult(context.Background(), 1, call)
+			background := a.backgroundSubAgentResult(context.Background(), 1, call, parseDelegationRequest(call, a.delegationOffer()))
 
 			if outcome != dispatchDone || !blocking.IsError || blocking.Content != tc.wantBlocking {
 				t.Errorf("blocking refusal = %q (error %v, outcome %v), want %q", blocking.Content, blocking.IsError, outcome, tc.wantBlocking)

@@ -279,8 +279,8 @@ type resolutionInput struct {
 	atDepthBound bool
 	maxDepth     int
 	// backgroundSubAgent is true for a sub_agent call this Agent runs as a one-item background
-	// workflow (isBackgroundSubAgentCall, ADR 0094): row 3 answers it with a Workflow verdict, as it
-	// answers a fan_out call, instead of a Delegate.
+	// workflow (delegationRequest.background, ADR 0094): row 3 answers it with a Workflow verdict,
+	// as it answers a fan_out call, instead of a Delegate.
 	backgroundSubAgent bool
 	// wrapUpOutput is the ONE path the step-cap wrap-up Turn may write — the delegation's
 	// `output_path` as its spawning call spelled it (Agent.outputPath) — and "" for every call

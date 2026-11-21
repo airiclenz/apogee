@@ -2888,6 +2888,63 @@ func TestDispatchReportsAPreToolExecReactionFailure(t *testing.T) {
 	}
 }
 
+// TestPrepareCall_ParsesTheRequestAfterThePreToolExecMoment pins where a sub_agent call's
+// arguments are parsed (dispatchSlot.request): after the pre-tool-exec Moment, so a Reaction that
+// rewrites the call's `task` is what both the child and the delegate-ledger row read — the child is
+// submitted the rewritten task and the row is labelled by it, and the model's own task reaches
+// neither. It passes on the tree before the slot carried the request too: it guards against the
+// parse moving ahead of the Moment, not against a reparse.
+func TestPrepareCall_ParsesTheRequestAfterThePreToolExecMoment(t *testing.T) {
+	t.Parallel()
+
+	const asked, rewritten = "the model's own task", "the task a reaction rewrote"
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	cfg.Reactions = []domain.Reaction{{
+		ID:     "rewrite-task",
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassShapeWork,
+		On:     []domain.Moment{domain.MomentPreToolExec},
+		Handler: domain.PreToolExecFunc(
+			func(_ context.Context, _ domain.LoopView, call *domain.ToolCallEdit) (domain.Outcome, error) {
+				if call.Tool() != tools.SubAgentToolName {
+					return domain.Outcome{}, nil
+				}
+				call.SetArguments(json.RawMessage(subAgentArgs(rewritten)))
+				return domain.Outcome{Edited: true}, nil
+			}),
+	}}
+	responder := scriptedResponder(t,
+		subAgentCallTurn("c1", asked),
+		contentTurn("the child's report"), // the child's only Turn
+		contentTurn("parent done"),
+	)
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	runExchange(t, a, "please delegate")
+
+	requests := responder.requests()
+	if len(requests) != 3 {
+		t.Fatalf("the upstream saw %d requests, want 3 (parent, child, parent)", len(requests))
+	}
+	var submitted []string
+	for _, m := range requests[1].Messages {
+		if m.Role == "user" {
+			submitted = append(submitted, m.Content)
+		}
+	}
+	if len(submitted) == 0 || !strings.Contains(submitted[len(submitted)-1], rewritten) ||
+		strings.Contains(strings.Join(submitted, "\n"), asked) {
+		t.Errorf("the child was submitted %q, want the rewritten task %q and never %q", submitted, rewritten, asked)
+	}
+	if rows := a.delegations.rows(); len(rows) != 1 || rows[0].name != rewritten {
+		t.Errorf("ledger rows = %+v, want one row labelled %q", rows, rewritten)
+	}
+}
+
 // TestDispatch_UnknownToolNamesItsNearMatch proves the registry miss dispatch answers with the
 // tool-call repair Floor guard OFF — the only path an unknown name reaches dispatch on — carries
 // the nearest registered name (`read_fil` → `read_file`), and that a name unlike every registered

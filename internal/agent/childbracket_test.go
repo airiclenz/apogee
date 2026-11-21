@@ -23,6 +23,11 @@ func bracketCall() domain.ToolCall {
 	return domain.ToolCall{ID: bracketCallID, Tool: "sub_agent", Arguments: []byte(`{"task":"survey the module"}`)}
 }
 
+// bracketRequest is bracketCall's arguments as a dispatch slot parses them for the bracket.
+func bracketRequest() delegationRequest {
+	return parseDelegationRequest(bracketCall(), delegationOffer{})
+}
+
 // newBracketHost builds the Agent that opens a test's bracket, emitting into sink.
 func newBracketHost(t *testing.T, sink domain.EventSink) *Agent {
 	t.Helper()
@@ -124,7 +129,7 @@ func TestChildBracket_PanicBeforeRunBooksRefused(t *testing.T) {
 			host := newBracketHost(t, sink)
 			var runID string
 
-			result, ending := host.openBracket(1, bracketCall(), &runID, &host.delegations).run(domain.SubAgentPhaseEvent{}, panicResult, tt.body)
+			result, ending := host.openBracket(1, bracketCall(), bracketRequest(), &runID, &host.delegations).run(domain.SubAgentPhaseEvent{}, panicResult, tt.body)
 
 			if result != tt.wantResult || ending != refusedEnding() {
 				t.Errorf("run = %+v, %+v; want %+v, refused", result, ending, tt.wantResult)
@@ -158,7 +163,7 @@ func TestChildBracket_PanicAfterRunBooksFaulted(t *testing.T) {
 		registry childRegistry
 		runID    string
 	)
-	b := host.openBracket(1, bracketCall(), &runID, &host.delegations)
+	b := host.openBracket(1, bracketCall(), bracketRequest(), &runID, &host.delegations)
 
 	result, ending := b.run(domain.SubAgentPhaseEvent{}, panicResult, func() (domain.ToolResult, childEnding) {
 		_, _, _, _ = b.runChild(context.Background(), childRun{registry: &registry, runID: runID, sub: sub})
@@ -183,7 +188,7 @@ func TestChildBracket_CancelledBodyClosesThePair(t *testing.T) {
 		registry childRegistry
 		runID    string
 	)
-	b := host.openBracket(1, bracketCall(), &runID, &host.delegations)
+	b := host.openBracket(1, bracketCall(), bracketRequest(), &runID, &host.delegations)
 	answer := errorToolResult(bracketCallID, cancelledQueuedDelegationContent)
 
 	result, ending := b.run(domain.SubAgentPhaseEvent{}, panicResult, func() (domain.ToolResult, childEnding) {
@@ -206,7 +211,7 @@ func TestChildBracket_CancelledBeforeRunBooksCancelled(t *testing.T) {
 	var runID string
 	answer := errorToolResult(bracketCallID, cancelledQueuedDelegationContent)
 
-	result, ending := host.openBracket(1, bracketCall(), &runID, &host.delegations).run(domain.SubAgentPhaseEvent{}, panicResult, func() (domain.ToolResult, childEnding) {
+	result, ending := host.openBracket(1, bracketCall(), bracketRequest(), &runID, &host.delegations).run(domain.SubAgentPhaseEvent{}, panicResult, func() (domain.ToolResult, childEnding) {
 		return answer, childEnding{kind: delegationCancelled}
 	})
 
@@ -233,7 +238,7 @@ func TestChildBracket_AStopWhoseFoldPanicsBooksStopped(t *testing.T) {
 			t.Error("stop found no armed run while the child ran")
 		}
 	}
-	b := host.openBracket(1, bracketCall(), &runID, &host.delegations)
+	b := host.openBracket(1, bracketCall(), bracketRequest(), &runID, &host.delegations)
 
 	result, ending := b.run(domain.SubAgentPhaseEvent{}, panicResult, func() (domain.ToolResult, childEnding) {
 		_, _, _, _ = b.runChild(context.Background(), childRun{
@@ -275,7 +280,7 @@ func TestChildBracket_NeverStartedBooksOneRowAndALoneFinish(t *testing.T) {
 			host := newBracketHost(t, sink)
 			var runID string
 
-			result := host.openBracket(1, bracketCall(), &runID, &host.delegations).neverStarted(tt.unstarted)
+			result := host.openBracket(1, bracketCall(), bracketRequest(), &runID, &host.delegations).neverStarted(tt.unstarted)
 
 			if want := errorToolResult(bracketCallID, tt.unstarted.content); result != want {
 				t.Errorf("neverStarted = %+v, want %+v", result, want)
@@ -302,7 +307,7 @@ func TestChildBracket_OpensOnTheReservedIndexAndMintsOnlyOnTheRunPath(t *testing
 	host.delegations.reserve("later")
 	var runID string
 
-	b := host.openBracket(1, bracketCall(), &runID, &host.delegations)
+	b := host.openBracket(1, bracketCall(), bracketRequest(), &runID, &host.delegations)
 	minted := b.mintRunID()
 	b.run(domain.SubAgentPhaseEvent{}, panicResult, func() (domain.ToolResult, childEnding) {
 		return domain.ToolResult{CallID: bracketCallID, Content: "done"}, childEnding{kind: delegationCompleted, hasStarted: true}
@@ -345,7 +350,7 @@ func TestChildBracket_RowAndUndeliveredPrecedeFinished(t *testing.T) {
 		registry childRegistry
 		runID    string
 	)
-	b := host.openBracket(1, bracketCall(), &runID, &host.delegations)
+	b := host.openBracket(1, bracketCall(), bracketRequest(), &runID, &host.delegations)
 
 	_, ending := b.run(domain.SubAgentPhaseEvent{}, panicResult, func() (domain.ToolResult, childEnding) {
 		defer b.reap(&registry, sub, nil)
@@ -377,10 +382,10 @@ func TestChildBracket_NilLedgerBooksNothing(t *testing.T) {
 	var runID string
 	answer := errorToolResult(bracketCallID, "could not start sub-agent: closed")
 
-	runResult, runEnded := host.openBracket(1, bracketCall(), &runID, nil).run(domain.SubAgentPhaseEvent{}, panicResult, func() (domain.ToolResult, childEnding) {
+	runResult, runEnded := host.openBracket(1, bracketCall(), bracketRequest(), &runID, nil).run(domain.SubAgentPhaseEvent{}, panicResult, func() (domain.ToolResult, childEnding) {
 		return answer, refusedEnding()
 	})
-	host.openBracket(1, bracketCall(), &runID, nil).neverStarted(unstartedSkipped())
+	host.openBracket(1, bracketCall(), bracketRequest(), &runID, nil).neverStarted(unstartedSkipped())
 
 	if runResult != answer || runEnded != refusedEnding() {
 		t.Errorf("run = %+v, %+v; want %+v, refused", runResult, runEnded, answer)

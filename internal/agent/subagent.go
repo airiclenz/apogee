@@ -843,7 +843,8 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 // It runs the delegation OUTSIDE a dispatch: inside a phase-less, ledger-less bracket
 // (childBracket) under runID as given — the recover boundary, and no started/finished phase and no
 // ledger row. Every dispatched delegation enters through runDelegation instead, whose bracket
-// carries both; this entry is kept for callers that read the delegation's result alone. The
+// carries both; this entry is kept for callers that read the delegation's result alone, and parses
+// call's arguments itself (parseDelegationRequest), since no dispatch slot parsed them. The
 // bracket's Turn is this Agent's current one, and 0 for an Agent with no Turn lifecycle yet (a
 // bare value that only reaches the argument checks).
 func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID string) (domain.ToolResult, dispatchOutcome) {
@@ -851,7 +852,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 	if a.turns != nil {
 		turn = a.turns.index
 	}
-	b := a.openBracket(turn, call, &runID, nil)
+	b := a.openBracket(turn, call, parseDelegationRequest(call, a.delegationOffer()), &runID, nil)
 	b.isPhaseless = true
 	result, end := a.runDelegate(ctx, b, a.ownDelegateSite())
 	return result, end.dispatchOutcome()
@@ -922,8 +923,10 @@ func (e delegateEnd) dispatchOutcome() dispatchOutcome {
 // runDelegate runs the one blocking sub_agent path inside b, the delegation's bracket
 // (childBracket), against site: the path a dispatched sub_agent call (runDelegation) and a workflow
 // item on the sub_agent path (workflowSpawner.spawnSubAgent, ADR 0094) both take. The call's
-// arguments are parsed once here (parseDelegationRequest): the started phase announces the step cap
-// the child runs under (delegationRequest.stepCap), and the body, delegate, reads the same request.
+// arguments are the bracket's request, parsed once by whoever opened it — a dispatched call's slot,
+// after the pre-tool-exec Moment (dispatchSlot.request) — and never here: the started phase
+// announces the step cap the child runs under (delegationRequest.stepCap), and the body, delegate,
+// reads the same request.
 //
 // The bracket is the ONE recover boundary of the delegation (ADR 0039 decision 4: each child keeps
 // panic recovery at its own boundary): a panic raised anywhere in the child's life — its teardown
@@ -942,7 +945,7 @@ func (e delegateEnd) dispatchOutcome() dispatchOutcome {
 // order; the row records the child's RESOLVED output target, never the unresolved argument.
 func (a *Agent) runDelegate(ctx context.Context, b *childBracket, site delegateSite) (domain.ToolResult, delegateEnd) {
 	var end delegateEnd
-	request := parseDelegationRequest(b.call, a.delegationOffer())
+	request := b.request
 	applied, requested := request.stepCap(a.cfg.Delegation.MaxSteps)
 	result, ending := b.run(
 		domain.SubAgentPhaseEvent{StepCap: applied, CapRequested: requested},

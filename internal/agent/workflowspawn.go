@@ -233,7 +233,9 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 	}
 
 	var runID string
-	b := a.openBracket(s.turn, s.call, &runID, nil)
+	// No request: an item's child takes its task from the stage, never from s.call's arguments, and
+	// the ledger-less bracket books no row to label.
+	b := a.openBracket(s.turn, s.call, delegationRequest{}, &runID, nil)
 	if s.observer != nil {
 		s.observer.itemStarted(spec, b.mintRunID())
 	}
@@ -312,7 +314,8 @@ func (a *Agent) stageChildTools(stage workflow.Stage) ([]string, error) {
 }
 
 // spawnSubAgent runs an item on the sub_agent path (workflow.Stage.SubAgent, ADR 0094): the stage's
-// sub_agent arguments run through runDelegate exactly as the blocking call's do, under the
+// sub_agent arguments, parsed here (parseDelegationRequest) since no dispatch slot holds them, run
+// through runDelegate exactly as the blocking call's do, under the
 // spawner's call and on its registry and retained set, inside a child bracket of their own
 // (childBracket) — the same started/finished pair runDelegation emits, its finished phase carrying
 // the delegation result the blocking parent would have read, and no ledger row: the workflow
@@ -326,7 +329,7 @@ func (s *workflowSpawner) spawnSubAgent(ctx context.Context, spec workflow.ItemS
 	}
 	call := domain.ToolCall{ID: s.call.ID, Tool: tools.SubAgentToolName, Arguments: spec.Stage.SubAgent}
 	var runID string
-	b := a.openBracket(s.turn, call, &runID, nil)
+	b := a.openBracket(s.turn, call, parseDelegationRequest(call, a.delegationOffer()), &runID, nil)
 	if s.observer != nil {
 		s.observer.itemStarted(spec, b.mintRunID())
 	}

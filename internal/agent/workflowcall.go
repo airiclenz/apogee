@@ -267,14 +267,6 @@ func asksBackground(raw json.RawMessage) bool {
 	return json.Unmarshal(raw, &args) == nil && args.Background
 }
 
-// isBackgroundSubAgentCall reports whether call is a sub_agent call that runs as a one-item
-// background workflow: the call asks for the background and offer — this Agent's delegationOffer,
-// read by the caller — says it may have it (delegationRequest.background). It is a pure function of
-// its inputs, so dispatch's partition (partitionDispatch) stays one.
-func isBackgroundSubAgentCall(call domain.ToolCall, offer delegationOffer) bool {
-	return isSubAgentCall(call) && parseDelegationRequest(call, offer).background
-}
-
 // isDelegationCall reports whether call is a delegation of the reply's tool round: a sub_agent call
 // that does not run in the background (delegationRequest.blocking). Only such a call gets a run id
 // before its head event, is pooled, may be pre-empted by a waiting message, and counts against the
@@ -289,11 +281,16 @@ func isDelegationCall(call domain.ToolCall, offer delegationOffer) bool {
 // for and answers it at once (ADR 0094). The arguments are checked first, so a call that could
 // never run costs no workflow folder: a continuation is refused (it runs blocking, D4), and an empty
 // task, an unreadable seat, an unknown roster or an unreadable `context` file are refused in the
-// blocking call's own words. The
+// blocking call's own words. They are read from request, the call's arguments as its dispatch slot
+// parsed them (dispatchSlot.request), never decoded again here. The
 // seat the call names sizes and queues the workflow (startBackground); the child resolves it again
 // from the same arguments as it starts.
-func (a *Agent) backgroundSubAgentResult(ctx context.Context, turn int, call domain.ToolCall) domain.ToolResult {
-	request := parseDelegationRequest(call, a.delegationOffer())
+func (a *Agent) backgroundSubAgentResult(
+	ctx context.Context,
+	turn int,
+	call domain.ToolCall,
+	request delegationRequest,
+) domain.ToolResult {
 	if request.decodeErr != nil {
 		return errorToolResult(call.ID, subAgentBackgroundArguments+request.decodeErr.Error())
 	}
@@ -388,7 +385,7 @@ func (a *Agent) runWorkflowCall(ctx context.Context, turn int, slot *dispatchSlo
 	if ctx.Err() != nil {
 		return errorToolResult(call.ID, notRunCancelledContent), dispatchCancelled
 	}
-	result := a.workflowCallResult(ctx, turn, call)
+	result := a.workflowCallResult(ctx, turn, call, slot.request)
 	if ctx.Err() != nil {
 		return result, dispatchCancelled
 	}
@@ -398,14 +395,20 @@ func (a *Agent) runWorkflowCall(ctx context.Context, turn int, slot *dispatchSlo
 
 // workflowCallResult parses, checks and runs one fan_out call's Workflow and renders its answer —
 // or, for a workflow control call, answers that, and for a background sub_agent call starts its
-// one-item workflow and answers at once. A fan_out call asking for the background where it may
-// have it is started there and answered at once.
-func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.ToolCall) domain.ToolResult {
+// one-item workflow and answers at once — reading request, the call's arguments as its dispatch
+// slot parsed them (dispatchSlot.request), which only a sub_agent call carries. A fan_out call
+// asking for the background where it may have it is started there and answered at once.
+func (a *Agent) workflowCallResult(
+	ctx context.Context,
+	turn int,
+	call domain.ToolCall,
+	request delegationRequest,
+) domain.ToolResult {
 	if isWorkflowControlCall(call) {
 		return a.workflowControlResult(call)
 	}
 	if isSubAgentCall(call) {
-		return a.backgroundSubAgentResult(ctx, turn, call)
+		return a.backgroundSubAgentResult(ctx, turn, call, request)
 	}
 	seat, refusal := a.fanOutSeat(call.Arguments)
 	if refusal != "" {

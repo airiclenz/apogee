@@ -60,7 +60,7 @@ const (
 // either way. A fan_out call stays in the leaf group: it runs a whole Workflow at its own width
 // (runWorkflowCall), so it never takes a slot in the delegations' pool and the fan-out ceiling
 // never counts it. So does a sub_agent call this Agent runs in the background (ADR 0094 D6,
-// isBackgroundSubAgentCall): it is answered at once, so it is no member of the round either.
+// delegationRequest.background): it is answered at once, so it is no member of the round either.
 // Between the two, a group of two or more delegations is announced to the Driver
 // (announceSubAgentGroup), so the members a serial group has not reached yet are known from the start.
 //
@@ -214,6 +214,14 @@ type dispatchSlot struct {
 	// delegation carries it: the head ToolCallEvent and the ToolResultEvent (SpawnRunID), the
 	// lifecycle phases, and, as the child's EventBase.RunID, everything the child emits.
 	runID string
+	// request is the call's sub_agent arguments, parsed once (parseDelegationRequest) right after
+	// the pre-tool-exec Moment — so it reads the call a Reaction left behind — and the zero value for
+	// every other call. Every reader after prepareCall takes it from here: whether the slot is a
+	// delegation (isDelegation), the resolver's background fact, the bracket every delegation is
+	// settled or run in (its task, seat, step cap and ledger label), and the background launch. The
+	// reads before the Moment — the partition, the width and the head event's run id — parse the
+	// raw call themselves.
+	request delegationRequest
 	// writeTarget is the call's classified write target — the resolved absolute path of a
 	// workspace-scoped writer's target, "" for every other call — carried from the ladder's one
 	// resolution to the commit point, so the ToolResultEvent is stamped from the same resolution
@@ -240,6 +248,13 @@ type dispatchSlot struct {
 	// It is decided after the pool joins — only then is it known that no slot was skipped — and
 	// appended at commit, so the audit record keeps the child's own result.
 	widthNote string
+}
+
+// isDelegation reports whether the slot holds a delegation of the reply's tool round — a sub_agent
+// call that does not run in the background (isDelegationCall) — read from the slot's request, so
+// it answers for the call the pre-tool-exec Moment left behind.
+func (s *dispatchSlot) isDelegation() bool {
+	return isSubAgentCall(s.call) && s.request.blocking()
 }
 
 // dispatchGroup runs one group of calls through the pipeline, width at a time, and reports
@@ -402,6 +417,11 @@ func (a *Agent) prepareCall(
 	}
 
 	slot := dispatchSlot{call: call, runID: runID}
+	if isSubAgentCall(call) {
+		// Parsed AFTER the Moment, once: everything below reads the arguments a Reaction left, from
+		// the slot (dispatchSlot.request).
+		slot.request = parseDelegationRequest(call, a.delegationOffer())
+	}
 	if a.refusePastCeiling(turn, index, group, &slot) {
 		return slot
 	}
@@ -429,6 +449,7 @@ func (a *Agent) prepareCall(
 
 	guard := a.tightenForStagedSecrets(ctx, call, a.guards.PreExecute(call, tool, a.guardExemptions()))
 	input := a.resolutionInput(tool, call, guard)
+	input.backgroundSubAgent = slot.request.background
 	slot.tool, slot.writeTarget = tool, input.writeTarget
 	slot.verdict = a.applyGates(ctx, turn, call, resolve(input))
 	if slot.verdict.kind == resolveRefuse {
@@ -453,11 +474,11 @@ func (a *Agent) prepareCall(
 // again: a child that has started is never affected, and a slot skipped stays skipped even if the
 // message is withdrawn.
 func (a *Agent) preemptDelegation(turn int, slot *dispatchSlot) bool {
-	if !isDelegationCall(slot.call, a.delegationOffer()) || !a.interjectionPending() {
+	if !slot.isDelegation() || !a.interjectionPending() {
 		return false
 	}
 	slot.run = false
-	slot.result = a.openBracket(turn, slot.call, &slot.runID, &a.delegations).neverStarted(unstartedSkipped())
+	slot.result = a.openBracket(turn, slot.call, slot.request, &slot.runID, &a.delegations).neverStarted(unstartedSkipped())
 	return true
 }
 
@@ -480,7 +501,7 @@ func (a *Agent) preemptDelegation(turn int, slot *dispatchSlot) bool {
 // a scratch dir set) is read here too, so the pointer to it is offered only to a model that can
 // act on it.
 func (a *Agent) refusePastCeiling(turn, index, group int, slot *dispatchSlot) bool {
-	if !isDelegationCall(slot.call, a.delegationOffer()) {
+	if !slot.isDelegation() {
 		return false
 	}
 	rounds, width := a.cfg.Delegation.FanOutRounds, a.statedDelegationWidth()
@@ -490,7 +511,7 @@ func (a *Agent) refusePastCeiling(turn, index, group int, slot *dispatchSlot) bo
 	}
 	refusal := fanOutCeilingResult(slot.call.ID, group, rounds, width, a.offersTool(tools.FanOutToolName))
 	slot.run = false
-	slot.result = a.openBracket(turn, slot.call, &slot.runID, &a.delegations).neverStarted(unstartedPastCeiling(refusal))
+	slot.result = a.openBracket(turn, slot.call, slot.request, &slot.runID, &a.delegations).neverStarted(unstartedPastCeiling(refusal))
 	return true
 }
 
@@ -716,7 +737,7 @@ func (a *Agent) settleCancelledDelegation(ctx context.Context, turn int, slot *d
 		return false
 	}
 	slot.run = false
-	slot.result = a.openBracket(turn, slot.call, &slot.runID, &a.delegations).neverStarted(unstartedCancelled())
+	slot.result = a.openBracket(turn, slot.call, slot.request, &slot.runID, &a.delegations).neverStarted(unstartedCancelled())
 	return true
 }
 
@@ -732,7 +753,7 @@ func (a *Agent) stopQueuedDelegation(turn int, slot *dispatchSlot) bool {
 		return false
 	}
 	slot.run = false
-	slot.result = a.openBracket(turn, slot.call, &slot.runID, &a.delegations).neverStarted(unstartedStopped())
+	slot.result = a.openBracket(turn, slot.call, slot.request, &slot.runID, &a.delegations).neverStarted(unstartedStopped())
 	return true
 }
 
@@ -801,7 +822,8 @@ func (a *Agent) interjectionPending() bool {
 }
 
 // runDelegation drives the sub_agent recursion point (a nested Agent) to its boundary inside the
-// delegation's bracket (childBracket), opened here on this Agent's delegate ledger: started as the
+// delegation's bracket (childBracket), opened here on this Agent's delegate ledger with the slot's
+// request (dispatchSlot.request), the arguments the pre-tool-exec Moment left: started as the
 // child is reached — the instant a pool worker dequeues it, or the instant the width-1 loop arrives
 // at it, which is what makes a slot-less delegation observably queued rather than silently pending
 // — and finished, carrying the result, as the child returns (domain.SubAgentPhaseEvent). A child
@@ -827,7 +849,8 @@ func (a *Agent) interjectionPending() bool {
 // id and commitCall stamps it on the result; only its head event lacks it, and a reader falls back
 // to (depth, call id) there.
 func (a *Agent) runDelegation(ctx context.Context, turn int, slot *dispatchSlot) (domain.ToolResult, dispatchOutcome) {
-	result, end := a.runDelegate(ctx, a.openBracket(turn, slot.call, &slot.runID, &a.delegations), a.ownDelegateSite())
+	b := a.openBracket(turn, slot.call, slot.request, &slot.runID, &a.delegations)
+	result, end := a.runDelegate(ctx, b, a.ownDelegateSite())
 	return result, end.dispatchOutcome()
 }
 
@@ -954,8 +977,10 @@ func repeatedArgumentKeysResult(call domain.ToolCall) (domain.ToolResult, bool) 
 // write-target check (the one I/O-tainted fact — resolve() does
 // none), the sub-agent depth bound, whether an Approver is configured, and the confinement box
 // a Confine verdict would run inside. It is dispatch's fact-gathering; the verdict logic lives
-// entirely in resolve(). The one fact it never gathers is workflowScriptDir: only runScriptCall
-// (recipe.go) knows a call is a recipe's script stage, and it sets the field on what this returns.
+// entirely in resolve(). The two facts it never gathers are set by its caller on what this returns:
+// workflowScriptDir, since only runScriptCall (recipe.go) knows a call is a recipe's script stage,
+// and backgroundSubAgent, since only prepareCall holds the call's parsed request
+// (dispatchSlot.request).
 func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard security.PreCheck) resolutionInput {
 	target := a.classifyWriteTarget(tool, call)
 	return resolutionInput{
@@ -971,7 +996,6 @@ func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard se
 		writeTarget:            target.real,
 		scratchDir:             a.ScratchDir(),
 		atDepthBound:           a.depth >= a.maxDepth(),
-		backgroundSubAgent:     isBackgroundSubAgentCall(call, a.delegationOffer()),
 		maxDepth:               a.maxDepth(),
 		wrapUpOutput:           a.wrapUpOutput(),
 		writesWrapUpOutput:     tool.Name() == tools.WriteFileToolName && target.real == a.outputTarget,

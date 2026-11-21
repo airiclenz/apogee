@@ -5467,7 +5467,12 @@ func TestRunDelegation_ACallTheCancelReachedBeforeItsChildIsNeverStarted(t *test
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	call := domain.ToolCall{ID: "c1", Tool: tools.SubAgentToolName, Arguments: []byte(continueArgs("Earlier", "carry on", 0))}
-	slot := dispatchSlot{call: call, verdict: resolution{kind: resolveDelegate}, run: true}
+	slot := dispatchSlot{
+		call:    call,
+		request: parseDelegationRequest(call, a.delegationOffer()),
+		verdict: resolution{kind: resolveDelegate},
+		run:     true,
+	}
 
 	a.runCall(ctx, 0, &slot)
 

@@ -105,6 +105,10 @@ type childBracket struct {
 	host *Agent
 	turn int
 	call domain.ToolCall
+	// request is call's arguments as parsed once for it (parseDelegationRequest) — the dispatch
+	// slot's for a dispatched call, parsed after the pre-tool-exec Moment — and the one source of
+	// the run's task, seat and step cap and of the row's fallback label.
+	request delegationRequest
 	// runID points at the delegation's run id — the dispatch slot's, where the call has one — so the
 	// id the run path mints is written back where the slot's later readers find it.
 	runID *string
@@ -129,13 +133,20 @@ type childBracket struct {
 	isPhaseless bool
 }
 
-// openBracket opens the bracket of one delegation answering call, its phases stamped with turn.
-// The spawn index is taken from ledger at once (delegationLedger.open): the one a pooled group
+// openBracket opens the bracket of one delegation answering call, its phases stamped with turn,
+// reading request — call's arguments as its caller parsed them — for the run and the row. The
+// spawn index is taken from ledger at once (delegationLedger.open): the one a pooled group
 // reserved for this call in call order, else the next — never reserved anew. runID is the slot's
 // run id, read where it already holds one; a run id is MINTED only on the run path (mintRunID), so
 // a delegation settled before it started never takes one. A nil ledger books no row.
-func (a *Agent) openBracket(turn int, call domain.ToolCall, runID *string, ledger *delegationLedger) *childBracket {
-	b := &childBracket{host: a, turn: turn, call: call, runID: runID, ledger: ledger}
+func (a *Agent) openBracket(
+	turn int,
+	call domain.ToolCall,
+	request delegationRequest,
+	runID *string,
+	ledger *delegationLedger,
+) *childBracket {
+	b := &childBracket{host: a, turn: turn, call: call, request: request, runID: runID, ledger: ledger}
 	if ledger != nil {
 		b.spawnIndex = ledger.open(call.ID)
 	}
@@ -267,11 +278,10 @@ func (b *childBracket) bookRow(ending childEnding, resultContent string) {
 	if b.ledger == nil {
 		return
 	}
-	// The label reads neither the seat nor the background, so the zero offer parses it whole.
 	b.ledger.record(ending.ledgerRecord(delegationRecord{
 		spawnIndex: b.spawnIndex,
 		callID:     b.call.ID,
-		name:       parseDelegationRequest(b.call, delegationOffer{}).label(b.rowName, b.call.ID),
+		name:       b.request.label(b.rowName, b.call.ID),
 		outputPath: b.rowTarget,
 	}, resultContent))
 }
