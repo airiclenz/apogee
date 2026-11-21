@@ -1483,7 +1483,7 @@ const seededStartupNote = "context: AGENTS.md (3.1 KiB)"
 
 // withSeededStartupNote is opts launching with seededStartupNote as its one routine start-up notice.
 func withSeededStartupNote(opts Options) Options {
-	opts.StartupNotices = []Notice{{Text: seededStartupNote, Kind: NoticeFenceResidual}}
+	opts.StartupNotices = []Notice{{Text: seededStartupNote, Kind: kindContextLoaded}}
 	return opts
 }
 
@@ -1534,7 +1534,7 @@ func TestSessionLogClosedByAPromptLeavesTheFirstBeatsNoteItsOwn(t *testing.T) {
 
 	m := wireRebind(t, withSeededStartupNote(testOpts), &fakeHeartbeat{}, &fakeRebind{})
 	m = sendLine(t, m, "hello")
-	if m.transcript.sessionLogOpen {
+	if m.chrome.isLogOpen {
 		t.Fatal("setup: the submitted prompt left the session log open")
 	}
 
@@ -1613,7 +1613,7 @@ func TestSessionLogLeavesAModelPickAndAServerSeedOnTheirOwnLine(t *testing.T) {
 
 		m = step(t, m, keyEnter())
 
-		if !m.transcript.sessionLogOpen {
+		if !m.chrome.isLogOpen {
 			t.Fatal("setup: the pick closed the session log; no Exchange launched")
 		}
 		assertSeededLogOnly(t, m)
@@ -1634,7 +1634,7 @@ func TestSessionLogLeavesAModelPickAndAServerSeedOnTheirOwnLine(t *testing.T) {
 
 		m = foldBeatMsg(t, m, upBeat("remote-model", remoteWindow))
 
-		if !m.transcript.sessionLogOpen {
+		if !m.chrome.isLogOpen {
 			t.Fatal("setup: the switch closed the session log; no Exchange launched")
 		}
 		assertSeededLogOnly(t, m)

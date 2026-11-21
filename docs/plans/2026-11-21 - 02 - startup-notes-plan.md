@@ -98,7 +98,11 @@ cmd/apogee/wire_boot.go — announceConfinement; internal/tui/transcript.go — 
 Depends on item 2.
 **Commit:** `refactor(tui): the TUI words a start-up notice for the transcript`
 
-## 4. The start-up chrome module: destination table and launch-side routing
+## 4. The start-up chrome module: destination table and launch-side routing — ✅ DONE (2026-11-21)
+NOTES (2026-11-21): re-derived from the plan's `destination(rule kindRule, …)` signature — item 1 named the row type `noticeKindRow`, so destination takes a `noticeKindRow`; the chrome also carries `place(t *transcript, kind, contact, text)`, the router `m.note` delegates to, which is what lets the converted sessionlog tests run on a bare transcript + startupChrome.
+NOTES (2026-11-21): the open/closed state is the chrome's `isLogOpen` field (zero value closed) with `open()`/`close()` methods; tests read `m.chrome.isLogOpen`. noteRebindRoutine (heartbeat.go) now reads `m.chrome.isLogOpen` and calls `addLogNote`, unchanged in effect — item 5 routes it through the chrome.
+NOTES (2026-11-21): the model_test.go StartupNotices literals (TestStartupNoticesPostAsEphemeralNotes, TestStartupNoticesWordTheResidualFromTheConfinementFacts) already carry NoticeFenceResidual, a non-beat routine kind, so they are left as they are; model_test.go is not in FILES. Only withSeededStartupNote (heartbeat_test.go) moves to kindContextLoaded.
+NOTES (2026-11-21): TestSessionLogAbsentWithoutRoutineNotes in its bare form asserts no log entry is drawn; the painted-frame header check it carried as a Model test is dropped, since with no entry there is nothing to paint. TestStartupChromePlace and TestStartupChromeZeroValueIsClosed are added beside TestStartupChromeDestination.
 
 **What:** Recast at the regression check (2026-11-21).
 **Goal:** one module `startupChrome` (internal/tui/startupchrome.go) owns the session log's open/closed state and the pure rule `destination(rule kindRule, c contact, logOpen bool) dest` → `destLog | destLinePersisted | destLineEphemeral`; every launch-side note (context files, colour-scheme warnings, start-up notices, git refusal) is placed through it; the transcript keeps no log-open flag and places what it is told.

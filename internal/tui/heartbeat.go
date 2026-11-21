@@ -471,7 +471,8 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 // that need the human — a refused rebind, an unknown window, a cleared override, a loud notice —
 // never come through here.
 func (m *Model) noteRebindRoutine(intent rebindIntent, text string) {
-	if intent.firstBeat && m.transcript.addSessionLogNote(text) {
+	if intent.firstBeat && m.chrome.isLogOpen {
+		m.transcript.addLogNote(text)
 		return
 	}
 	m.transcript.addNote(text)
@@ -580,7 +581,7 @@ const unknownWindowNote = notice.WindowUnknown
 // Both ids are rendered the way the footer and the start-up box render them (displayModel), so the
 // note and the chrome beside it can never name the same model two different ways. Neither is
 // escape-stripped here: the new id is whatever the server advertised, so it is untrusted, but the
-// note's two destinations — addNote, or addSessionLogNote for a first-contact beat while the start-up
+// note's two destinations — addNote, or addLogNote for a first-contact beat while the start-up
 // log is open ([Model.noteRebindRoutine]) — both strip at the seam for every producer.
 func rebindNote(oldModel string, oldWindow int, newModel string, newWindow int, quietSeed bool) string {
 	switch {

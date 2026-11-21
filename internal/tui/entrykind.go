@@ -72,7 +72,7 @@ type entryKindRule struct {
 	// block at the very top of the scrollback and is not what the cache is for. The Workflow block's
 	// view and text grow in place the same way as its events fold (workflowblock.go), and a Workflow
 	// item's run head has its card rewritten in place when the item's receipt lands, and the
-	// session log gains its notes in place (transcript.addSessionLogNote).
+	// session log gains its notes in place (transcript.addLogNote).
 	cacheable bool
 
 	// hasLiveStar reports whether the kind's header can still be WAITING for something, and so is
@@ -134,7 +134,7 @@ var entryKindRules = map[entryKind]entryKindRule{
 	// lands, which can come after the phase and done bits the paint key reads have settled.
 	entryWorkflowItem: {persistedName: session.EntryKindWorkflowItem, hasLiveStar: true},
 	// The start-up session log — the routine notes a session starts with, gathered under one counted
-	// header (layout.md, "The start-up box"; [transcript.addSessionLogNote]). It is ephemeral chrome
+	// header (layout.md, "The start-up box"; [transcript.addLogNote]). It is ephemeral chrome
 	// for the start-up box's reason: re-derived at every boundary, so never serialized. It carries a
 	// block state of its own, its fold, and is never cached because it grows IN PLACE as notes join
 	// it, touching no field the paint key reads. It is a host note: the program speaks it, and it

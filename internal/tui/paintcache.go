@@ -109,7 +109,7 @@ type paintInput struct {
 	// replayed from an older record, which paints its text.
 	// It is no term of the key: the kind is never cached (entryKindRules)
 	workflowView workflowView
-	// the session log's notes (transcript.addSessionLogNote), from which its rows are painted; nil
+	// the session log's notes (transcript.addLogNote), from which its rows are painted; nil
 	// on every other kind. No term of the key, for workflowView's reason: the kind is never cached
 	notes []string
 

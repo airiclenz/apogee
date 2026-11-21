@@ -363,7 +363,7 @@ func (m *Model) noteGitRefusal(sentence string) {
 		return
 	}
 	m.git.notedRefusal = sentence
-	m.noteRoutine(sentence + gitRefusedAdvice)
+	m.note(kindGitRefusal, contactEvent, sentence+gitRefusedAdvice)
 }
 
 // countsOnly drops a snapshot's entry lists: the footer reads counts and branch fields, and the

@@ -914,7 +914,9 @@
 // ([noticeKinds]) that declares each start-up notice kind's class — loud on its own line or routine
 // in the session log — and its source (the launch, the ambient workspace, a rebind beat), plus the
 // transcript wording of a kind the TUI words itself (the residual disclosure), so a producer names a
-// kind and never decides its loudness or its transcript wording; bridge.go the late-bound programRef every seam sends the running
+// kind and never decides its loudness or its transcript wording; startupchrome.go the start-up
+// chrome — the session's start-up log open/closed state and the one rule ([destination]) that puts a
+// start-up note in that log or on its own line, persisted or ephemeral; bridge.go the late-bound programRef every seam sends the running
 // program through — including [Bridge.NotifySchedule], the composition root's own way in, which is
 // how a Firing narrates from the scheduler's goroutine without the renderer knowing one exists, and
 // [Bridge.NotifyRouting] beside it, the same way in for the Sub-agent server's routing state (ADR

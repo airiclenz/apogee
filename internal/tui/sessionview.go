@@ -30,6 +30,12 @@ type sessionView struct {
 	// display preferences a reset keeps (transcript.go).
 	transcript transcript
 
+	// chrome is the session's start-up chrome (startupchrome.go): whether its start-up log still
+	// takes routine notes, and the router every launch-side note is placed through ([Model.note]).
+	// Its zero value is closed, so a fresh view — a watch's (clearWatchView) — starts with no log to
+	// join; only a session boundary opens it (resetSessionView, resumeLoaded, construction).
+	chrome startupChrome
+
 	// thinking is the session's thinking as the view RETAINS it — one bounded, escape-stripped
 	// record per agent per Turn of the chunks domain.ReasoningEvent reveals, completed records
 	// newest last beside the in-flight one for each run currently thinking (thinking.go). It is

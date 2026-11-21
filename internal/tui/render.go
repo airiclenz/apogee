@@ -1289,7 +1289,7 @@ const (
 // "✦ Session log (4 notes) ▶" and nothing beneath, no note row and no "+N more lines", the count
 // saying what the fold holds; open, the header's ▼ is the fold and every note is its own row,
 // uncapped and with no see-less footer, in the tone an expanded block's body wears. A note is one
-// paragraph — the log's sink folded its hard breaks ([transcript.addSessionLogNote]) — soft-wrapped
+// paragraph — the log's sink folded its hard breaks ([transcript.addLogNote]) — soft-wrapped
 // to the width and hung at its text column.
 //
 // It is its own painter rather than a task_list-shaped tool card on purpose: the card's fold is the

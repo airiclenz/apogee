@@ -45,6 +45,12 @@ const (
 	kindContextLoaded
 	// kindContextAnomaly: a context file present but unreadable, or standing content over its share.
 	kindContextAnomaly
+	// kindColorScheme: loading the configured colour scheme cost something — an unknown name, an
+	// unreadable file, a key whose value is not a colour (Options.ColorSchemeWarnings).
+	kindColorScheme
+	// kindGitRefusal: git refused to read the host workspace, and the footer's `git refused` marker
+	// is explained once ([Model.noteGitRefusal]).
+	kindGitRefusal
 )
 
 // noticeClass is whether a notice needs the human. A LOUD notice keeps its own note line; a ROUTINE
@@ -91,6 +97,8 @@ var noticeKinds = map[NoticeKind]noticeKindRow{
 	NoticeRosterUnapplied:  {class: classLoud, source: sourceBeat},
 	kindContextLoaded:      {class: classRoutine, source: sourceAmbient},
 	kindContextAnomaly:     {class: classLoud, source: sourceAmbient},
+	kindColorScheme:        {class: classLoud, source: sourceAmbient},
+	kindGitRefusal:         {class: classRoutine, source: sourceAmbient},
 }
 
 // kindRow is k's row in [noticeKinds]; a kind with no row reads as the reserved zero kind's, so an

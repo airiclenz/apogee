@@ -876,7 +876,7 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	m.transcript.addStartup(newStartupView(opts))
 	// Construction is the session's first boundary, so it opens the session's start-up log: the
 	// routine notes below gather into it until the first Exchange launch closes it (enterRunning).
-	m.transcript.openSessionLog()
+	m.chrome.open()
 	// A resumed run then repaints the stored scrollback beneath that box and relights the gauge
 	// (a no-op on a fresh start, when opts.Resumed is nil).
 	m.replayResumed(opts.Resumed)
@@ -1057,22 +1057,17 @@ func (m *Model) noteContextFiles() {
 		if n.Anomaly {
 			kind = kindContextAnomaly
 		}
-		if classOf(kind) == classLoud {
-			m.transcript.addEphemeralNote(text)
-			continue
-		}
-		m.noteRoutine(text)
+		m.note(kind, contactEvent, text)
 	}
 }
 
-// noteRoutine places one ROUTINE start-up note — a record of the start the human may read at
-// leisure, as against a notice that needs them: inside the session's start-up log while the log is
-// open, and as its own ephemeral note once the session's first Exchange has closed it (layout.md,
-// "The start-up box"). Either way it is display-only and escape-stripped at the transcript's seam.
-func (m *Model) noteRoutine(text string) {
-	if !m.transcript.addSessionLogNote(text) {
-		m.transcript.addEphemeralNote(text)
-	}
+// note places one start-up note of kind, raised by c, where the start-up chrome says it lands
+// ([startupChrome.place]): a routine record of the start inside the session's start-up log while
+// the log is open, every other note on its own line (layout.md, "The start-up box"). It is the one
+// entry every launch-side note goes through, and every destination escape-strips at the
+// transcript's seam.
+func (m *Model) note(kind NoticeKind, c contact, text string) {
+	m.chrome.place(&m.transcript, kind, c, text)
 }
 
 // noteColorSchemeWarnings surfaces what loading the configured colour scheme cost — an unknown
@@ -1090,7 +1085,7 @@ func (m *Model) noteRoutine(text string) {
 // like a session title — addEphemeralNote escape-strips it at the seam.
 func (m *Model) noteColorSchemeWarnings(warnings []string) {
 	for _, w := range warnings {
-		m.transcript.addEphemeralNote(w)
+		m.note(kindColorScheme, contactEvent, w)
 	}
 }
 
@@ -1098,18 +1093,14 @@ func (m *Model) noteColorSchemeWarnings(warnings []string) {
 // before the alternate screen opened (Options.StartupNotices) — in stderr's words, or in the
 // transcript's own for a kind the TUI words itself (transcriptNotes, one note each). The stderr lines
 // are composed by the binary; this only words and places them — a LOUD notice on its own line, a routine one inside the
-// session log (noteRoutine) — and both EPHEMERALLY, for the same reason the colour-scheme warnings
+// session log while it is open ([Model.note]) — and both EPHEMERALLY, for the same reason the colour-scheme warnings
 // are: each is re-derived from the mode, the config and the host's backend at every launch, so
 // persisting one would stack a duplicate into the record on every resume while telling the next
 // launch nothing it does not re-discover.
 func (m *Model) noteStartupNotices(notices []Notice) {
 	for _, n := range notices {
 		for _, note := range m.transcriptNotes(n) {
-			if n.Loud() {
-				m.transcript.addEphemeralNote(note)
-				continue
-			}
-			m.noteRoutine(note)
+			m.note(n.Kind, contactEvent, note)
 		}
 	}
 }
@@ -2580,7 +2571,7 @@ func (m *Model) enterRunning(cmd tea.Cmd, cancel context.CancelCauseFunc, box *i
 	// from here on is the conversation's own and prints on its own line (layout.md, "The start-up
 	// box"). Every launch shares this seam — a submit, /continue, a workflow wake, /compact — and a
 	// log already closed by an earlier one stays closed.
-	m.transcript.closeSessionLog()
+	m.chrome.close()
 	m.cacheBoundaryAtIdle()
 	m.worker.start(cancel, box)
 	m.installBox()

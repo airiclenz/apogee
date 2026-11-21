@@ -957,7 +957,7 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	m.transcript.reset()
 	m.transcript.addStartup(newStartupView(m.opts))
 	// The restored session opens its own start-up log, as a launch does, before its first notice.
-	m.transcript.openSessionLog()
+	m.chrome.open()
 	// The side panel's folded state falls with the outgoing session, whose Events it was folded
 	// from — BEFORE the replay below, which rebuilds the resumed session's tasks and writes from
 	// its stored entries (replayScrollback).

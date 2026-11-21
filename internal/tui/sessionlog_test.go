@@ -8,7 +8,6 @@ package tui
 
 import (
 	"bytes"
-	"context"
 	"reflect"
 	"slices"
 	"strings"
@@ -50,46 +49,47 @@ func sessionLogHeaders(m Model) []string {
 func TestSessionLogLeavesAnAnomalyOnItsOwnLine(t *testing.T) {
 	t.Parallel()
 
-	const unreadable = "context: BROKEN.md unreadable — permission denied"
-	eng := &fakeEngine{contextReport: domain.ContextFilesReport{Files: []domain.ContextFileNote{
-		{Name: "AGENTS.md", Bytes: 3174},
-		{Name: "BROKEN.md", Err: "permission denied"},
-	}}}
-	m := newModel(context.Background(), eng, Options{
-		StartupNotices: []Notice{{Text: "apogee: WARNING — auto mode is running UNCONFINED.", Kind: NoticeAutoUnconfined}},
-		UI:             testUIPrefs,
-	}, nil)
+	const (
+		loaded     = "context: AGENTS.md (3.1 KiB)"
+		unreadable = "context: BROKEN.md unreadable — permission denied"
+		unconfined = "apogee: WARNING — auto mode is running UNCONFINED."
+	)
+	var tr transcript
+	var chrome startupChrome
+	chrome.open()
 
-	if got, want := sessionLogNotes(m), []string{"context: AGENTS.md (3.1 KiB)"}; !slices.Equal(got, want) {
-		t.Errorf("session log notes = %q, want only the routine loaded line %q", got, want)
+	chrome.place(&tr, kindContextLoaded, contactEvent, loaded)
+	chrome.place(&tr, kindContextAnomaly, contactEvent, unreadable)
+	chrome.place(&tr, NoticeAutoUnconfined, contactEvent, unconfined)
+
+	at := tr.sessionLogIndex()
+	if at < 0 || !slices.Equal(tr.entries[at].notes, []string{loaded}) {
+		t.Fatalf("session log at %d, want it holding only the routine loaded line %q", at, loaded)
 	}
-	for _, loud := range []string{unreadable, "apogee: WARNING — auto mode is running UNCONFINED."} {
-		if !hasEntry(m, entryNote, loud) {
+	for _, loud := range []string{unreadable, unconfined} {
+		if _, ok := noteEntry(tr, loud); !ok {
 			t.Errorf("the notice %q is not its own note line; a notice that needs the human is never folded", loud)
 		}
-		if slices.Contains(sessionLogNotes(m), loud) {
+		if slices.Contains(tr.entries[at].notes, loud) {
 			t.Errorf("the notice %q was gathered into the session log", loud)
 		}
 	}
 }
 
-// A start with no routine note paints no log at all — never an empty `(0 notes)` header — even
+// A start with no routine note draws no log at all — never an empty `(0 notes)` header — even
 // when loud notices were placed.
 func TestSessionLogAbsentWithoutRoutineNotes(t *testing.T) {
 	t.Parallel()
 
-	m := newModel(context.Background(), &fakeEngine{}, Options{
-		ColorSchemeWarnings: []string{`color-scheme "mine.yaml": unknown — using default`},
-		StartupNotices:      []Notice{{Text: "apogee: degraded", Kind: NoticeAutoDegraded}},
-		UI:                  testUIPrefs,
-	}, nil)
-	m.refreshViewport()
+	var tr transcript
+	var chrome startupChrome
+	chrome.open()
 
-	if at := sessionLogIndex(m); at >= 0 {
+	chrome.place(&tr, kindColorScheme, contactEvent, `color-scheme "mine.yaml": unknown — using default`)
+	chrome.place(&tr, NoticeAutoDegraded, contactEvent, "apogee: degraded")
+
+	if at := tr.sessionLogIndex(); at >= 0 {
 		t.Errorf("a start with no routine note drew a session log at entry %d", at)
-	}
-	if got := sessionLogHeaders(m); len(got) != 0 {
-		t.Errorf("the frame paints session-log headers %q, want none", got)
 	}
 }
 
@@ -131,10 +131,7 @@ func TestSessionLogStripsEscapes(t *testing.T) {
 	t.Parallel()
 
 	var tr transcript
-	tr.openSessionLog()
-	if !tr.addSessionLogNote("context: A\x1b[31mGENTS.md\x1b]52;c;x\x07 (512 B)") {
-		t.Fatal("an open log refused a note")
-	}
+	tr.addLogNote("context: A\x1b[31mGENTS.md\x1b]52;c;x\x07 (512 B)")
 
 	at := tr.sessionLogIndex()
 	if at < 0 {
@@ -228,17 +225,14 @@ func TestSessionLogFoldsTheResidualNotice(t *testing.T) {
 	}
 }
 
-// storedSessionLogNotes sends each note through the log's own sink — openSessionLog then
-// addSessionLogNote — and returns what the log stored, the notes its painter reads.
+// storedSessionLogNotes sends each note through the log's own sink (addLogNote) and returns what
+// the log stored, the notes its painter reads.
 func storedSessionLogNotes(t *testing.T, notes ...string) []string {
 	t.Helper()
 
 	var tr transcript
-	tr.openSessionLog()
 	for _, note := range notes {
-		if !tr.addSessionLogNote(note) {
-			t.Fatalf("an open log refused the note %q", note)
-		}
+		tr.addLogNote(note)
 	}
 	at := tr.sessionLogIndex()
 	if at < 0 {
@@ -272,8 +266,7 @@ func TestSessionLogToggleLeavesTaskCardsAlone(t *testing.T) {
 	opts := testOpts
 	opts.Settings = fakeSettingsHost{write: log.write}
 	m := modelWithTaskListBlock(t, opts)
-	m.transcript.openSessionLog()
-	m.transcript.addSessionLogNote("context: AGENTS.md (3.1 KiB)")
+	m.transcript.addLogNote("context: AGENTS.md (3.1 KiB)")
 	m.refreshViewport()
 
 	cards := taskListEntries(m)
@@ -323,7 +316,7 @@ func TestSessionLogOpensAtBoundaryWithoutContextFiles(t *testing.T) {
 	closedThen := func(boundary func(t *testing.T, m Model) Model) func(t *testing.T) Model {
 		return func(t *testing.T) Model {
 			m := newTestModelEng(t, &fakeEngine{}, testOpts)
-			m.transcript.closeSessionLog()
+			m.chrome.close()
 			return boundary(t, m)
 		}
 	}
@@ -341,13 +334,13 @@ func TestSessionLogOpensAtBoundaryWithoutContextFiles(t *testing.T) {
 			t.Parallel()
 
 			m := tc.drive(t)
-			if !m.transcript.sessionLogOpen {
+			if !m.chrome.isLogOpen {
 				t.Fatal("the boundary left the session log closed")
 			}
 			if at := sessionLogIndex(m); at >= 0 {
 				t.Errorf("a boundary with no routine note drew a session log at entry %d", at)
 			}
-			m.noteRoutine("routine")
+			m.note(kindContextLoaded, contactEvent, "routine")
 			if got := sessionLogNotes(m); !slices.Equal(got, []string{"routine"}) {
 				t.Errorf("session log notes = %q, want the note placed after the boundary", got)
 			}
@@ -356,7 +349,8 @@ func TestSessionLogOpensAtBoundaryWithoutContextFiles(t *testing.T) {
 }
 
 // The session's first Exchange launch closes the log — a later routine note prints as its own line
-// and the log's count stands where it stood — and transcript.reset clears the open flag outright.
+// and the log's count stands where it stood — and transcript.reset drops the log entry, so the
+// closed chrome a fresh view starts with has no log to join.
 func TestSessionLogClosedByEnterRunningAndClearedByReset(t *testing.T) {
 	t.Parallel()
 
@@ -364,15 +358,15 @@ func TestSessionLogClosedByEnterRunningAndClearedByReset(t *testing.T) {
 		t.Parallel()
 
 		m := newTestModelEng(t, &fakeEngine{contextReport: loadedReport()}, testOpts)
-		if !m.transcript.sessionLogOpen {
+		if !m.chrome.isLogOpen {
 			t.Fatal("setup: construction left the log closed")
 		}
 		m = sendLine(t, m, "hello")
 
-		if m.transcript.sessionLogOpen {
+		if m.chrome.isLogOpen {
 			t.Fatal("the first Exchange launch left the session log open")
 		}
-		m.noteRoutine("late routine note")
+		m.note(kindContextLoaded, contactEvent, "late routine note")
 		if got, want := sessionLogNotes(m), []string{"context: AGENTS.md (3.1 KiB)"}; !slices.Equal(got, want) {
 			t.Errorf("session log notes = %q, want the count to stand at %q", got, want)
 		}
@@ -385,18 +379,19 @@ func TestSessionLogClosedByEnterRunningAndClearedByReset(t *testing.T) {
 		t.Parallel()
 
 		var tr transcript
-		tr.openSessionLog()
-		tr.addSessionLogNote("one")
+		var chrome startupChrome
+		chrome.open()
+		chrome.place(&tr, kindContextLoaded, contactEvent, "one")
 		tr.reset()
 
-		if tr.sessionLogOpen {
-			t.Error("reset left the session log open")
-		}
-		if tr.addSessionLogNote("two") {
-			t.Error("a reset transcript took a log note before any boundary opened one")
-		}
+		var fresh startupChrome
+		fresh.place(&tr, kindContextLoaded, contactEvent, "two")
+
 		if at := tr.sessionLogIndex(); at >= 0 {
 			t.Errorf("reset left a session log at entry %d", at)
+		}
+		if _, ok := noteEntry(tr, "two"); !ok {
+			t.Error("a note placed before any boundary opened a log did not print as its own line")
 		}
 	})
 }
