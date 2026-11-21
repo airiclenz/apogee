@@ -4442,6 +4442,94 @@ func TestNewModelReplaysResumedScrollback(t *testing.T) {
 	}
 }
 
+// TestFirstContactNotesStayOutOfAResumedRecord pins that the notes a session's first-contact beat
+// raises are re-derived at every launch, so they are shown but never saved: launching, resuming and
+// launching again leaves no copy in the record (nor in a fork cut from it) and exactly one in the
+// view, while a later beat's change — a move the session made — is saved (ADR 0022 addendum 0801).
+func TestFirstContactNotesStayOutOfAResumedRecord(t *testing.T) {
+	t.Parallel()
+
+	const roster = "profile roster not applied: served-model has no profile"
+	var src transcript
+	src.addUser("first question", nil)
+	src.addNote("a recorded note")
+	seed, err := encodeTranscript(&src)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	// The first contact binds a model whose window nobody could name and reports a roster it did not
+	// apply; any later binding is plain.
+	rb := &fakeRebind{answer: func(model string, window int) (RebindResult, error) {
+		if model == "served-model" {
+			return RebindResult{Model: model, Notices: []Notice{{Kind: NoticeRosterUnapplied, Text: roster}}}, nil
+		}
+		return RebindResult{Model: model, ContextWindow: window}, nil
+	}}
+	launch := func(blob []byte) Model {
+		t.Helper()
+		opts := testOpts
+		opts.Resumed = &ResumedSession{Transcript: blob, Title: "first question"}
+		m := wireRebind(t, opts, &fakeHeartbeat{}, rb)
+		return foldBeatMsg(t, m, upBeat("served-model", 32768))
+	}
+	saved := func(m Model) []byte {
+		t.Helper()
+		p, ok := m.snapshotPayload(domain.Session{})
+		if !ok {
+			t.Fatal("snapshotPayload failed on a resumed transcript")
+		}
+		return p.transcript
+	}
+	firstContactNotes := []string{unknownWindowNote, roster}
+	assertNotSaved := func(label string, blob []byte) {
+		t.Helper()
+		for _, note := range firstContactNotes {
+			if strings.Contains(string(blob), note) {
+				t.Errorf("%s: the record carries the first-contact note %q: %s", label, note, blob)
+			}
+		}
+	}
+	assertShownOnce := func(label string, m Model) {
+		t.Helper()
+		for _, note := range firstContactNotes {
+			if n := countNotes(m, note); n != 1 {
+				t.Errorf("%s: %q shown %d times, want once; notes = %q", label, note, n, noteTexts(m))
+			}
+		}
+	}
+
+	m := launch(seed)
+	assertShownOnce("first launch", m)
+	blob := saved(m)
+	assertNotSaved("first launch", blob)
+	if !strings.Contains(string(blob), "a recorded note") {
+		t.Errorf("the saved blob dropped the conversation's own note: %s", blob)
+	}
+
+	// A fork cut at the first prompt encodes its prefix through the save path's own projection
+	// (fork.go, forkAt), so it carries none of the first contact's notes either.
+	prompt := slices.IndexFunc(m.transcript.entries, func(e entry) bool { return e.kind == entryUser && e.depth == 0 })
+	forked, err := session.EncodeTranscript(entriesToRecords(m.transcript.prefixThrough(prompt)))
+	if err != nil {
+		t.Fatalf("encode the fork's prefix: %v", err)
+	}
+	if !strings.Contains(string(forked), "first question") {
+		t.Fatalf("the fork's prefix lost the prompt it was cut at: %s", forked)
+	}
+	assertNotSaved("fork", forked)
+
+	m = launch(blob)
+	assertShownOnce("relaunch", m)
+	assertNotSaved("relaunch", saved(m))
+
+	// A later beat that moves the model is news about the session, not a record of its start.
+	m = foldBeatMsg(t, m, upBeat("later-model", 16384))
+	if !strings.Contains(string(saved(m)), "→ later-model") {
+		t.Errorf("the later beat's change is not in the record: %s; notes = %q", saved(m), noteTexts(m))
+	}
+}
+
 // TestNewModelReplaysARunnerWrittenScrollback is the blank-replay gap closed from the reading
 // end: a blob the RUNNER wrote (internal/run's fold — stream facts only, no presenter verdicts)
 // replays as real entries, and the "no scrollback recorded" degrade note stops firing for it.

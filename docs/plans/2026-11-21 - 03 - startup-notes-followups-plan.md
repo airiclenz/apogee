@@ -71,7 +71,7 @@ internal/tui/noticekind_test.go — TestNoticeKindClasses, loudKindPhrases, Test
 
 **Commit:** `refactor(tui): server-move notes route through the start-up chrome`
 
-## 2. First-contact beat notes are not saved to the session record
+## 2. First-contact beat notes are not saved to the session record — ✅ DONE (2026-11-21)
 
 **What:**
 **Goal:** fixes `first-contact-notes-repeat` (a defect, not a regression). A heartbeat note raised with `contactFirst` is an ephemeral transcript entry: shown exactly as today, but absent from the session record and from forks. A beat note raised with `contactEvent` or `contactSettle` is persisted as before. Launching, resuming and launching again leaves no copy of a first-contact note in the record, and exactly one in the view. No loud note ever goes to the session log.

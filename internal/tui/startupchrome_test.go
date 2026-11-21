@@ -7,7 +7,8 @@ import (
 
 // TestStartupChromeDestination pins the one rule a start-up note's destination is read from, over
 // every class × source × contact, with the session log open and closed: a routine note that records
-// the start joins the open log, a beat's own line is persisted and every other own line ephemeral.
+// the start joins the open log, a later beat's own line is persisted and every other own line —
+// a first-contact beat's included — ephemeral.
 func TestStartupChromeDestination(t *testing.T) {
 	t.Parallel()
 
@@ -26,7 +27,7 @@ func TestStartupChromeDestination(t *testing.T) {
 		{"routine ambient, first", classRoutine, sourceAmbient, contactFirst, destLog, destLineEphemeral},
 		{"routine ambient, settle", classRoutine, sourceAmbient, contactSettle, destLog, destLineEphemeral},
 		{"routine beat, event", classRoutine, sourceBeat, contactEvent, destLinePersisted, destLinePersisted},
-		{"routine beat, first", classRoutine, sourceBeat, contactFirst, destLog, destLinePersisted},
+		{"routine beat, first", classRoutine, sourceBeat, contactFirst, destLog, destLineEphemeral},
 		{"routine beat, settle", classRoutine, sourceBeat, contactSettle, destLinePersisted, destLinePersisted},
 		{"loud boundary, event", classLoud, sourceBoundary, contactEvent, destLineEphemeral, destLineEphemeral},
 		{"loud boundary, first", classLoud, sourceBoundary, contactFirst, destLineEphemeral, destLineEphemeral},
@@ -35,7 +36,7 @@ func TestStartupChromeDestination(t *testing.T) {
 		{"loud ambient, first", classLoud, sourceAmbient, contactFirst, destLineEphemeral, destLineEphemeral},
 		{"loud ambient, settle", classLoud, sourceAmbient, contactSettle, destLineEphemeral, destLineEphemeral},
 		{"loud beat, event", classLoud, sourceBeat, contactEvent, destLinePersisted, destLinePersisted},
-		{"loud beat, first", classLoud, sourceBeat, contactFirst, destLinePersisted, destLinePersisted},
+		{"loud beat, first", classLoud, sourceBeat, contactFirst, destLineEphemeral, destLineEphemeral},
 		{"loud beat, settle", classLoud, sourceBeat, contactSettle, destLinePersisted, destLinePersisted},
 	}
 	for _, tt := range tests {
@@ -53,13 +54,14 @@ func TestStartupChromeDestination(t *testing.T) {
 	}
 
 	// The heartbeat's notes, by the kind each carries and the contact its rebind was raised by: the
-	// first-contact beat's routine notes join the open log and take a persisted line of their own
+	// first-contact beat's routine notes join the open log and take an ephemeral line of their own
 	// once a prompt has closed it; its notes that need the human — a refused rebind, the roster
-	// that was not applied, an unknown window, a cleared override — keep a persisted line while the
-	// log is open; a `/model` pick's, the post-`/server` seed's and a fallback settle's notes are
-	// news on a persisted line of their own, as is every note a server move writes — the switch, a
-	// fallback, a fallback the display could not follow, a choice that could not be saved; and a
-	// routing change keeps an ephemeral one.
+	// that was not applied, an unknown window, a cleared override — keep an ephemeral line while the
+	// log is open — none of them is saved, being re-derived at the next launch, and a first-contact
+	// change applied late from pendingRebind keeps this contact; a `/model` pick's, the
+	// post-`/server` seed's and a fallback settle's notes are news on a persisted line of their own,
+	// as is every note a server move writes — the switch, a fallback, a fallback the display could
+	// not follow, a choice that could not be saved; and a routing change keeps an ephemeral one.
 	heartbeat := []struct {
 		name       string
 		kind       NoticeKind
@@ -67,14 +69,14 @@ func TestStartupChromeDestination(t *testing.T) {
 		whenOpen   dest
 		whenClosed dest
 	}{
-		{"first beat's mandatory effort", kindMandatoryEffort, contactFirst, destLog, destLinePersisted},
-		{"first beat's change", kindRebindChange, contactFirst, destLog, destLinePersisted},
-		{"first beat's model binding", NoticeModelBinding, contactFirst, destLog, destLinePersisted},
-		{"first beat's trusted hint", NoticeTrustedHint, contactFirst, destLog, destLinePersisted},
-		{"first beat's refused rebind", kindRebindFailed, contactFirst, destLinePersisted, destLinePersisted},
-		{"first beat's unapplied roster", NoticeRosterUnapplied, contactFirst, destLinePersisted, destLinePersisted},
-		{"first beat's unknown window", kindWindowUnknown, contactFirst, destLinePersisted, destLinePersisted},
-		{"first beat's cleared effort", kindEffortCleared, contactFirst, destLinePersisted, destLinePersisted},
+		{"first beat's mandatory effort", kindMandatoryEffort, contactFirst, destLog, destLineEphemeral},
+		{"first beat's change", kindRebindChange, contactFirst, destLog, destLineEphemeral},
+		{"first beat's model binding", NoticeModelBinding, contactFirst, destLog, destLineEphemeral},
+		{"first beat's trusted hint", NoticeTrustedHint, contactFirst, destLog, destLineEphemeral},
+		{"first beat's refused rebind", kindRebindFailed, contactFirst, destLineEphemeral, destLineEphemeral},
+		{"first beat's unapplied roster", NoticeRosterUnapplied, contactFirst, destLineEphemeral, destLineEphemeral},
+		{"first beat's unknown window", kindWindowUnknown, contactFirst, destLineEphemeral, destLineEphemeral},
+		{"first beat's cleared effort", kindEffortCleared, contactFirst, destLineEphemeral, destLineEphemeral},
 		{"a /model pick's change", kindRebindChange, contactEvent, destLinePersisted, destLinePersisted},
 		{"a later beat's mandatory effort", kindMandatoryEffort, contactEvent, destLinePersisted, destLinePersisted},
 		{"a fallback settle's model binding", NoticeModelBinding, contactSettle, destLinePersisted, destLinePersisted},

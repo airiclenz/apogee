@@ -1183,6 +1183,33 @@ func TestRebindDeferredWhileBusy(t *testing.T) {
 	}
 }
 
+// TestRebindDeferredFirstContactStaysEphemeral pins that a first-contact change stashed while a
+// worker owns the engine keeps its contact when the boundary applies it: its note is shown once and
+// is display-only, re-derived at the next launch like the first contact's notes applied at idle.
+func TestRebindDeferredFirstContactStaysEphemeral(t *testing.T) {
+	t.Parallel()
+
+	rb := &fakeRebind{}
+	m := wireRebind(t, testOpts, &fakeHeartbeat{}, rb)
+	startStubWorker(t, &m)
+	m.chrome.close() // the Exchange the worker runs closed the start-up log as it launched
+
+	m = foldBeatMsg(t, m, upBeat("model-b", 16384)) // the session's first beat, while busy
+	if m.hb.pendingRebind == nil || m.hb.pendingRebind.contact != contactFirst {
+		t.Fatalf("pendingRebind = %+v, want the first contact stashed with its contact", m.hb.pendingRebind)
+	}
+
+	m = step(t, m, exchangeDoneMsg{})
+
+	const change = "model changed: test-model → model-b, context 32k → 16k"
+	if n := countNotes(m, change); n != 1 {
+		t.Fatalf("change notes = %d, want exactly 1; notes = %q", n, noteTexts(m))
+	}
+	if e, ok := noteEntry(m.transcript, change); !ok || !e.ephemeral {
+		t.Errorf("the deferred first contact's change is %+v (found %v), want an ephemeral line", e, ok)
+	}
+}
+
 // A `context-window:` pin outranks whatever the server reports, and the binary — not the renderer —
 // is what knows that. The TUI adopts the BOUND window, and because it measures change against the
 // OBSERVATION, the server's own differing window never re-triggers a rebind on every beat. The seed

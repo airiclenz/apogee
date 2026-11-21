@@ -123,9 +123,12 @@ type rebindIntent struct {
 	// FIRST-CONTACT beat itself — no beat had ever landed and none had ever failed — set only by
 	// [Model.observeBinding]; [contactSettle] is a fallback settle ([Model.followFallback]), which
 	// re-binds the model the switch already announced. Either one makes [rebindNote] quiet about
-	// what the restated start-up box already shows. Only the first-contact beat's routine notes
-	// record how the session started, so only they join the start-up log while it is open
-	// ([destination]); a settle's notes are news about a move the session just made. The zero value,
+	// what the restated start-up box already shows. Only the first-contact beat's notes record how
+	// the session started, so only its routine ones join the start-up log while it is open, and
+	// every one of them is display-only, never saved to the session record — re-derived at the next
+	// launch ([destination]); a settle's notes are news about a move the session just made and are
+	// saved. A first-contact intent stashed in pendingRebind keeps this contact when it is applied
+	// after the Exchange, so its notes are display-only too. The zero value,
 	// [contactEvent], is every other door — a `/model` pick, the post-`/server` seed, every later
 	// beat — whose change is news worded in full.
 	contact contact
@@ -492,7 +495,8 @@ func effortExcluded(support domain.EffortSupport, override domain.ThinkingEffort
 // The model is rendered through displayModel like every id the chrome shows, so this note and the
 // footer beside it can never name the same model two different ways. The level is quoted because it
 // is a vocabulary word rather than one of apogee's own; neither half is escape-stripped here, since
-// the note's one destination is addNote, which strips at the seam for every producer.
+// the note goes through the start-up chrome ([Model.note]), whose every destination strips at the
+// transcript's seam for every producer.
 func effortClearedNote(override, profile domain.ThinkingEffort, model, reportedDefault string) string {
 	// The dial is supported by construction: only a model that reported a vocabulary can rule a
 	// level out, so the label's "is there a segment at all" answer is never in doubt here.

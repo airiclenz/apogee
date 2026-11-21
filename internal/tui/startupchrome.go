@@ -16,7 +16,8 @@ const (
 	// the first. It is the zero value, so a [rebindIntent] built with no contact is one of these.
 	contactEvent contact = iota
 	// contactFirst: raised by the session's first-contact beat (set by [Model.observeBinding] from
-	// the pre-fold evidence), which is part of how the session started.
+	// the pre-fold evidence), which is part of how the session started — re-derived at every
+	// launch and resume, so its notes are display-only.
 	contactFirst
 	// contactSettle: raised by a fallback settle ([Model.followFallback]), which re-binds the model
 	// the switch already announced — quiet like first contact, yet news about a move the session
@@ -39,15 +40,17 @@ const (
 // destination is where a note of the kind whose row is rule, raised by c, lands while the session
 // log is (isLogOpen) or is not open. A ROUTINE note joins the open log when it records the start:
 // a launch's or the workspace's (source boundary or ambient), or a beat's raised by the session's
-// first contact. Every other note keeps its own line — persisted for a beat's, which records a move
-// the session made, and ephemeral for a boundary's or the workspace's, which is re-derived at the
-// next boundary and would only stack a duplicate into the record.
+// first contact. Every other note keeps its own line — persisted only for a beat's raised by any
+// later door (an event or a fallback settle), which records a move the session made, and ephemeral
+// for everything that is re-derived at the next launch or boundary and would only stack a duplicate
+// into the record: a boundary's, the workspace's, and a first-contact beat's (ADR 0022 addendum
+// 0801). A loud note therefore never joins the log.
 func destination(rule noticeKindRow, c contact, isLogOpen bool) dest {
 	recordsTheStart := rule.source != sourceBeat || c == contactFirst
 	if rule.class == classRoutine && isLogOpen && recordsTheStart {
 		return destLog
 	}
-	if rule.source == sourceBeat {
+	if rule.source == sourceBeat && c != contactFirst {
 		return destLinePersisted
 	}
 	return destLineEphemeral
