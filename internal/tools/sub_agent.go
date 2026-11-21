@@ -334,9 +334,7 @@ func (r *SubAgentRoster) assignNames(names []string) error {
 // because dispatch did not special-case it) fails loudly rather than silently no-op'ing.
 type SubAgent struct {
 	toolSpec
-	seatChoice bool
-	background bool
-	context    bool
+	opts SubAgentOptions
 }
 
 // SubAgentOptions carries the host's choices about WHICH sub_agent variant this build offers. It
@@ -373,26 +371,21 @@ func NewSubAgentWith(opts SubAgentOptions) *SubAgent {
 	if opts != (SubAgentOptions{}) {
 		spec.schema = subAgentSchema(opts)
 	}
-	return &SubAgent{
-		toolSpec:   spec,
-		seatChoice: opts.SeatChoice,
-		background: opts.Background,
-		context:    opts.Context,
-	}
+	return &SubAgent{toolSpec: spec, opts: opts}
 }
 
 // OffersSeatChoice reports whether this tool published the `run_on` argument. It exists so the
 // engine can ask, at spawn, whether the choice was ever offered: a seat named against a variant
 // that published no `run_on` is a value the model could not have been told about.
-func (t *SubAgent) OffersSeatChoice() bool { return t.seatChoice }
+func (t *SubAgent) OffersSeatChoice() bool { return t.opts.SeatChoice }
 
 // OffersBackground reports whether this tool published the `background` argument, so the engine
 // can tell a background the model was offered from one it could not have been told about.
-func (t *SubAgent) OffersBackground() bool { return t.background }
+func (t *SubAgent) OffersBackground() bool { return t.opts.Background }
 
 // OffersContext reports whether this tool published the `context` argument, so the engine reads
 // the files only of a call whose model was offered the argument and ignores a stray one otherwise.
-func (t *SubAgent) OffersContext() bool { return t.context }
+func (t *SubAgent) OffersContext() bool { return t.opts.Context }
 
 // ArgRoles declares `task`, `name` and `continue` as delegation prompts (domain.ArgRolePrompt):
 // all three carry prose written FOR the nested agent, never an action this host performs. The
@@ -414,7 +407,7 @@ func (t *SubAgent) ArgRoles() map[string]domain.ArgRole {
 		"name":     domain.ArgRolePrompt,
 		"continue": domain.ArgRolePrompt,
 	}
-	if t.context {
+	if t.opts.Context {
 		roles["context"] = domain.ArgRoleReadSource
 	}
 	return roles

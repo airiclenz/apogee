@@ -316,7 +316,10 @@
 // drives a nested Agent and deliberately carries none of the disposition markers. fan_out.go is
 // fan_out, the Workflow the model asks for (ADR 0087): a placeholder like sub_agent that dispatch
 // runs itself, registered default-off, publishing `run_on` under the seat-choice gate and
-// `background` only where the workflow tool is offered. workflow.go is workflow, the model's control
+// `background` only where the workflow tool is offered. delegation_offer.go registers no tool: it
+// is DelegationOffer, the one value naming the variant a roster publishes for both — OfferOf reads
+// it, and ChildRoster narrows a roster to the offer a delegate's child carries (ADR 0069 D3).
+// workflow.go is workflow, the model's control
 // over the background workflows fan_out starts (ADR 0089 D4) — status, stop, message — another
 // default-off placeholder dispatch answers itself, offered only where the Driver offers background
 // workflows (HostTools.OffersBackground: the TUI, never a headless run or a daemon firing).

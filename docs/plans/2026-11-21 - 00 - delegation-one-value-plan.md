@@ -81,7 +81,11 @@ Test-only. Pin every sub_agent and fan_out schema variant, and every delegation 
 - `go test -count=1 -run 'TestDelegationRefusals|TestBackgroundSubAgent_ALenient' ./internal/agent/`
 **Commit:** `test(agent): pin delegation schema and refusal bytes`
 
-## 2. One published offer in tools
+## 2. One published offer in tools — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): agent's withoutSeatChoice and its helpers are left in place — item 3 deletes them and points defaultSubAgentTools at tools.ChildRoster; this item only adds ChildRoster with the same rule.
+NOTES (2026-11-21): added TestChildRoster_NarrowsEveryOfferToItsChild beside the four named tests (every offer narrows to its Child; a foreign fan_out beside a seat-choosing sub_agent is kept verbatim).
+NOTES (2026-11-21): consequential edit — internal/tools/doc.go: made necessary by the new delegation_offer.go (TestDocMapNamesEveryFile requires every file in the map); one sentence naming DelegationOffer/OfferOf/ChildRoster, placed in the recursion-point paragraph beside fan_out.go so the spine's "Fifteen files register no tool" count is not touched.
 
 **What:**
 **Goal:** `tools.DelegationOffer` is the single type that says what a roster publishes for sub_agent and fan_out, and `tools.ChildRoster` derives a child's roster from it.

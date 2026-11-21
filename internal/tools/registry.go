@@ -309,6 +309,22 @@ func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
 	// D1, ADR 0094 D1): the Driver offers background workflows, and a configuration rung lifts the
 	// workflow tool that checks on and stops them.
 	background := host.OffersBackground && host.rosterDeltas().lifts(WorkflowToolName)
+	// offer is the one delegation offer both recursion tools are built from: sub_agent publishes
+	// `run_on` under the seat-choice gate, `context` under the `sub-agents-context` gate and
+	// `background` under fan_out's (ADR 0094 D1); fan_out publishes `run_on` under the same
+	// seat-choice gate and `background` only where the workflow tool is offered (ADR 0089). With
+	// none of them set both are the plain variants every other session sees.
+	offer := DelegationOffer{
+		SubAgent: SubAgentOptions{
+			SeatChoice: host.SubAgentSeatChoice,
+			Background: background,
+			Context:    host.SubAgentContext,
+		},
+		FanOut: FanOutOptions{
+			SeatChoice: host.SubAgentSeatChoice,
+			Background: background,
+		},
+	}
 	// secrets is the one scrub holder the four tools that hand a child the inherited environment
 	// share, so a widening reaches all of them at once.
 	secrets := host.secretEnv()
@@ -338,23 +354,11 @@ func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
 		NewWebFetch(host.URLGuard),
 		NewHTTPRequest(host.URLGuard),
 		NewWebSearch(host.URLGuard, host.WebSearchEndpoint),
-		// sub_agent publishes `run_on` under the seat-choice gate, `context` under the
-		// `sub-agents-context` gate and `background` under fan_out's (ADR 0094 D1); with none of them
-		// it is the plain variant every other session sees.
-		NewSubAgentWith(SubAgentOptions{
-			SeatChoice: host.SubAgentSeatChoice,
-			Background: background,
-			Context:    host.SubAgentContext,
-		}),
+		// sub_agent, in the variant the delegation offer above names.
+		NewSubAgentWith(offer.SubAgent),
 		// fan_out (ADR 0087) is registered DEFAULT-OFF beside the recursion point it spawns through,
-		// so it reaches no default menu. It publishes `run_on` under the same seat-choice gate as
-		// sub_agent, and `background` only where the workflow tool is offered (ADR 0089): the Driver
-		// offers background workflows, and a configuration rung lifts that tool, which ships
-		// default-off too.
-		NewFanOutWith(FanOutOptions{
-			SeatChoice: host.SubAgentSeatChoice,
-			Background: background,
-		}),
+		// so it reaches no default menu; its variant is the offer's too.
+		NewFanOutWith(offer.FanOut),
 		// workflow (ADR 0089 D4) is the control over what fan_out's and sub_agent's `background`
 		// starts: DEFAULT-OFF like fan_out, built whoever the host is (so KnownToolNames spells it),
 		// and dropped by backedTools where the Driver offers no background workflows.
