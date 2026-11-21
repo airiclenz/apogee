@@ -55,7 +55,9 @@
   - 5: guard folded (decision: literal want-tables; the test calls none of the classifiers item 6 deletes)
   - 6: guard folded (Spawn's no-ending-yet child maps to faulted via `spawnEnding`; runDelegate's defer keeps classifyDelegation's order; capped-then-panicked row; no-definition grep; stale comment citations corrected)
 
-## 1. Pin the model-facing bytes
+## 1. Pin the model-facing bytes — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): "a bad context" is pinned as two inputs — a `context` that is not an array (shape refusal) and an array naming a file the workspace lacks (read refusal); both paths are pinned for every input, including the two refusal-order inputs added for item 11. The schema pin also covers the plain NewSubAgent()/NewFanOut() constructors beside the 8 + 4 NewSubAgentWith/NewFanOutWith variants. The lenient-background test lives in delegationrefusal_pin_test.go, the item's listed agent file.
 
 **What:**
 Test-only. Pin every sub_agent and fan_out schema variant, and every delegation refusal, byte for byte at the base before anything moves.
