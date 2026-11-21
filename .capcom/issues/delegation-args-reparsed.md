@@ -1,8 +1,9 @@
 ---
 title: "A delegation request is parsed once (architecture review 2026-10-27 #4)"
-status: parked
+status: open
 type: task
 priority: 3
+plan: 2026-11-21 - 00 - delegation-one-value-plan.md
 created: 2026-11-05T19:56:21Z
 ---
 
@@ -11,3 +12,7 @@ Found by docs/reviews/archived/architecture-review-2026-10-27.html (#4), re-veri
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — six SubAgentArgs decodes remain (dispatch.go:173,938; subagent.go:1004,1418; workflowcall.go:331); one fix with delegation-offer-type-probes

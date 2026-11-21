@@ -1,8 +1,9 @@
 ---
 title: "Delegation offer is one value (architecture review 2026-10-27 #10)"
-status: parked
+status: open
 type: task
 priority: 3
+plan: 2026-11-21 - 00 - delegation-one-value-plan.md
 created: 2026-11-05T19:56:21Z
 ---
 
@@ -11,3 +12,7 @@ Found by docs/reviews/archived/architecture-review-2026-10-27.html (#10), re-ver
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — type-assert probes remain (subagent.go:2138-2240, workflowcall.go:275,294); one fix with delegation-args-reparsed
