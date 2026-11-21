@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Architecture review for apogee — 2026-11-21</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+</script>
+<style>
+  .seam { border-left: 2px dashed #64748b; }
+  .seam-b { border-bottom: 2px dashed #64748b; }
+  .leak { color: #dc2626; }
+  .deep { background: linear-gradient(135deg, #0f172a, #1e293b); color: #f8fafc; }
+  .lbl { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; }
+  .diagram { min-height: 300px; }
+  pre.mermaid { background: transparent; }
+</style>
+</head>
+<body class="bg-stone-50 text-slate-900 font-sans">
+<main class="max-w-5xl mx-auto px-4 sm:px-6 py-12 space-y-12">
+
+<header class="space-y-4">
+  <p class="lbl text-slate-500">apogee · architecture review</p>
+  <h1 class="font-serif text-4xl">Deepening opportunities — 2026-11-21</h1>
+  <p class="text-sm text-slate-600 max-w-3xl">Scope: commits since the 2026-11-10 review. Hot spots are the tool-group fold and
+    auto-collapse work in <code>internal/tui</code> (transcript.go 12 commits, render.go 8, mouse.go 7), the session log, and the
+    confinement + gitexec fixes. Three explorers read them; load-bearing claims were re-checked against HEAD <code>171d210f</code>.</p>
+  <div class="flex flex-wrap gap-4 text-xs text-slate-600">
+    <span class="flex items-center gap-2"><span class="inline-block w-5 h-4 border border-slate-400 bg-white"></span>module</span>
+    <span class="flex items-center gap-2"><span class="inline-block w-5 h-4 seam"></span>seam</span>
+    <span class="flex items-center gap-2"><span class="leak font-bold">→</span>leakage</span>
+    <span class="flex items-center gap-2"><span class="inline-block w-5 h-4 deep rounded-sm"></span>deep module</span>
+  </div>
+  <nav class="grid sm:grid-cols-2 gap-1 text-sm pt-2">
+    <a class="hover:underline" href="#c1">1 · A tool block's shape is asked once</a>
+    <a class="hover:underline" href="#c2">2 · The start-up chrome routes every note</a>
+    <a class="hover:underline" href="#c3">3 · Repository state is one fact from gitexec</a>
+    <a class="hover:underline" href="#c4">4 · A path's real location has one resolver</a>
+    <a class="hover:underline" href="#c5">5 · Confinement posture is one verdict per Driver</a>
+    <a class="hover:underline" href="#c6">6 · Reader fold gestures live in the fold module</a>
+    <a class="hover:underline" href="#c7">7 · A tool's grouping class is one registry column</a>
+    <a class="hover:underline" href="#c8">8 · A start-up notice's class is declared once</a>
+    <a class="hover:underline text-slate-500" href="#open">Still open from 2026-11-10</a>
+  </nav>
+</header>
+
+<section id="candidates" class="space-y-10">
+
+<!-- 1 -->
+<article id="c1" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="rounded-full bg-emerald-100 text-emerald-800 px-3 py-0.5 text-xs font-semibold">Strong</span>
+    <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-0.5 text-xs">in-process</span>
+  </div>
+  <h2 class="font-serif text-2xl">1 · A tool block's shape is asked once</h2>
+  <p class="font-mono text-sm text-slate-600">internal/tui/render.go:897 (resolveBlock) · transcript.go:2585 (foldableHead, foldHeadOf, toolGroupAt) · transcript.go:2677 · toolblock.go:181</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diagram">
+      <p class="lbl text-slate-500 mb-2">Before — three walks over the entries</p>
+      <pre class="mermaid">
+flowchart TB
+  E[(transcript entries)]
+  R["resolveBlock · paint walk"] --> E
+  F["foldableHead · fold walk"] --> E
+  V["reveal · sup.calls() &lt; 2"] --> E
+  P["paint · lone-call check"] --> E
+  F -. "same order as resolveBlock (a comment)" .-> R
+  V -. "group of one restated" .-> P
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#991b1b;
+  class F,V leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diagram">
+      <p class="lbl text-slate-500 mb-2">After — one shape classifier</p>
+      <pre class="mermaid">
+flowchart TB
+  S["tool-block shape: kind · span · head · group of one"]
+  E[(transcript entries)]
+  S --> E
+  R[paint] --> S
+  F[fold · blockFoldBy] --> S
+  V[reveal] --> S
+  M[mouse hit] --> S
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a;
+  class S deep
+      </pre>
+    </div>
+  </div>
+  <p><strong>Problem.</strong> Paint and fold each walk the entries to decide a block's shape; only a comment (<code>transcript.go:2592</code>) keeps their order in step. They already drifted: bug <code>lone-call-no-refold</code> (fix <code>0ebd1c61</code>, 22 files), and <code>4353151a</code> deleted a parallel paint path.</p>
+  <p><strong>Solution.</strong> One module answers "what shape is the block at this head" (Tools umbrella, Sub-agent group, Skill group, group of one, standalone); paint, fold, reveal and mouse all ask it.</p>
+  <ul class="grid sm:grid-cols-2 gap-x-6 text-sm list-disc pl-5">
+    <li>Locality: shape rules in one place</li>
+    <li>Leverage: four callers, one interface</li>
+    <li>Group-of-one rule stated once</li>
+    <li>Agreement tests become shape tables</li>
+    <li>Foundation for #6 and #7</li>
+  </ul>
+  <p class="text-xs text-slate-500">Deletion test: removing the walk in <code>foldableHead</code> concentrates complexity into the classifier. <code>blockFoldBy</code> (transcript.go:2307) and the paint cache's resolved-fold key are already well-shaped; keep them.</p>
+  <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm">Keeps ADR 0035 amendment 1120c (a)/(b): every call is a group of one; task-list cards, answered ask_user records, targetless calls and workflow blocks stay out.</div>
+</article>
+
+<!-- 2 -->
+<article id="c2" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="rounded-full bg-emerald-100 text-emerald-800 px-3 py-0.5 text-xs font-semibold">Strong</span>
+    <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-0.5 text-xs">in-process</span>
+  </div>
+  <h2 class="font-serif text-2xl">2 · The start-up chrome routes every note</h2>
+  <p class="font-mono text-sm text-slate-600">internal/tui/model.go:1045-1110 · heartbeat.go:122-133, :404-478, :585-610 · transcript.go:1048-1115, :1204 · commandrun.go:371 · sessions.go:960 · model.go:879, :2578</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diagram text-xs">
+      <p class="lbl text-slate-500 mb-3">Before — five routers, each picks its own fallback</p>
+      <table class="w-full">
+        <thead><tr class="lbl text-slate-400"><th class="text-left py-1">router</th><th class="text-left">routine, log closed</th><th class="text-left">loud</th></tr></thead>
+        <tbody class="font-mono">
+          <tr class="border-t"><td class="py-1">noteContextFiles</td><td>ephemeral</td><td>ephemeral</td></tr>
+          <tr class="border-t"><td class="py-1">noteRoutine</td><td class="leak">ephemeral</td><td>—</td></tr>
+          <tr class="border-t"><td class="py-1">noteStartupNotices</td><td>ephemeral</td><td>ephemeral</td></tr>
+          <tr class="border-t"><td class="py-1">noteRebindRoutine</td><td class="leak">persisted</td><td>—</td></tr>
+          <tr class="border-t"><td class="py-1">applyRebind loop</td><td>—</td><td class="leak">persisted</td></tr>
+        </tbody>
+      </table>
+      <div class="mt-3 space-y-1 text-slate-600">
+        <p>+ heartbeat carries <code>quietSeed</code> <em>and</em> <code>firstBeat</code></p>
+        <p>+ 3 boundary sites repeat reset → addStartup → openSessionLog</p>
+        <p class="leak">3 first-contact special cases in 2 days: 40328c44 · 5b008393 · 04ea2cc5</p>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diagram flex flex-col">
+      <p class="lbl text-slate-500 mb-3">After — one module, one destination table</p>
+      <div class="flex-1 grid grid-rows-[auto_1fr_auto] gap-2">
+        <div class="flex gap-2 text-xs justify-center">
+          <span class="border rounded px-2 py-1">context files</span><span class="border rounded px-2 py-1">start-up notices</span><span class="border rounded px-2 py-1">heartbeat</span><span class="border rounded px-2 py-1">boundary</span>
+        </div>
+        <div class="deep rounded-lg p-4 border-4 border-slate-900">
+          <p class="lbl text-slate-300">start-up chrome</p>
+          <p class="text-sm mt-1">note(class, origin) · boundary() · exchangeLaunched()</p>
+          <div class="grid grid-cols-2 gap-1 mt-3 text-[11px] text-slate-400">
+            <span>box restated</span><span>log open / close</span><span>first-contact absorb</span><span>repeat-of-box suppress</span><span>destination</span><span>persisted vs ephemeral</span>
+          </div>
+        </div>
+        <p class="text-xs text-slate-500 text-center">transcript only places what it is told</p>
+      </div>
+    </div>
+  </div>
+  <p><strong>Problem.</strong> Where a note lands (session log, standalone card) and whether it persists are decided per call site, and the routers disagree on both.</p>
+  <p><strong>Solution.</strong> One module owns the start-up box, the session log's open/close at a boundary and at the first Exchange launch, and each note's destination.</p>
+  <ul class="grid sm:grid-cols-2 gap-x-6 text-sm list-disc pl-5">
+    <li>Locality: one destination rule</li>
+    <li>Fallback disagreement disappears</li>
+    <li>14 tests drop the full Model</li>
+    <li>Table: class × origin × beat × log</li>
+  </ul>
+  <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm">Keeps ADR 0112 amend-1112 (residual stays routine; a residual inside the collapsed log counts as disclosed), ADR 0024 amend-1111 (<code>applyRebind</code> alone sets <code>lastRebindFailed</code>; one refusal note per target), ADR 0011 (notes are copy-on-write).</div>
+</article>
+
+<!-- 3 -->
+<article id="c3" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="rounded-full bg-emerald-100 text-emerald-800 px-3 py-0.5 text-xs font-semibold">Strong</span>
+    <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-0.5 text-xs">local-substitutable (temp repo)</span>
+  </div>
+  <h2 class="font-serif text-2xl">3 · Repository state is one fact from gitexec</h2>
+  <p class="font-mono text-sm text-slate-600">internal/gitexec/gitexec.go:~316, ~461, :545, :710 · cmd/apogee/gitstatus_host.go:175-187 · gitactions_host.go:212 · internal/tui/gitstatus.go:36 · internal/agent/treesnapshot.go:195 · internal/tools/git.go:222, :262 · internal/security/shellwrites.go:993</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diagram">
+      <p class="lbl text-slate-500 mb-2">Before — callers parse the refusal sentence</p>
+      <pre class="mermaid">
+sequenceDiagram
+  participant H as gitstatus host
+  participant G as gitexec
+  participant T as tui
+  H->>G: is work tree?
+  G-->>H: failed result + refusal text
+  H->>H: two string predicates
+  H->>T: build tui.GitRefusedError
+  Note over T: refused type lives in the TUI, built in cmd
+  Note over H: treesnapshot probes again, cannot tell refused from none
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diagram">
+      <p class="lbl text-slate-500 mb-2">After — gitexec answers the state</p>
+      <pre class="mermaid">
+sequenceDiagram
+  participant C as host · treesnapshot · footer
+  participant G as gitexec
+  C->>G: repository state at root
+  G-->>C: work tree (top) | none | refused (sentence) | incomplete
+  Note over G: owns key catalogue and benign values
+  Note over C: model-facing git tools still get a failed outcome
+      </pre>
+    </div>
+  </div>
+  <p><strong>Problem.</strong> gitexec reports a refusal only as text, so every consumer re-derives refused / absent / ok. Commits <code>122331e7</code>, <code>56b67508</code>, <code>c707c071</code> each edited gitexec, the status host, <code>tui/gitstatus</code> and <code>tui/watch</code>; <code>c55891ee</code>, <code>8e9f23cf</code>, <code>b13c5c80</code> co-edited gitexec and the config-key catalogue in <code>shellwrites.go</code>.</p>
+  <p><strong>Solution.</strong> gitexec returns the repository state at a root as one value and owns the program-naming key catalogue.</p>
+  <ul class="grid sm:grid-cols-2 gap-x-6 text-sm list-disc pl-5">
+    <li>Deletes string predicates in hosts</li>
+    <li>One work-tree probe, not two</li>
+    <li>treesnapshot gains a refused case</li>
+    <li>Tests stop scripting refusal sentences</li>
+  </ul>
+  <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm">ADR 0010: gitexec stays a leaf, so the refused type moves down into gitexec, never up. Keeps ADR 0012 amend-0906 / 1118(c), ADR 0108 amend-1118, ADR 0049.</div>
+</article>
+
+<!-- 4 -->
+<article id="c4" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="rounded-full bg-amber-100 text-amber-800 px-3 py-0.5 text-xs font-semibold">Worth exploring</span>
+    <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-0.5 text-xs">local-substitutable (temp dir, links)</span>
+  </div>
+  <h2 class="font-serif text-2xl">4 · A path's real location has one resolver</h2>
+  <p class="font-mono text-sm text-slate-600">internal/security/pathsafety.go:76 (EvalRealPath, 12 files) · internal/platform/realpath.go:32 (RealPath) · confine_posix.go:100 · confiner_windows.go (resolveBoxRoots) · internal/projectroot/projectroot.go:88 · security/rules.go:329 · agent/construct.go:304</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diagram text-xs">
+      <p class="lbl text-slate-500 mb-3">Before — five resolvers, two answers</p>
+      <div class="grid grid-cols-5 gap-1 text-center font-mono">
+        <div class="border rounded p-1 h-24 flex flex-col justify-between"><span>EvalRealPath</span><span class="text-slate-500">missing → ancestor</span><span class="leak">junction ?</span></div>
+        <div class="border rounded p-1 h-24 flex flex-col justify-between"><span>RealPath</span><span class="leak">missing → error</span><span>junction ✓</span></div>
+        <div class="border rounded p-1 h-24 flex flex-col justify-between"><span>canonical WritableRoot</span><span class="text-slate-500">posix</span></div>
+        <div class="border rounded p-1 h-24 flex flex-col justify-between"><span>resolve BoxRoots</span><span class="text-slate-500">windows</span></div>
+        <div class="border rounded p-1 h-24 flex flex-col justify-between"><span>project root</span><span class="text-slate-500">own walk</span></div>
+      </div>
+      <p class="mt-4 leak">6 junction fixes in 10 days, one caller each: f53e6dfc · 7ff18b95 · 86a84d68 · edf140b2 · 74c5027e · c05956b8</p>
+      <p class="mt-2 text-slate-600">Callers hand <code>ProjectRootPaths</code> four spellings, worked out in <code>agent/construct.go</code>.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diagram flex flex-col justify-center gap-3">
+      <p class="lbl text-slate-500">After — one deep resolver</p>
+      <div class="deep rounded-lg p-4 border-4 border-slate-900">
+        <p class="lbl text-slate-300">real location</p>
+        <p class="text-sm mt-1">resolve(path) · within(path, root)</p>
+        <p class="text-[11px] text-slate-400 mt-3">links · junctions · not-yet-created · every spelling compared</p>
+      </div>
+      <div class="flex gap-2 text-xs justify-center flex-wrap">
+        <span class="border rounded px-2 py-1">path safety</span><span class="border rounded px-2 py-1">confiner backends</span><span class="border rounded px-2 py-1">project root</span><span class="border rounded px-2 py-1">rules</span>
+      </div>
+    </div>
+  </div>
+  <p><strong>Problem.</strong> Five resolvers disagree on a missing path, and likely on junctions (Windows behaviour inferred from docs, not run). Each fix patched one caller.</p>
+  <p><strong>Solution.</strong> One module owns a path's real location and the "is this path under that root, in every spelling" comparison.</p>
+  <ul class="grid sm:grid-cols-2 gap-x-6 text-sm list-disc pl-5">
+    <li>Locality: junction fix lands once</li>
+    <li>Spelling knowledge leaves the caller</li>
+    <li>One resolver suite replaces per-package junction tests</li>
+  </ul>
+  <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm">Keeps ADR 0020: a Windows box root that is a reparse point is refused, never resolved through — the resolver must expose that, not hide it. Also ADR 0012, ADR 0096.</div>
+</article>
+
+<!-- 5 -->
+<article id="c5" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="rounded-full bg-amber-100 text-amber-800 px-3 py-0.5 text-xs font-semibold">Worth exploring</span>
+    <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-0.5 text-xs">in-process</span>
+  </div>
+  <h2 class="font-serif text-2xl">5 · Confinement posture is one verdict per Driver</h2>
+  <p class="font-mono text-sm text-slate-600">cmd/apogee/wire_boot.go:358-403 · headless.go:929-961 · daemon.go:253 · daemonfire.go:414-431 · internal/probe/confinement.go</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diagram text-xs">
+      <p class="lbl text-slate-500 mb-3">Before — each Driver re-derives the cells</p>
+      <div class="space-y-1">
+        <div class="grid grid-cols-5 gap-1 lbl text-slate-400"><span></span><span>unconfined</span><span>degraded</span><span>residual</span><span>prewarm</span></div>
+        <div class="grid grid-cols-5 gap-1"><span class="font-mono">TUI boot</span><span class="h-8 border-l-4 border-red-400 bg-red-50"></span><span class="h-8 border-l-4 border-red-400 bg-red-50"></span><span class="h-8 border-l-4 border-red-400 bg-red-50"></span><span class="h-8 border-l-4 border-red-400 bg-red-50"></span></div>
+        <div class="grid grid-cols-5 gap-1"><span class="font-mono">headless</span><span class="h-8 border-l-4 border-red-400 bg-red-50"></span><span class="h-8 bg-slate-100 text-center leading-8">refuse</span><span class="h-8 border-l-4 border-red-400 bg-red-50"></span><span class="h-8 border-l-4 border-red-400 bg-red-50"></span></div>
+        <div class="grid grid-cols-5 gap-1"><span class="font-mono">daemon</span><span class="h-8 border-l-4 border-red-400 bg-red-50"></span><span class="h-8 bg-slate-100 text-center leading-8">refuse</span><span class="h-8 border-l-4 border-red-400 bg-red-50"></span><span class="h-8 border-l-4 border-red-400 bg-red-50"></span></div>
+      </div>
+      <p class="mt-4 text-slate-600">Each site carries comments on why it differs. <span class="leak">86afc00e touched all three Drivers and their tests.</span></p>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diagram flex flex-col justify-center gap-3 text-xs">
+      <p class="lbl text-slate-500">After — compute once, render per Driver</p>
+      <div class="text-slate-600">backend caps · mode · confine-to-workspace · attended?</div>
+      <div class="deep rounded-lg p-4 h-16 border-4 border-slate-900 flex items-center"><span class="text-sm">posture verdict: refuse · degraded · residuals · unconfined warning · prewarm</span></div>
+      <div class="grid grid-cols-3 gap-1 text-center">
+        <span class="h-6 border rounded leading-6">TUI renders</span><span class="h-6 border rounded leading-6">headless renders</span><span class="h-6 border rounded leading-6">daemon renders</span>
+      </div>
+    </div>
+  </div>
+  <p><strong>Problem.</strong> Three Driver boot paths rebuild the same confinement decision from the same inputs.</p>
+  <p><strong>Solution.</strong> One verdict over the inputs; each Driver only words and prints it.</p>
+  <ul class="grid sm:grid-cols-2 gap-x-6 text-sm list-disc pl-5">
+    <li>One verdict table test</li>
+    <li>Driver tests become render checks</li>
+    <li>New residual: one edit</li>
+  </ul>
+  <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm">Keeps ADR 0012 (never unsupervised and unbounded; unattended Auto refused without FSWrite), ADR 0112 (residuals disclose, never block), ADR 0020, ADR 0031. <code>Config.ConfinementBox</code> and the single <code>Confine</code> call are already well-shaped.</div>
+</article>
+
+<!-- 6 -->
+<article id="c6" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="rounded-full bg-amber-100 text-amber-800 px-3 py-0.5 text-xs font-semibold">Worth exploring</span>
+    <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-0.5 text-xs">in-process</span>
+  </div>
+  <h2 class="font-serif text-2xl">6 · Reader fold gestures live in the fold module</h2>
+  <p class="font-mono text-sm text-slate-600">internal/tui/mouse.go:880-955 · transcript.go:2537-2685 · sidepanel.go:1382, :1392 · settingsapply.go:809-824</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diagram flex gap-4 items-end">
+      <div class="flex-1">
+        <p class="lbl text-slate-500 mb-2">Before — interface ≈ implementation</p>
+        <div class="flex gap-3 items-end h-56">
+          <div class="w-1/2 h-52 border-2 border-red-400 bg-red-50 rounded p-2 text-[11px] space-y-1">
+            <p class="lbl text-red-700">interface</p>
+            <p>blockFoldRule enum</p><p>openBlockAlone</p><p>toggleToolsFold + markBlockTouched</p><p>setBlockFolded + markBlockTouched</p>
+            <p>head: folded · foldTouched · foldOwn · turnClosed · typeExpanded</p>
+            <p>transcript: toolsOpen · toolsFoldOver · toolsAutoCollapse · turnLive</p>
+          </div>
+          <div class="w-1/2 h-56 border border-slate-300 bg-slate-50 rounded p-2 text-[11px]"><p class="lbl text-slate-500">implementation</p></div>
+        </div>
+        <p class="text-[11px] text-slate-500 mt-2">23 raw-flag reads across 5 test files</p>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diagram flex gap-4 items-end">
+      <div class="flex-1">
+        <p class="lbl text-slate-500 mb-2">After — small interface, deep implementation</p>
+        <div class="flex gap-3 items-end h-56">
+          <div class="w-1/2 h-14 border-2 border-slate-900 rounded p-2 text-[11px]"><p class="lbl">interface</p><p>act(gesture) → fold, flip ui.tools-open?</p></div>
+          <div class="w-1/2 h-56 deep rounded p-2 text-[11px] text-slate-400"><p class="lbl text-slate-300">implementation</p><p class="mt-2">flags · touched · own · auto-collapse fence</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p><strong>Problem.</strong> Each gesture caller must know the rule enum and the right mix of setters; tests drive full Model clicks and then read raw flags.</p>
+  <p><strong>Solution.</strong> The fold module takes the reader's act and returns the resulting fold, plus whether the shared preference must flip (only the Model writes config).</p>
+  <ul class="grid sm:grid-cols-2 gap-x-6 text-sm list-disc pl-5">
+    <li>Interface shrinks to one act</li>
+    <li>Tests on a bare transcript</li>
+    <li>Assert observable fold, not flags</li>
+    <li>Best done after #1</li>
+  </ul>
+  <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm">Keeps ADR 0035 D2 (auto-collapse writes nothing; only the large-umbrella shared toggle writes), 1118 (b)/(c) (touched is session-only; opening an auto-collapsed block opens that one alone), 1120c (c) (the touch belongs to the head).</div>
+</article>
+
+<!-- 7 -->
+<article id="c7" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="rounded-full bg-amber-100 text-amber-800 px-3 py-0.5 text-xs font-semibold">Worth exploring</span>
+    <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-0.5 text-xs">in-process</span>
+  </div>
+  <h2 class="font-serif text-2xl">7 · A tool's grouping class is one registry column</h2>
+  <p class="font-mono text-sm text-slate-600">internal/tui/toolregistry.go:213-224, :575-629 · transcript.go:2610-2614 · render.go:913, :966 · toolbranch.go:404 · toolview.go:922-950 · transcriptbridge.go:625-627 · groupsummary.go:52</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diagram">
+      <p class="lbl text-slate-500 mb-2">Before — "groupable" assembled from pieces</p>
+      <pre class="mermaid">
+flowchart LR
+  G{groupable?}
+  A["row.solo"] --> G
+  B["target == nil"] --> G
+  C["workflowFinishToolName exemption"] --> G
+  D["sub_agent / load_skill names in transcript + render"] --> G
+  E["outcome hook out.Solo"] --> G
+  F["bridge re-derives ask_user solo"] --> G
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#991b1b;
+  class D,F leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diagram">
+      <p class="lbl text-slate-500 mb-2">After — the row declares it</p>
+      <pre class="mermaid">
+flowchart LR
+  R["registry row: grouping class (umbrella · own group · standalone)"]
+  O["persisted Solo verdict"] --> G
+  R --> G{groupable}
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a;
+  class R deep
+      </pre>
+    </div>
+  </div>
+  <p><strong>Problem.</strong> Whether a tool joins the Tools umbrella, forms its own group or stands alone is spread across six places; <code>7303b12b</code> had to edit transcript, render and subagentblock instead of a row.</p>
+  <p><strong>Solution.</strong> Each registry row declares its grouping class; <code>groupable</code> derives from it plus the persisted verdict.</p>
+  <ul class="grid sm:grid-cols-2 gap-x-6 text-sm list-disc pl-5">
+    <li>New tool: one row</li>
+    <li>Per-row table tests</li>
+    <li>Hard-coded tool names deleted</li>
+  </ul>
+  <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm">Keeps ADR 0083 §1 (presenter verdicts stay on the wire, so persisted <code>Solo</code> stays) and ADR 0031 (no domain or engine field). Per-tool label, target and verb phrase are already one row each.</div>
+</article>
+
+<!-- 8 -->
+<article id="c8" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="rounded-full bg-slate-200 text-slate-700 px-3 py-0.5 text-xs font-semibold">Speculative</span>
+    <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-0.5 text-xs">in-process</span>
+  </div>
+  <h2 class="font-serif text-2xl">8 · A start-up notice's class is declared once</h2>
+  <p class="font-mono text-sm text-slate-600">cmd/apogee/{wire_boot,wire_live,wire_verbs,mcp_cmd}.go · internal/tui/tui.go:1285-1314 · internal/probe/confinement.go:138-200 · model.go:1056</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diagram text-xs space-y-2">
+      <p class="lbl text-slate-500">Before</p>
+      <div class="grid grid-cols-3 gap-1">
+        <span class="border rounded p-1 font-mono">Notice{Loud,Log} ×9</span><span class="border rounded p-1 font-mono">Anomaly → loud</span><span class="border rounded p-1 font-mono leak">Log ignored on rebind</span>
+        <span class="border rounded p-1 font-mono">ResidualNotice</span><span class="border rounded p-1 font-mono">ResidualNotes</span><span class="border rounded p-1 font-mono leak">foldHardBreaks</span>
+      </div>
+      <p class="text-slate-600">The 14 loud kinds exist only as prose; <code>3b8d0444</code> edited three docs to list them; no test pins it.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diagram flex flex-col justify-center gap-3 text-xs">
+      <p class="lbl text-slate-500">After</p>
+      <div class="deep rounded-lg p-4 border-4 border-slate-900"><p class="lbl text-slate-300">TUI Driver notice table</p><p class="mt-1">kind → class · transcript wording</p></div>
+      <p class="text-slate-600 text-center">loud list is code; a test pins it · feeds #2</p>
+    </div>
+  </div>
+  <p><strong>Problem.</strong> Loud vs routine and the transcript wording are decided by each producer in <code>cmd/apogee</code>, with a flag that works on one path only.</p>
+  <p><strong>Solution.</strong> The TUI Driver declares each notice kind's class and wording once.</p>
+  <ul class="grid sm:grid-cols-2 gap-x-6 text-sm list-disc pl-5">
+    <li>Loud list pinned by a test</li>
+    <li>Stderr shape stops leaking in</li>
+  </ul>
+  <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm"><code>internal/notice</code> composers return text only, so the class must not move into <code>notice</code> or <code>domain</code>. ADR 0112 amend-1112 §2: stderr, headless and daemon output stay byte-for-byte unchanged.</div>
+</article>
+
+<!-- still open -->
+<article id="open" class="rounded-xl border border-dashed border-slate-300 bg-stone-100 p-6 space-y-3">
+  <h2 class="font-serif text-xl">Still open from 2026-11-10</h2>
+  <p class="text-sm text-slate-600">None of the ten are built (<code>panelFrame</code> absent; <code>scalarPathDepth</code> still caps the scalar writer). The side panel cooled (7 commits since, vs 47), so #1 there is less urgent. New evidence for two of them:</p>
+  <ul class="text-sm list-disc pl-5 space-y-1">
+    <li><strong>#8 A UI pref is declared once, in domain:</strong> <code>5be06c33</code> (<code>ui.tools-auto-collapse</code>) touched config.go, registry.go, defaults/config.yaml, domain/uiprefs.go and tui/settingsapply.go.</li>
+    <li><strong>#3 Applying a UI pref is one module:</strong> <code>37823599</code> added a one-key special case for <code>ui.side-panel.width</code> inside the generic <code>settingChanged</code> diff.</li>
+  </ul>
+  <p class="text-xs text-slate-500">Checked and well-shaped: paint cache (validation cache, 6 documented drops), <code>entryKindRules</code>, <code>buildGroupSummary</code>, <code>blockFoldBy</code>, <code>UpstreamLoadingEvent.Notice()</code>, confiner seam (4 real adapters), <code>planUnixSockets</code>, <code>confinetest</code>, the shell write view tokenizer.</p>
+</article>
+
+</section>
+
+<section id="top-recommendation" class="rounded-2xl deep p-8 space-y-3">
+  <p class="lbl text-slate-400">Top recommendation</p>
+  <h2 class="font-serif text-3xl"><a class="hover:underline" href="#c1">1 · A tool block's shape is asked once</a></h2>
+  <p class="text-slate-300 max-w-3xl">It is the hottest code in the tree, two classifiers have already drifted into a shipped bug, it is purely in-process, and it is the foundation for #6 and #7. Next take #2 (session log routing) and #3 (repository state), which are independent and each close a family of repeat fixes.</p>
+</section>
+
+</main>
+</body>
+</html>
