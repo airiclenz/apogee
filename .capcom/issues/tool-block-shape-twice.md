@@ -1,11 +1,13 @@
 ---
 title: "A tool block's shape is asked once (architecture review 2026-11-21 #1)"
-status: parked
+status: done
 type: task
 priority: 3
 labels: [tui]
 plan: 2026-11-21 - 00 - tool-block-shape-plan.md
 created: 2026-11-21T12:27:13Z
+closed: 2026-11-21T14:12:15Z
+reason: "Resolved by plan 2026-11-21 - 00 - tool-block-shape-plan (all four items done; archived at fe1c3ce7): blockshape.go answers a tool block's shape once for paint, fold, reveal and hit-testing."
 ---
 
 Found by docs/reviews/architecture-review-2026-11-21.html, verified 2026-11-21 at 171d210f.
