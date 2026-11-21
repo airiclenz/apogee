@@ -470,7 +470,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		// the resolver hands THAT to its painter and to its key, so what a block paints and what its
 		// memo names are one value (paintcache.go). The entries themselves stay with the walk, which
 		// is the only part that needs them — where a block ENDS is a question about the list
-		// (subAgentGroupAt, subAgentSpan, toolSuperGroup, sameLabelRun), never about a paint.
+		// (toolBlockAt, subAgentSpan), never about a paint.
 		in := root.painted(t.entries[i])
 		// One question, asked once: what block starts here? The answer carries its shape, the records
 		// it covers, its paint and the index the walk resumes at ([resolvedBlock]), so the step past a
@@ -881,12 +881,12 @@ type resolvedBlock struct {
 
 // resolveBlock answers what block starts at entry index head, whose painter record is in. It is the
 // renderer's ONE block-shape decision, and the only place a shape's span is turned into a step: the
-// folded shapes are asked for in the order their containment demands — a grouped delegation list
-// before its members, an umbrella before the same-label runs inside it — and an entry heading none
-// of them is a block of its own.
+// folded tool-block shapes are the shape answer's ([toolBlockAt]), asked once at the walk's index and
+// in the one order that answer states, and an entry in none of them is a run's framed head or a block
+// of its own.
 //
-// It reads the entry LIST, because where a block ends is a question about the list (subAgentGroupAt,
-// subAgentSpan, toolSuperGroup, sameLabelRun); everything it hands back speaks in paint records
+// It reads the entry LIST, because where a block ends is a question about the list (toolBlockAt,
+// subAgentSpan); everything it hands back speaks in paint records
 // instead, which is what keeps a painter to what it needs to draw and nothing it could write through
 // (paintcache.go, ADR 0011).
 //
@@ -901,17 +901,76 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 	// delegation has the collapsed row it wears in this list and its run view, and no third shape
 	// (docs/layout/tool-layout.md, "Grouped Sub-agents").
 	//
-	// Adjacent delegations fold into ONE "✦ Sub-agents (N)" list (subAgentGroupAt), asked first
-	// because every member of one is also a run head and would otherwise resolve as a block of its
-	// own below. The question is asked at every member and not only at the first: a member carrying
-	// the open flag ENDS this block, so the list resumes in a second block of the same shape after
-	// it, headerless, its rows still counted against the whole group.
-	//
-	// Only an UNFRAMED member can carry that flag: setExpanded refuses it on any head with a run to
-	// open (transcript.go), so the block that stops at one steps past a member with no span rather
-	// than into a railed one, and a framed member's span is skipped whole, by the rule below.
-	if grp, pos, ok := subAgentGroupAt(t.entries, head); ok {
-		return t.resolveGroup(head, in, width, blink, root, buf, grp, pos, shapeSubAgentGroup)
+	// The tool-block shape is asked ONCE, at the walk's own index, of the one answer the fold side
+	// asks too (toolBlockAt), so paint and fold cannot come to disagree about which block an entry
+	// is in. The walk's index can be a group member and not its head — a list resuming after an open
+	// member — so the head and member position are read off the answer, never assumed from head.
+	b := toolBlockAt(t.entries, head)
+	switch b.kind {
+	case shapeSubAgentGroup, shapeSkillGroup:
+		// Adjacent delegations fold into ONE "✦ Sub-agents (N)" list, asked first (toolBlockAt)
+		// because every member of one is also a run head and would otherwise resolve as a block of
+		// its own below. The question is asked at every member and not only at the first: a member
+		// carrying the open flag ENDS this block, so the list resumes in a second block of the same
+		// shape after it, headerless, its rows still counted against the whole group.
+		//
+		// Only an UNFRAMED member can carry that flag: setExpanded refuses it on any head with a run
+		// to open (transcript.go), so the block that stops at one steps past a member with no span
+		// rather than into a railed one, and a framed member's span is skipped whole, by the rule
+		// below.
+		//
+		// Adjacent SKILL FETCHES fold the same way, under one "✦ Skill (N)" (the issue register,
+		// "load_skill renders as a raw tool"): a fetch is the run taking instructions on, and two of
+		// them in a row are one act with two rows, not two cards. It is one mechanism with two
+		// participants — the same derivation asked of another tool name and the same painter — so
+		// nothing here restates what a group is. The shape answer asks it after the delegation list,
+		// which a delegation head answers and this rule must never see, and BEFORE the umbrella,
+		// because the presenter marks a fetch solo (presentToolCall): a mixed "✦ Tools" would bury
+		// the instructions the run just took on among the reads around them. A member row opens
+		// INLINE and never a run view — opensRun and headsRun stay keyed on sub_agent, so a fetch
+		// heads no run to open and the ordinary member painter is what its expanded row falls to
+		// (renderSubAgentGroup).
+		return t.resolveGroup(head, in, width, blink, root, buf, b)
+	case shapeToolSuper:
+		// Every groupable call folds under an umbrella — a lone call as a group of one, a single
+		// same-label run and adjacent runs of DIFFERENT tools alike, because a run is a ROW of the
+		// umbrella rather than a block of its own, so only a call that groups with nothing (a solo or
+		// targetless one) falls through to the single block below. The walk's index is the
+		// umbrella's head by construction — every shape either advances by a single entry or steps
+		// over a whole block — and the block is stated from the answer's own head and end all the
+		// same.
+		//
+		// The umbrella covers its calls and nothing else (superGroup.calls), so the walk steps
+		// over exactly them. Its per-entry state is in the paint key already: blockKey spans the
+		// whole umbrella and spanFlags packs both levels — a member's expanded at bit 0 and a run
+		// head's typeExpanded at bit 2 — so opening either level is a different key and a fresh
+		// paint (paintcache.go). Its FOLD is the one resolution blockFoldBy states: under
+		// auto-collapse a settled and untouched one is folded first; otherwise its size decides — a
+		// large umbrella, more type rows than the threshold (umbrellaIsLarge), folds to its header
+		// line under the one shared preference (toolsOpen), a small one on its head entry's own flag
+		// — and the resolved answer rides the block into the key (paintKey.large/folded), so a
+		// settle (a later entry, the Turn's end, a child's report), a threshold edit, a preference
+		// flip or the head flag's move is a fresh paint too. Whether it is a group of one is the
+		// answer's too (groupOfOne), which the painter draws the call's own block under the header
+		// from.
+		sup := b.sup
+		ins := root.appendInputs(buf[:0], t.entries[b.head:b.end])
+		live := anyOpenCall(ins)
+		fold := umbrellaFold{large: t.umbrellaIsLarge(b.head), folded: t.blockFolded(b.head)}
+		groupOfOne := b.groupOfOne()
+		// The head record's level, read here so draw closes over an int and not the record.
+		depth := in.depth
+		return resolvedBlock{
+			shape: shapeToolSuper,
+			ins:   ins,
+			live:  live,
+			fold:  fold,
+			draw: func(th theme) blockPaint {
+				return renderSuperGroup(th, superRunViews(ins, sup), railedWidth(width, depth),
+					blockState{live: live, blink: blink}, fold, groupOfOne).railed(th, depth)
+			},
+			next: b.end,
+		}
 	}
 	// A sub-agent run is ONE block, always (layout.md, ADR 0063): its head paints with the
 	// cascading summary and the whole span is then skipped outright, which is what elides the
@@ -927,7 +986,7 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 	// so a nested entry arriving or landing its result is a different block (paintcache.go).
 	//
 	// A delegation never reaches this branch: every one is a member of a Sub-agent group, a lone
-	// one of a group of one (ownGroup), and the group branch above paints it. What reaches it is a
+	// one of a group of one (ownGroup), and the group case above paints it. What reaches it is a
 	// Workflow item's run head (entryWorkflowItem), which heads a run but never groups. A run
 	// reaching this branch closes with no ┊ at all: the closer belongs to a list resuming after one
 	// of its members, and a head standing here stands alone.
@@ -949,59 +1008,6 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 				return renderSubAgentRun(th, ins[0], ins[1:], width, blink)
 			},
 			next: head + span + 1, // the span is elided whole: it is read in the run's own view
-		}
-	}
-	// Adjacent SKILL FETCHES fold the same way delegations do, under one "✦ Skill (N)" (the issue
-	// register, "load_skill renders as a raw tool"): a fetch is the run taking instructions on, and
-	// two of them in a row are one act with two rows, not two cards. It is one mechanism with two
-	// participants — the same derivation asked of another tool name (ownGroupAt) and the same
-	// painter — so nothing here restates what a group is.
-	//
-	// It is asked AFTER the two delegation branches because a delegation head answers those and
-	// this rule must never see one, and BEFORE the umbrella because the presenter marks a fetch
-	// solo (presentToolCall): a mixed "✦ Tools" would bury the instructions the run just took on
-	// among the reads around them. A member row opens INLINE and never a run view — opensRun and
-	// headsRun stay keyed on sub_agent, so a fetch heads no run to open and the ordinary member
-	// painter is what its expanded row falls to (renderSubAgentGroup).
-	if grp, pos, ok := ownGroupAt(t.entries, head, loadSkillToolName); ok {
-		return t.resolveGroup(head, in, width, blink, root, buf, grp, pos, shapeSkillGroup)
-	}
-	// Every groupable call folds under an umbrella (toolSuperGroup) — a lone call as a group of one,
-	// a single same-label run and adjacent runs of DIFFERENT tools alike, because a run is a ROW of
-	// the umbrella rather than a block of its own, so only a call that groups with nothing (a solo or
-	// targetless one) falls through to the single block below. The question is only ever asked at
-	// a block head — the walk's index is one by construction, since every shape either advances by
-	// a single entry or steps over a whole block — and toolSuperGroup is only correct there: asked
-	// mid-run it would answer with a partial first run.
-	//
-	// The umbrella covers its calls and nothing else (superGroup.calls), so the walk steps
-	// over exactly them. Its per-entry state is in the paint key already: blockKey spans the
-	// whole umbrella and spanFlags packs both levels — a member's expanded at bit 0 and a run
-	// head's typeExpanded at bit 2 — so opening either level is a different key and a fresh
-	// paint (paintcache.go). Its FOLD is the one resolution blockFoldBy states: under
-	// auto-collapse a settled and untouched one is folded first; otherwise its size decides — a
-	// large umbrella, more type rows than the threshold (umbrellaIsLarge), folds to its header line
-	// under the one shared preference (toolsOpen), a small one on its head entry's own flag — and the
-	// resolved answer rides the block into the key (paintKey.large/folded), so a settle (a later
-	// entry, the Turn's end, a child's report), a threshold edit, a preference flip or the head
-	// flag's move is a fresh paint too.
-	if sup := toolSuperGroup(t.entries, head); len(sup) > 0 {
-		calls := sup.calls()
-		ins := root.appendInputs(buf[:0], t.entries[head:head+calls])
-		live := anyOpenCall(ins)
-		fold := umbrellaFold{large: t.umbrellaIsLarge(head), folded: t.blockFolded(head)}
-		// The head record's level, read here so draw closes over an int and not the record.
-		depth := in.depth
-		return resolvedBlock{
-			shape: shapeToolSuper,
-			ins:   ins,
-			live:  live,
-			fold:  fold,
-			draw: func(th theme) blockPaint {
-				return renderSuperGroup(th, superRunViews(ins, sup), railedWidth(width, depth),
-					blockState{live: live, blink: blink}, fold).railed(th, depth)
-			},
-			next: head + calls,
 		}
 	}
 	// One entry, one block. Which kinds can still be waiting, and which head a prompt stop, are the
@@ -1101,9 +1107,11 @@ func previewTail(s string) string {
 }
 
 // resolveGroup turns one folded list of same-tool calls into the block that paints it — the shape
-// both [subAgentGroupAt] and the skill list resolve through, so a fan-out of delegations and a run
-// of skill fetches are laid out by ONE rule and can never come to disagree about where a group's
-// block ends. shape names which of them this is, for the paint key alone (paintcache.go): what is
+// both the Sub-agent and the Skill group of the shape answer ([toolBlockAt]) resolve through, so a
+// fan-out of delegations and a run of skill fetches are laid out by ONE rule and can never come to
+// disagree about where a group's block ends. head is the walk's index, where this block starts: the
+// group's first member, or a member further in (b.pos > 0) when the list resumes after an open one.
+// b.kind names which group this is, for the paint key alone (paintcache.go): what is
 // drawn is settled by the members themselves, and [renderSubAgentGroup] reads each row exactly as
 // the lone block it folded from. buf is the walk's record buffer, as [transcript.resolveBlock]
 // states.
@@ -1114,7 +1122,8 @@ func previewTail(s string) string {
 // paints a row — and paints its header line alone; the fold rides the block into the paint key
 // (resolvedBlock.fold), so the click that folds or opens it is a fresh paint.
 func (t *transcript) resolveGroup(head int, in paintInput, width int, blink bool,
-	root paintRoot, buf []paintInput, grp []groupBlock, pos int, shape blockShape) resolvedBlock {
+	root paintRoot, buf []paintInput, b toolBlock) resolvedBlock {
+	grp, pos := b.group, b.pos
 	// Only the group's first block carries the header, and so only it can stand folded: a member
 	// further in is no block's head (toolBlockAt), so it answers open.
 	folded := t.blockFolded(head)
@@ -1129,8 +1138,7 @@ func (t *transcript) resolveGroup(head int, in paintInput, width int, blink bool
 	// the header's star asks the whole list whether any delegate is still working, and a
 	// member's row changes shape the moment its delegation grows a span to reveal, so a key
 	// stopping at the last row it paints would serve a stale one (paintcache.go).
-	tail := grp[len(grp)-1]
-	cover := tail.at + 1 + tail.span - head
+	cover := b.end - head
 	// One record per covered entry, stated once and read by both the key and the rows: a
 	// member's own record sits at its offset from the head and its span is the records behind
 	// it, so what the paint reads is exactly what the key named (paintcache.go).
@@ -1152,7 +1160,7 @@ func (t *transcript) resolveGroup(head int, in paintInput, width int, blink bool
 		next += grp[end].span
 	}
 	return resolvedBlock{
-		shape: shape,
+		shape: b.kind,
 		ins:   ins,
 		live:  live,
 		fold:  umbrellaFold{folded: folded},

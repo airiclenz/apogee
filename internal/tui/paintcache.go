@@ -85,8 +85,8 @@ type entryState struct {
 // stated once for every field a painter has.
 //
 // The line it draws is the one [transcript.renderView] already stands on: the WALK reads the entries
-// — where a block ends is a question about the list (subAgentGroupAt, subAgentSpan, toolSuperGroup,
-// sameLabelRun) — and everything downstream of a block's boundaries reads this record instead.
+// — where a block ends is a question about the list (toolBlockAt, subAgentSpan) — and everything
+// downstream of a block's boundaries reads this record instead.
 //
 // It is also what turns [paintKey]'s completeness from a remembered rule into a compile-visible
 // decision. A painter can paint no fact that is not stated here, and a fact stated here arrives

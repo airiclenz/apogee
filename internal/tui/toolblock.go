@@ -133,7 +133,9 @@ const (
 // LIST whose rows stand for RUNS rather than for calls, and everything about the shape follows from
 // that — save for a GROUP OF ONE, a lone call, whose open shape is the call's own standalone block
 // (renderToolBlock) directly under the header, with no type row: one call has no run to list, and
-// the block it paints there is the very one it painted before a lone call folded at all.
+// the block it paints there is the very one it painted before a lone call folded at all. Whether the
+// umbrella is one is the shape answer's to say ([toolBlock.groupOfOne]), handed in as groupOfOne, so
+// the painter never restates the group-of-one rule.
 //
 //   - a TYPE ROW is the leader row about a whole run (leaderRowIn): the label and its "(N)" where a
 //     call would put its target, the run's aggregate in the outcome slot (runAggregate), and a ▶/▼
@@ -171,14 +173,15 @@ const (
 // rows are actually drawn in: demotion changes what a member hides, and that is what its indicator
 // and its click surface are answered from — the same reason the guard runs at the block's entrance
 // rather than inside a row.
-func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState, fold umbrellaFold) blockPaint {
+func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState, fold umbrellaFold,
+	groupOfOne bool) blockPaint {
 	room := toolRowCells(th, width)
 	var out blockPaint
 	out.add([]string{umbrellaHeader(th, runs, state, room, width, !fold.folded)}, targetUmbrella)
 	if fold.folded {
 		return out
 	}
-	if len(runs) == 1 && len(runs[0].views) == 1 {
+	if groupOfOne {
 		// The block marks its own lines for member 0 — the umbrella's head, the call itself — so a
 		// click there flips the call's body while the header above folds the group.
 		out.join(renderToolBlock(th, runs[0].views[0], width, blockState{

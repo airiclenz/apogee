@@ -79,7 +79,10 @@ internal/tui/autocollapse_test.go — settledAt; internal/tui/autocollapse_touch
 - `grep -c '^func TestToolBlockShapes(' internal/tui/blockshape_test.go` prints 1
 **Commit:** `refactor(tui): answer a tool block's shape once for fold and reveal`
 
-## 3. Make paint ask the shape answer
+## 3. Make paint ask the shape answer — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): resolveBlock now asks toolBlockAt before the framed-run check (it used to ask the Sub-agent group, then framing, then the Skill group and the umbrella); no entry answers both, since a framed run head (entryWorkflowItem) is never a Skill member or a groupable call, so the order change paints nothing differently.
+NOTES (2026-11-21): resolveGroup takes the toolBlock in place of (grp, pos, shape) and reads its cover from b.end; its folded test stays t.blockFolded at the walk index, which the head-only contract answers open at a resumed block (pos > 0), as before.
 
 Depends on item 2.
 
