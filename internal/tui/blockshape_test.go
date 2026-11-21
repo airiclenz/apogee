@@ -41,20 +41,25 @@ func loneAnswer(at int) shapeAnswer {
 	return shapeAnswer{kind: shapeEntry, head: at, end: at + 1}
 }
 
-// TestToolBlockShapes pins the shape answer (toolBlockAt) asked at a block's head AND at every
-// member: the umbrella (a group of one included), the Sub-agent and Skill groups (a lone delegation
-// or skill fetch is a group of one), the breakers that end a block, and the calls and blocks that
-// stay out of every group (ADR 0035 amendment 1120c). noFoldAt names indices that are inside a
-// foldable block but head none, where blockFoldBy must answer foldByNone.
-func TestToolBlockShapes(t *testing.T) {
-	t.Parallel()
+// blockShapeCase is one transcript of the shape table and the answers it pins. noFoldAt names
+// indices that are inside a foldable block but head none, where blockFoldBy must answer foldByNone.
+// noUmbrellaAt names indices asked straight of the umbrella's primitives — no groupable call there,
+// and no umbrella headed — because the shape answer asks the Skill group before the umbrella, so its
+// kind alone would not see a fetch turning groupable.
+type blockShapeCase struct {
+	name         string
+	build        func(tr *transcript)
+	want         map[int]shapeAnswer
+	noFoldAt     []int
+	noUmbrellaAt []int
+}
 
-	for _, tc := range []struct {
-		name     string
-		build    func(tr *transcript)
-		want     map[int]shapeAnswer
-		noFoldAt []int
-	}{
+// blockShapeCases is the shape table: the umbrella (a group of one included), the Sub-agent and
+// Skill groups (a lone delegation or skill fetch is a group of one), the breakers that end a block,
+// and the calls and blocks that stay out of every group (ADR 0035 amendment 1120c). Both the shape
+// test and the paint/fold agreement test walk it, so the transcripts each pins are one list.
+func blockShapeCases() []blockShapeCase {
+	return []blockShapeCase{
 		{
 			name:  "a lone groupable call is a group of one",
 			build: func(tr *transcript) { readCall(tr, "r1", "a.go", 1, 5, 0) },
@@ -114,6 +119,39 @@ func TestToolBlockShapes(t *testing.T) {
 				3: umbrellaAnswer(3, 4),
 			},
 			noFoldAt: []int{2},
+		},
+		{
+			// Each fetch carries a non-empty Target — what would otherwise make it groupable — and
+			// the never-group mark keeps it out of the umbrella at every index one could form from
+			// (TestSkillFetchesNeverJoinTheToolsSuperGroup).
+			name: "two skill fetches never join the Tools umbrella",
+			build: func(tr *transcript) {
+				skillFetch(tr, "c1", "format Go", "<skill: Coding Standards>\nUse gofmt.\n</skill>\n")
+				skillFetch(tr, "c2", "cut a release", "<skill: Brew Release>\nTag it.\n</skill>\n")
+			},
+			want: map[int]shapeAnswer{
+				0: {kind: shapeSkillGroup, head: 0, pos: 0, end: 2, members: 2, isFoldable: true},
+				1: {kind: shapeSkillGroup, head: 0, pos: 1, end: 2, members: 2, isFoldable: true},
+			},
+			noFoldAt:     []int{1},
+			noUmbrellaAt: []int{0, 1},
+		},
+		{
+			// An open member ends the group's block, so paint resumes the list at the member after
+			// it: a walk index that is a member past the first (pos > 0) and heads no fold.
+			name: "a Skill group resumed after an open member",
+			build: func(tr *transcript) {
+				skillFetch(tr, "s1", "go style", "# Go style")
+				skillFetch(tr, "s2", "go tests", "# Go tests")
+				skillFetch(tr, "s3", "go docs", "# Go docs")
+				tr.entries[1].expanded = true
+			},
+			want: map[int]shapeAnswer{
+				0: {kind: shapeSkillGroup, head: 0, pos: 0, end: 3, members: 3, isFoldable: true},
+				1: {kind: shapeSkillGroup, head: 0, pos: 1, end: 3, members: 3, isFoldable: true},
+				2: {kind: shapeSkillGroup, head: 0, pos: 2, end: 3, members: 3, isFoldable: true},
+			},
+			noFoldAt: []int{1, 2},
 		},
 		{
 			name: "narration breaks an umbrella",
@@ -193,7 +231,15 @@ func TestToolBlockShapes(t *testing.T) {
 			build: func(tr *transcript) { tr.apply(startedWith("scan", "fix")) },
 			want:  map[int]shapeAnswer{0: loneAnswer(0)},
 		},
-	} {
+	}
+}
+
+// TestToolBlockShapes pins the shape answer (toolBlockAt) asked at a block's head AND at every
+// member, over every transcript of the shape table (blockShapeCases).
+func TestToolBlockShapes(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range blockShapeCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -211,6 +257,132 @@ func TestToolBlockShapes(t *testing.T) {
 			for _, at := range tc.noFoldAt {
 				if got := tr.blockFoldBy(at); got != foldByNone {
 					t.Errorf("blockFoldBy(%d) = %d at a member past its block's head; want foldByNone", at, got)
+				}
+			}
+			for _, at := range tc.noUmbrellaAt {
+				if groupable(tr.entries[at].tool) {
+					t.Errorf("entry %d is groupable; it would fold into a Tools umbrella", at)
+				}
+				if g := toolSuperGroup(tr.entries, at); g != nil {
+					t.Errorf("toolSuperGroup(entries, %d) = %v; it heads no umbrella", at, g)
+				}
+			}
+		})
+	}
+}
+
+// walkedBlock is one block the paint walk laid down: the walk index it started at, the shape the
+// painter answered with, and where the walk resumed.
+type walkedBlock struct {
+	at    int
+	shape blockShape
+	next  int
+}
+
+// paintWalk steps tr exactly as renderView does — over the paint root's window, past every retired
+// item attempt, from one resolveBlock answer to the next — and returns each block it resolved. A
+// block that does not move the walk forward fails the test rather than looping.
+func paintWalk(t *testing.T, tr *transcript) []walkedBlock {
+	t.Helper()
+
+	root := tr.paintRoot()
+	retired := retiredAttempts(tr.entries)
+	var walked []walkedBlock
+	var records []paintInput
+	for i := root.first; i < root.last; {
+		if retired[i] {
+			i += 1 + subAgentSpan(tr.entries, i)
+			continue
+		}
+		block := tr.resolveBlock(i, root.painted(tr.entries[i]), 80, false, root, records)
+		records = block.ins
+		if block.next <= i {
+			t.Fatalf("resolveBlock(%d) resumes the walk at %d; it must move forward", i, block.next)
+		}
+		walked = append(walked, walkedBlock{at: i, shape: block.shape, next: block.next})
+		i = block.next
+	}
+	return walked
+}
+
+// memberIndices is every entry the block answers for as one of its own heads: each umbrella call,
+// and each group member's call. A member's span is its run's own blocks, so it is not listed.
+func memberIndices(b toolBlock) []int {
+	var at []int
+	switch b.kind {
+	case shapeToolSuper:
+		for i := b.head; i < b.end; i++ {
+			at = append(at, i)
+		}
+	case shapeSubAgentGroup, shapeSkillGroup:
+		for _, m := range b.group {
+			at = append(at, m.at)
+		}
+	}
+	return at
+}
+
+// TestPaintAndFoldAgreeWithTheBlockShape pins paint and fold to the one shape answer: at every
+// index the paint walk reaches over a shape-table transcript, with auto-collapse off and on, the
+// painted shape is toolBlockAt's kind (a run head's shapeSubAgentRun is a shapeEntry there), the
+// walk stands on the block's head unless it resumes a group (pos > 0, head before it), a foldable
+// block's step stays inside it and any other block steps one entry or over its span, every umbrella
+// call and group member answers the same head, and blockFoldBy finds a fold exactly at a foldable
+// block's head.
+func TestPaintAndFoldAgreeWithTheBlockShape(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range blockShapeCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tr := &transcript{}
+			tc.build(tr)
+
+			for _, autoCollapse := range []bool{false, true} {
+				tr.setToolsAutoCollapse(autoCollapse)
+				for _, w := range paintWalk(t, tr) {
+					b := toolBlockAt(tr.entries, w.at)
+					painted := w.shape
+					if painted == shapeSubAgentRun {
+						painted = shapeEntry
+					}
+					if painted != b.kind {
+						t.Errorf("autoCollapse=%v: painted shape %d at %d; toolBlockAt answers %d",
+							autoCollapse, w.shape, w.at, b.kind)
+					}
+					if b.pos == 0 && b.head != w.at {
+						t.Errorf("autoCollapse=%v: walk index %d at pos 0 answers head %d; want the index",
+							autoCollapse, w.at, b.head)
+					}
+					if b.pos > 0 && b.head >= w.at {
+						t.Errorf("autoCollapse=%v: walk index %d resumes a group at pos %d with head %d; want a head before it",
+							autoCollapse, w.at, b.pos, b.head)
+					}
+					if b.foldable() {
+						if w.next > b.end {
+							t.Errorf("autoCollapse=%v: the block painted at %d resumes at %d, past its end %d",
+								autoCollapse, w.at, w.next, b.end)
+						}
+					} else if span := subAgentSpan(tr.entries, w.at); w.next != w.at+1 && w.next != w.at+1+span {
+						t.Errorf("autoCollapse=%v: the entry painted at %d resumes at %d; want %d or %d",
+							autoCollapse, w.at, w.next, w.at+1, w.at+1+span)
+					}
+					for _, at := range memberIndices(b) {
+						if got := toolBlockAt(tr.entries, at).head; got != b.head {
+							t.Errorf("autoCollapse=%v: toolBlockAt(%d).head = %d; the block painted at %d has head %d",
+								autoCollapse, at, got, w.at, b.head)
+						}
+					}
+					fold := tr.blockFoldBy(w.at)
+					if b.pos == 0 && (fold != foldByNone) != b.foldable() {
+						t.Errorf("autoCollapse=%v: blockFoldBy(%d) = %d; foldable() = %v",
+							autoCollapse, w.at, fold, b.foldable())
+					}
+					if b.pos > 0 && fold != foldByNone {
+						t.Errorf("autoCollapse=%v: blockFoldBy(%d) = %d at a resumed group member; want foldByNone",
+							autoCollapse, w.at, fold)
+					}
 				}
 			}
 		})

@@ -780,7 +780,9 @@ func TestRenderSkillFetchMissKeepsTheQuery(t *testing.T) {
 // Two adjacent fetches never fold into the mixed "✦ Tools" umbrella. The guard is worth
 // stating twice over: each view carries a non-empty Target — which is what would otherwise make it
 // groupable — and the never-group mark keeps it
-// out anyway, at every index the umbrella could form from.
+// out anyway, at every index the umbrella could form from. That the umbrella's own primitives see
+// no groupable call and no umbrella there is a row of the shape table (blockshape_test.go,
+// "two skill fetches never join the Tools umbrella").
 func TestSkillFetchesNeverJoinTheToolsSuperGroup(t *testing.T) {
 	t.Parallel()
 
@@ -794,12 +796,6 @@ func TestSkillFetchesNeverJoinTheToolsSuperGroup(t *testing.T) {
 		}
 		if !e.tool.solo {
 			t.Errorf("entry %d is not solo; a skill fetch groups with its own kind, never with everyone", i)
-		}
-		if groupable(e.tool) {
-			t.Errorf("entry %d is groupable; it would fold into a Tools umbrella", i)
-		}
-		if g := toolSuperGroup(tr.entries, i); g != nil {
-			t.Errorf("toolSuperGroup(entries, %d) = %v; a run of skill fetches heads no umbrella", i, g)
 		}
 	}
 }

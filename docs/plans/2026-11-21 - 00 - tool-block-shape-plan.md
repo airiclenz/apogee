@@ -102,7 +102,11 @@ internal/tui/transcript.go — blockFolded, blockFoldBy; internal/tui/paintcache
 - `grep -nE '\b(subAgentGroupAt|ownGroupAt|foldableHead)\b' internal/tui/render.go` prints nothing
 **Commit:** `refactor(tui): paint a tool block from its one shape answer`
 
-## 4. Pin paint and fold to the shape answer with an agreement table
+## 4. Pin paint and fold to the shape answer with an agreement table — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): the shape table moved into a shared `blockShapeCases()` (type `blockShapeCase`) that both `TestToolBlockShapes` and `TestPaintAndFoldAgreeWithTheBlockShape` range over; the walk helper `paintWalk` steps `resolveBlock` over `paintRoot()`'s window, skipping `retiredAttempts`, as `renderView` does.
+NOTES (2026-11-21): added two shape-table rows — "two skill fetches never join the Tools umbrella" (the moved `groupable`/`toolSuperGroup` asserts, carried by a new `noUmbrellaAt` field asked straight of those primitives) and "a Skill group resumed after an open member" (sets `entries[1].expanded`), the only table transcript whose walk reaches a pos > 0 index, so the agreement test's resumed-group clause is exercised.
+NOTES (2026-11-21): the agreement test walks each transcript twice, auto-collapse off and on, so the folded-group step (next past the whole group) is covered as well as the open one.
 
 Depends on item 3.
 
