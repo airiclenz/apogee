@@ -132,8 +132,9 @@
 // 0063, ADR 0086) — the second as a message sent now, which skips the child's unstarted
 // grandchildren while it waits (ADR 0025, amended 2026-10-05).
 // childrun.go is the one lifecycle a child's run goes through on that registry — register, arm,
-// Run, disarm, the stop verdict and an optional fold of a stopped child — and its teardown,
-// reapChild; sub_agent delegation (runSubAgent) runs its child on it with fold on, the workflow
+// Run, disarm, the stop verdict and an optional fold of a stopped child — its teardown, reapChild,
+// and the bracket a delegation is booked under around it (childBracket: run id, phase pair,
+// recover boundary, ending and ledger row); sub_agent delegation (runSubAgent) runs its child on it with fold on, the workflow
 // spawner its item children with fold off. childending.go is the one value a delegation's ending
 // is decided as — a child's run read through one run switch, a refusal, or a delegation settled
 // before its child started — and every word that ending is spelled in elsewhere projects from it:

@@ -244,7 +244,13 @@ Superseded source: docs/manual/headless.md:311 (`refused` = "the child, still ru
 - `! grep -nE 'func (\(a \*Agent\) )?(classifyDelegation|delegationSummary|subAgentEnding|undeliveredWorkflowReason|undeliveredReason)\(' internal/agent/*.go`
 **Commit:** `refactor(agent): every delegation classifier reads one childEnding`
 
-## 7. The child bracket, unit-tested
+## 7. The child bracket, unit-tested — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): re-derived from `classifyDelegation` (item 6 replaced it with `delegateEnding`/`spawnEnding`): `childBracket.settle` keeps delegateEnding's order — cancelled (unstartedCancelled when `!ran`), stopped, error/panic → refused if `!ran` else faulted, otherwise the body's ending — and reads "error ending" off the ending's kind (faulted/refused), not `result.IsError`.
+NOTES (2026-11-21): shape chosen where the plan left it open: `openBracket(turn int, call, runID *string, ledger)` — runID is a pointer so `mintRunID` (called by `run`, callable earlier for an observer) writes the minted id back to the slot; `run(started, onPanic func(any) domain.ToolResult, body func() (domain.ToolResult, childEnding))`; the bracket emits the panic ErrorEvent itself (identical on both paths) and onPanic supplies each path's own panicked result; `reap(registry, sub, stopLeftover)` holds the leftover for step 4; the row's label/target are the `rowName`/`rowTarget` fields.
+NOTES (2026-11-21): added a ninth test, `TestChildBracket_OpensOnTheReservedIndexAndMintsOnlyOnTheRunPath`, pinning the regression guard's two openBracket rules (reserved index honoured; run id minted only on the run path and written back).
+NOTES (2026-11-21): consequential edit — internal/agent/doc.go: made necessary by adding childBracket to childrun.go (the package map's childrun.go role now names it).
+NOTES (2026-11-21): childrun.go's header sentence "The helper owns no recover frame" is left as is — it still describes runChild, and item 8 owns rewriting the recover-boundary comments when callers move.
 
 Depends on item 6.
 
