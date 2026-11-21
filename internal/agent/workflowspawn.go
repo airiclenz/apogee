@@ -267,13 +267,17 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 	item := &workflowChild{label: spec.Item.Label}
 	sub.workflowItem = item
 	sub.tools = withFinish(sub.tools, narrowed, tools.NewFinish(spec.Stage.Returns, item.accept))
+	// ran is set as the child's Run is reached, stopped by runChild's verdict, and ended once the
+	// run is read in full: the reaping defer runs BEFORE the recover above, so a child that ran and
+	// then panicked reaches it with no ending yet (spawnEnding).
 	var (
-		ending  workflow.Ending
+		ran     bool
+		ended   *childEnding
 		stopped bool
 	)
 	defer func() {
 		sub.reportUndelivered(sub.turns.index, reapChild(s.children, runID, sub),
-			undeliveredWorkflowReason(ending, stopped))
+			spawnEnding(ran, ended, stopped).undelivered())
 		_ = sub.Close()
 	}()
 
@@ -287,10 +291,18 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 		res    domain.StepResult
 		runErr error
 	)
-	res, stopped, _, runErr = runChild(ctx, childRun{registry: s.children, runID: runID, sub: sub})
-	outcome = sub.workflowOutcome(res, runErr, stopped)
+	res, stopped, _, runErr = runChild(ctx, childRun{
+		registry: s.children,
+		runID:    runID,
+		sub:      sub,
+		// The LAST act before Run, as runDelegate's: anything that ends the frame before it leaves a
+		// child that never ran.
+		onArmed: func(context.Context) { ran = true },
+	})
+	ending := runEnding(res, runErr, stopped)
+	outcome = sub.workflowOutcome(ending, runErr)
 	outcome.Transcript = sub.conv.Messages()
-	ending = outcome.Ending
+	ended = &ending
 	return outcome, nil
 }
 
@@ -342,26 +354,11 @@ func (s *workflowSpawner) spawnSubAgent(ctx context.Context, spec workflow.ItemS
 		s.fellBack.Store(true)
 	}
 	a.emitSubAgentPhase(s.turn, s.call, runID, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Result: result})
-	ending := subAgentEnding(end.outcome)
+	ending := end.ending.workflowEnding()
 	if ending == workflow.EndStopped {
 		return workflow.Outcome{Ending: ending, Transcript: end.transcript}
 	}
 	return workflow.Outcome{Ending: ending, Report: result.Content, Transcript: end.transcript}
-}
-
-// subAgentEnding is the workflow Ending of a delegation that ended as ended: a cancel or a stop is
-// stopped, a refusal a fault.
-func subAgentEnding(ended delegationOutcome) workflow.Ending {
-	switch ended {
-	case delegationCompleted:
-		return workflow.EndCompleted
-	case delegationCapped:
-		return workflow.EndCapped
-	case delegationCancelled, delegationStopped:
-		return workflow.EndStopped
-	default:
-		return workflow.EndFaulted
-	}
 }
 
 // task composes an item child's opening task: the spec's brief, the stage's prompt file rendered
@@ -464,33 +461,34 @@ func withFinish(roster *domain.ToolRegistry, names []string, finish domain.Tool)
 	return out
 }
 
-// workflowOutcome reads how an item child's run ended — the receiver is the CHILD. A capped run
-// keeps the engine fold and its closing text as the report a continuation is seeded from; a
-// faulted one keeps its cause; a completed one keeps its last words.
-func (a *Agent) workflowOutcome(res domain.StepResult, err error, stopped bool) workflow.Outcome {
+// workflowOutcome is the Outcome of an item child's run that ended as ending (runEnding) — the
+// receiver is the CHILD, and err the Run's error, whose text is a loop-level fault's report. A
+// capped run keeps the engine fold and its closing text as the report a continuation is seeded
+// from; a faulted one keeps its cause; a stopped or cancelled one keeps nothing; a completed one
+// keeps its last words.
+func (a *Agent) workflowOutcome(ending childEnding, err error) workflow.Outcome {
 	receipt := a.workflowItem.taken()
-	switch {
-	case err != nil:
-		return workflow.Outcome{Ending: workflow.EndFaulted, Report: err.Error()}
-	case stopped:
-		return workflow.Outcome{Ending: workflow.EndStopped}
-	case res.StepCapped:
-		text := a.lastVisibleText()
-		return workflow.Outcome{
-			Ending:  workflow.EndCapped,
-			Receipt: receipt,
-			Report:  a.foldWithClosing(text, floor.ClosingShapeOf(text)),
+	switch ending.kind {
+	case delegationFaulted:
+		if err != nil {
+			return workflow.Outcome{Ending: ending.workflowEnding(), Report: err.Error()}
 		}
-	case res.Faulted:
 		cause := a.turns.fault()
 		if cause == "" {
 			cause = subAgentFaultNoCause
 		}
-		return workflow.Outcome{Ending: workflow.EndFaulted, Report: cause}
-	case res.Status == domain.StatusCancelled:
-		return workflow.Outcome{Ending: workflow.EndStopped}
+		return workflow.Outcome{Ending: ending.workflowEnding(), Report: cause}
+	case delegationStopped, delegationCancelled:
+		return workflow.Outcome{Ending: ending.workflowEnding()}
+	case delegationCapped:
+		text := a.lastVisibleText()
+		return workflow.Outcome{
+			Ending:  ending.workflowEnding(),
+			Receipt: receipt,
+			Report:  a.foldWithClosing(text, floor.ClosingShapeOf(text)),
+		}
 	default:
-		return workflow.Outcome{Ending: workflow.EndCompleted, Receipt: receipt, Report: a.lastVisibleText()}
+		return workflow.Outcome{Ending: ending.workflowEnding(), Receipt: receipt, Report: a.lastVisibleText()}
 	}
 }
 
@@ -527,22 +525,23 @@ func workflowPhaseBody(callID string, outcome workflow.Outcome, err error) domai
 	}
 }
 
-// undeliveredWorkflowReason is why a message queued for an item child never landed, by how the
-// child ended — the delegation rule (undeliveredReason, ADR 0088 D2): a child a stop cut short
-// while it ran (runChild's stopped verdict: the human's stop of the one item or the cancel of the
-// whole Turn) reads as stopped, one that ended stopped without that verdict as cancelled, and a
-// child that never ran as faulted.
-func undeliveredWorkflowReason(ending workflow.Ending, stopped bool) domain.UndeliveredReason {
+// spawnEnding is how an item child ended, as its reaping defer reads it (Spawn): ran is whether
+// its Run was reached, ended the ending its run was read as — nil until the run is read in full —
+// and stopped runChild's stop verdict. A stop cut the running child short whatever the frame
+// reached after it (ADR 0088 D2: the human's stop of the one item or the cancel of the whole
+// Turn); a child that never ran did not take what was queued for it, so it reads as refused, as a
+// sub_agent child that never ran does (owner, 2026-11-21); and a child that ran and then panicked
+// before its run was read has no ending yet, so it reads as the fault it is — never the zero
+// ending, which would claim a completion.
+func spawnEnding(ran bool, ended *childEnding, stopped bool) childEnding {
 	switch {
 	case stopped:
-		return domain.UndeliveredStopped
-	case ending == workflow.EndCompleted:
-		return domain.UndeliveredCompleted
-	case ending == workflow.EndCapped:
-		return domain.UndeliveredCapped
-	case ending == workflow.EndStopped:
-		return domain.UndeliveredCancelled
+		return runEnding(domain.StepResult{}, nil, true)
+	case !ran:
+		return refusedEnding()
+	case ended == nil:
+		return childEnding{kind: delegationFaulted, hasStarted: true}
 	default:
-		return domain.UndeliveredFaulted
+		return *ended
 	}
 }

@@ -322,11 +322,13 @@ func TestStopChild_AfterTheRunReturnedLeavesTheReportStanding(t *testing.T) {
 	}
 }
 
-// TestUndeliveredReason_Stopped pins the mapping a stopped delegation's leftover messages are
-// reported under.
+// TestUndeliveredReason_Stopped pins the reason a stopped delegation's leftover messages are
+// reported under, read off the ending runDelegate's frame decides (delegateEnding).
 func TestUndeliveredReason_Stopped(t *testing.T) {
-	if got := undeliveredReason(delegationStopped); got != domain.UndeliveredStopped {
-		t.Errorf("undeliveredReason(stopped) = %q, want %q", got, domain.UndeliveredStopped)
+	stopped := delegateEnding(domain.ToolResult{CallID: "c1", Content: stoppedResultHead}, dispatchDone, true, true,
+		domain.StepResult{Status: domain.StatusCancelled})
+	if got := stopped.undelivered(); got != domain.UndeliveredStopped {
+		t.Errorf("undelivered(stopped) = %q, want %q", got, domain.UndeliveredStopped)
 	}
 }
 

@@ -754,8 +754,8 @@ func (a *Agent) runPooledSlot(ctx context.Context, turn int, slot *dispatchSlot)
 // D2): nothing is built or run, it takes the not-started result (cancelledQueuedDelegationContent)
 // and its finished phase at once
 // (skipDelegation), its run flag is cleared so commitCall books no audit record, and its
-// delegate-ledger row is booked here, `cancelled` by the rule every row is (classifyDelegation),
-// since the call never reaches runSubAgent. True
+// delegate-ledger row is booked here, `cancelled` as its unstarted ending projects it
+// (unstartedCancelled), since the call never reaches runSubAgent. True
 // is returned for a slot it settled; a leaf, a slot with nothing left to run, and any slot while
 // the context is live are left alone.
 func (a *Agent) settleCancelledDelegation(ctx context.Context, turn int, slot *dispatchSlot) bool {
@@ -764,14 +764,11 @@ func (a *Agent) settleCancelledDelegation(ctx context.Context, turn int, slot *d
 	}
 	slot.run = false
 	slot.result = a.skipDelegation(turn, slot, errorToolResult(slot.call.ID, cancelledQueuedDelegationContent))
-	ended, cause := classifyDelegation(slot.result, dispatchCancelled, false, false, domain.StepResult{})
-	a.delegations.record(delegationRecord{
+	a.delegations.record(unstartedCancelled().ledgerRecord(delegationRecord{
 		spawnIndex: a.delegations.open(slot.call.ID),
 		callID:     slot.call.ID,
 		name:       delegationLabel("", slot.call),
-		outcome:    ended,
-		cause:      cause,
-	})
+	}, slot.result.Content))
 	return true
 }
 
@@ -780,22 +777,19 @@ func (a *Agent) settleCancelledDelegation(ctx context.Context, turn int, slot *d
 // runs nothing and folds nothing. It takes the stopped-unstarted result and its finished phase at
 // once (skipDelegation), its run flag is cleared so commitCall books no audit record for a child
 // that never ran, and its delegate-ledger row is booked here — as recordCeilingRefusal books a
-// refusal's, since the call never reaches runSubAgent — classified `stopped` by the rule every row
-// is (classifyDelegation). True is returned for a stopped slot.
+// refusal's, since the call never reaches runSubAgent — `stopped` as its unstarted ending projects
+// it (unstartedStopped). True is returned for a stopped slot.
 func (a *Agent) stopQueuedDelegation(turn int, slot *dispatchSlot) bool {
 	if slot.runID == "" || !a.children.dequeue(slot.runID) {
 		return false
 	}
 	slot.run = false
 	slot.result = a.skipDelegation(turn, slot, errorToolResult(slot.call.ID, stoppedQueuedDelegationContent))
-	ended, cause := classifyDelegation(slot.result, dispatchDone, false, true, domain.StepResult{})
-	a.delegations.record(delegationRecord{
+	a.delegations.record(unstartedStopped().ledgerRecord(delegationRecord{
 		spawnIndex: a.delegations.open(slot.call.ID),
 		callID:     slot.call.ID,
 		name:       delegationLabel("", slot.call),
-		outcome:    ended,
-		cause:      cause,
-	})
+	}, slot.result.Content))
 	return true
 }
 

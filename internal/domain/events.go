@@ -380,8 +380,10 @@ const (
 	// that one child (Agent.StopChild), after which the parent's Turn went on without it, or the
 	// cancel of the whole Turn, which stops every running child the same way (ADR 0088 D2).
 	UndeliveredStopped UndeliveredReason = "stopped"
-	// UndeliveredRefused is a child still running that refused to commit the message into its
-	// Exchange at the boundary: the message and everything queued behind it never landed.
+	// UndeliveredRefused is a child that did not take the message: one still running that refused
+	// to commit it into its Exchange at the boundary, or one that never ran at all — on the
+	// sub_agent and the workflow path alike. The message and everything queued behind it never
+	// landed.
 	UndeliveredRefused UndeliveredReason = "refused"
 )
 

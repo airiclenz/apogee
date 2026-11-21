@@ -778,24 +778,32 @@ func TestDelegationLedger_CauseIsTheHeadLineClamped(t *testing.T) {
 	}
 }
 
-// TestUndeliveredReason_FollowsTheDelegationOutcome pins the mapping the reaping path reports
-// through: each way a delegation ends names its own reason, so a message left in the mailbox is
-// never told it missed a child that "finished" when the child was capped, failed or cancelled.
+// TestUndeliveredReason_FollowsTheDelegationOutcome pins the reason the reaping path reports
+// through, read off the ending runDelegate's frame decides (delegateEnding): each way a delegation
+// ends names its own reason, so a message left in the mailbox is never told it missed a child that
+// "finished" when the child was capped, failed or cancelled.
 func TestUndeliveredReason_FollowsTheDelegationOutcome(t *testing.T) {
 	t.Parallel()
+	report := domain.ToolResult{CallID: "c1", Content: "done"}
+	failed := errorToolResult("c1", "sub-agent failed: boom")
 	cases := []struct {
-		ended delegationOutcome
-		want  domain.UndeliveredReason
+		name    string
+		result  domain.ToolResult
+		outcome dispatchOutcome
+		ran     bool
+		res     domain.StepResult
+		want    domain.UndeliveredReason
 	}{
-		{delegationCompleted, domain.UndeliveredCompleted},
-		{delegationCapped, domain.UndeliveredCapped},
-		{delegationFaulted, domain.UndeliveredFaulted},
-		{delegationCancelled, domain.UndeliveredCancelled},
-		{delegationRefused, domain.UndeliveredRefused},
+		{"completed", report, dispatchDone, true, domain.StepResult{}, domain.UndeliveredCompleted},
+		{"capped", report, dispatchDone, true, domain.StepResult{StepCapped: true}, domain.UndeliveredCapped},
+		{"faulted", failed, dispatchDone, true, domain.StepResult{}, domain.UndeliveredFaulted},
+		{"cancelled", domain.ToolResult{}, dispatchCancelled, true, domain.StepResult{Status: domain.StatusCancelled}, domain.UndeliveredCancelled},
+		{"refused", errorToolResult("c1", "could not start sub-agent: boom"), dispatchDone, false, domain.StepResult{}, domain.UndeliveredRefused},
 	}
 	for _, tc := range cases {
-		if got := undeliveredReason(tc.ended); got != tc.want {
-			t.Errorf("undeliveredReason(%q) = %q, want %q", tc.ended, got, tc.want)
+		got := delegateEnding(tc.result, tc.outcome, tc.ran, false, tc.res).undelivered()
+		if got != tc.want {
+			t.Errorf("%s: undelivered = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 }

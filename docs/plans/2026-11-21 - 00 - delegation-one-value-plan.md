@@ -210,7 +210,13 @@ TestChildEnding_ProjectsTodaysWords states its expectations as literal tables, w
 - `go build ./... && go test -count=1 -run 'TestChildEnding|TestRunEnding' ./internal/agent/`
 **Commit:** `refactor(agent): one childEnding value projects every delegation ending`
 
-## 6. Classifiers route through the ending
+## 6. Classifiers route through the ending — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): runDelegate's ending is built by a new `delegateEnding(result, outcome, ran, stopped, res) childEnding` in subagent.go, keeping classifyDelegation's order (dispatch cancel, stop, error → refused if !ran else faulted, capped, completed); an unstarted cancel reads `unstartedCancelled()` and an unstarted error `refusedEnding()`. The "capped then panicked → faulted" row in TestChildEnding_ProjectsTodaysWords calls it.
+NOTES (2026-11-21): `delegateEnd.outcome delegationOutcome` became `delegateEnd.ending childEnding` (its type changed, so the field name followed); spawnSubAgent reads `end.ending.workflowEnding()`.
+NOTES (2026-11-21): `workflowOutcome` now takes `(ending childEnding, err error)` — err is kept only for a Run error's report text; delegationResult's body notes (missing-output, draft, continue line) still read res/stoppedByUser unchanged, for byte identity.
+NOTES (2026-11-21): TestWorkflowSpawn_HumanStopReadsStoppedViaTheEnding is a unit test over runEnding/workflowOutcome/spawnEnding (the end-to-end stop is already pinned by TestWorkflowSpawn_AHumanStopOfAnItemChildEndsItStopped); TestUndeliveredWorkflowReason gained two rows beyond the plan's — "a stop, then a panic before the run was read" and "a Run error".
+NOTES (2026-11-21): childending_test.go's header comment still names the retired classifiers, as the functions its literal words were read from at write time (history, not current code); left as item 5 wrote it.
 
 Depends on item 5.
 

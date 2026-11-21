@@ -990,24 +990,3 @@ func (a *Agent) reportUndelivered(turn int, queued []domain.UserInput, reason do
 		})
 	}
 }
-
-// undeliveredReason maps how a delegation ended (classifyDelegation) onto why the messages its
-// mailbox still held never landed. A refusal can only leave a message behind when the child was
-// registered and then never reached its Run — a panic in between — so it reads as the child not
-// taking the message, which is what happened.
-func undeliveredReason(ended delegationOutcome) domain.UndeliveredReason {
-	switch ended {
-	case delegationCapped:
-		return domain.UndeliveredCapped
-	case delegationFaulted:
-		return domain.UndeliveredFaulted
-	case delegationCancelled:
-		return domain.UndeliveredCancelled
-	case delegationStopped:
-		return domain.UndeliveredStopped
-	case delegationRefused:
-		return domain.UndeliveredRefused
-	default:
-		return domain.UndeliveredCompleted
-	}
-}

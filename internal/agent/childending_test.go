@@ -131,6 +131,16 @@ func TestChildEnding_ProjectsTodaysWords(t *testing.T) {
 			wantSummary:   domain.DelegationOutcome{SteeredMessages: childEndingSteered, IsStoppedByUser: true},
 		},
 		{
+			name:          "a capped run whose rendering or retention panicked",
+			ending:        delegateEnding(domain.ToolResult{IsError: true, Content: `tool "sub_agent" panicked`}, dispatchDone, true, false, domain.StepResult{Status: domain.StatusExchangeComplete, StepCapped: true}),
+			resultContent: `tool "sub_agent" panicked`,
+			wantOutcome:   delegationFaulted,
+			wantCause:     `tool "sub_agent" panicked`,
+			wantEnding:    workflow.EndFaulted,
+			wantReason:    domain.UndeliveredFaulted,
+			wantSummary:   domain.DelegationOutcome{SteeredMessages: childEndingSteered},
+		},
+		{
 			name:        "a run cancelled with neither stop nor Turn cancel behind it",
 			ending:      runEnding(domain.StepResult{Status: domain.StatusCancelled}, nil, false),
 			wantOutcome: delegationCancelled,

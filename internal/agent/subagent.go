@@ -102,7 +102,7 @@ const stepCapResultFormat = "[delegate stopped at its step cap (%d steps); parti
 // a partial result — with the bound that tripped named in the parenthesis, so the parent learns
 // which knob its next delegation is up against. Package constants, pinned by test, because the TUI
 // reads the three heads by shape (delegationBoundHead) off a result carrying no typed outcome
-// (domain.DelegationOutcome, delegationSummary) and the parent model reads them as the
+// (domain.DelegationOutcome, childEnding.summary) and the parent model reads them as the
 // contract for the rest of the result. %d is the token budget applied; %s is the time limit,
 // spelled by boundDurationText.
 const (
@@ -855,7 +855,7 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 // frame (children.go, apogee-clb): it runs last of all, after the recover has settled the named
 // results, so every way out of this frame — a refusal before any child exists, a cancel, a fault, a
 // cap, a completion, a recovered panic — is classified from the ToolResult and dispatchOutcome
-// actually returned (classifyDelegation) and lands as one row. Four calls that never reach it book
+// actually returned (delegateEnding) and lands as one row. Four calls that never reach it book
 // their rows themselves: a delegation refused past the reply's fan-out ceiling, which dispatchGroup
 // books (recordCeilingRefusal, dispatch.go) — the ceiling's own site — a pooled
 // delegation the human stopped before a worker took it, which the pool books at the dequeue
@@ -867,7 +867,7 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 // completion order is the model's call order; the row records the child's RESOLVED output target,
 // never the unresolved argument. It is also where the messages the child's mailbox still held at
 // the end are reported undelivered, after the ledger row, because the reason each carries is that
-// same classification (undeliveredReason).
+// same ending (childEnding.undelivered).
 func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID string) (domain.ToolResult, dispatchOutcome) {
 	return a.runDelegate(ctx, call, runID, a.ownDelegateSite(), nil)
 }
@@ -934,10 +934,10 @@ func (s delegateSite) recordRow(r delegationRecord) {
 }
 
 // delegateEnd is what a caller of runDelegate reads beyond the result: how the delegation ended
-// (classifyDelegation's word), the child's conversation, and whether the child fell back from the
-// Sub-agent server to the session's (Agent.seatFallback).
+// (delegateEnding), the child's conversation, and whether the child fell back from the Sub-agent
+// server to the session's (Agent.seatFallback).
 type delegateEnd struct {
-	outcome      delegationOutcome
+	ending       childEnding
 	transcript   []domain.Message
 	seatFallback bool
 }
@@ -954,7 +954,7 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 		res          domain.StepResult
 		// stopped is set once a human's stop (StopChild) or the cancel of the whole Turn is known
 		// to have cut the child's Run short; the ledger reads it before any error case
-		// (classifyDelegation).
+		// (delegateEnding).
 		stopped bool
 		// stopLeftover is what the child's mailbox held when a stopped run's result was rendered:
 		// the result lists it, and the reaping defer still reports it undelivered.
@@ -979,20 +979,18 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 			result = errorToolResult(call.ID, fmt.Sprintf("tool %q panicked", call.Tool))
 			outcome = dispatchDone
 		}
-		ended, cause := classifyDelegation(result, outcome, ran, stopped, res)
+		ended := delegateEnding(result, outcome, ran, stopped, res)
 		if end != nil {
-			*end = delegateEnd{outcome: ended, transcript: transcript, seatFallback: seatFallback}
+			*end = delegateEnd{ending: ended, transcript: transcript, seatFallback: seatFallback}
 		}
-		site.recordRow(delegationRecord{
+		site.recordRow(ended.ledgerRecord(delegationRecord{
 			spawnIndex: spawnIndex,
 			callID:     call.ID,
 			name:       delegationLabel(ledgerName, call),
-			outcome:    ended,
-			cause:      cause,
 			outputPath: ledgerTarget,
-		})
+		}, result.Content))
 		if reportLeftover != nil {
-			reportLeftover(undeliveredReason(ended))
+			reportLeftover(ended.undelivered())
 		}
 	}()
 	if a.depth >= a.maxDepth() {
@@ -1353,31 +1351,37 @@ func (a *Agent) roundReport(result domain.ToolResult, res domain.StepResult, err
 	}
 }
 
-// classifyDelegation reads how a delegation ended off what runSubAgent is returning for it — the
-// result, the dispatch outcome, whether the child's Run was reached (ran), whether a human's stop
-// cut it short (stopped) and what it returned (res) — into the ledger's outcome word and, for a
-// fault or refusal, the head line of the result that told the parent. A cancel is read first: it
-// returns no result at all. A stop is read next, ahead of every error case, because a stopped
-// run's result is the non-error partial result whatever state the stop left the child in. An error result is
-// then a refusal when no child ever ran (every early return, and a Submit that failed) and a fault
-// otherwise — the child's own fault, a Run error, a recovered panic, or a completed reply the
-// engine would not hand over as a report (completedResult's error shapes). A non-error result is
-// capped when the child's Run said so and completed otherwise.
-func classifyDelegation(result domain.ToolResult, outcome dispatchOutcome, ran, stopped bool, res domain.StepResult) (delegationOutcome, string) {
+// delegateEnding is how a delegation that reached runDelegate ended, read off what that frame is
+// returning for it — the result, the dispatch outcome, whether the child's Run was reached (ran),
+// whether a human's stop or the Turn's cancel cut it short (stopped) and what it returned (res) —
+// once, as the childEnding every word for it is projected from. A cancel is read first: it returns
+// no result at all, and one that reached the call before its child existed is an unstarted one. A
+// stop is read next, ahead of every error case, because a stopped run's result is the non-error
+// partial result whatever state the stop left the child in. An error result is then a refusal
+// when no child ever ran (every early return, and a Submit that failed) and a fault otherwise —
+// the child's own fault, a Run error, a recovered panic, or a completed reply the engine would not
+// hand over as a report (completedResult's error shapes) — ahead of the bound, so a capped run
+// whose rendering or retention panicked is a fault, never capped. A non-error result is capped
+// when the child's Run said so and completed otherwise.
+func delegateEnding(result domain.ToolResult, outcome dispatchOutcome, ran, stopped bool, res domain.StepResult) childEnding {
+	ending := childEnding{hasStarted: ran}
 	switch {
+	case outcome == dispatchCancelled && !ran:
+		return unstartedCancelled()
 	case outcome == dispatchCancelled:
-		return delegationCancelled, ""
+		ending.kind = delegationCancelled
 	case stopped:
-		return delegationStopped, ""
+		ending.kind = delegationStopped
 	case result.IsError && !ran:
-		return delegationRefused, delegationCause(result.Content)
+		return refusedEnding()
 	case result.IsError:
-		return delegationFaulted, delegationCause(result.Content)
+		ending.kind = delegationFaulted
 	case res.StepCapped:
-		return delegationCapped, ""
+		ending.kind = delegationCapped
 	default:
-		return delegationCompleted, ""
+		ending.kind = delegationCompleted
 	}
+	return ending
 }
 
 // resolveStepCap applies a sub_agent call's optional `max_steps` (asked) to the delegate cap the
@@ -1480,23 +1484,21 @@ func (a *Agent) startDelegationNaming(ctx context.Context, turn int, callID stri
 }
 
 // delegationResult renders a child's FINISHED run as the ToolResult the parent model reads on its
-// next Turn. It holds the whole outcome switch — a loop-level Run error, a cancel, a fault, the
-// step cap, or the child's final answer, validated before it is handed over as a report
-// (completedResult) — and, after it, the ONE site the user-steered trailer is appended at, so no
-// outcome can grow a result that forgets to tell the parent the human spoke to its delegate.
+// next Turn. It reads the run once through the one run switch (runEnding, with the human's stop as
+// its verdict) and renders that ending — a loop-level Run error, a cancel, a fault, the step cap,
+// or the child's final answer, validated before it is handed over as a report (completedResult) —
+// and, after it, the ONE site the user-steered trailer is appended at, so no outcome can grow a
+// result that forgets to tell the parent the human spoke to its delegate. The result's typed
+// summary is the same ending's projection (childEnding.summary), once the report is known.
 //
 // The receiver is the CHILD, not the spawning parent: the run being reported on is the child's and
 // so is every value the report is made of (steered, lastFault, lastVisibleText, finalMessageText).
 // callID belongs to the parent's sub_agent call, because the result answers THAT call.
 func (a *Agent) delegationResult(callID string, res domain.StepResult, err error) (domain.ToolResult, dispatchOutcome) {
+	ending := runEnding(res, err, a.stoppedByUser)
 	var result domain.ToolResult
-	switch {
-	case err != nil:
-		// Run returns a Go error only for a loop-level fault the nested Agent could not
-		// localise — surface it as an error result to the parent model rather than failing
-		// the parent Turn.
-		result = errorToolResult(callID, "sub-agent failed: "+err.Error())
-	case a.stoppedByUser:
+	switch ending.kind {
+	case delegationStopped:
 		// The HUMAN stopped this one delegation (StopChild, ADR 0086 D4) and the parent's Turn goes
 		// on — ahead of the cancel and fault cases, because the stop is what left the child
 		// cancelled or with a cancelled fault fold. Like a capped result it is NON-error partial
@@ -1508,13 +1510,20 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 			Content: stoppedResultHead + "\n" + a.cappedResultBody(text, floor.ClosingShapeOf(text)),
 			IsError: false,
 		}
-	case res.Status == domain.StatusCancelled:
+	case delegationCancelled:
 		// A run cancelled with neither the human's stop nor the parent's cancel behind it — which
 		// runSubAgent never produces, since those are its child context's only cancels. It is
 		// reported as the cancel it is, and the dispatch answers it with the not-started result
 		// (runDelegation), as it answers a call the cancel reached before its child was built.
 		return domain.ToolResult{}, dispatchCancelled
-	case res.Faulted:
+	case delegationFaulted:
+		if err != nil {
+			// Run returns a Go error only for a loop-level fault the nested Agent could not
+			// localise — surface it as an error result to the parent model rather than failing
+			// the parent Turn.
+			result = errorToolResult(callID, "sub-agent failed: "+err.Error())
+			break
+		}
 		// The nested Exchange was ABANDONED, not completed — an Upstream fault, a recovered
 		// extension panic, or an overflow the child's one fold could not rescue. It closes on
 		// StatusExchangeComplete exactly as a real completion does, so the fault marker is the
@@ -1530,7 +1539,7 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 			cause = subAgentFaultNoCause
 		}
 		result = errorToolResult(callID, subAgentFaultPrefix+cause)
-	case res.StepCapped:
+	case delegationCapped:
 		// The engine STOPPED the child at one of its bounds (Agent.Run) — the step cap, or the
 		// token or time bound that takes the same path with its own head line (capResultHead) —
 		// it was still asking for tools, so what it has is partial. That is not a failure and must
@@ -1563,7 +1572,12 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	// would elide them with the middle. The head lines the TUI's recognisers read (stepCapResultFormat,
 	// subAgentFaultPrefix) are inside the kept head, so the cut never re-classifies a result.
 	result.Content = capDelegateResult(result.Content)
-	result.Summary = a.delegationSummary(res, result)
+	// The typed half of the result (domain.DelegationOutcome) — the facts the head line and the
+	// trailer state, taken from the run rather than read back off those lines — is read here, off
+	// the capped body with no note appended yet: the text the no-report reading judges is then the
+	// child's closing text alone, exactly as a host's prose reading judges it once it has taken the
+	// notes back off. withReport makes a completed reply the engine would not hand over a fault.
+	result.Summary = ending.withReport(result).summary(a.steered, a.limits.hit.delegationBound(), result.Content)
 
 	// What the human wrote to a STOPPED child that never reached it, first in the note slot, one
 	// head line and the message text each: the parent reads the fold as the child's work, and these
@@ -1634,31 +1648,6 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 		result.Content += userSteeredTrailerSeparator + userSteeredTrailer(a.steered)
 	}
 	return result, dispatchDone
-}
-
-// delegationSummary is the typed half of a rendered delegation result (domain.DelegationOutcome):
-// the facts the head line and the user-steered trailer state to the parent model, taken from the
-// run itself rather than read back off those lines, so a host renders how the delegation ended
-// without parsing text written for the model. result is the outcome switch's result with the
-// absolute cap applied and no body note appended yet — the text the no-report reading judges is
-// then the child's closing text alone, exactly as a host's prose reading judges it once it has
-// taken the notes back off. The receiver is the CHILD, as in delegationResult.
-//
-// The cases follow delegationResult's switch: an error result names its own fault, the human's
-// stop outranks a bound, and only a completed non-error result can have no report.
-func (a *Agent) delegationSummary(res domain.StepResult, result domain.ToolResult) domain.DelegationOutcome {
-	summary := domain.DelegationOutcome{SteeredMessages: a.steered}
-	switch {
-	case result.IsError:
-	case a.stoppedByUser:
-		summary.IsStoppedByUser = true
-	case res.StepCapped:
-		summary.Bound = a.limits.hit.delegationBound()
-	default:
-		text := strings.TrimSpace(result.Content)
-		summary.HasNoReport = text == noReportMarker || floor.IsNonReport(result.Content)
-	}
-	return summary
 }
 
 // delegation is everything a delegate IS that its Config cannot say — the constructor input
