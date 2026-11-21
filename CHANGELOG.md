@@ -12,6 +12,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.35.7] — 2026-11-21
+
 - Every tool block's leading `✦` — the `✦ Tools` umbrella, a lone tool call, and the `✦ Sub-agents (N)` and `✦ Skill (N)` groups — now paints in the colour scheme's tools header colour; the header text beside it, the live star's blink and a scheduled Firing's `⟳` look as before.
 - **A settled lone tool call now auto-collapses too.** Under `ui.tools-auto-collapse` (on by default), a lone groupable tool call whose result has landed, once the model has started its next step (see below), and that the reader has not touched folds to the one line a one-call Tools umbrella would paint (`✦ Read 1 file ⋯ ▶`, `✦ Ran 1 command ⋯ ▶`). A click or ⏎ on that line opens it to its usual block, writing no setting, and it stays open; a side-panel jump to it opens it the same way. A live call, a call the reader has acted on, and every lone call with auto-collapse off paint as before; skill fetches, delegations, answered questions and task-list cards never fold this way.
 - **Sub-agent and Skill groups fold from their header.** The `✦ Sub-agents (N)` and `✦ Skill (N)` header now wears `▼` / `▶` at the block's right edge, like a Tools umbrella's: a click or ⏎ there folds that group alone to its header line and opens it again, live or settled, without writing any setting. Folded, the header's star still blinks while a member works, and members you opened stay open underneath for the reopen. A side-panel jump to a member of a folded group opens the group first.
