@@ -23,3 +23,4 @@ Must keep: ADR 0112 amend-1112 (the residual stays routine; a residual inside th
 ## Log
 
 - 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — five routers and disagreeing fallbacks unchanged (internal/tui/model.go:1045-1110, heartbeat.go:473-477); do after startup-notice-class-scattered
+- 2026-11-21 Airic Lenz: Plan 2026-11-21 - 02 - startup-notes-plan.md (archived at 43bf2196) landed the startupChrome module: launch-side and heartbeat notes, session boundaries and box restatement route through it. Left open: serverSwitchNote and the 'server fallback: could not follow' note still call transcript.addNote directly (deferred; tracked as server-switch-notes-unrouted).

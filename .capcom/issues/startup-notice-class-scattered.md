@@ -1,11 +1,13 @@
 ---
 title: "A start-up notice's class is declared once (architecture review 2026-11-21 #8)"
-status: open
+status: done
 type: task
 priority: 4
 labels: [tui]
 plan: 2026-11-21 - 02 - startup-notes-plan.md
 created: 2026-11-21T12:27:13Z
+closed: 2026-11-21T20:42:55Z
+reason: "Resolved by plan 2026-11-21 - 02 - startup-notes-plan.md (archived at 43bf2196): each start-up notice kind's class and transcript wording are declared once in internal/tui/noticekind.go, and TestLoudKindsNamedInDocs pins the loud list in the docs."
 ---
 
 Found by docs/reviews/architecture-review-2026-11-21.html, verified 2026-11-21 at 171d210f. Rated Speculative.
