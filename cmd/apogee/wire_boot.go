@@ -355,7 +355,7 @@ func (w *rootWiring) announceConfinement() {
 	// A per-session startup warning whenever Auto runs unconfined (ADR 0012): confine=false
 	// is safe only inside a VM, and it is the only blanket loosen in the system.
 	if w.mode == domain.ModeAuto && !w.opts.ConfineToWorkspace {
-		w.announce(tui.Notice{Text: unconfinedAutoWarning, Loud: true})
+		w.announce(tui.Notice{Text: unconfinedAutoWarning, Kind: tui.NoticeAutoUnconfined})
 	}
 
 	// The mirror branch: Auto WITH confinement asked for, on a host whose backend cannot
@@ -363,7 +363,7 @@ func (w *rootWiring) announceConfinement() {
 	// now, which is what made Auto look broken (the issue register, 2026-07-21). Say it once,
 	// name the backend, and point at /confine.
 	if notice := probe.DegradedNotice(probe.BackendName(w.confiner), w.confiner.Capabilities(), w.mode, w.opts.ConfineToWorkspace); notice != "" {
-		w.announce(tui.Notice{Text: notice, Loud: true})
+		w.announce(tui.Notice{Text: notice, Kind: tui.NoticeAutoDegraded})
 	}
 
 	// The third cell, and the sibling of the branch above rather than a third exclusive one: a
@@ -381,7 +381,7 @@ func (w *rootWiring) announceConfinement() {
 	// once folded into a single note.
 	backend, caps := probe.BackendName(w.confiner), w.confiner.Capabilities()
 	if notice := probe.ResidualNotice(backend, caps, w.mode, w.opts.ConfineToWorkspace); notice != "" {
-		w.announce(tui.Notice{Text: notice, Log: probe.ResidualNotes(backend, caps, w.mode, w.opts.ConfineToWorkspace)})
+		w.announce(tui.Notice{Text: notice, Kind: tui.NoticeFenceResidual, Log: probe.ResidualNotes(backend, caps, w.mode, w.opts.ConfineToWorkspace)})
 	}
 
 	// The unknown-window honesty line used to print here, before the alt-screen. It has moved into
@@ -408,9 +408,9 @@ func (w *rootWiring) announceConfinement() {
 // announce prints one startup notice on stderr and keeps it for the transcript — the one seam
 // through which every start-up notice speaks, so the two surfaces cannot drift: the opening frame
 // repeats what the shell scrollback shows, in the same words unless the notice carries the
-// transcript's own (tui.Notice.Log, composed beside Text from the same source). Loudness and Log
-// reach only the transcript, where a loud notice keeps its own line and a routine one joins the
-// session log; stderr prints Text alike for both.
+// transcript's own (tui.Notice.Log, composed beside Text from the same source). Kind and Log
+// reach only the transcript, where a notice of a loud kind keeps its own line and a routine one
+// joins the session log (the TUI's own table classes each kind); stderr prints Text alike for both.
 func (w *rootWiring) announce(notice tui.Notice) {
 	fmt.Fprintln(os.Stderr, notice.Text)
 	w.startupNotices = append(w.startupNotices, notice)

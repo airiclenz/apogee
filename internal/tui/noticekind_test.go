@@ -3,8 +3,7 @@ package tui
 import "testing"
 
 // TestNoticeKindClasses pins every declared kind's class and source as the one table declares them,
-// the reserved zero kind among them: read through the table lookup, never through Notice.loud,
-// whose transitional fallback still answers the producer's own Loud for a zero Kind.
+// the reserved zero kind among them, read through the table lookup.
 func TestNoticeKindClasses(t *testing.T) {
 	t.Parallel()
 
@@ -60,15 +59,18 @@ func TestNoticeKindClasses_UndeclaredKindReadsAsTheZeroKind(t *testing.T) {
 	}
 }
 
-// TestNoticeKindClasses_NoticeReadsItsKindsClass pins that a Notice naming a kind takes its class
-// from the table, whatever its transitional Loud field says.
+// TestNoticeKindClasses_NoticeReadsItsKindsClass pins that a Notice takes its class from the
+// table: a loud kind's notice is loud, a routine kind's is not, and one naming no kind is loud.
 func TestNoticeKindClasses_NoticeReadsItsKindsClass(t *testing.T) {
 	t.Parallel()
 
-	if !(Notice{Kind: NoticeAutoUnconfined}).loud() {
+	if !(Notice{Kind: NoticeAutoUnconfined}).Loud() {
 		t.Error("a loud kind's notice is not loud")
 	}
-	if (Notice{Kind: NoticeFenceResidual, Loud: true}).loud() {
-		t.Error("a routine kind's notice is loud — Loud outranked the table")
+	if (Notice{Kind: NoticeFenceResidual}).Loud() {
+		t.Error("a routine kind's notice is loud")
+	}
+	if !(Notice{}).Loud() {
+		t.Error("a notice naming no kind is routine, want it loud")
 	}
 }

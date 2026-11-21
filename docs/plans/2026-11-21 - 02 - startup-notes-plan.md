@@ -60,7 +60,10 @@ internal/tui/heartbeat_test.go — TestSessionLogLeavesTheFirstBeatsLoudNotesOnT
 - `go test -race -count=1 -run 'TestNoticeKind|TestStartupNotices|TestSessionLog|TestRebindNoticesSurfaceAsNotes|TestDocMapNamesEveryFile' ./internal/tui/`
 **Commit:** `refactor(tui): a start-up notice's class comes from one NoticeKind table`
 
-## 2. cmd/apogee producers name a Kind; the Loud field goes
+## 2. cmd/apogee producers name a Kind; the Loud field goes — ✅ DONE (2026-11-21)
+NOTES (2026-11-21): consequential edit — internal/tui/heartbeat.go: made necessary by renaming Notice.loud() to the exported Notice.Loud()
+NOTES (2026-11-21): consequential edit — internal/tui/model.go: made necessary by renaming Notice.loud() to the exported Notice.Loud()
+NOTES (2026-11-21): consequential edit — internal/tui/noticekind_test.go: made necessary by dropping the Loud field and fallback; adds the `Notice{}.Loud() == true` assertion item 1's section hands to item 2
 
 **What:**
 **Goal:** every `tui.Notice` built in cmd/apogee sets a `Kind` from item 1's exported constants and no `Loud`; `tui.Notice` has no `Loud` field; `func (n Notice) Loud() bool` (exported, table-backed) answers the class; stderr text is byte-identical.

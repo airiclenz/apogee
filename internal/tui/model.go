@@ -1105,7 +1105,7 @@ func (m *Model) noteColorSchemeWarnings(warnings []string) {
 func (m *Model) noteStartupNotices(notices []Notice) {
 	for _, n := range notices {
 		for _, note := range n.transcriptNotes() {
-			if n.loud() {
+			if n.Loud() {
 				m.transcript.addEphemeralNote(note)
 				continue
 			}

@@ -285,7 +285,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		return err
 	}
 	if shareWarning != "" {
-		w.announce(tui.Notice{Text: shareWarning, Loud: true})
+		w.announce(tui.Notice{Text: shareWarning, Kind: tui.NoticeShareGroupConfig})
 	}
 	w.store = session.NewStore(w.roots.sessions, storeOpts...)
 	// The configured watched homes (`sessions.watch-homes:`, ADR 0103 decision 7), each behind a

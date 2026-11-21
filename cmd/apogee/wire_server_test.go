@@ -127,7 +127,7 @@ func TestRebindReportsARefusedRosterSwapAsANotice(t *testing.T) {
 		if strings.Contains(n.Text, "next model switch") {
 			// The refusal is the one rebind notice the human may have to act on, so it is LOUD: it
 			// keeps its own line even on the first-contact beat, never folded into the session log.
-			if !n.Loud {
+			if !n.Loud() {
 				t.Errorf("notice %q is routine, want it loud", n.Text)
 			}
 			lines = append(lines, n.Text)

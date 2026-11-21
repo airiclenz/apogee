@@ -1304,19 +1304,12 @@ type Notice struct {
 	// Kind names what the notice is about; its class — loud or routine — is read from the TUI's own
 	// table ([noticeKinds]), not decided by the producer. The zero value is loud.
 	Kind NoticeKind
-
-	// Loud is the producer-decided class a notice with no Kind still carries, read only while Kind
-	// is the zero value ([Notice.loud]).
-	Loud bool
 }
 
-// loud reports whether the notice keeps its own note line: its Kind's class from [noticeKinds]
-// when it names one, otherwise the producer's own Loud.
-func (n Notice) loud() bool {
-	if n.Kind != kindUnset {
-		return classOf(n.Kind) == classLoud
-	}
-	return n.Loud
+// Loud reports whether the notice keeps its own note line: its Kind's class, read from
+// [noticeKinds]. A notice whose producer named no Kind is loud.
+func (n Notice) Loud() bool {
+	return classOf(n.Kind) == classLoud
 }
 
 // transcriptNotes is what the transcript places for this notice: Log's notes when it has any,
@@ -1783,7 +1776,7 @@ func (o Options) colorScheme() scheme.Scheme {
 // lines worth telling the human (a validated set that matched the new model, say), surfaced in
 // order as transcript notes. The TUI renders it and never derives it: which window won, and why, is
 // the binary's decision, so the renderer needs no knowledge of the pin at all. Each notice carries
-// its kind, whose class the TUI's own table declares ([Notice.loud]): a routine one raised by the
+// its kind, whose class the TUI's own table declares ([Notice.Loud]): a routine one raised by the
 // session's first-contact beat joins the start-up session log while it is open, and a loud one
 // always keeps its own line.
 type RebindResult struct {

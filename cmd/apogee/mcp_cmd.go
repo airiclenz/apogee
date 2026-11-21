@@ -563,7 +563,7 @@ func connectStartupServer(
 // connected on the tools it did surface; a reload says the same as a clause on its landed note.
 func (w *rootWiring) announceTruncatedMCP(cut []mcp.Truncation) {
 	for _, t := range cut {
-		w.announce(tui.Notice{Text: "apogee: mcp server " + t.Name + " — " + mcpTruncatedClause(t), Loud: true})
+		w.announce(tui.Notice{Text: "apogee: mcp server " + t.Name + " — " + mcpTruncatedClause(t), Kind: tui.NoticeMCPTruncated})
 	}
 }
 
@@ -573,7 +573,7 @@ func (w *rootWiring) announceTruncatedMCP(cut []mcp.Truncation) {
 // servers and the other adopted ones are connected; only the skipped server is left out.
 func (w *rootWiring) announceSkippedMCP(skipped []mcp.Denied) {
 	for _, s := range skipped {
-		w.announce(tui.Notice{Text: "apogee: " + mcpSkipClause(s), Loud: true})
+		w.announce(tui.Notice{Text: "apogee: " + mcpSkipClause(s), Kind: tui.NoticeMCPSkipped})
 	}
 	w.cueSkippedMCP(skipped)
 }

@@ -568,10 +568,15 @@ func TestRunRootConfinementStartupNotices(t *testing.T) {
 			// And how loud each is in the transcript (layout.md, "The start-up box"): the warning and
 			// the degradation need the human and keep their own line, while the residual is a routine
 			// record the session log gathers — disclosed there (ADR 0112, amended 2026-11-12).
+			// Each notice names its kind, so its class is the TUI's table's and never the zero kind's
+			// loud-by-default.
 			for _, n := range rec.opts.StartupNotices {
+				if n.Kind == 0 {
+					t.Errorf("startup notice %q names no Kind; every announced notice must", n.Text)
+				}
 				wantLoud := !strings.Contains(n.Text, residualNotice)
-				if n.Loud != wantLoud {
-					t.Errorf("startup notice %q is Loud = %v; want %v", n.Text, n.Loud, wantLoud)
+				if n.Loud() != wantLoud {
+					t.Errorf("startup notice %q is Loud() = %v; want %v", n.Text, n.Loud(), wantLoud)
 				}
 			}
 

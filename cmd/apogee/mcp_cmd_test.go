@@ -883,7 +883,7 @@ func TestStartupSkipsARepoServerWhosePinMoved(t *testing.T) {
 		t.Error("the global server's tools are missing; a pin skip must spare the rest of the set")
 	}
 	want := "apogee: mcp server wiki skipped — stdio server \"wiki\": refusing to launch — bin/wiki.sh changed since you adopted it"
-	if len(w.startupNotices) != 1 || !strings.HasPrefix(w.startupNotices[0].Text, want) || !w.startupNotices[0].Loud {
+	if len(w.startupNotices) != 1 || !strings.HasPrefix(w.startupNotices[0].Text, want) || !w.startupNotices[0].Loud() {
 		t.Errorf("startup notices = %+v, want one loud one opening %q", w.startupNotices, want)
 	}
 	if !awaitPinWake(t, w) {
@@ -928,7 +928,7 @@ func TestStartupAnnouncesAnMCPToolListCutShort(t *testing.T) {
 		t.Error("the cut-short server's surfaced tools are missing; it connects on the tools it surfaced")
 	}
 	want := "apogee: mcp server many — tool list cut short: stopped at 512 tools, skipped 1 tool with a schema over 64 KiB"
-	if len(w.startupNotices) != 1 || w.startupNotices[0].Text != want || !w.startupNotices[0].Loud {
+	if len(w.startupNotices) != 1 || w.startupNotices[0].Text != want || !w.startupNotices[0].Loud() {
 		t.Errorf("startup notices = %+v, want exactly one loud %q", w.startupNotices, want)
 	}
 }
@@ -987,7 +987,7 @@ func TestStartupSkipsARepoServerWhosePinIsUnreadable(t *testing.T) {
 	want := "apogee: mcp server wiki skipped — stdio server \"wiki\": refusing to launch — "
 	if len(w.startupNotices) != 1 || !strings.HasPrefix(w.startupNotices[0].Text, want) ||
 		!strings.Contains(w.startupNotices[0].Text, "bin/wiki.sh") ||
-		strings.Contains(w.startupNotices[0].Text, "proposed again") || !w.startupNotices[0].Loud {
+		strings.Contains(w.startupNotices[0].Text, "proposed again") || !w.startupNotices[0].Loud() {
 		t.Errorf("startup notices = %+v, want one opening %q naming bin/wiki.sh, never \"proposed again\"", w.startupNotices, want)
 	}
 	if !awaitPinWake(t, w) {
