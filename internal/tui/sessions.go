@@ -954,10 +954,9 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	m.pendingTitle.drop()
 	title := msg.rec.Meta.Title
 	m.nameSession(title) // the frame follows the restore, as it follows every other naming route
-	m.transcript.reset()
-	m.transcript.addStartup(newStartupView(m.opts))
-	// The restored session opens its own start-up log, as a launch does, before its first notice.
-	m.chrome.open()
+	// The restored session reseeds the box and opens its own start-up log, as a launch does, before
+	// its first notice.
+	m.beginSession()
 	// The side panel's folded state falls with the outgoing session, whose Events it was folded
 	// from — BEFORE the replay below, which rebuilds the resumed session's tasks and writes from
 	// its stored entries (replayScrollback).

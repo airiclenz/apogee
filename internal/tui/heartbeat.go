@@ -423,7 +423,7 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	m.opts.Model, m.opts.ContextWindow = result.Model, result.ContextWindow
 	// The box's facts were frozen when it was seeded, so a late seed would otherwise leave a
 	// "connecting" box at the top of the scrollback until the next /clear.
-	m.transcript.refreshStartup(newStartupView(m.opts))
+	m.restateBox()
 	quiet := intent.contact != contactEvent
 	if note := rebindNote(oldModel, oldWindow, m.opts.Model, m.opts.ContextWindow, quiet); note != "" {
 		m.note(kindRebindChange, intent.contact, note)
@@ -645,7 +645,7 @@ func (m Model) foldServerSwitch(from string, result ServerSwitchResult, record c
 	// The box's facts were frozen when it was seeded; restate it so the top of the scrollback names
 	// the server this session is now on rather than the one it launched against (applyRebind's own
 	// reason, one level up).
-	m.transcript.refreshStartup(newStartupView(m.opts))
+	m.restateBox()
 	m.transcript.addNote(serverSwitchNote(from, m.opts, record.saved))
 	record.warn(&m.transcript)
 	// The fresh generation IS the retirement of the old chain, so the first beat is armed rather than
@@ -699,7 +699,7 @@ func (m Model) followFallback(e domain.UpstreamSwitchedEvent) (Model, tea.Cmd) {
 	m.hb.lastRebindFailed = ""
 	// The box's facts were frozen when it was seeded; restate it so the top of the scrollback names
 	// the server this session is now on ([Model.foldServerSwitch]'s reason).
-	m.transcript.refreshStartup(newStartupView(m.opts))
+	m.restateBox()
 	settle := rebindIntent{
 		model:   result.Model,
 		window:  result.ObservedWindow,

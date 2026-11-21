@@ -46,7 +46,7 @@ func (m *Model) foldUpdateChecked(msg updateCheckedMsg) {
 		return
 	}
 	m.opts.updateNotice = updateNotice{latest: msg.latest, command: msg.command}
-	m.transcript.refreshStartup(newStartupView(m.opts))
+	m.restateBox()
 }
 
 // startupVersion composes the start-up box's version value: the clean release version alone, or —

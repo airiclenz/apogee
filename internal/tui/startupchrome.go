@@ -91,3 +91,22 @@ func (c *startupChrome) place(t *transcript, kind NoticeKind, at contact, text s
 		t.addEphemeralNote(text)
 	}
 }
+
+// beginSession is a session boundary — construction, /clear and /new, a /sessions restore: the
+// transcript returns to empty, the one-time start-up box is seeded as its first entry from the
+// display Options as they stand, and the session's start-up log opens before any of the boundary's
+// notices arrives. On a fresh Model the reset finds nothing to drop. It is the only place a
+// boundary composes those three steps, so no boundary can reseed the box without reopening the log.
+func (m *Model) beginSession() {
+	m.transcript.reset()
+	m.transcript.addStartup(newStartupView(m.opts))
+	m.chrome.open()
+}
+
+// restateBox re-states the start-up box's facts in place from the display Options as they now
+// stand — a rebind, a server switch or bind, a pre-bound pick, an update check's answer — leaving
+// the box where it sits in the scrollback ([transcript.refreshStartup]). The box's view is a frozen
+// copy taken when it was seeded, so every change to a fact it shows comes through here.
+func (m *Model) restateBox() {
+	m.transcript.refreshStartup(newStartupView(m.opts))
+}

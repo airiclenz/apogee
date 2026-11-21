@@ -1120,9 +1120,9 @@ func (t *transcript) addPresented(msg presentedMsg) {
 }
 
 // addStartup appends the one-time start-up box — the logo and the session's host / model /
-// context / version (startupView). It is seeded by newModel as entries[0] (and re-seeded by
-// startNewSession when /clear starts a fresh session), not folded from an engine Event: the box is
-// the HOST's opening frame, like addPresented's record of a host act. Host
+// context / version (startupView). It is seeded as entries[0] at every session boundary — launch,
+// /clear and /new, a /sessions restore — by [Model.beginSession], not folded from an engine
+// Event: the box is the HOST's opening frame, like addPresented's record of a host act. Host
 // and Model are escape-stripped (they trace to config / the CLI) so a control sequence can never
 // reach the terminal through them; the logo, context ([format.Tokens] of an int), and version are this
 // program's own values and pass through untouched.
@@ -1162,8 +1162,8 @@ func (t *transcript) refreshStartup(v startupView) {
 // workspace root and the terminal's link gesture (facts about the run, which /clear does not move)
 // and the task-list fold
 // preference (a fact about the human, which a new session inherits).
-// It is the /clear + /new "start a new session" primitive: the caller re-seeds the one-time
-// start-up box with addStartup so the fresh view matches a launch. It does NOT touch the engine's
+// It is the /clear + /new "start a new session" primitive: [Model.beginSession] re-seeds the
+// one-time start-up box with addStartup so the fresh view matches a launch. It does NOT touch the engine's
 // memory (ClearContext) — that is the caller's separate, fallible step (model.startNewSession).
 func (t *transcript) reset() {
 	t.entries = nil

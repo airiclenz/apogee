@@ -150,7 +150,10 @@ The leftover-field check is `! grep -nE 'noteRebindRoutine|firstBeat|quietSeed:|
 Depends on item 4.
 **Commit:** `refactor(tui): heartbeat notes route through the start-up chrome`
 
-## 6. Session boundaries and box restatement are chrome operations
+## 6. Session boundaries and box restatement are chrome operations — ✅ DONE (2026-11-21)
+NOTES (2026-11-21): newModel now goes through beginSession too, so construction runs transcript.reset() on the fresh, empty transcript (it drops nothing; one extra generation bump and an empty paint-cache clear), where the plan's approach said "no reset" for that site.
+NOTES (2026-11-21): consequential edit — internal/tui/transcript.go: made necessary by beginSession (the addStartup and reset doc comments named newModel/startNewSession as the seeding callers).
+NOTES (2026-11-21): consequential edit — internal/tui/doc.go: made necessary by beginSession/restateBox (the package map's startupchrome.go line now names the two box operations).
 
 **What:**
 **Goal:** a session boundary (launch, `/clear`-style reset, session restore) is one call `m.beginSession()` that resets the transcript, adds the start-up box and opens the log; restating the box at a rebind is one call `m.restateBox()`; no call site outside startupchrome.go composes reset → addStartup → open by hand or calls `refreshStartup(newStartupView(…))` directly.

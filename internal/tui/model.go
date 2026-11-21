@@ -872,11 +872,11 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// Seed the one-time start-up box as entries[0]. Seeding it here (rather than on the first
 	// WindowSizeMsg) makes it a normal transcript entry: it renders fresh at the live width on
 	// every repaint, so it reflows on resize with no "already shown" guard, and /clear re-seeds it
-	// through the same helper (startNewSession) to reprint a fresh-launch view.
-	m.transcript.addStartup(newStartupView(opts))
-	// Construction is the session's first boundary, so it opens the session's start-up log: the
-	// routine notes below gather into it until the first Exchange launch closes it (enterRunning).
-	m.chrome.open()
+	// through the same boundary call ([Model.beginSession]) to reprint a fresh-launch view.
+	// Construction is the session's first boundary, so it also opens the session's start-up log:
+	// the routine notes below gather into it until the first Exchange launch closes it
+	// (enterRunning).
+	m.beginSession()
 	// A resumed run then repaints the stored scrollback beneath that box and relights the gauge
 	// (a no-op on a fresh start, when opts.Resumed is nil).
 	m.replayResumed(opts.Resumed)

@@ -181,7 +181,7 @@ func (m Model) foldServerBind(result ServerSwitchResult, record choiceRecord) (M
 	m.opts.Endpoint = result.Endpoint
 	m.opts.HostAlias = result.HostAlias
 	m.opts.ContextWindow = result.ContextWindow
-	m.transcript.refreshStartup(newStartupView(m.opts))
+	m.restateBox()
 	m.transcript.addNote(serverBindNote(m.opts, record.saved))
 	record.warn(&m.transcript)
 	// Arming is a statement of its own: it takes a pointer, and in `return m, m.armBeat()` the order

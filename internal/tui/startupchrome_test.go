@@ -143,6 +143,45 @@ func TestStartupChromeZeroValueIsClosed(t *testing.T) {
 	}
 }
 
+// TestStartupChromeBoundaryReopensTheLog pins that every session boundary after the launch — /clear,
+// /new and a /sessions restore — reopens a start-up log the previous session had closed: the box is
+// reseeded as the first entry, and the boundary's own routine notice (the context-files report)
+// gathers into the fresh log rather than taking a line of its own.
+func TestStartupChromeBoundaryReopensTheLog(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		drive func(t *testing.T, m Model) Model
+	}{
+		{"/clear", clearSession},
+		{"/new", newSession},
+		{"a /sessions restore", restoreSession},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := newTestModelEng(t, &fakeEngine{contextReport: loadedReport()}, testOpts)
+			m.chrome.close() // the first Exchange launch closed the outgoing session's log
+
+			m = tc.drive(t, m)
+
+			if !m.chrome.isLogOpen {
+				t.Error("the boundary left the start-up log closed")
+			}
+			if len(m.transcript.entries) == 0 || m.transcript.entries[0].kind != entryStartup {
+				t.Errorf("entries[0] is not the start-up box: %+v", m.transcript.entries)
+			}
+			want := []string{"context: AGENTS.md (3.1 KiB)"}
+			if at := m.transcript.sessionLogIndex(); at < 0 || !slices.Equal(m.transcript.entries[at].notes, want) {
+				t.Errorf("session log at %d, want it holding %v", at, want)
+			}
+		})
+	}
+}
+
 // noteEntry is tr's note line reading text, and whether there is one.
 func noteEntry(tr transcript, text string) (entry, bool) {
 	for _, e := range tr.entries {
