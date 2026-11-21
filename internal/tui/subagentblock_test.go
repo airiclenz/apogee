@@ -2630,7 +2630,7 @@ func TestSubAgentSkippedContentIsWhatTheVerdictMatches(t *testing.T) {
 }
 
 // skippedDelegation folds a delegation the engine SKIPPED for a pending interjection, exactly as
-// skipDelegation emits it: the call, then a finished phase with no started one before it, carrying
+// childBracket.neverStarted emits it: the call, then a finished phase with no started one before it, carrying
 // the error-shaped skip result — and, when burst is set, the trailing ToolResultEvent that pairs the
 // result with the call in the dispatch's own order.
 func skippedDelegation(tr *transcript, id, task string, burst bool) {

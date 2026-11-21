@@ -61,7 +61,7 @@ var errEmptyInterjection = errors.New("apogee: interjection is empty")
 //
 // What a STAGED message does before it reaches here is the host's to say through
 // Config.InterjectionPending: while it answers true, the delegations of the running group
-// that have not started are skipped (dispatch.go, skipDelegation) so the boundary this
+// that have not started are skipped (dispatch.go, childBracket.neverStarted) so the boundary this
 // call needs arrives when the children already running finish, instead of after every
 // queued one. That seam is a predicate, not a drain — the message itself still commits
 // only here, at the boundary, on the driving goroutine.

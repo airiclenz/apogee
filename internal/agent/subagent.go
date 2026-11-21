@@ -931,10 +931,10 @@ func (e delegateEnd) dispatchOutcome() dispatchOutcome {
 // (executeTool). The bracket also decides the ending once, after the recover, books the ledger row
 // (children.go, apogee-clb) and reports what the child's mailbox still held as undelivered under
 // that ending (childEnding.undelivered). Four calls that never reach a run book their rows where
-// they are settled: a delegation refused past the reply's fan-out ceiling (recordCeilingRefusal,
-// dispatch.go), a pooled delegation the human stopped before a worker took it
-// (stopQueuedDelegation), one the user's cancel reached before it started
-// (settleCancelledDelegation) and one a queued message pre-empted (preemptDelegation). The spawn
+// they are settled, each through its bracket (childBracket.neverStarted): a delegation refused
+// past the reply's fan-out ceiling (refusePastCeiling, dispatch.go), a pooled delegation the human
+// stopped before a worker took it (stopQueuedDelegation), one the user's cancel reached before it
+// started (settleCancelledDelegation) and one a queued message pre-empted (preemptDelegation). The spawn
 // index is taken as the bracket opens, under the ledger's lock — the one a pooled group reserved
 // for this call in call order (dispatchGroup), else the next — because a pool fan-out runs several
 // of these frames at once and neither its dequeue nor its completion order is the model's call

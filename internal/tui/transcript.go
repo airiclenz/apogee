@@ -2833,7 +2833,7 @@ const unstartedDelegationPrefix = "sub-agent not started:"
 // ceiling refusal and the queued stop, which are the only results opening with
 // unstartedDelegationPrefix. Such a
 // head is neither finished work nor a queued job, whatever its phase says: the engine closes it
-// through its finished phase alone (skipDelegation), so a count that read the phase would take a
+// through its finished phase alone (childBracket.neverStarted), so a count that read the phase would take a
 // refused delegation for a report a stop keeps. The result's head line is the first line of the
 // body the failure laid out (absorbFailure): a sub_agent head carries no body of its own before its
 // result, and the prompt an expanded row shows above the result is composed at paint time

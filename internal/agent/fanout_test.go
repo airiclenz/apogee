@@ -1527,6 +1527,117 @@ func TestDispatchSerially_PreemptedDelegationBooksASkippedLedgerRow(t *testing.T
 	})
 }
 
+// TestDispatchSerially_EveryUnstartedKindBooksOneRow pins the never-started bracket at width 1
+// (childBracket.neverStarted) for every kind the width-1 loop settles before a child starts: a
+// delegation pre-empted by a queued message, one refused past the fan-out ceiling and one the
+// user's cancel reached first. Each answers its call with its kind's exact not-started result, on
+// one finished phase alone under the run id its head ToolCallEvent carried — the bracket never
+// mints one — books no audit record and exactly one ledger row, numbered in the model's call order
+// behind the delegation that ran. The fourth kind, the queued stop, exists only in a pool
+// (TestStopChild_AQueuedPooledDelegationNeverStarts).
+func TestDispatchSerially_EveryUnstartedKindBooksOneRow(t *testing.T) {
+	const ceilingRefusal = "sub-agent not started: this reply fanned out 2 delegations and the ceiling is 1 (1 rounds × width 1) — the first 1 ran; delegate the rest again once their results are in"
+	tests := []struct {
+		name string
+		// arm wires the kind onto cfg and returns the hook "task one" runs as its child is asked —
+		// the moment the second delegation's fate is decided — given the Run's cancel.
+		arm         func(cfg *domain.Config, cancel context.CancelFunc) func(context.Context)
+		firstScript []provider.Delta
+		wantContent string
+		wantRows    []ledgerRow
+	}{
+		{
+			name: "skipped",
+			arm: func(cfg *domain.Config, _ context.CancelFunc) func(context.Context) {
+				var pending atomic.Bool
+				cfg.InterjectionPending = pending.Load
+				return func(context.Context) { pending.Store(true) }
+			},
+			firstScript: contentScript("child one done"),
+			wantContent: skippedDelegationContent,
+			wantRows: []ledgerRow{
+				{spawnIndex: 1, callID: "c1", outcome: delegationCompleted},
+				{spawnIndex: 2, callID: "c2", outcome: delegationSkipped},
+			},
+		},
+		{
+			name: "past the ceiling",
+			arm: func(cfg *domain.Config, _ context.CancelFunc) func(context.Context) {
+				cfg.Delegation.FanOutRounds = 1
+				return nil
+			},
+			firstScript: contentScript("child one done"),
+			wantContent: ceilingRefusal,
+			wantRows: []ledgerRow{
+				{spawnIndex: 1, callID: "c1", outcome: delegationCompleted},
+				{spawnIndex: 2, callID: "c2", outcome: delegationRefused, cause: delegationCause(ceilingRefusal)},
+			},
+		},
+		{
+			name: "cancelled",
+			arm: func(_ *domain.Config, cancel context.CancelFunc) func(context.Context) {
+				return func(c context.Context) {
+					cancel()
+					<-c.Done()
+				}
+			},
+			firstScript: []provider.Delta{{Kind: provider.DeltaError, Err: "context canceled"}},
+			wantContent: cancelledQueuedDelegationContent,
+			wantRows: []ledgerRow{
+				{spawnIndex: 1, callID: "c1", outcome: delegationStopped},
+				{spawnIndex: 2, callID: "c2", outcome: delegationCancelled},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			cfg := subAgentConfig(sink, domain.ModeAskBefore)
+			cfg.ParallelAgents = 1
+			hook := tt.arm(&cfg, cancel)
+			up := newRoutedResponder().
+				route("delegate two things", nil, fanOutScript([2]string{"c1", "task one"}, [2]string{"c2", "task two"})).
+				route("task one", hook, tt.firstScript).
+				route("task two", nil, contentScript("child two done")).
+				route("delegate two things", nil, contentScript("parent done"))
+			a, err := newAgent(cfg, up)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			if err := a.Submit(domain.UserInput{Text: "delegate two things"}); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+
+			if _, err := a.Run(ctx); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			results := subAgentResults(sink.events)
+			if len(results) != 2 || results[1].CallID != "c2" {
+				t.Fatalf("depth-0 tool results = %+v, want c1 then c2", results)
+			}
+			if !results[1].IsError || results[1].Content != tt.wantContent {
+				t.Errorf("c2 result = %+v, want exactly the error-shaped %q", results[1], tt.wantContent)
+			}
+			phases := phasesFor(sink.events, "c2")
+			if len(phases) != 1 || phases[0].Phase != domain.SubAgentFinished || phases[0].Result.Content != tt.wantContent {
+				t.Fatalf("c2 phases = %+v, want one finished phase carrying the not-started result", phases)
+			}
+			if head := sink.events[eventIndex(sink.events, "c2")].(domain.ToolCallEvent); phases[0].RunID != head.SpawnRunID {
+				t.Errorf("c2 finished phase run id = %q, want the head's %q (a never-started bracket never mints)", phases[0].RunID, head.SpawnRunID)
+			}
+			for _, ae := range auditEvents(sink.events) {
+				if ae.CallID == "c2" {
+					t.Errorf("c2 was audit-recorded (%+v); a child that never ran books no record", ae)
+				}
+			}
+			assertLedgerRows(t, a, tt.wantRows)
+		})
+	}
+}
+
 // ----------------------------------------------------------------------------
 // The delegation-width line (plan 2026-09-14 - 04 item 4)
 // ----------------------------------------------------------------------------

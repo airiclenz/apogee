@@ -314,7 +314,10 @@ Depends on item 7.
 - `go test -count=1 -run 'TestDelegationPhases|TestDispatch_SerialDelegationPanic|TestSubAgent_ChildPanic|TestRunDelegation|TestFanOut_ChildPanic|TestWorkflowSpawn_ASubAgent|TestInterjectChild|TestDelegationRefusals' ./internal/agent/`
 **Commit:** `refactor(agent): started sub_agent runs go through childBracket`
 
-## 9. Never-started entries on the bracket
+## 9. Never-started entries on the bracket — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): skippedDelegationResult removed with skipDelegation — preemptDelegation was its only caller, so the bracket's unstartedSkipped content replaces it (same errorToolResult bytes).
+NOTES (2026-11-21): internal/agent/stop_test.go, listed under Files, needed no edit — it names none of the removed helpers and TestStopChild_AQueuedPooledDelegationNeverStarts passes unchanged.
 
 Depends on item 8.
 

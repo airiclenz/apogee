@@ -239,11 +239,6 @@ type dispatchSlot struct {
 	// clears it too, so commitCall treats the skipped slot exactly as a refused one: no audit
 	// record for a child that never ran.
 	run bool
-	// ceilingRefused marks a delegation refused past the reply's fan-out ceiling
-	// (refusePastCeiling): it holds its final result like a skipped slot, and it is the one refusal
-	// dispatchGroup books a delegate-ledger row for itself — the call never enters runSubAgent, the
-	// ledger's own site, and the model's next request must still count it (children.go).
-	ceilingRefused bool
 	// delegated marks a child that ran to a result: runCall sets it as the child returns, and
 	// commitCall books the audit record it earns — on the dispatching goroutine, in call order.
 	// A leaf's arms book their own record inside runCall (executeRun, executeGate, executeConfine),
@@ -283,15 +278,15 @@ type dispatchSlot struct {
 // its run flag at dequeue, and such a group carries no width line at all. A group with a slot
 // refused past the ceiling carries none either — the refusal already names the width.
 //
-// A ceiling-refused slot's delegate-ledger row is booked HERE, at either width, because the call
-// never reaches runSubAgent, the ledger's own site (children.go): after the width-1 prepare, or
-// after the whole pooled group has been prepared and its running slots reserved, so the refused
-// rows number behind every slot that runs, in the model's own call order.
+// A ceiling-refused slot's delegate-ledger row is booked as prepareCall refuses it, by its bracket
+// (refusePastCeiling, childBracket.neverStarted), at either width. In a pooled group every slot
+// before it has already been prepared and its delegation reserved, and every delegation after it
+// sits past the ceiling too, so the refused rows still number behind every slot that runs, in the
+// model's own call order.
 func (a *Agent) dispatchGroup(ctx context.Context, turn, width int, calls []domain.ToolCall) dispatchOutcome {
 	if width <= 1 {
 		for i, call := range calls {
 			slot := a.prepareCall(ctx, turn, call, true, i, len(calls))
-			a.recordCeilingRefusal(&slot)
 			if !a.settleCancelledDelegation(ctx, turn, &slot) {
 				a.runCall(ctx, turn, &slot)
 			}
@@ -321,10 +316,6 @@ func (a *Agent) dispatchGroup(ctx context.Context, turn, width int, calls []doma
 			a.children.queue(slots[i].runID)
 		}
 	}
-	for i := range slots {
-		a.recordCeilingRefusal(&slots[i])
-	}
-
 	a.runPool(ctx, turn, width, slots)
 
 	// Join first, commit after: a cancel has already been answered slot by slot in the run phase,
@@ -466,11 +457,11 @@ func (a *Agent) prepareCall(
 // preemptDelegation is the one rule by which a queued user message pre-empts a delegation that
 // has not started: when the slot is a delegation (isDelegationCall — a background sub_agent call
 // is answered at once and never skipped, ADR 0094 D6) and a message is waiting for this Agent's
-// boundary (interjectionPending), the slot takes the skip result and its finished phase at once
-// (skipDelegation), its run flag is cleared so commitCall books no audit record for a child that
-// never ran, its delegate-ledger row is booked here — `skipped`, no cause, since the call never
-// reaches runSubAgent: the index its pooled group reserved for it, else the next fresh one at
-// width 1 — and true is returned. A leaf tool is never pre-empted — it runs to its result
+// boundary (interjectionPending), the slot is settled through its bracket at once
+// (childBracket.neverStarted, unstartedSkipped) — the skip result, its finished phase alone and its
+// delegate-ledger row, `skipped` with no cause, at the index its pooled group reserved for it, else
+// the next fresh one at width 1 — its run flag is cleared so commitCall books no audit record for a
+// child that never ran, and true is returned. A leaf tool is never pre-empted — it runs to its result
 // whatever is waiting at the boundary — and the predicate is read ONCE per slot, here, and never
 // again: a child that has started is never affected, and a slot skipped stays skipped even if the
 // message is withdrawn.
@@ -479,13 +470,7 @@ func (a *Agent) preemptDelegation(turn int, slot *dispatchSlot) bool {
 		return false
 	}
 	slot.run = false
-	slot.result = a.skipDelegation(turn, slot, skippedDelegationResult(slot.call.ID))
-	a.delegations.record(delegationRecord{
-		spawnIndex: a.delegations.open(slot.call.ID),
-		callID:     slot.call.ID,
-		name:       delegationLabel("", slot.call),
-		outcome:    delegationSkipped,
-	})
+	slot.result = a.openBracket(turn, slot.call, &slot.runID, &a.delegations).neverStarted(unstartedSkipped())
 	return true
 }
 
@@ -493,9 +478,11 @@ func (a *Agent) preemptDelegation(turn int, slot *dispatchSlot) bool {
 // 2026-09-20, and by ADR 0094 D6): when the slot is a delegation (isDelegationCall — a background
 // sub_agent call is never counted) sitting at or past the fan-out ceiling in its
 // group — index counts from 0, so the first `ceiling` delegations in emitted order run as they
-// always have — the slot takes the ceiling refusal and its finished phase at once
-// (skipDelegation's path: no started phase, no audit record, the run flag cleared), and true is
-// returned. A leaf tool is never counted or refused, whatever its group holds, and a ceiling of 0
+// always have — the slot is settled through its bracket at once (childBracket.neverStarted,
+// unstartedPastCeiling): the ceiling refusal, its finished phase alone and its delegate-ledger row,
+// `refused` with the refusal's head line as its cause, booked here because the call never reaches
+// runSubAgent; the run flag is cleared, so no audit record is booked, and true is returned. A leaf
+// tool is never counted or refused, whatever its group holds, and a ceiling of 0
 // (rounds 0) refuses nothing.
 //
 // The overflow is REFUSED rather than held back and re-issued by the engine (owner, 2026-09-20):
@@ -514,30 +501,10 @@ func (a *Agent) refusePastCeiling(turn, index, group int, slot *dispatchSlot) bo
 	if ceiling <= 0 || index < ceiling {
 		return false
 	}
+	refusal := fanOutCeilingResult(slot.call.ID, group, rounds, width, a.offersTool(tools.FanOutToolName))
 	slot.run = false
-	slot.ceilingRefused = true
-	slot.result = a.skipDelegation(turn, slot, fanOutCeilingResult(slot.call.ID, group, rounds, width, a.offersTool(tools.FanOutToolName)))
+	slot.result = a.openBracket(turn, slot.call, &slot.runID, &a.delegations).neverStarted(unstartedPastCeiling(refusal))
 	return true
-}
-
-// recordCeilingRefusal books the delegate-ledger row a ceiling-refused slot is owed (children.go)
-// and does nothing for any other slot. It is the ceiling's OWN write, one of the ledger's sites
-// besides the delegation bracket's (childBracket, childrun.go), beside the pre-emption's (preemptDelegation), the
-// human's stop's (stopQueuedDelegation) and the cancel's (settleCancelledDelegation): opened and
-// recorded on the dispatching goroutine, so a pooled group's refused rows take their indices
-// after every reserved slot. The row reads as any
-// refusal does — `refused`, the result's head line as its cause, the call's label as its name.
-func (a *Agent) recordCeilingRefusal(slot *dispatchSlot) {
-	if !slot.ceilingRefused {
-		return
-	}
-	a.delegations.record(delegationRecord{
-		spawnIndex: a.delegations.open(slot.call.ID),
-		callID:     slot.call.ID,
-		name:       delegationLabel("", slot.call),
-		outcome:    delegationRefused,
-		cause:      delegationCause(slot.result.Content),
-	})
 }
 
 // runCall executes one prepared slot's verdict and leaves the result and outcome on the slot; a
@@ -751,45 +718,34 @@ func (a *Agent) runPooledSlot(ctx context.Context, turn int, slot *dispatchSlot)
 
 // settleCancelledDelegation settles a delegation the user's cancel reached before its child
 // started — dequeued by a pool worker, or reached by the width-1 loop, after the cancel (ADR 0088
-// D2): nothing is built or run, it takes the not-started result (cancelledQueuedDelegationContent)
-// and its finished phase at once
-// (skipDelegation), its run flag is cleared so commitCall books no audit record, and its
-// delegate-ledger row is booked here, `cancelled` as its unstarted ending projects it
-// (unstartedCancelled), since the call never reaches runSubAgent. True
-// is returned for a slot it settled; a leaf, a slot with nothing left to run, and any slot while
-// the context is live are left alone.
+// D2): nothing is built or run, it is settled through its bracket at once
+// (childBracket.neverStarted, unstartedCancelled) — the not-started result
+// (cancelledQueuedDelegationContent), its finished phase alone and its delegate-ledger row,
+// `cancelled`, booked here since the call never reaches runSubAgent — and its run flag is cleared
+// so commitCall books no audit record. True is returned for a slot it settled; a leaf, a slot with
+// nothing left to run, and any slot while the context is live are left alone.
 func (a *Agent) settleCancelledDelegation(ctx context.Context, turn int, slot *dispatchSlot) bool {
 	if ctx.Err() == nil || !slot.run || slot.verdict.kind != resolveDelegate {
 		return false
 	}
 	slot.run = false
-	slot.result = a.skipDelegation(turn, slot, errorToolResult(slot.call.ID, cancelledQueuedDelegationContent))
-	a.delegations.record(unstartedCancelled().ledgerRecord(delegationRecord{
-		spawnIndex: a.delegations.open(slot.call.ID),
-		callID:     slot.call.ID,
-		name:       delegationLabel("", slot.call),
-	}, slot.result.Content))
+	slot.result = a.openBracket(turn, slot.call, &slot.runID, &a.delegations).neverStarted(unstartedCancelled())
 	return true
 }
 
 // stopQueuedDelegation settles a pooled delegation the human stopped before a worker took it (ADR
 // 0086 D4): read at the dequeue under the registry's lock (childRegistry.dequeue), a marked slot
-// runs nothing and folds nothing. It takes the stopped-unstarted result and its finished phase at
-// once (skipDelegation), its run flag is cleared so commitCall books no audit record for a child
-// that never ran, and its delegate-ledger row is booked here — as recordCeilingRefusal books a
-// refusal's, since the call never reaches runSubAgent — `stopped` as its unstarted ending projects
-// it (unstartedStopped). True is returned for a stopped slot.
+// runs nothing and folds nothing. It is settled through its bracket at once
+// (childBracket.neverStarted, unstartedStopped) — the stopped-unstarted result, its finished phase
+// alone and its delegate-ledger row, `stopped`, at the index its group reserved for it, booked
+// here since the call never reaches runSubAgent — and its run flag is cleared so commitCall books
+// no audit record for a child that never ran. True is returned for a stopped slot.
 func (a *Agent) stopQueuedDelegation(turn int, slot *dispatchSlot) bool {
 	if slot.runID == "" || !a.children.dequeue(slot.runID) {
 		return false
 	}
 	slot.run = false
-	slot.result = a.skipDelegation(turn, slot, errorToolResult(slot.call.ID, stoppedQueuedDelegationContent))
-	a.delegations.record(unstartedStopped().ledgerRecord(delegationRecord{
-		spawnIndex: a.delegations.open(slot.call.ID),
-		callID:     slot.call.ID,
-		name:       delegationLabel("", slot.call),
-	}, slot.result.Content))
+	slot.result = a.openBracket(turn, slot.call, &slot.runID, &a.delegations).neverStarted(unstartedStopped())
 	return true
 }
 
@@ -812,12 +768,6 @@ const cancelledQueuedDelegationContent = "sub-agent not started: the user cancel
 // ran: the same words every time, so the model can tell a skip from a child's own failure and
 // decide whether to delegate again once it has read the message.
 const skippedDelegationContent = "sub-agent not started: the user sent a message while this group was running; delegate again if the task is still needed"
-
-// skippedDelegationResult is the error-shaped tool result of a pre-empted delegation — built as
-// executeRefuse builds a refusal, so on the wire and in a Driver it reads like one.
-func skippedDelegationResult(callID string) domain.ToolResult {
-	return errorToolResult(callID, skippedDelegationContent)
-}
 
 // fanOutCeilingResultFormat is the whole tool result a delegation refused past the reply's fan-out
 // ceiling carries (refusePastCeiling), in the pre-emption result's shape — the same `sub-agent not
@@ -861,20 +811,6 @@ func (a *Agent) interjectionPending() bool {
 		return false
 	}
 	return a.cfg.InterjectionPending()
-}
-
-// skipDelegation closes one delegation that has not started with result: it emits the finished
-// phase that closes the child's bracket without a started one — carrying that result, not
-// Cancelled, since nothing is rolled back — and returns it for the caller to commit in call order.
-// Its callers are the ways a delegation is settled before it starts, preemptDelegation (a
-// queued message), refusePastCeiling (the fan-out ceiling) and settleCancelledDelegation (the
-// user's cancel), at either width, so a lone delegation is closed exactly as a pooled one — and
-// stopQueuedDelegation (the human's stop on a
-// pooled delegation still waiting for a worker), which only a pool has. The phase carries the run id the slot's head
-// ToolCallEvent carried, so the bracket closes the block that event opened.
-func (a *Agent) skipDelegation(turn int, slot *dispatchSlot, result domain.ToolResult) domain.ToolResult {
-	a.emitSubAgentPhase(turn, slot.call, slot.runID, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Result: result})
-	return result
 }
 
 // runDelegation drives the sub_agent recursion point (a nested Agent) to its boundary inside the
@@ -928,8 +864,8 @@ func (a *Agent) stepCapFor(call domain.ToolCall) (applied, requested int) {
 //
 // runDelegation brackets every child with the started/finished pair whatever width it ran under,
 // so nothing that runs is ever left looking queued. A delegation skipped for a pending
-// interjection, or refused past the reply's fan-out ceiling, reports a finished phase alone
-// (skipDelegation): it never started.
+// interjection, refused past the reply's fan-out ceiling, reached by the cancel or stopped while
+// queued reports a finished phase alone (childBracket.neverStarted): it never started.
 //
 // The caller fills what the phase carries — Phase, and Result on a finished one, StepCap and
 // CapRequested on a started one (stepCapFor) — and this stamps the identity and the moment, At,
