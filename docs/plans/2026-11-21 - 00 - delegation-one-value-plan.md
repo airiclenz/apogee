@@ -426,7 +426,10 @@ Depends on item 11.
 - `go test -count=1 -run 'TestDelegationRefusals|TestPrepareCall_|TestWorkflowCall_ABackground|TestSubAgent_RejectsEmpty|TestBackground_|TestSubAgentContext|TestRunDelegation' ./internal/agent/`
 **Commit:** `refactor(agent): a delegation request is parsed once per dispatch slot`
 
-## 13. Record the bracket in the decision records and glossary
+## 13. Record the bracket in the decision records and glossary — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): the new adr-0039-amend-1121 also restates the 2026-09-20 ceiling note's "`refusePastCeiling`'s own write" (the refused row is now the bracket's, opened by refusePastCeiling) and records the ratified never-ran → `refused` undelivered reason; it is named on ADR 0039's Status line and reading-order list.
+NOTES (2026-11-21): the retired-identifier grep over .capcom/knowledge/ found no Note naming skipDelegation, recordCeilingRefusal, classifyDelegation, withoutSeatChoice or publishesSeatChoice, so no further Note needed correcting; fan-out-ceiling.md's refused row and docs/manual/configuration.md's ledger `refused` outcome describe the ledger outcome, not the undelivered reason, and stay accurate unchanged.
 
 Depends on item 12.
 

@@ -61,7 +61,13 @@ a pre-emption adds no note of its own but is listed when one fires — ahead of 
 directive, with the same system-prompt fallback for a tail that is not a tool result. Facts, no imperatives; structural
 (no key, on under Bypass); in memory only, cleared as the next Exchange opens — the retained
 delegations outlive it, the ledger does not — never in the conversation or the snapshot
-(`internal/agent/children.go`).
+(`internal/agent/children.go`). Every row is booked in one place, the delegation's bracket
+(`childBracket`, `internal/agent/childrun.go`), which also holds its run id, its started/finished
+phase pair and the recover boundary a child's panic stops at, and decides its ending once (ADR 0039
+D4, amended 2026-11-21): a delegation that ran, one refused before its child was built, and one
+settled before it started — skipped, refused past the **Fan-out ceiling**, caught queued by a cancel
+or a stop — book their rows alike. A call the resolver refuses books none, and a workflow item's
+bracket keeps no ledger.
 The tool subset a child inherits is the parent's menu **minus the human's seat**: `ask_user`
 and `present_document` are withheld from every sub-agent at every depth (owner call,
 2026-09-14 — a delegation has no seat at the human's prompt; a child reports the question or
@@ -116,7 +122,7 @@ else can drive a child's Steps. Every queued message earns one
 `domain.ChildInterjectionEvent{Input, Landed, Reason}` on the shared sink, so a Driver never has to
 guess whether it arrived — nor, for one that did not, why: the `Reason` says the child `completed`,
 was `capped`, `faulted`, `stopped` by the human or was `cancelled` before the boundary the message
-waited for, or `refused` it there. `Agent.StopChild(runID)`, keyed and recursing the same way,
+waited for, or `refused` it at the boundary, or never ran. `Agent.StopChild(runID)`, keyed and recursing the same way,
 is the other call a Driver makes on a running child — see **Stop (a delegation)**. A child that received such messages returns its result with the trailer
 `(the user sent N message(s) to this sub-agent while it ran)` on every outcome but a cancelled
 dispatch — a parent reading a result shaped by instructions it never issued must be able to see

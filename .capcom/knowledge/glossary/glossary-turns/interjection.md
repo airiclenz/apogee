@@ -62,7 +62,7 @@ capped before your message landed`, `<name> was stopped by you before your messa
 found the child running — the human's stop of that one child, or the cancel of the whole Turn), `<name>
 failed before your message landed`, `<name> was cancelled before your message landed` (the child
 ended cancelled without a stop finding it running), or `<name>
-could not take your message` where the child, still running, refused it at the boundary.
+could not take your message` where the child refused it at the boundary, or never ran.
 _Avoid_: "steering" / "steer" (ADR 0014's guided-decomposition sense — a Mechanism shaping the
 model's own primary call, not a human speaking), "scheduled message" (nothing is clock-timed;
 it means deliver-at-the-next-boundary), "queued input" alone (the queue is the staging, the

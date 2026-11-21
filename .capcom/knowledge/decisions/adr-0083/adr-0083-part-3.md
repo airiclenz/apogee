@@ -31,3 +31,13 @@ layout leaves readable at depth 0 and a bug results from it.
 > (`internal/agent/childrun.go`, `runChild` and `reapChild`) the workflow spawner also runs on;
 > the delegate's fields stay flat, and `runSubAgent` still makes its call-derived writes after
 > construction and reads the child's fields for the report.
+
+> **Note 2026-11-21 (plan `2026-11-21 - 00`, items 7–12; issue `delegation-endings-hand-bracketed`).**
+> This section stands: what moved is the bracket a delegation is booked under, not the
+> runtime-state value. Its run id, its started/finished phase pair, the recover boundary a child's
+> panic stops at (ADR 0039 D4, amended 2026-11-21), its ending and its one ledger row are now one
+> `childBracket` (`internal/agent/childrun.go`), opened around the child-run lifecycle by the frame
+> that spawns the child — `runDelegation`, `runSubAgent` or the workflow spawner — and a value of
+> that frame, never a field on `Agent`. The ending it decides is a return value. The delegate's
+> fields stay flat, and `runSubAgent` still makes its call-derived writes after construction and
+> reads the child's fields for the report.

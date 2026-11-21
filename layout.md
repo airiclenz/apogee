@@ -1638,7 +1638,7 @@ did not land — `<name> finished before your message landed` (the child complet
 `<name> failed before your message landed`,
 `<name> was cancelled before your message landed` (the child ended cancelled without a stop finding
 it running), or `<name> could not take your message` (the
-child, still running, refused it at the boundary). A reason this build does not know, or a record
+child refused it at the boundary, or never ran). A reason this build does not know, or a record
 written before the reason existed, reads as the first.
 
 ---
