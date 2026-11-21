@@ -87,6 +87,47 @@ func TestDelegationOffer_JoinsThePublishedOfferWithTheLiveFacts(t *testing.T) {
 	}
 }
 
+// TestDelegationOffer_LiveFactsGateBackground pins the sub_agent background gate on a real Agent
+// (ADR 0094 D1, D7): only the top-level Agent of a session that can keep the workflow — a scratch
+// dir and a workspace — whose sub_agent published the switch may run a call in the background.
+func TestDelegationOffer_LiveFactsGateBackground(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		shape func(*domain.Config)
+		depth int
+		want  bool
+	}{
+		{"the switch published", func(*domain.Config) {}, 0, true},
+		{"a delegate", func(*domain.Config) {}, 1, false},
+		{"no scratch dir", func(cfg *domain.Config) { cfg.ScratchDir = "" }, 0, false},
+		{"no workspace", func(cfg *domain.Config) { cfg.WorkspaceDir = "" }, 0, false},
+		{"the plain sub_agent", func(cfg *domain.Config) {
+			reg := domain.NewToolRegistry()
+			_ = reg.Register(tools.NewSubAgent())
+			_ = reg.Register(tools.NewWorkflow())
+			cfg.Tools = reg
+		}, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := backgroundSubAgentConfig(t, &recordingSink{})
+			tc.shape(&cfg)
+			a, err := newAgent(cfg, &workflowResponder{})
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			a.depth = tc.depth
+
+			if got := a.delegationOffer().background; got != tc.want {
+				t.Errorf("delegationOffer().background = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
 // topLevelAgent is a depth-0 Agent over roster with a scratch dir and the given workspace — the
 // fields delegationOffer reads, and nothing else.
 func topLevelAgent(roster *domain.ToolRegistry, workspace string) *Agent {

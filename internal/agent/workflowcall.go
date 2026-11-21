@@ -24,13 +24,13 @@ package agent
 //
 // A call setting `background` (ADR 0089 D1) hands the same plan — or the same recipe — to the
 // background manager (background.go) and is answered at once with the workflow's id and status
-// path, but only where this Agent's fan_out published that switch (offersBackground) and this Agent
-// is the top-level one: everywhere else — a headless run, a daemon firing, a delegate — the call
-// runs blocking, as if the switch were unset, because with no conversation to go on there is
-// nothing for a background workflow to run beside.
+// path, but only where this Agent's fan_out published that switch and this Agent is the top-level
+// one (delegationOffer.fanOutBackground): everywhere else — a headless run, a daemon firing, a
+// delegate — the call runs blocking, as if the switch were unset, because with no conversation to
+// go on there is nothing for a background workflow to run beside.
 //
 // A sub_agent call setting `background` (ADR 0094) takes the same road: where this Agent may
-// launch it (offersBackgroundSubAgent) dispatch keeps it out of the reply's delegations — it is
+// launch it (delegationOffer.background) dispatch keeps it out of the reply's delegations — it is
 // never pooled, pre-empted or counted against the fan-out ceiling — and resolves it as a Workflow,
 // and it runs here as a one-item background workflow whose one item runs the blocking sub_agent path
 // (backgroundSubAgentPlan; its item spawned by workflowspawn.go), answered at once with the
@@ -267,46 +267,10 @@ func asksBackground(raw json.RawMessage) bool {
 	return json.Unmarshal(raw, &args) == nil && args.Background
 }
 
-// offersBackground reports whether a fan_out call on this Agent may start its workflow in the
-// background: this is the top-level Agent — background workflows belong to it (startBackground) —
-// and the fan_out on its menu published the switch, which only a Driver that offers background
-// workflows lets it do (tools.HostTools.OffersBackground; ADR 0089 D1). Anywhere else a
-// `background: true` that reaches dispatch runs blocking.
-func (a *Agent) offersBackground() bool {
-	if a.isDelegate() {
-		return false
-	}
-	tool, ok := a.lookupTool(tools.FanOutToolName)
-	if !ok {
-		return false
-	}
-	fanOut, ok := tool.(*tools.FanOut)
-	return ok && fanOut.OffersBackground()
-}
-
-// offersBackgroundSubAgent reports whether a sub_agent call on this Agent may run as a one-item
-// background workflow (ADR 0094): this is the top-level Agent, the sub_agent on its menu published
-// the switch — which only fan_out's gate lets it do (tools.HostTools.OffersBackground and a roster
-// that lifts workflow; ADR 0094 D1), whether or not fan_out itself is lifted — and the session can
-// keep the workflow: a scratch directory to keep its folder in and a workspace to run it over.
-// Anywhere else a `background: true` runs blocking, as if the switch were unset (ADR 0094 D7) —
-// never refused for a workflow the session cannot keep.
-func (a *Agent) offersBackgroundSubAgent() bool {
-	if a.isDelegate() || a.ScratchDir() == "" || a.cfg.WorkspaceDir == "" {
-		return false
-	}
-	tool, ok := a.lookupTool(tools.SubAgentToolName)
-	if !ok {
-		return false
-	}
-	spawner, ok := tool.(*tools.SubAgent)
-	return ok && spawner.OffersBackground()
-}
-
 // isBackgroundSubAgentCall reports whether call is a sub_agent call that runs as a one-item
 // background workflow: the call asks for the background and offered — this Agent's
-// offersBackgroundSubAgent, read by the caller — says it may have it. It is a pure function of its
-// inputs, so dispatch's partition (partitionDispatch) stays one.
+// delegationOffer.background, read by the caller — says it may have it. It is a pure function of
+// its inputs, so dispatch's partition (partitionDispatch) stays one.
 func isBackgroundSubAgentCall(call domain.ToolCall, offered bool) bool {
 	return offered && isSubAgentCall(call) && asksBackground(call.Arguments)
 }
@@ -451,7 +415,7 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 	if refusal != "" {
 		return errorToolResult(call.ID, refusal)
 	}
-	background := asksBackground(call.Arguments) && a.offersBackground()
+	background := asksBackground(call.Arguments) && a.delegationOffer().fanOutBackground
 	if recipe, inputs, refusal, isRecipe := parseFanOutRecipe(call.Arguments); isRecipe {
 		if refusal != "" {
 			return errorToolResult(call.ID, refusal)

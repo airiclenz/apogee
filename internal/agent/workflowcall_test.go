@@ -1915,7 +1915,7 @@ func TestWorkflowControl_ADelegateIsRefused(t *testing.T) {
 	if got := controlCall(a, `{"action":"status"}`); !got.IsError || !strings.Contains(got.Content, "only the main agent") {
 		t.Errorf("a delegate's status = %q (error %v), want the main-agent refusal", got.Content, got.IsError)
 	}
-	if a.offersBackground() {
+	if a.delegationOffer().fanOutBackground {
 		t.Error("a delegate offers background; a background workflow belongs to the top-level Agent")
 	}
 }
@@ -2308,7 +2308,7 @@ func TestPartitionDispatch_ABackgroundSubAgentIsALeafWhereOffered(t *testing.T) 
 		{true, []string{"s1"}, []string{"s2"}},
 		{false, nil, []string{"s1", "s2"}},
 	} {
-		leaves, delegations := partitionDispatch(calls, tc.offered)
+		leaves, delegations := partitionDispatch(calls, delegationOffer{background: tc.offered})
 		if ids := callIDs(leaves); !slices.Equal(ids, tc.leaves) {
 			t.Errorf("offered %t: leaves = %v, want %v", tc.offered, ids, tc.leaves)
 		}
@@ -2325,44 +2325,6 @@ func callIDs(calls []domain.ToolCall) []string {
 		ids = append(ids, call.ID)
 	}
 	return ids
-}
-
-func TestOffersBackgroundSubAgent_OnlyTheTopLevelAgentOfASessionThatKeepsWorkflows(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		name  string
-		shape func(*domain.Config)
-		depth int
-		want  bool
-	}{
-		{"the switch published", func(*domain.Config) {}, 0, true},
-		{"a delegate", func(*domain.Config) {}, 1, false},
-		{"no scratch dir", func(cfg *domain.Config) { cfg.ScratchDir = "" }, 0, false},
-		{"no workspace", func(cfg *domain.Config) { cfg.WorkspaceDir = "" }, 0, false},
-		{"the plain sub_agent", func(cfg *domain.Config) {
-			reg := domain.NewToolRegistry()
-			_ = reg.Register(tools.NewSubAgent())
-			_ = reg.Register(tools.NewWorkflow())
-			cfg.Tools = reg
-		}, 0, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			cfg := backgroundSubAgentConfig(t, &recordingSink{})
-			tc.shape(&cfg)
-			a, err := newAgent(cfg, &workflowResponder{})
-			if err != nil {
-				t.Fatalf("newAgent: %v", err)
-			}
-			a.depth = tc.depth
-
-			if got := a.offersBackgroundSubAgent(); got != tc.want {
-				t.Errorf("offersBackgroundSubAgent = %t, want %t", got, tc.want)
-			}
-		})
-	}
 }
 
 func TestWorkflowState_MapsTheEngineState(t *testing.T) {

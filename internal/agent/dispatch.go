@@ -77,7 +77,7 @@ func (a *Agent) dispatchTools(ctx context.Context, turn int, calls []domain.Tool
 	// a cancel's not-run answer — so the count of results still to append starts at the reply's
 	// width and each append takes one off it (freshResultBound shares the room left by it).
 	a.turns.resultsToAppend = len(calls)
-	leaves, delegations := partitionDispatch(calls, a.offersBackgroundSubAgent())
+	leaves, delegations := partitionDispatch(calls, a.delegationOffer())
 	if a.dispatchGroup(ctx, turn, 1, leaves) == dispatchSettled {
 		// A leaf took the cancel, so no delegation of this reply ever started: each is answered
 		// not-run, in emitted order, and the Turn is kept whole.
@@ -107,14 +107,15 @@ func (a *Agent) announceSubAgentGroup(turn, size, width int) {
 
 // partitionDispatch splits a reply's calls into the leaf tools and the sub_agent delegations,
 // each group keeping its emitted order (ADR 0039 decision 11). It is a pure function of the
-// call list and backgroundOffered — whether this Agent may run a sub_agent call in the background
-// (offersBackgroundSubAgent), answered by the caller: nothing about the bound server, the depth, or
-// the cap reaches it, so the dispatch ORDER a reply produces is fixed even when the fan-out width is
-// not. A sub_agent call that runs in the background is a leaf (isDelegationCall, ADR 0094 D6), and
-// so is one marked Malformed, which is answered with its parse error and spawns nothing.
-func partitionDispatch(calls []domain.ToolCall, backgroundOffered bool) (leaves, delegations []domain.ToolCall) {
+// call list and offer — this Agent's delegationOffer, of which only background (whether a sub_agent
+// call may run in the background) is read, answered by the caller: nothing about the bound server,
+// the depth, or the cap reaches it, so the dispatch ORDER a reply produces is fixed even when the
+// fan-out width is not. A sub_agent call that runs in the background is a leaf (isDelegationCall,
+// ADR 0094 D6), and so is one marked Malformed, which is answered with its parse error and spawns
+// nothing.
+func partitionDispatch(calls []domain.ToolCall, offer delegationOffer) (leaves, delegations []domain.ToolCall) {
 	for _, call := range calls {
-		if isDelegationCall(call, backgroundOffered) {
+		if isDelegationCall(call, offer.background) {
 			delegations = append(delegations, call)
 			continue
 		}
@@ -401,7 +402,7 @@ func (a *Agent) prepareCall(
 	// A delegation's run id is minted BEFORE its head event, so the ToolCallEvent that opens the
 	// delegation already carries the id every later event about it will (dispatchSlot.runID).
 	var runID string
-	if isDelegationCall(call, a.offersBackgroundSubAgent()) {
+	if isDelegationCall(call, a.delegationOffer().background) {
 		runID = a.runIDs.mint()
 	}
 	a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call, ResolvedPath: a.resolvedPath(call), SpawnRunID: runID})
@@ -474,7 +475,7 @@ func (a *Agent) prepareCall(
 // again: a child that has started is never affected, and a slot skipped stays skipped even if the
 // message is withdrawn.
 func (a *Agent) preemptDelegation(turn int, slot *dispatchSlot) bool {
-	if !isDelegationCall(slot.call, a.offersBackgroundSubAgent()) || !a.interjectionPending() {
+	if !isDelegationCall(slot.call, a.delegationOffer().background) || !a.interjectionPending() {
 		return false
 	}
 	slot.run = false
@@ -505,7 +506,7 @@ func (a *Agent) preemptDelegation(turn int, slot *dispatchSlot) bool {
 // a scratch dir set) is read here too, so the pointer to it is offered only to a model that can
 // act on it.
 func (a *Agent) refusePastCeiling(turn, index, group int, slot *dispatchSlot) bool {
-	if !isDelegationCall(slot.call, a.offersBackgroundSubAgent()) {
+	if !isDelegationCall(slot.call, a.delegationOffer().background) {
 		return false
 	}
 	rounds, width := a.cfg.Delegation.FanOutRounds, a.statedDelegationWidth()
@@ -1082,7 +1083,7 @@ func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard se
 		writeTarget:            target.real,
 		scratchDir:             a.ScratchDir(),
 		atDepthBound:           a.depth >= a.maxDepth(),
-		backgroundSubAgent:     isBackgroundSubAgentCall(call, a.offersBackgroundSubAgent()),
+		backgroundSubAgent:     isBackgroundSubAgentCall(call, a.delegationOffer().background),
 		maxDepth:               a.maxDepth(),
 		wrapUpOutput:           a.wrapUpOutput(),
 		writesWrapUpOutput:     tool.Name() == tools.WriteFileToolName && target.real == a.outputTarget,

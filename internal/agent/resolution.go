@@ -320,7 +320,7 @@ type resolutionInput struct {
 //     child starts a nested workflow past `delegate-max-depth` (ADR 0087). A sub_agent call run in
 //     the background (backgroundSubAgent, ADR 0094) is a Workflow verdict on the same terms. Its
 //     Plan scratch-dir rule is not this row's: with no scratch dir it is never run in the
-//     background (offersBackgroundSubAgent), so it is Delegated, blocking. A `workflow` control
+//     background (delegationOffer.background), so it is Delegated, blocking. A `workflow` control
 //     call (ADR 0089 D4) is a Workflow verdict too, but spawns nothing, so no depth bound applies.
 //     In Plan with no session scratch dir, a fan_out or workflow call is refused first with
 //     fanOutNoScratch's text: the workflow folder lives in the scratch dir (ADR 0087 D4), so there

@@ -142,7 +142,10 @@ Depends on item 2.
 - `go test -count=1 -run 'TestDelegationOffer|TestSeat_|TestSubAgentsContext|TestSubAgentContext|TestFanOutWidth|TestOrientation|TestDelegationRefusals|TestSubAgent_BackgroundAlone' ./internal/agent/`
 **Commit:** `refactor(agent): seat and context read one delegation offer`
 
-## 4. Background offer readers on the same value
+## 4. Background offer readers on the same value — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): subagent.go and subagent_test.go (listed in Files) needed no edit — neither calls nor names offersBackground/offersBackgroundSubAgent at this tree; TestSubAgent_BackgroundAloneOffersNoSeat was already fixed by item 3.
+NOTES (2026-11-21): isDelegationCall/isBackgroundSubAgentCall keep their `offered bool` parameter; their callers pass `a.delegationOffer().background` (partitionDispatch passes `offer.background`). The comment grep still hits construct.go:569, internal/tools/registry.go and cmd/apogee/wire_*.go — every one names the `offersBackground` parameter of tools.HostToolsOf/registryWithMCP, not the deleted agent helper, so they stay.
 
 Depends on item 3.
 

@@ -804,7 +804,7 @@ func TestPartitionDispatch_LeafToolsRunBeforeDelegations(t *testing.T) {
 		{ID: "s2", Tool: tools.SubAgentToolName},
 		{ID: "r1", Tool: "read_file"},
 	}
-	leaves, delegations := partitionDispatch(calls, false)
+	leaves, delegations := partitionDispatch(calls, delegationOffer{})
 	if len(leaves) != 2 || leaves[0].ID != "w1" || leaves[1].ID != "r1" {
 		t.Errorf("leaves = %+v, want w1 then r1 in emitted order", leaves)
 	}
