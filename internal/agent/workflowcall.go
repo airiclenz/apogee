@@ -268,20 +268,21 @@ func asksBackground(raw json.RawMessage) bool {
 }
 
 // isBackgroundSubAgentCall reports whether call is a sub_agent call that runs as a one-item
-// background workflow: the call asks for the background and offered — this Agent's
-// delegationOffer.background, read by the caller — says it may have it. It is a pure function of
+// background workflow: the call asks for the background and offer — this Agent's delegationOffer,
+// read by the caller — says it may have it (delegationRequest.background). It is a pure function of
 // its inputs, so dispatch's partition (partitionDispatch) stays one.
-func isBackgroundSubAgentCall(call domain.ToolCall, offered bool) bool {
-	return offered && isSubAgentCall(call) && asksBackground(call.Arguments)
+func isBackgroundSubAgentCall(call domain.ToolCall, offer delegationOffer) bool {
+	return isSubAgentCall(call) && parseDelegationRequest(call, offer).background
 }
 
 // isDelegationCall reports whether call is a delegation of the reply's tool round: a sub_agent call
-// that does not run in the background. Only such a call gets a run id before its head event, is
-// pooled, may be pre-empted by a waiting message, and counts against the fan-out ceiling (ADR 0094
-// D6). A sub_agent call marked Malformed is a leaf, never a delegation: it spawns nothing — it is
-// answered with its parse error (prepareCall) — so it mints no run id and takes no ceiling index.
-func isDelegationCall(call domain.ToolCall, offered bool) bool {
-	return call.Malformed == nil && isSubAgentCall(call) && !isBackgroundSubAgentCall(call, offered)
+// that does not run in the background (delegationRequest.blocking). Only such a call gets a run id
+// before its head event, is pooled, may be pre-empted by a waiting message, and counts against the
+// fan-out ceiling (ADR 0094 D6). A sub_agent call marked Malformed is a leaf, never a delegation: it
+// spawns nothing — it is answered with its parse error (prepareCall) — so it mints no run id and
+// takes no ceiling index.
+func isDelegationCall(call domain.ToolCall, offer delegationOffer) bool {
+	return isSubAgentCall(call) && parseDelegationRequest(call, offer).blocking()
 }
 
 // backgroundSubAgentResult starts the one-item background workflow a background sub_agent call asks
@@ -292,34 +293,29 @@ func isDelegationCall(call domain.ToolCall, offered bool) bool {
 // seat the call names sizes and queues the workflow (startBackground); the child resolves it again
 // from the same arguments as it starts.
 func (a *Agent) backgroundSubAgentResult(ctx context.Context, turn int, call domain.ToolCall) domain.ToolResult {
-	var args tools.SubAgentArgs
-	if err := json.Unmarshal(call.Arguments, &args); err != nil {
-		return errorToolResult(call.ID, subAgentBackgroundArguments+err.Error())
+	request := parseDelegationRequest(call, a.delegationOffer())
+	if request.decodeErr != nil {
+		return errorToolResult(call.ID, subAgentBackgroundArguments+request.decodeErr.Error())
 	}
-	if args.Continue != "" {
+	if request.args.Continue != "" {
 		return errorToolResult(call.ID, subAgentBackgroundContinue)
 	}
-	if args.Task == "" {
+	if !request.hasTask() {
 		return errorToolResult(call.ID, subAgentBackgroundNoTask)
 	}
-	seat := seatConfigured
-	if a.delegationOffer().seatChoice {
-		asked, err := parseDelegationSeat(args.RunOn)
-		if err != nil {
-			return errorToolResult(call.ID, err.Error())
-		}
-		seat = asked
+	if request.seatErr != nil {
+		return errorToolResult(call.ID, request.seatErr.Error())
 	}
-	if _, err := a.requestedChildTools(args.Tools); err != nil {
+	if _, err := a.requestedChildTools(request.args.Tools); err != nil {
 		return errorToolResult(call.ID, err.Error())
 	}
 	// Read and thrown away: the background child reads the files again as it starts, on the
 	// blocking path, so this read only refuses an unreadable one before any workflow exists.
-	if _, refusal := a.readDelegationContext(ctx, args.Context); refusal != "" {
+	if _, refusal := a.readDelegationContext(ctx, request.args.Context); refusal != "" {
 		return errorToolResult(call.ID, refusal)
 	}
-	plan := backgroundSubAgentPlan(call, a.runIDs.mint(), args)
-	id, err := a.startBackground(workflowLaunch{plan: plan, seat: seat, turn: turn, call: call})
+	plan := backgroundSubAgentPlan(call, a.runIDs.mint(), request)
+	id, err := a.startBackground(workflowLaunch{plan: plan, seat: request.askedSeat(), turn: turn, call: call})
 	if err != nil {
 		return errorToolResult(call.ID, fmt.Sprintf(subAgentBackgroundFailed, err))
 	}
@@ -333,8 +329,8 @@ func (a *Agent) backgroundSubAgentResult(ctx context.Context, turn int, call dom
 // and nonce, salting the plan hash with both (ADR 0094 D8): the call id alone is the upstream's
 // choice and not guaranteed unique, so a re-used id would otherwise resume the earlier call's run.
 // A resume or rerun reads the plan back from its folder, so it keeps the nonce it was started with.
-func backgroundSubAgentPlan(call domain.ToolCall, nonce string, args tools.SubAgentArgs) workflow.Plan {
-	label := delegationLabel(delegationName(args.Name), call)
+func backgroundSubAgentPlan(call domain.ToolCall, nonce string, request delegationRequest) workflow.Plan {
+	label := request.label(delegationName(request.args.Name), call.ID)
 	return workflow.Plan{Name: label, Stages: []workflow.Stage{{
 		Name:     subAgentStageName,
 		Kind:     workflow.StageFanout,

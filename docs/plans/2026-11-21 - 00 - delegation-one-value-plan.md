@@ -362,7 +362,13 @@ Depends on item 9.
 - `go build ./... && go test -count=1 -run 'TestWorkflowSpawn|TestUndelivered|TestChildBracket' ./internal/agent/`
 **Commit:** `refactor(agent): workflow Spawn brackets its child through childBracket`
 
-## 11. The delegation request parser
+## 11. The delegation request parser — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): re-derived from delegationLabel's ledger-row callers living in dispatch.go and subagent.go (items 7-9 moved them into childBracket.bookRow in childrun.go), which now calls parseDelegationRequest(b.call, delegationOffer{}).label(b.rowName, b.call.ID).
+NOTES (2026-11-21): consequential edit — internal/agent/doc.go: made necessary by adding delegationrequest.go (TestDocMapNamesEveryFile requires every file in the map).
+NOTES (2026-11-21): workflowspawn.go is unchanged — spawnSubAgent reaches the step cap only through runDelegate, which now parses its call once (parseDelegationRequest) and hands the same request to delegate; no stepCapFor call lived in workflowspawn.go.
+NOTES (2026-11-21): the request carries one field beyond the plan's struct, isMalformed, so blocking() can answer "never a delegation" for a Malformed call; isDelegationCall/isBackgroundSubAgentCall now take the delegationOffer (not offer.background) and route through the parser after their isSubAgentCall gate.
+NOTES (2026-11-21): delegate and backgroundSubAgentResult read the request's decodeErr / hasTask / seatErr each at its own place in today's order (the goal's "one decoder" covers them); item 12 still moves the parse onto the dispatch slot.
 
 Depends on item 10.
 

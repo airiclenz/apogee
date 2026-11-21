@@ -113,7 +113,7 @@ type childBracket struct {
 	ledger     *delegationLedger
 	spawnIndex int
 	// rowName is the label the row books — the child's display name once its run is read; "" falls
-	// back to the call's own label (delegationLabel). rowTarget is the child's RESOLVED output
+	// back to the call's own label (delegationRequest.label). rowTarget is the child's RESOLVED output
 	// target, "" for none.
 	rowName   string
 	rowTarget string
@@ -267,10 +267,11 @@ func (b *childBracket) bookRow(ending childEnding, resultContent string) {
 	if b.ledger == nil {
 		return
 	}
+	// The label reads neither the seat nor the background, so the zero offer parses it whole.
 	b.ledger.record(ending.ledgerRecord(delegationRecord{
 		spawnIndex: b.spawnIndex,
 		callID:     b.call.ID,
-		name:       delegationLabel(b.rowName, b.call),
+		name:       parseDelegationRequest(b.call, delegationOffer{}).label(b.rowName, b.call.ID),
 		outputPath: b.rowTarget,
 	}, resultContent))
 }

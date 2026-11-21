@@ -921,8 +921,9 @@ func (e delegateEnd) dispatchOutcome() dispatchOutcome {
 
 // runDelegate runs the one blocking sub_agent path inside b, the delegation's bracket
 // (childBracket), against site: the path a dispatched sub_agent call (runDelegation) and a workflow
-// item on the sub_agent path (workflowSpawner.spawnSubAgent, ADR 0094) both take. The started
-// phase announces the step cap the child runs under (stepCapFor); the body is delegate.
+// item on the sub_agent path (workflowSpawner.spawnSubAgent, ADR 0094) both take. The call's
+// arguments are parsed once here (parseDelegationRequest): the started phase announces the step cap
+// the child runs under (delegationRequest.stepCap), and the body, delegate, reads the same request.
 //
 // The bracket is the ONE recover boundary of the delegation (ADR 0039 decision 4: each child keeps
 // panic recovery at its own boundary): a panic raised anywhere in the child's life — its teardown
@@ -941,23 +942,31 @@ func (e delegateEnd) dispatchOutcome() dispatchOutcome {
 // order; the row records the child's RESOLVED output target, never the unresolved argument.
 func (a *Agent) runDelegate(ctx context.Context, b *childBracket, site delegateSite) (domain.ToolResult, delegateEnd) {
 	var end delegateEnd
-	applied, requested := a.stepCapFor(b.call)
+	request := parseDelegationRequest(b.call, a.delegationOffer())
+	applied, requested := request.stepCap(a.cfg.Delegation.MaxSteps)
 	result, ending := b.run(
 		domain.SubAgentPhaseEvent{StepCap: applied, CapRequested: requested},
 		func(any) domain.ToolResult {
 			return errorToolResult(b.call.ID, fmt.Sprintf("tool %q panicked", b.call.Tool))
 		},
-		func() (domain.ToolResult, childEnding) { return a.delegate(ctx, b, site, &end) },
+		func() (domain.ToolResult, childEnding) { return a.delegate(ctx, b, site, request, &end) },
 	)
 	end.ending = ending
 	return result, end
 }
 
-// delegate is runDelegate's body, run inside b: it parses the delegated task, refuses what it
-// cannot run before any child exists, builds the child, runs it through the bracket
+// delegate is runDelegate's body, run inside b: it reads the delegated task from request, refuses
+// what it cannot run before any child exists — request's own checks each at its place in this
+// path's order, builds the child, runs it through the bracket
 // (childBracket.runChild), renders its result and retains it where the run asks for that. It
 // returns the result and the ending it read, and fills end's transcript and seat fallback.
-func (a *Agent) delegate(ctx context.Context, b *childBracket, site delegateSite, end *delegateEnd) (domain.ToolResult, childEnding) {
+func (a *Agent) delegate(
+	ctx context.Context,
+	b *childBracket,
+	site delegateSite,
+	request delegationRequest,
+	end *delegateEnd,
+) (domain.ToolResult, childEnding) {
 	call, runID := b.call, *b.runID
 	var (
 		res domain.StepResult
@@ -975,13 +984,14 @@ func (a *Agent) delegate(ctx context.Context, b *childBracket, site delegateSite
 		return errorToolResult(call.ID, depthLimitReason(a.maxDepth())), refusedEnding()
 	}
 
-	var args tools.SubAgentArgs
-	if err := json.Unmarshal(call.Arguments, &args); err != nil {
-		return errorToolResult(call.ID, "invalid sub_agent arguments: "+err.Error()), refusedEnding()
+	if request.decodeErr != nil {
+		return errorToolResult(call.ID, "invalid sub_agent arguments: "+request.decodeErr.Error()), refusedEnding()
 	}
-	if args.Task == "" {
+	if !request.hasTask() {
 		return errorToolResult(call.ID, "sub_agent requires a non-empty task"), refusedEnding()
 	}
+	// A local copy: a continuation fills the name, roster and output path from the entry it takes.
+	args := request.args
 
 	// A CONTINUATION (P6 of plan 2026-09-18 - 00; ADR 0086 D2): the call names a delegation this
 	// Agent retained, and the child built below starts from that entry's task and rounds instead of
@@ -1039,15 +1049,11 @@ func (a *Agent) delegate(ctx context.Context, b *childBracket, site delegateSite
 	// offered: it is IGNORED rather than honoured or refused, which is the identity rule — below the
 	// first hop a delegation keeps the seat it landed on (ADR 0069 decision 3) — and which keeps a
 	// hallucinated argument from being an error the model cannot act on.
-	seat := seatConfigured
-	if a.delegationOffer().seatChoice {
-		asked, err := parseDelegationSeat(args.RunOn)
-		if err != nil {
-			giveBack()
-			return errorToolResult(call.ID, err.Error()), refusedEnding()
-		}
-		seat = asked
+	if request.seatErr != nil {
+		giveBack()
+		return errorToolResult(call.ID, request.seatErr.Error()), refusedEnding()
 	}
+	seat := request.askedSeat()
 
 	// The roster this call asks for (ADR 0005's per-task narrowing, published as `tools`), resolved
 	// BEFORE the child is built for the same reason the seat is: an unknown name costs no child and
@@ -1388,23 +1394,6 @@ func resolveStepCap(configured, asked int) (applied, requested int) {
 		return configured, asked
 	}
 	return configured, 0
-}
-
-// delegationLabel is the name a ledger row spells a delegation by: the display name the child
-// ended its run wearing (the call's own `name`, or the namer's), else the first line of the task
-// the call asked for — the Driver's own display fallback — else the call id, which is the one
-// handle a refused call with no readable task still has and the model itself minted.
-func delegationLabel(name string, call domain.ToolCall) string {
-	if name != "" {
-		return name
-	}
-	var args tools.SubAgentArgs
-	if json.Unmarshal(call.Arguments, &args) == nil {
-		if task := sanitize.ClampRunes(sanitize.FirstLine(args.Task), title.MaxDelegateRunes); task != "" {
-			return task
-		}
-	}
-	return "call " + call.ID
 }
 
 // startDelegationNaming launches the ONE out-of-band completion that names a delegation the model

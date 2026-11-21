@@ -115,7 +115,7 @@ func (a *Agent) announceSubAgentGroup(turn, size, width int) {
 // nothing.
 func partitionDispatch(calls []domain.ToolCall, offer delegationOffer) (leaves, delegations []domain.ToolCall) {
 	for _, call := range calls {
-		if isDelegationCall(call, offer.background) {
+		if isDelegationCall(call, offer) {
 			delegations = append(delegations, call)
 			continue
 		}
@@ -138,12 +138,13 @@ func partitionDispatch(calls []domain.ToolCall, offer delegationOffer) (leaves, 
 // it will never use, where an error would abandon a whole reply's fan-out over one malformed
 // argument.
 func (a *Agent) seatsAreSplit(calls []domain.ToolCall, target *DelegationTarget) bool {
-	if target == nil || !a.delegationOffer().seatChoice {
+	offer := a.delegationOffer()
+	if target == nil || !offer.seatChoice {
 		return false
 	}
 	var onSession, onSubAgentsServer bool
 	for _, call := range calls {
-		if a.askedSeat(call) == seatSession {
+		if parseDelegationRequest(call, offer).askedSeat() == seatSession {
 			onSession = true
 			continue
 		}
@@ -153,33 +154,19 @@ func (a *Agent) seatsAreSplit(calls []domain.ToolCall, target *DelegationTarget)
 }
 
 // allAskedSession reports whether EVERY call in the reply EXPLICITLY asked for the session seat.
-// The explicitness is the whole point: askedSeat answers seatConfigured for a call that named no
-// seat and for one whose argument does not parse, and neither is an ask — both land wherever the
-// configured default routes them, which with a target latched is the Sub-agent server. So a reply
-// mixing an explicit `run_on: "session"` with an unnamed call is not an all-session reply and is
-// sized by the ordinary rule.
+// The explicitness is the whole point: delegationRequest.askedSeat answers seatConfigured for a
+// call that named no seat and for one whose argument does not parse, and neither is an ask — both
+// land wherever the configured default routes them, which with a target latched is the Sub-agent
+// server. So a reply mixing an explicit `run_on: "session"` with an unnamed call is not an
+// all-session reply and is sized by the ordinary rule.
 func (a *Agent) allAskedSession(calls []domain.ToolCall) bool {
+	offer := a.delegationOffer()
 	for _, call := range calls {
-		if a.askedSeat(call) != seatSession {
+		if parseDelegationRequest(call, offer).askedSeat() != seatSession {
 			return false
 		}
 	}
 	return true
-}
-
-// askedSeat reports the Delegation seat one call named, seatConfigured for every call that named
-// none — which includes a call whose arguments do not parse and one naming a value outside the
-// enum, both of which runSubAgent refuses on their own account before a child exists.
-func (a *Agent) askedSeat(call domain.ToolCall) delegationSeat {
-	var args tools.SubAgentArgs
-	if err := json.Unmarshal(call.Arguments, &args); err != nil {
-		return seatConfigured
-	}
-	seat, err := parseDelegationSeat(args.RunOn)
-	if err != nil {
-		return seatConfigured
-	}
-	return seat
 }
 
 // ----------------------------------------------------------------------------
@@ -393,7 +380,7 @@ func (a *Agent) prepareCall(
 	// A delegation's run id is minted BEFORE its head event, so the ToolCallEvent that opens the
 	// delegation already carries the id every later event about it will (dispatchSlot.runID).
 	var runID string
-	if isDelegationCall(call, a.delegationOffer().background) {
+	if isDelegationCall(call, a.delegationOffer()) {
 		runID = a.runIDs.mint()
 	}
 	a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call, ResolvedPath: a.resolvedPath(call), SpawnRunID: runID})
@@ -466,7 +453,7 @@ func (a *Agent) prepareCall(
 // again: a child that has started is never affected, and a slot skipped stays skipped even if the
 // message is withdrawn.
 func (a *Agent) preemptDelegation(turn int, slot *dispatchSlot) bool {
-	if !isDelegationCall(slot.call, a.delegationOffer().background) || !a.interjectionPending() {
+	if !isDelegationCall(slot.call, a.delegationOffer()) || !a.interjectionPending() {
 		return false
 	}
 	slot.run = false
@@ -493,7 +480,7 @@ func (a *Agent) preemptDelegation(turn int, slot *dispatchSlot) bool {
 // a scratch dir set) is read here too, so the pointer to it is offered only to a model that can
 // act on it.
 func (a *Agent) refusePastCeiling(turn, index, group int, slot *dispatchSlot) bool {
-	if !isDelegationCall(slot.call, a.delegationOffer().background) {
+	if !isDelegationCall(slot.call, a.delegationOffer()) {
 		return false
 	}
 	rounds, width := a.cfg.Delegation.FanOutRounds, a.statedDelegationWidth()
@@ -844,19 +831,6 @@ func (a *Agent) runDelegation(ctx context.Context, turn int, slot *dispatchSlot)
 	return result, end.dispatchOutcome()
 }
 
-// stepCapFor reports the step cap one sub_agent call's child will run under and the ask it clamps
-// (resolveStepCap against the configured delegate cap), for the started phase event to carry: the
-// same rule runSubAgent applies when it seeds the child, read here BEFORE the child exists so the
-// phase that announces it can state the bound. A call whose arguments do not parse asked for
-// nothing — runSubAgent refuses it on its own account before a child exists.
-func (a *Agent) stepCapFor(call domain.ToolCall) (applied, requested int) {
-	var args tools.SubAgentArgs
-	if err := json.Unmarshal(call.Arguments, &args); err != nil {
-		return resolveStepCap(a.cfg.Delegation.MaxSteps, 0)
-	}
-	return resolveStepCap(a.cfg.Delegation.MaxSteps, args.MaxSteps)
-}
-
 // emitSubAgentPhase surfaces one delegation lifecycle boundary. The event is stamped with the
 // CHILD's identity — one level deeper than this Agent, under the child's run id and the spawning
 // call's id — rather than with the emitting parent's, so it carries the same run identity as the
@@ -868,7 +842,7 @@ func (a *Agent) stepCapFor(call domain.ToolCall) (applied, requested int) {
 // queued reports a finished phase alone (childBracket.neverStarted): it never started.
 //
 // The caller fills what the phase carries — Phase, and Result on a finished one, StepCap and
-// CapRequested on a started one (stepCapFor) — and this stamps the identity and the moment, At,
+// CapRequested on a started one (delegationRequest.stepCap) — and this stamps the identity and the moment, At,
 // read from the Agent's injected clock so every phase of every caller is timed in one place.
 func (a *Agent) emitSubAgentPhase(turn int, call domain.ToolCall, runID string, event domain.SubAgentPhaseEvent) {
 	event.EventBase = a.childBase(turn, call.ID, runID)
@@ -997,7 +971,7 @@ func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard se
 		writeTarget:            target.real,
 		scratchDir:             a.ScratchDir(),
 		atDepthBound:           a.depth >= a.maxDepth(),
-		backgroundSubAgent:     isBackgroundSubAgentCall(call, a.delegationOffer().background),
+		backgroundSubAgent:     isBackgroundSubAgentCall(call, a.delegationOffer()),
 		maxDepth:               a.maxDepth(),
 		wrapUpOutput:           a.wrapUpOutput(),
 		writesWrapUpOutput:     tool.Name() == tools.WriteFileToolName && target.real == a.outputTarget,
