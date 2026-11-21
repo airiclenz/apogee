@@ -13,6 +13,9 @@ or Moment is a **minor** bump, not a breaking change.
 ## [Unreleased]
 
 - **Docs:** the `UIPrefs.ToolsAutoCollapse` comment in `internal/domain/uiprefs.go` now describes a single tool call as a group of one and a single delegation or skill fetch as a group of one, and no longer names the retired lone call.
+- `apogee daemon` now warns once at start-up, on stderr, when `config.yaml` holds a plaintext `api-key:` (unless the entry sets `plaintext-key-ok: true`) or a retired `sub-agents: true` flag — the same notices `apogee headless` prints, saying "the daemon never prompts". A second daemon refused by the lock prints neither, and the stdout log never carries them.
+- **`apogee headless` names skills that failed to load.** A `SKILL.md` that discovery found but could not load — a header that will not parse, say — is now reported on stderr before the model is asked anything, with the reason and the file to fix, in the same words a session's `/skills` report uses. A skill shadowed by a same-named one stays silent there, as it is a working skill; stdout is unchanged.
+- **The daemon logs skills that failed to load.** A firing whose skill roots hold a `SKILL.md` that failed to load names it in the daemon's log before the run, with the reason and the file to fix, in the words `/skills` uses — once per project, and again only when that report changes.
 
 ## [0.35.7] — 2026-11-21
 
