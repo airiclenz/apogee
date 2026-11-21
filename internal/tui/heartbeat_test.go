@@ -1526,80 +1526,6 @@ func TestSessionLogGathersTheFirstBeatsRoutineNote(t *testing.T) {
 	}
 }
 
-// Once a submitted prompt has launched the session's first Exchange the log is closed, so the same
-// first-contact note — stashed while the worker held the engine and applied at its end — prints as
-// its own persisted note, exactly as it did before the log existed.
-func TestSessionLogClosedByAPromptLeavesTheFirstBeatsNoteItsOwn(t *testing.T) {
-	t.Parallel()
-
-	m := wireRebind(t, withSeededStartupNote(testOpts), &fakeHeartbeat{}, &fakeRebind{})
-	m = sendLine(t, m, "hello")
-	if m.chrome.isLogOpen {
-		t.Fatal("setup: the submitted prompt left the session log open")
-	}
-
-	m = foldBeatMsg(t, m, reasoningBeat("served-model", 32768))
-	m = step(t, m, exchangeDoneMsg{})
-
-	assertSeededLogOnly(t, m)
-	note := mandatoryEffortNote("served-model")
-	found := false
-	for _, e := range m.transcript.entries {
-		if e.kind == entryNote && e.text == note {
-			found = true
-			if e.ephemeral {
-				t.Errorf("note %q is ephemeral, want it persisted as at base", note)
-			}
-		}
-	}
-	if !found {
-		t.Errorf("notes = %q, want %q on its own line", noteTexts(m), note)
-	}
-}
-
-// The notes of a first-contact beat that need the human keep their own line while the log is open:
-// a refused rebind, and a notice the composition root marked loud — the roster that was not applied.
-// The routine notice beside the loud one still joins the log.
-func TestSessionLogLeavesTheFirstBeatsLoudNotesOnTheirOwnLine(t *testing.T) {
-	t.Parallel()
-
-	t.Run("a refused rebind", func(t *testing.T) {
-		t.Parallel()
-		rb := &fakeRebind{answer: func(model string, _ int) (RebindResult, error) {
-			return RebindResult{}, errors.New("no validated set for " + model)
-		}}
-		m := wireRebind(t, withSeededStartupNote(unbound(testOpts)), &fakeHeartbeat{}, rb)
-
-		m = foldBeatMsg(t, m, upBeat("served-model", 32768))
-
-		assertSeededLogOnly(t, m)
-		if n := countNotes(m, "no validated set for served-model"); n != 1 {
-			t.Errorf("refusal notes = %d, want exactly 1 on its own line; notes = %q", n, noteTexts(m))
-		}
-	})
-
-	t.Run("the roster that was not applied", func(t *testing.T) {
-		t.Parallel()
-		const (
-			routine = "tools: +view_diff (profile)"
-			loud    = "tools: the profile roster for served-model was not applied (busy) — it applies at the next model switch"
-		)
-		rb := &fakeRebind{answer: func(model string, window int) (RebindResult, error) {
-			return RebindResult{Model: model, ContextWindow: window, Notices: []Notice{{Text: routine, Kind: NoticeModelBinding}, {Text: loud, Kind: NoticeRosterUnapplied}}}, nil
-		}}
-		m := wireRebind(t, withSeededStartupNote(unbound(testOpts)), &fakeHeartbeat{}, rb)
-
-		m = foldBeatMsg(t, m, upBeat("served-model", 32768))
-
-		if got, want := sessionLogNotes(m), []string{seededStartupNote, routine}; !reflect.DeepEqual(got, want) {
-			t.Errorf("session log notes = %q, want %q", got, want)
-		}
-		if got, want := noteTexts(m), []string{loud}; !reflect.DeepEqual(got, want) {
-			t.Errorf("transcript notes = %q, want the loud notice alone %q", got, want)
-		}
-	})
-}
-
 // A `/model` pick and the seed that completes a `/server` move are news the human asked for, not a
 // record of how the session started: before any prompt, with the log still open, each keeps its own
 // line and the log's count stands.
@@ -1644,7 +1570,7 @@ func TestSessionLogLeavesAModelPickAndAServerSeedOnTheirOwnLine(t *testing.T) {
 	})
 }
 
-// A fallback settle is quiet about the model it already announced (quietSeed), yet it is a move the
+// A fallback settle is quiet about the model it already announced (contactSettle), yet it is a move the
 // session just made, not how it started: with the log open, the notices its rebind brings keep their
 // own line.
 func TestSessionLogLeavesAFallbackSettleOnItsOwnLine(t *testing.T) {

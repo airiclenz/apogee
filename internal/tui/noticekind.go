@@ -51,6 +51,28 @@ const (
 	// kindGitRefusal: git refused to read the host workspace, and the footer's `git refused` marker
 	// is explained once ([Model.noteGitRefusal]).
 	kindGitRefusal
+
+	// kindRebindChange: what a successful rebind moved — the late seed, a model change, a window
+	// change ([rebindNote]).
+	kindRebindChange
+	// kindRebindFailed: the binding source refused a rebind, so the session stays where it was
+	// ([rebindFailNote]).
+	kindRebindFailed
+	// kindWindowUnknown: the newly bound model's context window nobody could name
+	// ([unknownWindowNote]).
+	kindWindowUnknown
+	// kindEffortCleared: the session effort override the newly bound model rules out was dropped
+	// ([effortClearedNote]).
+	kindEffortCleared
+	// kindMandatoryEffort: the newly bound model's reasoning cannot be turned off
+	// ([mandatoryEffortNote]).
+	kindMandatoryEffort
+	// kindOffline: the heartbeat crossed offline ([offlineNote]).
+	kindOffline
+	// kindOnline: the heartbeat crossed back online ([onlineNote]).
+	kindOnline
+	// kindRouting: the Sub-agent server's routing state changed ([Model.foldRoutingNotice]).
+	kindRouting
 )
 
 // noticeClass is whether a notice needs the human. A LOUD notice keeps its own note line; a ROUTINE
@@ -99,6 +121,14 @@ var noticeKinds = map[NoticeKind]noticeKindRow{
 	kindContextAnomaly:     {class: classLoud, source: sourceAmbient},
 	kindColorScheme:        {class: classLoud, source: sourceAmbient},
 	kindGitRefusal:         {class: classRoutine, source: sourceAmbient},
+	kindRebindChange:       {class: classRoutine, source: sourceBeat},
+	kindRebindFailed:       {class: classLoud, source: sourceBeat},
+	kindWindowUnknown:      {class: classLoud, source: sourceBeat},
+	kindEffortCleared:      {class: classLoud, source: sourceBeat},
+	kindMandatoryEffort:    {class: classRoutine, source: sourceBeat},
+	kindOffline:            {class: classLoud, source: sourceBeat},
+	kindOnline:             {class: classLoud, source: sourceBeat},
+	kindRouting:            {class: classLoud, source: sourceAmbient},
 }
 
 // kindRow is k's row in [noticeKinds]; a kind with no row reads as the reserved zero kind's, so an

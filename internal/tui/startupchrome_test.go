@@ -51,6 +51,50 @@ func TestStartupChromeDestination(t *testing.T) {
 			}
 		})
 	}
+
+	// The heartbeat's notes, by the kind each carries and the contact its rebind was raised by: the
+	// first-contact beat's routine notes join the open log and take a persisted line of their own
+	// once a prompt has closed it; its notes that need the human — a refused rebind, the roster
+	// that was not applied, an unknown window, a cleared override — keep a persisted line while the
+	// log is open; a `/model` pick's, the post-`/server` seed's and a fallback settle's notes are
+	// news on a persisted line of their own; and a routing change keeps an ephemeral one.
+	heartbeat := []struct {
+		name       string
+		kind       NoticeKind
+		contact    contact
+		whenOpen   dest
+		whenClosed dest
+	}{
+		{"first beat's mandatory effort", kindMandatoryEffort, contactFirst, destLog, destLinePersisted},
+		{"first beat's change", kindRebindChange, contactFirst, destLog, destLinePersisted},
+		{"first beat's model binding", NoticeModelBinding, contactFirst, destLog, destLinePersisted},
+		{"first beat's trusted hint", NoticeTrustedHint, contactFirst, destLog, destLinePersisted},
+		{"first beat's refused rebind", kindRebindFailed, contactFirst, destLinePersisted, destLinePersisted},
+		{"first beat's unapplied roster", NoticeRosterUnapplied, contactFirst, destLinePersisted, destLinePersisted},
+		{"first beat's unknown window", kindWindowUnknown, contactFirst, destLinePersisted, destLinePersisted},
+		{"first beat's cleared effort", kindEffortCleared, contactFirst, destLinePersisted, destLinePersisted},
+		{"a /model pick's change", kindRebindChange, contactEvent, destLinePersisted, destLinePersisted},
+		{"a later beat's mandatory effort", kindMandatoryEffort, contactEvent, destLinePersisted, destLinePersisted},
+		{"a fallback settle's model binding", NoticeModelBinding, contactSettle, destLinePersisted, destLinePersisted},
+		{"a fallback settle's mandatory effort", kindMandatoryEffort, contactSettle, destLinePersisted, destLinePersisted},
+		{"an unkinded rebind notice", kindUnset, contactFirst, destLineEphemeral, destLineEphemeral},
+		{"offline", kindOffline, contactEvent, destLinePersisted, destLinePersisted},
+		{"online", kindOnline, contactEvent, destLinePersisted, destLinePersisted},
+		{"routing", kindRouting, contactEvent, destLineEphemeral, destLineEphemeral},
+	}
+	for _, tt := range heartbeat {
+		t.Run("heartbeat/"+tt.name, func(t *testing.T) {
+			t.Parallel()
+			rule := kindRow(tt.kind)
+
+			if got := destination(rule, tt.contact, true); got != tt.whenOpen {
+				t.Errorf("log open: destination = %d, want %d", got, tt.whenOpen)
+			}
+			if got := destination(rule, tt.contact, false); got != tt.whenClosed {
+				t.Errorf("log closed: destination = %d, want %d", got, tt.whenClosed)
+			}
+		})
+	}
 }
 
 // TestStartupChromePlace pins that each destination the rule names is the transcript place a note

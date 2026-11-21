@@ -27,6 +27,14 @@ func TestNoticeKindClasses(t *testing.T) {
 		{"context anomaly", kindContextAnomaly, classLoud, sourceAmbient},
 		{"colour scheme", kindColorScheme, classLoud, sourceAmbient},
 		{"git refusal", kindGitRefusal, classRoutine, sourceAmbient},
+		{"rebind change", kindRebindChange, classRoutine, sourceBeat},
+		{"rebind failed", kindRebindFailed, classLoud, sourceBeat},
+		{"window unknown", kindWindowUnknown, classLoud, sourceBeat},
+		{"effort cleared", kindEffortCleared, classLoud, sourceBeat},
+		{"mandatory effort", kindMandatoryEffort, classRoutine, sourceBeat},
+		{"offline", kindOffline, classLoud, sourceBeat},
+		{"online", kindOnline, classLoud, sourceBeat},
+		{"routing", kindRouting, classLoud, sourceAmbient},
 	}
 	if len(tests) != len(noticeKinds) {
 		t.Fatalf("the test pins %d kinds, the table declares %d — pin the new kind here", len(tests), len(noticeKinds))

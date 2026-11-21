@@ -125,7 +125,15 @@ internal/tui/watch_test.go — TestSessionViewHoldsEveryFieldTheBoundariesReset,
 Depends on item 3.
 **Commit:** `refactor(tui): one start-up chrome decides where a launch note lands`
 
-## 5. Heartbeat notes route through the start-up chrome
+## 5. Heartbeat notes route through the start-up chrome — ✅ DONE (2026-11-21)
+NOTES (2026-11-21): a beat after first contact (and the post-/server seed) builds its intent with contactEvent, not contactSettle: rebindNote's quiet argument is `c != contactEvent`, so only first contact and a fallback settle stay quiet, as at the base. The contactEvent/contactFirst/contactSettle comments in startupchrome.go are rewritten to match (and no longer cite rebindIntent.firstBeat).
+NOTES (2026-11-21): the eight heartbeat kinds are appended after kindGitRefusal in noticekind.go and pinned in TestNoticeKindClasses (consequential: its length check against noticeKinds requires every new row).
+NOTES (2026-11-21): consequential edit — internal/tui/noticekind_test.go: made necessary by the eight new noticeKinds rows (TestNoticeKindClasses counts the table).
+NOTES (2026-11-21): consequential edit — internal/tui/model.go: made necessary by m.note now taking heartbeat notes too (its doc said "every launch-side note").
+NOTES (2026-11-21): TestSessionLogClosedByAPromptLeavesTheFirstBeatsNoteItsOwn and TestSessionLogLeavesTheFirstBeatsLoudNotesOnTheirOwnLine are folded into a heartbeat-kind table inside TestStartupChromeDestination (first beat's routine note persisted once the log is closed; refused rebind, unapplied roster, unknown window, cleared effort persisted while open); the first-beat-into-log, fallback-settle and /model-pick + post-/server-seed tests stay as wiring smoke tests.
+NOTES (2026-11-21): the mandatoryEffortNote and foldRoutingNotice doc comments named addNote/addEphemeralNote as their destination; rewritten to name the chrome. The serverSwitchNote and "server fallback: could not follow" notes (heartbeat.go) are not in the item's enumerated list and still call transcript.addNote directly.
+NOTES (2026-11-21): internal/tui/transcript_test.go, listed in Files, needed no change (rebindNote's signature is unchanged). The open issue first-contact-notes-repeat still names noteRebindRoutine in its body; issues are not edited by this run.
+NOTES (2026-11-21): per the item's regression guard, a rebind notice with a zero Kind now takes the zero row (loud, sourceBoundary: ephemeral own line) where the base persisted it via Notice.Loud(); every cmd/apogee rebind producer names a Kind since item 2, so no shipped note moves.
 
 **What:**
 **Goal:** every heartbeat and rebind note (binding change, refused rebind, unknown window, effort cleared, mandatory effort, offline, online, routing) is placed by `m.note` with a kind from the table; `rebindIntent` carries one `contact` value instead of the `quietSeed`/`firstBeat` pair; `noteRebindRoutine` is gone; every destination equals the base's.

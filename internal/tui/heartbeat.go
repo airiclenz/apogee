@@ -88,8 +88,7 @@ type heartbeatState struct {
 
 // rebindIntent is one captured binding change: the model the last beat observed the server to be
 // serving, the window it reported for it, the effort wire dialect it reported for the server, and
-// whether the beat that saw it was the session's first
-// contact. It is what the deferred apply stashes and what the [ServerHost.Rebind] seam is called
+// how the change came to be raised (its [contact]). It is what the deferred apply stashes and what the [ServerHost.Rebind] seam is called
 // with — plain values, so the value-copied Model carries it safely. It is the OBSERVATION, not the
 // binding: what the binary makes of it (a pinned window outranking the observed one) comes back in
 // the [RebindResult].
@@ -119,18 +118,17 @@ type rebindIntent struct {
 	// the engine — the clear is host policy (ADR 0060 D9). It holds plain values and one slice of
 	// them, so it copies with the Model exactly as [heartbeatState.effort] does (ADR 0011).
 	effort domain.EffortSupport
-	// quietSeed records that this change was observed at FIRST CONTACT — no beat had ever landed
-	// and none had ever failed. It is an observation FACT, captured before the fold erases the
-	// evidence, rather than presentation state; [rebindNote] is what decides the wording it buys.
-	quietSeed bool
-	// firstBeat records that this change is the session's FIRST-CONTACT beat itself — set only by
-	// [Model.observeBinding], from the same pre-fold evidence quietSeed is, and never by any other
-	// door. It is what lets [Model.applyRebind] gather that beat's routine notes into the session's
-	// start-up log while the log is still open (layout.md, "The start-up box"). quietSeed cannot
-	// stand in for it: a fallback settle ([Model.followFallback]) sets quietSeed too, and its notes
-	// are news about a move the session just made, not a record of how it started — as are a
-	// `/model` pick's, the post-`/server` seed's and every later beat's, which all leave it false.
-	firstBeat bool
+	// contact is how this change came to be raised, an observation FACT captured before the fold
+	// erases the evidence rather than presentation state. [contactFirst] is the session's
+	// FIRST-CONTACT beat itself — no beat had ever landed and none had ever failed — set only by
+	// [Model.observeBinding]; [contactSettle] is a fallback settle ([Model.followFallback]), which
+	// re-binds the model the switch already announced. Either one makes [rebindNote] quiet about
+	// what the restated start-up box already shows. Only the first-contact beat's routine notes
+	// record how the session started, so only they join the start-up log while it is open
+	// ([destination]); a settle's notes are news about a move the session just made. The zero value,
+	// [contactEvent], is every other door — a `/model` pick, the post-`/server` seed, every later
+	// beat — whose change is news worded in full.
+	contact contact
 }
 
 // offlineFailureThreshold is how many consecutive idle beat failures flip the footer offline once
@@ -299,7 +297,7 @@ func (m Model) foldBeat(beat heartbeat.Beat) Model {
 
 	m, rebound := m.observeBinding(beat, firstContact)
 	if crossed && !rebound {
-		m.transcript.addNote(onlineNote)
+		m.note(kindOnline, contactEvent, onlineNote)
 	}
 	return m
 }
@@ -353,6 +351,10 @@ func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bo
 	}
 	m.hb.observedModel, m.hb.observedWindow = beat.ActiveModel, window
 	m.hb.observedDialect = beat.EffortSupport.Dialect
+	at := contactEvent
+	if firstContact {
+		at = contactFirst
+	}
 	intent := rebindIntent{
 		model:  beat.ActiveModel,
 		window: window,
@@ -362,9 +364,8 @@ func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bo
 		dialect: beat.EffortSupport.Dialect,
 		// The whole tell the beat read for the model it is binding, so the clear below decides from
 		// the observation that captured the change rather than from a later beat's state.
-		effort:    beat.EffortSupport,
-		quietSeed: firstContact,
-		firstBeat: firstContact,
+		effort:  beat.EffortSupport,
+		contact: at,
 	}
 	if !m.engineHolds().canRebind() {
 		// The engine is not the Update loop's to re-point right now, and Agent.Rebind is idle-only by
@@ -414,7 +415,7 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 			return m, false
 		}
 		m.hb.lastRebindFailed = intent.model
-		m.transcript.addNote(rebindFailNote(oldModel, intent.model, err))
+		m.note(kindRebindFailed, intent.contact, rebindFailNote(oldModel, intent.model, err))
 		return m, true
 	}
 
@@ -423,18 +424,15 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	// The box's facts were frozen when it was seeded, so a late seed would otherwise leave a
 	// "connecting" box at the top of the scrollback until the next /clear.
 	m.transcript.refreshStartup(newStartupView(m.opts))
-	if note := rebindNote(oldModel, oldWindow, m.opts.Model, m.opts.ContextWindow, intent.quietSeed); note != "" {
-		m.noteRebindRoutine(intent, note)
+	quiet := intent.contact != contactEvent
+	if note := rebindNote(oldModel, oldWindow, m.opts.Model, m.opts.ContextWindow, quiet); note != "" {
+		m.note(kindRebindChange, intent.contact, note)
 	}
 	for _, notice := range result.Notices {
-		if notice.Loud() {
-			m.transcript.addNote(notice.Text)
-			continue
-		}
-		m.noteRebindRoutine(intent, notice.Text)
+		m.note(notice.Kind, intent.contact, notice.Text)
 	}
 	if m.opts.ContextWindow == 0 {
-		m.transcript.addNote(unknownWindowNote)
+		m.note(kindWindowUnknown, intent.contact, unknownWindowNote)
 	}
 	// The session effort override the newly bound model rules out, dropped rather than left to fail
 	// the next turn (ADR 0060 D8). It is decided HERE because this is the one seam every model switch
@@ -448,7 +446,7 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	// rows are (ADR 0060 D9).
 	if override, profile := m.eng.ThinkingEffort(); effortExcluded(intent.effort, override) {
 		m.eng.SetEffortOverride("")
-		m.transcript.addNote(effortClearedNote(override, profile, m.opts.Model, intent.effort.Default))
+		m.note(kindEffortCleared, intent.contact, effortClearedNote(override, profile, m.opts.Model, intent.effort.Default))
 	}
 	// A model whose reasoning cannot be turned off is a host-side fact (ADR 0060 D9), so the human
 	// learns it the way the excluded-override clear above already tells them: a note at the bind,
@@ -456,26 +454,9 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	// as well as Mandatory because EffortSupport documents every field below Supported as meaningless
 	// when it is false — a beat that reports Mandatory with no dial is reporting nothing.
 	if intent.effort.Supported && intent.effort.Mandatory {
-		m.noteRebindRoutine(intent, mandatoryEffortNote(m.opts.Model))
+		m.note(kindMandatoryEffort, intent.contact, mandatoryEffortNote(m.opts.Model))
 	}
 	return m, true
-}
-
-// noteRebindRoutine places one ROUTINE rebind note — what moved, a model profile or roster delta
-// the binding brought, a model that always reasons. The session's first-contact beat
-// (rebindIntent.firstBeat) is part of how the session started, so while the start-up log is still
-// open — no Exchange has launched yet — its routine notes join that log and raise its count
-// (layout.md, "The start-up box"), display-only like the rest of it. Every other rebind, and the
-// first beat once the log has closed, writes the persisted note it always has: a `/model` pick, a
-// `/server` seed, a fallback settle and every later beat are genuine news ([rebindNote]). The notes
-// that need the human — a refused rebind, an unknown window, a cleared override, a loud notice —
-// never come through here.
-func (m *Model) noteRebindRoutine(intent rebindIntent, text string) {
-	if intent.firstBeat && m.chrome.isLogOpen {
-		m.transcript.addLogNote(text)
-		return
-	}
-	m.transcript.addNote(text)
 }
 
 // effortExcluded reports whether a live session effort override is one the bound model has ruled
@@ -528,8 +509,8 @@ func effortClearedNote(override, profile domain.ThinkingEffort, model, reportedD
 //
 // The model is rendered through displayModel like every id the chrome shows, so this note, the
 // cleared-override note above it and the footer below cannot name the same model three ways. It is
-// not escape-stripped here: the note's one destination is addNote, which strips at the seam for
-// every producer.
+// not escape-stripped here: every destination the start-up chrome places it in ([Model.note])
+// strips at the seam for every producer.
 func mandatoryEffortNote(model string) string {
 	return displayModel(model) + " always reasons — compaction and titles spend part of their output cap on it"
 }
@@ -580,9 +561,8 @@ const unknownWindowNote = notice.WindowUnknown
 //
 // Both ids are rendered the way the footer and the start-up box render them (displayModel), so the
 // note and the chrome beside it can never name the same model two different ways. Neither is
-// escape-stripped here: the new id is whatever the server advertised, so it is untrusted, but the
-// note's two destinations — addNote, or addLogNote for a first-contact beat while the start-up
-// log is open ([Model.noteRebindRoutine]) — both strip at the seam for every producer.
+// escape-stripped here: the new id is whatever the server advertised, so it is untrusted, but every
+// destination the start-up chrome places it in ([Model.note]) strips at the seam for every producer.
 func rebindNote(oldModel string, oldWindow int, newModel string, newWindow int, quietSeed bool) string {
 	switch {
 	case oldModel == "":
@@ -721,11 +701,11 @@ func (m Model) followFallback(e domain.UpstreamSwitchedEvent) (Model, tea.Cmd) {
 	// the server this session is now on ([Model.foldServerSwitch]'s reason).
 	m.transcript.refreshStartup(newStartupView(m.opts))
 	settle := rebindIntent{
-		model:     result.Model,
-		window:    result.ObservedWindow,
-		dialect:   result.ObservedDialect,
-		effort:    result.ObservedEffort,
-		quietSeed: true,
+		model:   result.Model,
+		window:  result.ObservedWindow,
+		dialect: result.ObservedDialect,
+		effort:  result.ObservedEffort,
+		contact: contactSettle,
 	}
 	if m.engineHolds().canRebind() {
 		m, _ = m.applyRebind(settle)
@@ -780,7 +760,7 @@ func (m Model) foldBeatFailure(failure string) Model {
 		return m
 	}
 	m.hb.offline = true
-	m.transcript.addNote(offlineNote(failure))
+	m.note(kindOffline, contactEvent, offlineNote(failure))
 	m.reportUpstream(true, failure)
 	return m
 }
@@ -840,8 +820,10 @@ func (m Model) upstreamBlockNote() string {
 //
 // The note is EPHEMERAL, like the "context: …" line: the routing state is re-derived from live
 // beats every time a session starts or resumes, so a stored "routing to grunt" is a claim about a
-// server nobody has beaten since — and five resumes would keep five of them (addEphemeralNote).
+// server nobody has beaten since — and five resumes would keep five of them. Its kind,
+// [kindRouting], is a loud workspace note, which the start-up chrome keeps on its own ephemeral
+// line ([destination]).
 func (m Model) foldRoutingNotice(msg routingNoticeMsg) (tea.Model, tea.Cmd) {
-	m.transcript.addEphemeralNote(msg.note)
+	m.note(kindRouting, contactEvent, msg.note)
 	return m, nil
 }

@@ -1064,8 +1064,8 @@ func (m *Model) noteContextFiles() {
 // note places one start-up note of kind, raised by c, where the start-up chrome says it lands
 // ([startupChrome.place]): a routine record of the start inside the session's start-up log while
 // the log is open, every other note on its own line (layout.md, "The start-up box"). It is the one
-// entry every launch-side note goes through, and every destination escape-strips at the
-// transcript's seam.
+// entry every launch-side and heartbeat note goes through, and every destination escape-strips at
+// the transcript's seam.
 func (m *Model) note(kind NoticeKind, c contact, text string) {
 	m.chrome.place(&m.transcript, kind, c, text)
 }

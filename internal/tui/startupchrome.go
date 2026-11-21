@@ -10,14 +10,17 @@ package tui
 type contact uint8
 
 const (
-	// contactEvent: raised by an event the host itself drives — a session boundary's notices, a
-	// launch's colour-scheme warnings, a git read's refusal.
+	// contactEvent: raised by any other event — a session boundary's notices, a launch's
+	// colour-scheme warnings, a git read's refusal, a liveness crossing, a routing change, and a
+	// rebind that is news worded in full: a `/model` pick, the post-`/server` seed, every beat after
+	// the first. It is the zero value, so a [rebindIntent] built with no contact is one of these.
 	contactEvent contact = iota
-	// contactFirst: raised by the session's first-contact beat (rebindIntent.firstBeat), which is
-	// part of how the session started.
+	// contactFirst: raised by the session's first-contact beat (set by [Model.observeBinding] from
+	// the pre-fold evidence), which is part of how the session started.
 	contactFirst
-	// contactSettle: raised by any later rebind — a `/model` pick, a `/server` seed, a fallback
-	// settle, every beat after the first — which is news, not a record of the start.
+	// contactSettle: raised by a fallback settle ([Model.followFallback]), which re-binds the model
+	// the switch already announced — quiet like first contact, yet news about a move the session
+	// just made, not a record of the start.
 	contactSettle
 )
 
@@ -50,8 +53,8 @@ func destination(rule noticeKindRow, c contact, isLogOpen bool) dest {
 	return destLineEphemeral
 }
 
-// startupChrome is the session's start-up log state and the router every launch-side note goes
-// through. It is a plain value (ADR 0011) held in the sessionView, so a watch parks it with the
+// startupChrome is the session's start-up log state and the router every launch-side and
+// heartbeat note goes through. It is a plain value (ADR 0011) held in the sessionView, so a watch parks it with the
 // rest of the view and a fresh sessionView literal starts with it closed.
 //
 // Its zero value is CLOSED: only a session boundary opens the log ([startupChrome.open]) —
