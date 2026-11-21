@@ -174,7 +174,11 @@ Depends on item 3.
 - `go test -count=1 -run 'TestDelegationOffer|TestWorkflowCall_|TestWorkflowControl_ADelegate|TestSubAgent_BackgroundAlone|TestPartitionDispatch|TestDelegationRefusals' ./internal/agent/`
 **Commit:** `refactor(agent): background delegation reads the one offer`
 
-## 5. One ending value with its projections
+## 5. One ending value with its projections — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): consequential edit — internal/agent/doc.go: made necessary by the new childending.go (TestDocMapNamesEveryFile requires every file in the package's doc map)
+NOTES (2026-11-21): childEnding carries two fields beyond the plan's `struct{ kind delegationOutcome }`: `hasStarted` (undelivered() and summary() must tell a never-ran stopped/cancelled ending from a started one) and `content` (the unstarted constructors' fixed result content, per the regression guard)
+NOTES (2026-11-21): projection signatures chosen: ledgerRecord(row delegationRecord, resultContent string) fills outcome+cause into a caller-built row; summary(steered int, bound domain.DelegationBound, report string) returns the zero value for an ending that never ran; refusedEnding() takes no argument, the cause comes from ledgerRecord's resultContent
 
 Depends on item 4.
 

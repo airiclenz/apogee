@@ -134,7 +134,11 @@
 // childrun.go is the one lifecycle a child's run goes through on that registry — register, arm,
 // Run, disarm, the stop verdict and an optional fold of a stopped child — and its teardown,
 // reapChild; sub_agent delegation (runSubAgent) runs its child on it with fold on, the workflow
-// spawner its item children with fold off. rebind.go swaps every per-model binding together when
+// spawner its item children with fold off. childending.go is the one value a delegation's ending
+// is decided as — a child's run read through one run switch, a refusal, or a delegation settled
+// before its child started — and every word that ending is spelled in elsewhere projects from it:
+// the ledger row, the workflow Ending, why undelivered mail never landed, and the typed summary of
+// the rendered result. rebind.go swaps every per-model binding together when
 // the Upstream's loaded model changes, and moves the session to another server (ADR 0024);
 // sharedupstream.go is the one holder an Agent reads its Upstream through, shared by handle between
 // a parent and its unrouted children so an Upstream put into it reaches all of them; serverbinding.go is
