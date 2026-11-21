@@ -1,6 +1,6 @@
 ---
 title: "The config writer reaches any registry path (architecture review 2026-11-10 #2)"
-status: parked
+status: open
 type: task
 priority: 3
 created: 2026-11-10T19:36:32Z
@@ -17,3 +17,7 @@ Caveat for design: the sections and fold writes today read-modify-write against 
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — scalarPathDepth=2 (internal/config/configwrite_scalar.go:41); IsSidePanelKey branches unchanged (cmd/apogee/wire_options.go:588,633)

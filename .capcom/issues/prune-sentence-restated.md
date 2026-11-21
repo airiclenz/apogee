@@ -1,6 +1,6 @@
 ---
 title: "The prune note is worded at three sites instead of on the event (architecture review 2026-10-14 #16)"
-status: parked
+status: open
 type: task
 priority: 4
 labels: [driver-parity]
@@ -16,3 +16,7 @@ Direction: add `PruneEvent.Notice()` and have all three sites print it, as the o
 ## Acceptance
 
 - One wording, pinned by a domain test; the three sites call `Notice()`.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — PruneEvent has no Notice(); sentence hand-written at headless.go:285, run/transcript.go:103, tui/transcript.go:3092; cheap

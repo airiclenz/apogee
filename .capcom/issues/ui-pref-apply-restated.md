@@ -1,6 +1,6 @@
 ---
 title: "Applying a UI pref on screen is one module (architecture review 2026-11-10 #3)"
-status: parked
+status: open
 type: task
 priority: 3
 labels: [tui, test-gap]
@@ -18,3 +18,7 @@ Solution: one TUI module for "UI prefs on this screen": by default a key lands t
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — ui.tools-auto-collapse (5be06c33) repeated the pattern; plan with ui-pref-declared-thrice and side-panel-writer-split

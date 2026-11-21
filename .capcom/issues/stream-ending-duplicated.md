@@ -1,6 +1,6 @@
 ---
 title: "One reply accumulator ends every stream (architecture review 2026-10-14 #12)"
-status: parked
+status: open
 type: task
 priority: 3
 created: 2026-11-05T19:56:22Z
@@ -11,3 +11,7 @@ Found by docs/reviews/archived/architecture-review-2026-10-14.html (#12), re-ver
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — two codecs each write cap/fault/finish/EOF epilogue (wire_openai.go:286 vs wire_anthropic_stream.go:431); EOF symptom already fixed

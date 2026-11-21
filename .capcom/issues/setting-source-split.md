@@ -1,6 +1,6 @@
 ---
 title: "A key's layer and source answered config-side (architecture review 2026-10-14 #15)"
-status: parked
+status: open
 type: task
 priority: 3
 created: 2026-11-05T19:56:22Z
@@ -11,3 +11,7 @@ Found by docs/reviews/archived/architecture-review-2026-10-14.html (#15), re-ver
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — project-write rule stated twice (settingsrows.go:331, projectwrite.go:274); plan with config-read-entries

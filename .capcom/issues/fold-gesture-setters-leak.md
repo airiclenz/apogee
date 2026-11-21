@@ -1,6 +1,6 @@
 ---
 title: "Reader fold gestures live in the fold module (architecture review 2026-11-21 #6)"
-status: parked
+status: open
 type: task
 priority: 3
 labels: [tui]
@@ -18,3 +18,7 @@ Must keep: ADR 0035 D2 (auto-collapse writes nothing; only the large-umbrella sh
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — gesture switch unchanged (internal/tui/mouse.go:933-945); prerequisite tool-block-shape plan landed, now unblocked

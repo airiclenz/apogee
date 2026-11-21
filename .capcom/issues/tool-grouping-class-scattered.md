@@ -1,6 +1,6 @@
 ---
 title: "A tool's grouping class is one registry column (architecture review 2026-11-21 #7)"
-status: parked
+status: open
 type: task
 priority: 3
 labels: [tui]
@@ -18,3 +18,7 @@ Must keep: ADR 0083 §1 (presenter verdicts stay on the wire, so the persisted `
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): PARTIAL — own-group names moved to internal/tui/blockshape.go; registry grouping column, solo/workflowFinish exemption, transcriptbridge.go:625 and toolbranch.go:404 re-derivations remain

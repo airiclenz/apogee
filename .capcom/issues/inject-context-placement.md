@@ -1,10 +1,12 @@
 ---
 title: "`Request.InjectContext` placement — a `domain` data type encodes chat-template role-safety policy"
-status: parked
+status: dropped
 type: decision
 priority: 4
 aliases: [apogee-p5j]
 created: 2026-09-03T18:40:20Z
+closed: 2026-11-21T16:14:32Z
+reason: Placement judged defensible by two reviews; Request.AdviseTail (2007250a) puts role placement in domain too. Triage 2026-11-21.
 ---
 
 **Status:** parked 2026-07-26 — carried out of the 2026-07-24 architecture-deepening review so that
@@ -84,3 +86,7 @@ Nothing else calls it, and nothing else keys idempotency or boundary logic on th
 - Is the honest outcome instead to **close** the question — an ADR 0010 (and/or 0017) note naming
   `domain` the deliberate owner of role-safety placement, so it stops being re-flagged at every
   architecture pass? A review that says "defensible" twice is evidence for this branch.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): DOUBTFUL — moved to domain/request.go:297; two reviews call placement defensible; Request.AdviseTail (2007250a) adds role placement to domain too; close with an ADR 0010 note

@@ -1,6 +1,6 @@
 ---
 title: "One context-fill value for every run (architecture review 2026-11-02 #9)"
-status: parked
+status: open
 type: task
 priority: 3
 created: 2026-11-02T20:02:19Z
@@ -11,3 +11,7 @@ Found by docs/reviews/archived/architecture-review-2026-11-02.html, verified 202
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): PARTIAL — viewedFill (46699077) unified gauge and side panel; child ~ estimates still missing (fold.go:295 depth-0 only)

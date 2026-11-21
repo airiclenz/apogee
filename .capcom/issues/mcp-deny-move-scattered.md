@@ -1,6 +1,6 @@
 ---
 title: "A url-safety move is one call on the MCP holder (architecture review 2026-11-10 #4)"
-status: parked
+status: open
 type: task
 priority: 3
 created: 2026-11-10T19:37:32Z
@@ -17,3 +17,7 @@ Caveats: the host-list swap can be refused mid-Turn, and today nothing is reques
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — denyMCP still two mcp.Admit partitions (cmd/apogee/wire_settings.go:1697-1729); plan with the other liveMCP items

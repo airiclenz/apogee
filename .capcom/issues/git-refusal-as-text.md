@@ -1,6 +1,6 @@
 ---
 title: "Repository state is one fact from gitexec (architecture review 2026-11-21 #3)"
-status: parked
+status: open
 type: task
 priority: 3
 labels: [security]
@@ -18,3 +18,7 @@ Must keep: ADR 0010 (gitexec stays a leaf and cannot import tui, so the refused 
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — refusal still errors.New text (internal/gitexec/gitexec.go:461) read by string predicates (cmd/apogee/gitstatus_host.go:184-187)

@@ -1,6 +1,6 @@
 ---
 title: "A path's real location has one resolver (architecture review 2026-11-21 #4)"
-status: parked
+status: open
 type: task
 priority: 3
 labels: [security, windows]
@@ -18,3 +18,7 @@ Must keep: ADR 0020 (a Windows box root that is a reparse point is refused, neve
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — security.EvalRealPath still plain EvalSymlinks; only platform.RealPath crosses junctions; Windows not checked

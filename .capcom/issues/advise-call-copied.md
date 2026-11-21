@@ -1,6 +1,6 @@
 ---
 title: "One advise call for every advise Moment (architecture review 2026-10-27 #8)"
-status: parked
+status: open
 type: task
 priority: 3
 created: 2026-11-05T19:56:21Z
@@ -11,3 +11,7 @@ Found by docs/reviews/archived/architecture-review-2026-10-27.html (#8), re-veri
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — two handler-kind switches (reactions.go:619, sessionadvise.go:225); cheap and standalone

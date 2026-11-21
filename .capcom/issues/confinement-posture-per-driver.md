@@ -1,10 +1,12 @@
 ---
 title: "Confinement posture is one verdict per Driver (architecture review 2026-11-21 #5)"
-status: parked
+status: dropped
 type: task
 priority: 3
 labels: [security, driver-parity]
 created: 2026-11-21T12:27:13Z
+closed: 2026-11-21T16:14:32Z
+reason: "Obsolete: already denied by ADR 0083 part 5 (2026-09-15); reopens only on a 4th Driver or boot drift. Triage 2026-11-21."
 ---
 
 Found by docs/reviews/architecture-review-2026-11-21.html, verified 2026-11-21 at 171d210f.
@@ -18,3 +20,7 @@ Must keep: ADR 0012 (never both unsupervised and unbounded; unattended Auto refu
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): OBSOLETE — already denied by ADR 0083 part 5 (owner, 2026-09-15); reopens only on a 4th Driver or boot drift; the 11-21 review missed it

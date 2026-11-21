@@ -1,6 +1,6 @@
 ---
 title: "A UI pref is declared once, in domain (architecture review 2026-11-10 #8)"
-status: parked
+status: open
 type: task
 priority: 3
 created: 2026-11-10T19:36:32Z
@@ -15,3 +15,7 @@ Solution: one per-key table in domain (path, parse/format, field, default, struc
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — registry enum validators still build UIPrefs{X: v}.Validate() (internal/config/registry.go:1868-1886)

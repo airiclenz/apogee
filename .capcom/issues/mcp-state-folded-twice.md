@@ -1,6 +1,6 @@
 ---
 title: "One MCP state fold; dials queued is a fact, not a note string (architecture review 2026-11-10 #9)"
-status: parked
+status: open
 type: task
 priority: 3
 labels: [tui]
@@ -16,3 +16,7 @@ Caveat: the seed fold keeps raw Events to restate them (`events()`), while sidep
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — both folds remain (cmd/apogee/wire_mcp.go:404, internal/sidepanel/mcp.go:50); note-string compare at internal/tui/settingsapply.go:370

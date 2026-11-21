@@ -1,6 +1,6 @@
 ---
 title: "Navigation mode over two region adapters (architecture review 2026-11-10 #6)"
-status: parked
+status: open
 type: task
 priority: 3
 labels: [tui]
@@ -16,3 +16,7 @@ Solution: resolve the cursor once per key behind a region seam. Navigation mode 
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — four verb pairs duplicated (internal/tui/blockcursor.go:218/254,403/630,444/461,498/538); after panel-geometry-scattered

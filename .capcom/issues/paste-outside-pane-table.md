@@ -1,6 +1,6 @@
 ---
 title: "Paste walks the pane table, one draft edit door (architecture review 2026-10-14 #5)"
-status: parked
+status: open
 type: task
 priority: 3
 created: 2026-11-05T19:56:22Z
@@ -11,3 +11,7 @@ Found by docs/reviews/archived/architecture-review-2026-10-14.html (#5), re-veri
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — foldPaste/foldWidgetMsg still hand-ordered chains (internal/tui/prompteditor.go:552,633)

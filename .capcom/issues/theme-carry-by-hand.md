@@ -1,10 +1,12 @@
 ---
 title: "The theme is a function of its inputs (architecture review 2026-11-10 #10)"
-status: parked
+status: dropped
 type: task
 priority: 4
 labels: [tui]
 created: 2026-11-10T19:36:32Z
+closed: 2026-11-21T16:14:32Z
+reason: "Not worth the churn: three fields, cache clearing recorded as deliberate (paintcache.go:165-170), no bug seen. Triage 2026-11-21."
 ---
 
 Found by docs/reviews/architecture-review-2026-11-10.html, verified 2026-11-10 at a5c4f2db. Verified VALID (Speculative): the hand-kept carry list and clear-by-discipline are real; no bug has been seen, and the paint-cache comment records clearing over keying as a deliberate call.
@@ -16,3 +18,7 @@ Solution: one rebuild entry, `theme(scheme, glyphs, terminal facts)`, and a them
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): DOUBTFUL — three fields; clearing vs keying the cache recorded as deliberate (paintcache.go:165-170); no bug seen

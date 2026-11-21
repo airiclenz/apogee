@@ -1,6 +1,6 @@
 ---
 title: "A start-up notice's class is declared once (architecture review 2026-11-21 #8)"
-status: parked
+status: open
 type: task
 priority: 4
 labels: [tui]
@@ -18,3 +18,7 @@ Must keep: internal/notice/doc.go (composers return text only; each Driver does 
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — 9 tui.Notice{Loud/Log} sites remain; Log ignored on rebind (tui.go:1301); feeds startup-note-routing-scattered

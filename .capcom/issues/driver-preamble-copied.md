@@ -1,6 +1,6 @@
 ---
 title: "One Driver host for process-scope facilities (architecture review 2026-10-27 #7)"
-status: parked
+status: open
 type: task
 priority: 3
 created: 2026-11-05T19:56:21Z
@@ -11,3 +11,7 @@ Found by docs/reviews/archived/architecture-review-2026-10-27.html (#7), re-veri
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID? — copies persist (headless.go:775-1309) but ADR 0083 part 5 denied hostBoot — the body's no-ADR-conflict claim is wrong; reopen triggers met (d00f0f9c, serve-http-driver); needs a dated ADR 0083 amendment first

@@ -1,6 +1,6 @@
 ---
 title: "The start-up chrome routes every note (architecture review 2026-11-21 #2)"
-status: parked
+status: open
 type: task
 priority: 3
 labels: [tui]
@@ -18,3 +18,7 @@ Must keep: ADR 0112 amend-1112 (the residual stays routine; a residual inside th
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — five routers and disagreeing fallbacks unchanged (internal/tui/model.go:1045-1110, heartbeat.go:473-477); do after startup-notice-class-scattered

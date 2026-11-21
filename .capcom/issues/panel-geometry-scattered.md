@@ -1,6 +1,6 @@
 ---
 title: "The side panel's frame is one computed value (architecture review 2026-11-10 #1)"
-status: parked
+status: open
 type: task
 priority: 3
 labels: [tui]
@@ -16,3 +16,7 @@ Solution: build one `panelFrame` per frame from window width, show mode, width s
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — no panelFrame; ~15 geometry helpers (internal/tui/sidepanel.go:132-241); do before nav-verbs-per-region

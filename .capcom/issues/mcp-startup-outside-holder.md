@@ -1,6 +1,6 @@
 ---
 title: "Startup is the MCP holder's first request (architecture review 2026-11-10 #7)"
-status: parked
+status: open
 type: task
 priority: 3
 created: 2026-11-10T19:37:32Z
@@ -17,3 +17,7 @@ Caveats: startup offers OAuth logins on stderr while the holder's connect recipe
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — connectMCPServers still dials outside the holder (cmd/apogee/mcp_cmd.go:490); needs an ADR 0109 owner call first

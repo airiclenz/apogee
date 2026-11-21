@@ -1,6 +1,6 @@
 ---
 title: "The panel's resume rebuild folds records, not painted cards (architecture review 2026-11-10 #5)"
-status: parked
+status: open
 type: task
 priority: 3
 labels: [tui]
@@ -18,3 +18,7 @@ Cheapest step on its own: a test pinning `panelWriterTargetArgs` to every tool t
 ## Acceptance
 
 - Decided: pursued as a plan or closed as not worth it.
+
+## Log
+
+- 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — only the cheap pin test on panelWriterTargetArgs (internal/tui/sidepanel.go:1797) is worth doing; the FoldRecord/wire refactor is doubtful
