@@ -12,6 +12,7 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- Docs: the start-up session log's description (`layout.md`, `docs/manual/commands.md`, the glossary's Session log) now names every notice that keeps its own line, including an MCP server's tool list cut short and standing content over its Budget share, names the git refusal note as routine, and points at `internal/tui/noticekind.go` as the one table; `TestLoudKindsNamedInDocs` fails when a loud kind is added without a docs phrase or a phrase loses its kind.
 - **Internal:** the engine now learns what its `sub_agent` and `fan_out` tools offer — seat choice, `context` and `background` — from one delegation offer read off the live roster, instead of probing each tool's concrete type at every reader. Nothing a model or user sees changes.
 - **A workflow item's child that never ran now reports its undelivered messages as `refused`.** A message queued for an item child whose Run was never reached was reported undelivered as `faulted`; it now reads `refused`, as a sub_agent child that never ran already did. A child that ran and then panicked still reads `faulted`.
 - Docs: the headless manual (`child_interjection`'s `data.reason`) and the layout spec now say an undelivered `refused` means the child refused the message at the boundary, or never ran; ADR 0039 (amendment of 2026-11-21), ADR 0083 part 3 and the Sub-agent glossary entry name the child bracket (`childBracket`) as every delegation's recover boundary and the one place its ledger row is booked.
