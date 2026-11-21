@@ -805,7 +805,7 @@ func TestReadPromptOfARemovedSkillFolderNeverReadsTheWorkspace(t *testing.T) {
 // TestWorkflowSpawn_AHumanStopOfAnItemChildEndsItStopped pins the spawner on the child-run
 // lifecycle with fold off: a human's stop of a running item child ends it stopped with no fold
 // requested, and what was queued for it is reported undelivered once, as stopped — the reason a
-// delegation the human stopped reads as (childEnding.undelivered, spawnEnding).
+// delegation the human stopped reads as (childEnding.undelivered, childBracket.settle).
 func TestWorkflowSpawn_AHumanStopOfAnItemChildEndsItStopped(t *testing.T) {
 	t.Parallel()
 
@@ -854,11 +854,87 @@ func TestWorkflowSpawn_AHumanStopOfAnItemChildEndsItStopped(t *testing.T) {
 	}
 }
 
+// TestWorkflowSpawn_APanicFinishesFaulted pins an item child's recover boundary off the sub_agent
+// path (childBracket): a panic raised while the child runs, with a message queued for it, is
+// recovered ONCE — one ErrorEvent naming it from the spawning call's tool — inside one
+// started/finished pair under one run id, the finished phase reading `faulted: panic: <r>` and the
+// item ending faulted with `panic: <r>` as its report, never a spawn error; the queued message is
+// reported undelivered once, as faulted, and the child is no longer addressable.
+func TestWorkflowSpawn_APanicFinishesFaulted(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.Mode = domain.ModeAskBefore
+	responder := &stopResponder{}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	const boom = "item child boom"
+	var runID string
+	responder.before = func(int) {
+		runID = runningChildRunID(t, a)
+		if err := a.InterjectChild(runID, domain.UserInput{Text: childRunNote}); err != nil {
+			t.Errorf("InterjectChild: %v", err)
+		}
+		panic(boom)
+	}
+
+	outcome := spawnItem(t, a, itemSpec("a.go", workflow.ReceiptSpec{"count": "int"}))
+
+	wantReport := "panic: " + boom
+	if outcome.Ending != workflow.EndFaulted || outcome.Report != wantReport {
+		t.Fatalf("outcome = %+v, want faulted reporting %q", outcome, wantReport)
+	}
+	var (
+		recovered   []domain.ErrorEvent
+		phases      []domain.SubAgentPhaseEvent
+		undelivered []domain.ChildInterjectionEvent
+	)
+	for _, event := range sink.events {
+		switch e := event.(type) {
+		case domain.ErrorEvent:
+			if strings.Contains(e.Err, boom) {
+				recovered = append(recovered, e)
+			}
+		case domain.SubAgentPhaseEvent:
+			phases = append(phases, e)
+		case domain.ChildInterjectionEvent:
+			if !e.Landed {
+				undelivered = append(undelivered, e)
+			}
+		}
+	}
+	if len(recovered) != 1 || recovered[0].Err != wantReport || recovered[0].Source != fanOutCall.Tool {
+		t.Errorf("recovered-panic ErrorEvents = %+v, want exactly one %q from %q", recovered, wantReport, fanOutCall.Tool)
+	}
+	if len(phases) != 2 || phases[0].Phase != domain.SubAgentStarted || phases[1].Phase != domain.SubAgentFinished {
+		t.Fatalf("phases = %+v, want one started then one finished", phases)
+	}
+	if phases[0].RunID != runID || phases[1].RunID != runID || phases[1].CallID != fanOutCall.ID {
+		t.Errorf("phase run ids %q/%q under call %q, want the child's %q under %q",
+			phases[0].RunID, phases[1].RunID, phases[1].CallID, runID, fanOutCall.ID)
+	}
+	wantFinished := workflowFaultResultPrefix + wantReport
+	if finished := phases[1].Result; !finished.IsError || finished.Content != wantFinished {
+		t.Errorf("finished phase result = %+v, want the error result %q", finished, wantFinished)
+	}
+	if len(undelivered) != 1 || undelivered[0].Input.Text != childRunNote ||
+		undelivered[0].Reason != domain.UndeliveredFaulted {
+		t.Errorf("undelivered reports = %+v, want the one queued message, reason faulted", undelivered)
+	}
+	if _, ok := a.children.lookup(runID); ok {
+		t.Error("the panicked item's child is still addressable")
+	}
+}
+
 // TestUndeliveredWorkflowReason pins why an item child's leftover messages never landed, as its
-// reaping defer reads the child (spawnEnding): a child a stop cut short while it ran reads as
-// stopped, one that ended stopped without that verdict (runEnding's cancelled-status case) as
-// cancelled, a child that never ran as refused (owner, 2026-11-21), one that ran and then panicked
-// before its run was read as faulted, and every other ending as itself.
+// bracket reads the child (childBracket.settle) — ended is nil where the body panicked before its
+// run was read: a child a stop cut short while it ran reads as stopped, one that ended stopped
+// without that verdict (runEnding's cancelled-status case) as cancelled, a child that never ran as
+// refused (owner, 2026-11-21), one that ran and then panicked before its run was read as faulted,
+// and every other ending as itself.
 func TestUndeliveredWorkflowReason(t *testing.T) {
 	t.Parallel()
 
@@ -881,13 +957,20 @@ func TestUndeliveredWorkflowReason(t *testing.T) {
 		{"faulted", true, ending(domain.StepResult{Status: domain.StatusExchangeComplete, Faulted: true}, nil, false), false, domain.UndeliveredFaulted},
 		{"a Run error", true, ending(domain.StepResult{}, errors.New("boom"), false), false, domain.UndeliveredFaulted},
 		{"never ran", false, nil, false, domain.UndeliveredRefused},
+		{"refused before it ran", false, func() *childEnding { e := refusedEnding(); return &e }(), false, domain.UndeliveredRefused},
 		{"ran then panicked", true, nil, false, domain.UndeliveredFaulted},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := spawnEnding(tt.ran, tt.ended, tt.stopped).undelivered(); got != tt.want {
-				t.Errorf("spawnEnding(%v, %v, %v).undelivered() = %q, want %q", tt.ran, tt.ended, tt.stopped, got, tt.want)
+			b := &childBracket{hasStarted: tt.ran, isStopped: tt.stopped}
+			isPanicked := tt.ended == nil
+			var ended childEnding
+			if !isPanicked {
+				ended = *tt.ended
+			}
+			if got := b.settle(ended, isPanicked).undelivered(); got != tt.want {
+				t.Errorf("settle(ran %v, %v, stopped %v).undelivered() = %q, want %q", tt.ran, tt.ended, tt.stopped, got, tt.want)
 			}
 		})
 	}
@@ -897,7 +980,7 @@ func TestUndeliveredWorkflowReason(t *testing.T) {
 // ending itself: a human's stop of a running item child is carried by the one ending its run is
 // read as (runEnding), so the Outcome the Runner reads, the ending's workflow word and the reason
 // its leftover messages are reported under all say stopped — never the cancelled the child's
-// cancelled status alone would read as — even where the reaping defer's own stop flag is not set.
+// cancelled status alone would read as — even where the bracket's own stop flag is not set.
 func TestWorkflowSpawn_HumanStopReadsStoppedViaTheEnding(t *testing.T) {
 	t.Parallel()
 
@@ -910,8 +993,9 @@ func TestWorkflowSpawn_HumanStopReadsStoppedViaTheEnding(t *testing.T) {
 		t.Errorf("workflowOutcome = %+v, want stopped with no report", got)
 	}
 	for _, stopped := range []bool{true, false} {
-		if got := spawnEnding(true, &ended, stopped).undelivered(); got != domain.UndeliveredStopped {
-			t.Errorf("spawnEnding(ran, stopped ending, %v).undelivered() = %q, want %q", stopped, got, domain.UndeliveredStopped)
+		b := &childBracket{hasStarted: true, isStopped: stopped}
+		if got := b.settle(ended, false).undelivered(); got != domain.UndeliveredStopped {
+			t.Errorf("settle(ran, stopped ending, stopped %v).undelivered() = %q, want %q", stopped, got, domain.UndeliveredStopped)
 		}
 	}
 }

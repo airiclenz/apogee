@@ -337,7 +337,13 @@ Depends on item 8.
 - `go build ./... && go test -count=1 -run 'TestFanOut|TestDispatchSerially|TestStopChild_AQueued' ./internal/agent/`
 **Commit:** `refactor(agent): never-started delegations settle through childBracket`
 
-## 10. Workflow Spawn on the bracket
+## 10. Workflow Spawn on the bracket — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): Spawn's post-mint half moved into a new `(*workflowSpawner).runItem` bracket body (build, finish tool, reap+Close defer, Submit, `b.runChild`); Spawn opens the bracket on a nil ledger at mint, `onPanic` sets `outcome={EndFaulted, "panic: <r>"}, err=nil` and returns `workflowPhaseResult(...)`, and Spawn returns the body's `(outcome, err)` after the pair closes. The seat-fallback flag is passed by pointer so a panic after the build still carries SeatFallbackNote, as before.
+NOTES (2026-11-21): `spawnEnding` deleted — the bracket's `settle` now decides the item's undelivered reason, and nothing else called it; TestUndeliveredWorkflowReason and TestWorkflowSpawn_HumanStopReadsStoppedViaTheEnding were recast onto `childBracket.settle` with the same want-table (ended nil = a panicked body), plus one row for a refusal returned before the run.
+NOTES (2026-11-21): event order on a panic with queued mail now follows the bracket: ErrorEvent, then the undelivered report, then the finished phase (it was undelivered report before the ErrorEvent); the sub_agent path already orders it this way.
+NOTES (2026-11-21): consequential edit — internal/agent/childrun.go: made necessary by moving Spawn's recover into childBracket (header named "a workflow item's … its spawner's (Spawn)" recover frame).
+NOTES (2026-11-21): consequential edit — internal/agent/doc.go: made necessary by Spawn's items now running in a ledger-less bracket (package map's childrun.go role).
 
 Depends on item 9.
 

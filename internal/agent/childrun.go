@@ -9,15 +9,15 @@ package agent
 // can continue it (ADR 0086 D4). A workflow item's child (workflowSpawner.Spawn) runs on it with
 // fold off: a stopped item is re-run on resume, so nothing of it is kept.
 //
-// The helper owns no recover frame: a delegation's is its bracket's (childBracket.run), and a
-// workflow item's off the sub_agent path its spawner's (Spawn), so a panic is classified where it
-// can be reported. It takes the registry explicitly: a background workflow's children are
-// listed on the top-level Agent the Driver addresses, not on the launch-time snapshot that runs the
-// workflow (backgroundHost).
+// The helper owns no recover frame: a delegation's and a workflow item's are their bracket's
+// (childBracket.run), so a panic is classified where it can be reported. It takes the registry
+// explicitly: a background workflow's children are listed on the top-level Agent the Driver
+// addresses, not on the launch-time snapshot that runs the workflow (backgroundHost).
 //
-// The CHILD BRACKET (childBracket) is what a delegation is booked under around that lifecycle: its
-// run id, the started/finished phase pair a Driver reads, the recover boundary a child's panic stops
-// at (ADR 0039 D4), the ending read once, and the one ledger row. A delegation settled before its
+// The CHILD BRACKET (childBracket) is what a delegation — or a workflow item (Spawn) — is booked
+// under around that lifecycle: its run id, the started/finished phase pair a Driver reads, the
+// recover boundary a child's panic stops at (ADR 0039 D4), the ending read once, and the one
+// ledger row, which a workflow item's nil ledger never books. A delegation settled before its
 // child started takes a lone finished phase and its row (neverStarted); one that runs takes the
 // whole pair around its body (run), the child inside it run through the bracket (runChild). A
 // sub_agent call run outside a dispatch (runSubAgent) runs in a phase-less, ledger-less bracket:

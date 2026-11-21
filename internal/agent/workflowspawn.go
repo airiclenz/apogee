@@ -204,10 +204,14 @@ func (a *Agent) newWorkflowSpawner(turn int, call domain.ToolCall, prompts fs.FS
 var _ workflow.Spawner = (*workflowSpawner)(nil)
 
 // Spawn runs one item child to its end and reports how it ended (workflow.Spawner). It is the
-// workflow's recursion point and its one recover boundary: a panic anywhere in the child's life
-// is reported as a fault. An error is a child that could not run at all — the depth bound, an
+// workflow's recursion point. An error is a child that could not run at all — the depth bound, an
 // unreadable prompt file, an unknown tool name, a failed construction — which the Runner treats
-// as a fault; a cancel of ctx before the child starts is EndStopped with no child built.
+// as a fault; a cancel of ctx before the child starts is EndStopped with no child built. Those
+// refused before the run id is minted emit no phase. From the mint on the item runs inside a
+// child bracket of its own (childBracket) and no ledger row: the started/finished pair a Driver
+// reads, the finished phase carrying the item's phase result (workflowPhaseResult) on every exit,
+// and the recover boundary — a panic anywhere in the child's life is the item's fault, reported
+// `panic: <r>`, never a spawn error.
 func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (outcome workflow.Outcome, err error) {
 	if spec.Stage.RunsSubAgent() {
 		return s.spawnSubAgent(ctx, spec), nil
@@ -228,82 +232,70 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 		return workflow.Outcome{Ending: workflow.EndStopped}, nil
 	}
 
-	runID := a.runIDs.mint()
+	var runID string
+	b := a.openBracket(s.turn, s.call, &runID, nil)
 	if s.observer != nil {
-		s.observer.itemStarted(spec, runID)
+		s.observer.itemStarted(spec, b.mintRunID())
 	}
 	stepCap, _ := resolveStepCap(a.cfg.Delegation.MaxSteps, 0)
-	a.emitSubAgentPhase(s.turn, s.call, runID, domain.SubAgentPhaseEvent{
-		Phase:   domain.SubAgentStarted,
-		StepCap: stepCap,
+	// Whether the child fell back from the Sub-agent server: the finished phase reads it on every
+	// exit, a recovered panic's included.
+	isSeatFallback := false
+	onPanic := func(recovered any) domain.ToolResult {
+		outcome, err = workflow.Outcome{Ending: workflow.EndFaulted, Report: fmt.Sprintf("panic: %v", recovered)}, nil
+		return workflowPhaseResult(s.call.ID, outcome, err, isSeatFallback)
+	}
+	b.run(domain.SubAgentPhaseEvent{StepCap: stepCap}, onPanic, func() (domain.ToolResult, childEnding) {
+		var ending childEnding
+		outcome, ending, err = s.runItem(ctx, b, spec, task, narrowed, &isSeatFallback)
+		return workflowPhaseResult(s.call.ID, outcome, err, isSeatFallback), ending
 	})
-	// Whether the child below fell back from the Sub-agent server; read by the finished phase.
-	seatFallback := false
-	// Registered FIRST so it runs LAST: the finished phase closes the block on whatever outcome
-	// the frame ends with, a recovered panic's included.
-	defer func() {
-		if r := recover(); r != nil {
-			a.cfg.Events.Emit(domain.ErrorEvent{
-				EventBase: a.base(s.turn),
-				Source:    s.call.Tool,
-				Err:       fmt.Sprintf("panic: %v", r),
-			})
-			outcome, err = workflow.Outcome{Ending: workflow.EndFaulted, Report: fmt.Sprintf("panic: %v", r)}, nil
-		}
-		a.emitSubAgentPhase(s.turn, s.call, runID, domain.SubAgentPhaseEvent{
-			Phase:  domain.SubAgentFinished,
-			Result: workflowPhaseResult(s.call.ID, outcome, err, seatFallback),
-		})
-	}()
+	// The error is returned as the body returned it once the bracket has closed the pair: a child
+	// that could not be built or take its task is still a spawn error the Runner retries.
+	return outcome, err
+}
 
+// runItem is Spawn's bracket body: it builds the item child on b's run id with narrowed tools and
+// a finish tool, hands it task and runs it through the bracket (childBracket.runChild), fold off —
+// a stopped item is re-run on resume, so nothing of it is kept. It returns the item's outcome, the
+// ending its run was read as and the error of a child that could not be built or take its task,
+// which reads as refused. isSeatFallback is set as soon as the child is known to have fallen back,
+// so a panic after it still carries the note.
+func (s *workflowSpawner) runItem(ctx context.Context, b *childBracket, spec workflow.ItemSpec, task string, narrowed []string, isSeatFallback *bool) (workflow.Outcome, childEnding, error) {
+	a := s.parent
+	runID := *b.runID
 	sub, err := a.newChildAgentOn(s.seat, s.call.ID, runID, task, delegationName(spec.Name))
 	if err != nil {
-		return workflow.Outcome{}, fmt.Errorf("could not construct the item's child: %w", err)
+		return workflow.Outcome{}, refusedEnding(), fmt.Errorf("could not construct the item's child: %w", err)
 	}
 	// newChildAgentOn decided the fallback at the one place that saw both the ask and the latch.
-	if seatFallback = sub.seatFallback; seatFallback {
+	if *isSeatFallback = sub.seatFallback; *isSeatFallback {
 		s.fellBack.Store(true)
 	}
 	item := &workflowChild{label: spec.Item.Label}
 	sub.workflowItem = item
 	sub.tools = withFinish(sub.tools, narrowed, tools.NewFinish(spec.Stage.Returns, item.accept))
-	// ran is set as the child's Run is reached, stopped by runChild's verdict, and ended once the
-	// run is read in full: the reaping defer runs BEFORE the recover above, so a child that ran and
-	// then panicked reaches it with no ending yet (spawnEnding).
-	var (
-		ran     bool
-		ended   *childEnding
-		stopped bool
-	)
+	// The report of what the child's mailbox still held waits for the bracket (childBracket.reap),
+	// which alone knows how the run ended — this defer runs before a recovered panic is classified.
 	defer func() {
-		sub.reportUndelivered(sub.turns.index, reapChild(s.children, runID, sub),
-			spawnEnding(ran, ended, stopped).undelivered())
+		b.reap(s.children, sub, nil)
 		_ = sub.Close()
 	}()
 
 	if err := sub.Submit(domain.UserInput{Text: task, FileRefs: spec.Stage.Context}); err != nil {
-		return workflow.Outcome{}, fmt.Errorf("could not start the item's child: %w", err)
+		return workflow.Outcome{}, refusedEnding(), fmt.Errorf("could not start the item's child: %w", err)
 	}
 	// Addressable and stoppable while it runs, as a sub_agent child is (ADR 0063, ADR 0086 D4): a
-	// human's stop of one item ends that child as stopped, and the Runner restarts it on resume —
-	// so fold is off: nothing of a stopped item is kept.
-	var (
-		res    domain.StepResult
-		runErr error
-	)
-	res, stopped, _, runErr = runChild(ctx, childRun{
+	// human's stop of one item ends that child as stopped, and the Runner restarts it on resume.
+	res, stopped, _, runErr := b.runChild(ctx, childRun{
 		registry: s.children,
 		runID:    runID,
 		sub:      sub,
-		// The LAST act before Run, as a delegation's bracket reads its own (childBracket.runChild):
-		// anything that ends the frame before it leaves a child that never ran.
-		onArmed: func(context.Context) { ran = true },
 	})
 	ending := runEnding(res, runErr, stopped)
-	outcome = sub.workflowOutcome(ending, runErr)
+	outcome := sub.workflowOutcome(ending, runErr)
 	outcome.Transcript = sub.conv.Messages()
-	ended = &ending
-	return outcome, nil
+	return outcome, ending, nil
 }
 
 // stageChildTools is the narrowed tool list a stage's item children run with — nil for no
@@ -514,26 +506,5 @@ func workflowPhaseBody(callID string, outcome workflow.Outcome, err error) domai
 		return domain.ToolResult{CallID: callID, Content: workflowCappedNoReceipt}
 	default:
 		return domain.ToolResult{CallID: callID, Content: workflowNoReceiptResult}
-	}
-}
-
-// spawnEnding is how an item child ended, as its reaping defer reads it (Spawn): ran is whether
-// its Run was reached, ended the ending its run was read as — nil until the run is read in full —
-// and stopped runChild's stop verdict. A stop cut the running child short whatever the frame
-// reached after it (ADR 0088 D2: the human's stop of the one item or the cancel of the whole
-// Turn); a child that never ran did not take what was queued for it, so it reads as refused, as a
-// sub_agent child that never ran does (owner, 2026-11-21); and a child that ran and then panicked
-// before its run was read has no ending yet, so it reads as the fault it is — never the zero
-// ending, which would claim a completion.
-func spawnEnding(ran bool, ended *childEnding, stopped bool) childEnding {
-	switch {
-	case stopped:
-		return runEnding(domain.StepResult{}, nil, true)
-	case !ran:
-		return refusedEnding()
-	case ended == nil:
-		return childEnding{kind: delegationFaulted, hasStarted: true}
-	default:
-		return *ended
 	}
 }
