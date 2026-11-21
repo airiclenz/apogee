@@ -1,11 +1,13 @@
 ---
 title: The daemon never says a config holds a plaintext key or a retired sub-agents flag
-status: open
+status: done
 type: task
 priority: 3
 labels: [driver-parity, security]
 plan: 2026-11-21 - 01 - driver-notice-parity-plan.md
 created: 2026-11-21T12:44:48Z
+closed: 2026-11-21T15:41:43Z
+reason: "Resolved by driver-notice-parity-plan (archived 5f7d5552), items 1-2: the daemon prints the shared config-hygiene notices on stderr."
 ---
 
 Found by docs/reviews/archived/architecture-review-2026-08-30.html (B4, the plaintext-key half) and docs/reviews/archived/architecture-review-2026-09-30.html (ledger L5 = in-passing defect D6); re-verified 2026-11-21 at 43ece2f2.

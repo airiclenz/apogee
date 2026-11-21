@@ -1,11 +1,13 @@
 ---
 title: A headless or daemon Firing never reports skills that failed to load
-status: open
+status: done
 type: task
 priority: 3
 labels: [driver-parity]
 plan: 2026-11-21 - 01 - driver-notice-parity-plan.md
 created: 2026-11-21T12:44:48Z
+closed: 2026-11-21T15:41:43Z
+reason: "Resolved by driver-notice-parity-plan (archived 5f7d5552), items 3-5: headless prints failed skills on stderr before submit; the daemon logs them once per project root (owner-ratified latch)."
 ---
 
 Found by docs/reviews/archived/architecture-review-2026-08-30.html (A5); re-verified 2026-11-21 at 43ece2f2.
