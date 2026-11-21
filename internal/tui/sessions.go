@@ -957,6 +957,9 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// The restored session reseeds the box and opens its own start-up log, as a launch does, before
 	// its first notice.
 	m.beginSession()
+	// The server's first-contact lines still describe the binding this session runs on, and were
+	// never in any record, so they come back under the box as a launch placed them.
+	m.replaceFirstContactLines()
 	// The side panel's folded state falls with the outgoing session, whose Events it was folded
 	// from — BEFORE the replay below, which rebuilds the resumed session's tasks and writes from
 	// its stored entries (replayScrollback).

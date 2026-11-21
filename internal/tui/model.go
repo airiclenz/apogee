@@ -1065,9 +1065,26 @@ func (m *Model) noteContextFiles() {
 // ([startupChrome.place]): a routine record of the start inside the session's start-up log while
 // the log is open, every other note on its own line (layout.md, "The start-up box"). It is the one
 // entry every launch-side and heartbeat note goes through, and every destination escape-strips at
-// the transcript's seam.
+// the transcript's seam. A first-contact note that takes its own line is also kept as one of the
+// binding's standing lines ([heartbeatState.firstContactLines]), for a transcript swap to re-place.
 func (m *Model) note(kind NoticeKind, c contact, text string) {
+	if c == contactFirst && destination(kindRow(kind), c, m.chrome.isLogOpen) != destLog {
+		m.hb.firstContactLines = append(slices.Clip(m.hb.firstContactLines), text)
+	}
 	m.chrome.place(&m.transcript, kind, c, text)
+}
+
+// replaceFirstContactLines re-places the binding's standing first-contact lines
+// ([heartbeatState.firstContactLines]) as ephemeral notes in a transcript a swap has just reset.
+// They are never saved to the session record (ADR 0022 addendum 0801), so a /sessions restore or a
+// /fork, which repaints the view from a record, would otherwise drop a warning — the unknown window,
+// a refused rebind, an unapplied roster — that still holds for the session on screen. It runs right
+// after the boundary reseeds the box, so the lines sit where the first contact put them at launch:
+// under the box, above the conversation.
+func (m *Model) replaceFirstContactLines() {
+	for _, text := range m.hb.firstContactLines {
+		m.transcript.addEphemeralNote(text)
+	}
 }
 
 // noteColorSchemeWarnings surfaces what loading the configured colour scheme cost — an unknown

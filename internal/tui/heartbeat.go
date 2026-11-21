@@ -84,6 +84,14 @@ type heartbeatState struct {
 	// the refusal is noted once per distinct target instead of once every Interval. Only
 	// [Model.applyRebind] sets it; "" once a rebind succeeds.
 	lastRebindFailed string
+	// firstContactLines are the texts of the first-contact notes that took a line of their own
+	// rather than joining the start-up log ([destination]), in the order they were placed. Those
+	// lines are display-only, so a transcript swap — a /sessions restore or a /fork — would drop
+	// them while the binding they describe still stands; [Model.replaceFirstContactLines] puts them
+	// back. Only [Model.note] appends; a later binding ([Model.applyRebind] for any other contact)
+	// and a `/server` switch (which resets this whole state) supersede them. Only ever replaced or
+	// appended to a clipped copy, so it copies with the Model (ADR 0011).
+	firstContactLines []string
 }
 
 // rebindIntent is one captured binding change: the model the last beat observed the server to be
@@ -423,6 +431,10 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	}
 
 	m.hb.lastRebindFailed = ""
+	if intent.contact != contactFirst {
+		// The first contact's standing lines describe the binding this one replaces.
+		m.hb.firstContactLines = nil
+	}
 	m.opts.Model, m.opts.ContextWindow = result.Model, result.ContextWindow
 	// The box's facts were frozen when it was seeded, so a late seed would otherwise leave a
 	// "connecting" box at the top of the scrollback until the next /clear.

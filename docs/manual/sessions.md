@@ -201,7 +201,8 @@ it, and a smaller one and a group start open.
 Nor are the notes apogee writes when the server first answers a launch or a
 resume — an unknown context window, a roster or switch that was not applied, the
 model the server turned out to be running. They show in the transcript as
-always, but they are not saved, because apogee works them out again at the next
+always — a `/sessions` resume or a `/fork` puts back the ones that still hold
+for the server — but they are not saved, because apogee works them out again at the next
 launch: a session resumed ten times does not collect ten copies. A change later
 in the session — the server swapping models, a `/model` pick, a `/server` move —
 is saved, because it records something the session did. A

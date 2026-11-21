@@ -4530,6 +4530,57 @@ func TestFirstContactNotesStayOutOfAResumedRecord(t *testing.T) {
 	}
 }
 
+// TestRestoreRePlacesFirstContactLines pins that a /sessions restore, whose transcript swap drops
+// every display-only note, puts the server's standing first-contact lines back: each loud one once,
+// ephemeral, under the box and above the "resumed:" note, as the launch placed it. A routine one
+// that joined the start-up log stays out, and a later binding retires the lines for good.
+func TestRestoreRePlacesFirstContactLines(t *testing.T) {
+	t.Parallel()
+
+	const (
+		roster  = "profile roster not applied: served-model has no profile"
+		binding = "model binding: served-model matched no profile"
+	)
+	rb := &fakeRebind{answer: func(model string, window int) (RebindResult, error) {
+		if model == "served-model" {
+			return RebindResult{Model: model, Notices: []Notice{
+				{Kind: NoticeModelBinding, Text: binding},
+				{Kind: NoticeRosterUnapplied, Text: roster},
+			}}, nil
+		}
+		return RebindResult{Model: model, ContextWindow: window}, nil
+	}}
+	m := foldBeatMsg(t, wireRebind(t, testOpts, &fakeHeartbeat{}, rb), upBeat("served-model", 32768))
+
+	m = restoreSession(t, m)
+	for _, line := range []string{unknownWindowNote, roster} {
+		at := slices.IndexFunc(m.transcript.entries, func(e entry) bool { return e.kind == entryNote && e.text == line })
+		resumed := slices.IndexFunc(m.transcript.entries, func(e entry) bool {
+			return e.kind == entryNote && strings.HasPrefix(e.text, "resumed:")
+		})
+		switch {
+		case countNotes(m, line) != 1:
+			t.Errorf("%q shown %d times after the restore, want once; notes = %q", line, countNotes(m, line), noteTexts(m))
+		case !m.transcript.entries[at].ephemeral:
+			t.Errorf("the re-placed %q is not ephemeral", line)
+		case resumed < 0 || at > resumed:
+			t.Errorf("the re-placed %q sits at %d, not above the resumed note at %d; notes = %q", line, at, resumed, noteTexts(m))
+		}
+	}
+	if n := countNotes(m, binding); n != 0 {
+		t.Errorf("the routine first-contact note took %d lines of its own after the restore, want none", n)
+	}
+
+	// A later binding supersedes the first contact, so the next restore has nothing to re-place.
+	m = foldBeatMsg(t, m, upBeat("later-model", 16384))
+	m = restoreSession(t, m)
+	for _, line := range []string{unknownWindowNote, roster} {
+		if n := countNotes(m, line); n != 0 {
+			t.Errorf("%q re-placed %d times after a later binding, want none; notes = %q", line, n, noteTexts(m))
+		}
+	}
+}
+
 // TestNewModelReplaysARunnerWrittenScrollback is the blank-replay gap closed from the reading
 // end: a blob the RUNNER wrote (internal/run's fold — stream facts only, no presenter verdicts)
 // replays as real entries, and the "no scrollback recorded" degrade note stops firing for it.
