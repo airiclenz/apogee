@@ -33,7 +33,9 @@
 - Putting skip reports on headless's JSON event stream.
 - The TUI's migration offers (unchanged).
 
-## 1. One producer for the config-hygiene notices
+## 1. One producer for the config-hygiene notices — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): `reasonHeadless` deleted rather than kept: both plaintext reasons now derive from the clause pair `neverPromptsHeadless` / `neverPromptsDaemon` through `neverPromptsReason`, which `configHygieneNotices` reads; the headless bytes are unchanged (pinned literally in `TestConfigHygieneNoticesPerDriver`). The clause-taking inner flag notice is `driverSubAgentsFlagNotice`; `subAgentsFlagNotice(path, names)` stays as its headless wrapper. `neverPromptsDaemon` has only a test reader until item 2 wires the daemon (`make lint` passes).
 
 **What:**
 **Goal:** `cmd/apogee` has one function that, given the server entries, the config file path and a Driver clause, returns the plaintext-key notice and the retired-sub-agents-flag notice (each only when it applies). Headless prints its notices through that function, and its stderr bytes are unchanged.

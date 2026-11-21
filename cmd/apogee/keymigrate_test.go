@@ -154,6 +154,123 @@ func TestSubAgentsFlagNoticeNamesTheEntriesAndTheReplacement(t *testing.T) {
 	}
 }
 
+// The one producer both unattended Drivers print from: each notice appears exactly when its
+// condition holds, plaintext first, and in the Driver's own words. The clauses are spelled out
+// literally rather than read from the constants, so the headless bytes stay pinned to what
+// TestSubAgentsFlagNoticeNamesTheEntriesAndTheReplacement pins and the daemon's cannot drift unseen.
+// The last case is the one a shared producer could get wrong: a flag scan that cannot read the file
+// must not take the plaintext notice down with it.
+func TestConfigHygieneNoticesPerDriver(t *testing.T) {
+	t.Parallel()
+
+	const (
+		plainYAML = "servers:\n  - name: testbox\n    endpoint: http://127.0.0.1:1111\nserver: testbox\n"
+		plainKey  = "sk-plain-as-day"
+	)
+	drivers := []struct {
+		name            string
+		neverPrompts    string
+		plaintextReason string
+		flagClause      string
+	}{
+		{
+			name:            "headless",
+			neverPrompts:    neverPromptsHeadless,
+			plaintextReason: "headless runs never prompt, so apogee cannot offer to move it into a secret store",
+			flagClause:      "headless runs never prompt",
+		},
+		{
+			name:            "daemon",
+			neverPrompts:    neverPromptsDaemon,
+			plaintextReason: "the daemon never prompts, so apogee cannot offer to move it into a secret store",
+			flagClause:      "the daemon never prompts",
+		},
+	}
+	cases := []struct {
+		name          string
+		servers       []config.ServerEntry
+		fileYAML      string
+		unreadable    bool
+		wantPlaintext []string
+		wantFlag      []string
+		wantErr       bool
+	}{
+		{
+			name:          "a plaintext key",
+			servers:       []config.ServerEntry{{Name: "workstation", APIKey: plainKey}},
+			fileYAML:      plainYAML,
+			wantPlaintext: []string{"workstation"},
+		},
+		{
+			name:     "a plaintext key the human acknowledged",
+			servers:  []config.ServerEntry{{Name: "workstation", APIKey: plainKey, PlaintextKeyOK: true}},
+			fileYAML: plainYAML,
+		},
+		{
+			name:     "a retired sub-agents flag",
+			servers:  []config.ServerEntry{{Name: "testbox"}, {Name: "cheaper"}},
+			fileYAML: subAgentsFlagYAML,
+			wantFlag: []string{"cheaper"},
+		},
+		{
+			name:          "both",
+			servers:       []config.ServerEntry{{Name: "testbox", APIKey: plainKey}, {Name: "cheaper"}},
+			fileYAML:      subAgentsFlagYAML,
+			wantPlaintext: []string{"testbox"},
+			wantFlag:      []string{"cheaper"},
+		},
+		{
+			name:     "neither",
+			servers:  []config.ServerEntry{{Name: "testbox"}},
+			fileYAML: plainYAML,
+		},
+		{
+			name:          "a plaintext key over a file the flag scan cannot read",
+			servers:       []config.ServerEntry{{Name: "workstation", APIKey: plainKey}},
+			unreadable:    true,
+			wantPlaintext: []string{"workstation"},
+			wantErr:       true,
+		},
+	}
+
+	for _, driver := range drivers {
+		for _, tc := range cases {
+			t.Run(driver.name+"/"+tc.name, func(t *testing.T) {
+				t.Parallel()
+				path := filepath.Join(t.TempDir(), "config.yaml")
+				if tc.unreadable {
+					// A directory where the file should be: present, so not the scan's "no file"
+					// silence, and unreadable as a file on every OS.
+					if err := os.Mkdir(path, 0o700); err != nil {
+						t.Fatalf("make the unreadable config: %v", err)
+					}
+				} else if err := os.WriteFile(path, []byte(tc.fileYAML), 0o600); err != nil {
+					t.Fatalf("write the config: %v", err)
+				}
+				var want []string
+				if len(tc.wantPlaintext) > 0 {
+					want = append(want, plaintextKeyNotice(path, driver.plaintextReason, tc.wantPlaintext))
+				}
+				if len(tc.wantFlag) > 0 {
+					want = append(want, "apogee: "+strings.Join(tc.wantFlag, ", ")+" still carries the "+
+						"retired sub-agents: true flag in "+path+", and "+driver.flagClause+", so apogee "+
+						"cannot offer to migrate it. The flag no longer routes anything — set "+
+						"sub-agents-server: <entry> at the root of the file and drop the flag.")
+				}
+
+				got, err := configHygieneNotices(tc.servers, path, driver.neverPrompts)
+
+				if (err != nil) != tc.wantErr {
+					t.Errorf("err = %v; want an error: %v", err, tc.wantErr)
+				}
+				if strings.Join(got, "\n") != strings.Join(want, "\n") || len(got) != len(want) {
+					t.Errorf("notices =\n%q\nwant\n%q", got, want)
+				}
+			})
+		}
+	}
+}
+
 // The move in full, in order: the secret reaches the store while the file still holds the literal,
 // the read-back command is built while it still does, and only afterwards is the entry rewritten —
 // into an ordinary `api-key-cmd:` line the config package validates like any other.

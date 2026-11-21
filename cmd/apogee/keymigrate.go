@@ -187,19 +187,59 @@ func plaintextKeyFor(servers []config.ServerEntry, name string) (string, bool) {
 	return "", false
 }
 
-// The two reasons a plaintext key is reported rather than offered a move. Which one is true is the
+// The reasons a plaintext key is reported rather than offered a move. Which one is true is the
 // caller's knowledge, not the notice's: the interactive path reaches the notice only after a probe
-// found no store, while a headless run never probes at all and would be asserting something it
-// never checked if it said the same. Each is a lower-case clause with no trailing period, because
-// plaintextKeyNotice folds it into the middle of its first sentence.
+// found no store (reasonNoStore), while an unattended Driver never probes at all and would be
+// asserting something it never checked if it said the same — its reason is its own never-prompts
+// clause, folded in by neverPromptsReason. Each reason is a lower-case clause with no trailing
+// period, because plaintextKeyNotice folds it into the middle of its first sentence.
 //
-// A third reason is deliberately not a constant here: a probe that FAILED rather than finding
+// A further reason is deliberately not a constant here: a probe that FAILED rather than finding
 // nothing carries its own sentence into the same slot (prepareKeyMigration), because only the probe
 // knows what it hit.
+const reasonNoStore = "this machine has no secret store apogee can move it into"
+
+// The never-prompts clauses of the two unattended Drivers, one per Driver: the half of each
+// config-hygiene notice that says why no offer is coming. The wording is shared and the clause is
+// each Driver's own (ADR 0083 §5) — a headless run and the daemon both report what the TUI would
+// offer, and each says so in its own name. Lower-case, no trailing period, for the reason the
+// reasons above are.
 const (
-	reasonNoStore  = "this machine has no secret store apogee can move it into"
-	reasonHeadless = "headless runs never prompt, so apogee cannot offer to move it into a secret store"
+	neverPromptsHeadless = "headless runs never prompt"
+	neverPromptsDaemon   = "the daemon never prompts"
 )
+
+// neverPromptsReason is the plaintext-key reason an unattended Driver gives: its never-prompts
+// clause, and what that costs the human.
+func neverPromptsReason(neverPrompts string) string {
+	return neverPrompts + ", so apogee cannot offer to move it into a secret store"
+}
+
+// configHygieneNotices is everything an unattended Driver says at start-up about the config file
+// itself, in the order it says it: the plaintext-key notice (ADR 0047) and then the retired
+// `sub-agents: true` flag notice (ADR 0045), each only when it applies. neverPrompts is the Driver's
+// own clause (neverPromptsHeadless, neverPromptsDaemon); entries are the resolved `servers:` entries
+// and path is the config file this run read, which the flag scan reads again because ServerEntry has
+// no field for the retired key.
+//
+// The notices are only ever said: the migration OFFERS are the TUI's (prepareKeyMigration,
+// prepareSubAgentsMigration), because each is a consented edit to the human's own file and an
+// unattended run has nobody to consent (ADR 0036 D8). Nothing is probed and nothing is written.
+//
+// A flag scan that fails returns its error ALONGSIDE every notice found so far — the plaintext one
+// does not depend on the scan, so a file the scan stumbles on never silences it. Whether that error
+// is worth a word is the Driver's call, not this function's.
+func configHygieneNotices(entries []config.ServerEntry, path, neverPrompts string) ([]string, error) {
+	var notices []string
+	if names := plaintextKeyEntries(entries); len(names) > 0 {
+		notices = append(notices, plaintextKeyNotice(path, neverPromptsReason(neverPrompts), names))
+	}
+	names, err := config.RetiredSubAgentsEntries(path)
+	if len(names) > 0 {
+		notices = append(notices, driverSubAgentsFlagNotice(path, neverPrompts, names))
+	}
+	return notices, err
+}
 
 // plaintextKeyNotice is what a run that cannot offer a migration says instead: which entries hold a
 // key in the file, why no offer is coming, and the three things its owner can do about it without
@@ -217,22 +257,29 @@ func plaintextKeyNotice(path, reason string, names []string) string {
 		strings.Join(names, ", "), path, reason, path)
 }
 
-// subAgentsFlagNotice is what a headless run says instead of the offer prepareSubAgentsMigration
-// raises: which `servers:` entries still spell ADR 0045's retired `sub-agents: true`, why no offer is
-// coming, and the one edit that replaces the flag. It is the flag half of the same bargain the
-// plaintext key gets — a start-up fact about the human's own file that an unattended run can only
-// report, because the rewrite is a consented edit and there is nobody here to consent.
+// subAgentsFlagNotice is the flag notice in a headless run's words: driverSubAgentsFlagNotice with
+// the headless never-prompts clause.
+func subAgentsFlagNotice(path string, names []string) string {
+	return driverSubAgentsFlagNotice(path, neverPromptsHeadless, names)
+}
+
+// driverSubAgentsFlagNotice is what an unattended Driver says instead of the offer
+// prepareSubAgentsMigration raises: which `servers:` entries still spell ADR 0045's retired
+// `sub-agents: true`, why no offer is coming (the Driver's own never-prompts clause), and the one
+// edit that replaces the flag. It is the flag half of the same bargain the plaintext key gets — a
+// start-up fact about the human's own file that an unattended run can only report, because the
+// rewrite is a consented edit and there is nobody here to consent.
 //
 // It names the file for plaintextKeyNotice's reason: --config and APOGEE_CONFIG both move it.
 //
 // The wording is deliberately routing-agnostic. A stale flag and a set root `sub-agents-server:` key
 // can stand in the same file, so a notice claiming where delegations run today would be wrong for
 // exactly the configs most likely to carry both.
-func subAgentsFlagNotice(path string, names []string) string {
+func driverSubAgentsFlagNotice(path, neverPrompts string, names []string) string {
 	return fmt.Sprintf("apogee: %s still carries the retired sub-agents: true flag in %s, and "+
-		"headless runs never prompt, so apogee cannot offer to migrate it. The flag no longer "+
+		"%s, so apogee cannot offer to migrate it. The flag no longer "+
 		"routes anything — set sub-agents-server: <entry> at the root of the file and drop the flag.",
-		strings.Join(names, ", "), path)
+		strings.Join(names, ", "), path, neverPrompts)
 }
 
 // keyMigrator is the act behind [tui.ConfigHost.MigrateKey]: the whole move for one entry, reported

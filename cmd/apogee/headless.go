@@ -856,24 +856,17 @@ func runHeadlessBody(
 	// Best-effort and silent, exactly as it is there — GC is never a reason a run fails to start.
 	gcScratchDirs(roots.scratch, time.Now())
 
-	// A plaintext `api-key:` in the config file is worth saying out loud here too (ADR 0047), but
-	// only saying: the migration OFFER is the TUI's, because moving a key is a consented edit to the
-	// human's own config and an unattended run has nobody to consent (the ADR 0036 reasoning that
-	// keeps a headless start-up refusing rather than picking). So no store is probed and nothing is
-	// written — the notice names the entries and what can be done about them by hand, on stderr,
-	// where it cannot contaminate the answer.
-	if names := plaintextKeyEntries(opts.Servers); len(names) > 0 {
-		cmd.PrintErrln(plaintextKeyNotice(filepath.Join(roots.config, "config.yaml"), reasonHeadless, names))
-	}
-
-	// A retired `sub-agents: true` flag is worth the same sentence, and for the same reason: the
-	// migration OFFER is the TUI's (prepareSubAgentsMigration, keymigrate.go), which a headless run
-	// never reaches because it builds no rootWiring — so the flag would sit there routing nothing,
-	// silently, for as long as the config is only ever driven this way. The detection is the same
-	// raw-YAML scan the offer uses, because ServerEntry has no field for the retired key; a file the
-	// scan stumbles on is silent rather than fatal, exactly as it is there.
-	if names, err := config.RetiredSubAgentsEntries(filepath.Join(roots.config, "config.yaml")); err == nil && len(names) > 0 {
-		cmd.PrintErrln(subAgentsFlagNotice(filepath.Join(roots.config, "config.yaml"), names))
+	// A plaintext `api-key:` and a retired `sub-agents: true` flag in the config file are worth
+	// saying out loud here too (ADR 0047, ADR 0045), but only saying: the migration OFFERS are the
+	// TUI's (prepareKeyMigration, prepareSubAgentsMigration), which a headless run never reaches
+	// because it builds no rootWiring — and an unattended run has nobody to consent to an edit of the
+	// human's own config (the ADR 0036 reasoning that keeps a headless start-up refusing rather than
+	// picking). So no store is probed and nothing is written; the notices go to stderr, where they
+	// cannot contaminate the answer. A file the flag scan stumbles on is silent rather than fatal,
+	// exactly as it is for the offer, so its error is dropped — the plaintext notice survives it.
+	notices, _ := configHygieneNotices(opts.Servers, filepath.Join(roots.config, "config.yaml"), neverPromptsHeadless)
+	for _, notice := range notices {
+		cmd.PrintErrln(notice)
 	}
 
 	// The host's real Confiner backend for this OS, and the teardown the Windows token backend
