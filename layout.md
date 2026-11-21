@@ -1820,7 +1820,8 @@ too narrow for it the row ends in `…` like any other.
 
 **The session log beneath it (2026-11-12).** The routine notes a session starts with — the context
 files it loaded, Auto's disclosed residuals, model facts such as mandatory reasoning, the first
-heartbeat's rebind notes (model profile, roster change, a hint) — do not each take a line. They
+heartbeat's rebind notes (model profile, roster change, a hint), the note explaining the footer's
+`git refused` marker (a git refusal is routine) — do not each take a line. They
 gather into ONE transcript block that sits below the card, and below any scrollback a resume
 replays under it, collapsed by default to its counted header in the Tasks card's grammar:
 
@@ -1848,12 +1849,15 @@ joins the log, and a note too long for the window soft-wraps, hung at its text c
 
 The header reads `(1 note)` for one. The fold is the log's own — per-block, session-only, never
 `ui.task-list-open` ("Collapsed and expanded blocks", above). **A notice that needs the human is
-never folded away:** Auto running unconfined, degraded Auto, a skipped MCP server, a
-group-readable config under `sessions.share-group`, an unreadable context file, a colour-scheme
-warning, a refused rebind, a profile roster that was not applied, an unknown context window, an
-effort level the new model dropped, the server going offline or coming back, and a routing notice
-each keep their own `· …` note line outside the log, exactly as before. The log holds routine notes only, so a start with none paints
-no log at all — never an empty `(0 notes)` header.
+never folded away:** Auto running unconfined, degraded Auto, a skipped MCP server, an MCP server's
+tool list cut short, a group-readable config under `sessions.share-group`, an unreadable context
+file, standing content over its Budget share, a colour-scheme warning, a refused rebind, a profile
+roster that was not applied, an unknown context window, an effort level the new model dropped, the
+server going offline or coming back, and a routing notice each keep their own `· …` note line
+outside the log, exactly as before. These loud kinds, and the routine ones, are defined once, in
+`internal/tui/noticekind.go` (`noticeKinds`); a drift test fails when a loud kind is missing from
+this list. The log holds routine notes only, so a start with none paints no log at all — never an
+empty `(0 notes)` header.
 
 **One log per session, open until the first Exchange.** Each session boundary — launch, `/clear`,
 `/new`, a `/sessions` restore — opens a fresh log, and it absorbs routine notes until the

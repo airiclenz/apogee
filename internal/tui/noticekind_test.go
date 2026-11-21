@@ -1,6 +1,10 @@
 package tui
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 // TestNoticeKindClasses pins every declared kind's class and source as the one table declares them,
 // the reserved zero kind among them, read through the table lookup.
@@ -82,5 +86,136 @@ func TestNoticeKindClasses_NoticeReadsItsKindsClass(t *testing.T) {
 	}
 	if !(Notice{}).Loud() {
 		t.Error("a notice naming no kind is routine, want it loud")
+	}
+}
+
+// The three docs that list the loud start-up notice kinds, as paths from this package's directory
+// (where `go test` runs): the repo layout is fixed, so a missing file fails rather than skips.
+const (
+	loudDocLayout   = "../../layout.md"
+	loudDocCommands = "../../docs/manual/commands.md"
+	loudDocGlossary = "../../.capcom/knowledge/glossary/glossary-identity/session-log.md"
+)
+
+// loudKindPhrases is, per loud kind and per doc, the phrases that doc names the kind with. The docs
+// word several kinds differently, so each doc keeps its own phrases; a kind whose notice has two
+// texts (kindContextAnomaly: an unreadable context file, standing content over its share) carries a
+// phrase for each.
+var loudKindPhrases = map[NoticeKind]map[string][]string{
+	NoticeAutoUnconfined: {
+		loudDocLayout:   {"Auto running unconfined"},
+		loudDocCommands: {"Auto running unconfined"},
+		loudDocGlossary: {"Auto unconfined"},
+	},
+	NoticeAutoDegraded: {
+		loudDocLayout:   {"degraded Auto"},
+		loudDocCommands: {"Auto degraded on a host that cannot fence writes"},
+		loudDocGlossary: {"degraded Auto"},
+	},
+	NoticeShareGroupConfig: {
+		loudDocLayout:   {"group-readable config under `sessions.share-group`"},
+		loudDocCommands: {"a config file other members of your `sessions.share-group` can read"},
+		loudDocGlossary: {"group-readable config under `sessions.share-group`"},
+	},
+	NoticeMCPTruncated: {
+		loudDocLayout:   {"an MCP server's tool list cut short"},
+		loudDocCommands: {"an MCP server whose tool list was cut short"},
+		loudDocGlossary: {"an MCP server's tool list cut short"},
+	},
+	NoticeMCPSkipped: {
+		loudDocLayout:   {"a skipped MCP server"},
+		loudDocCommands: {"a skipped MCP server"},
+		loudDocGlossary: {"a skipped MCP server"},
+	},
+	NoticeRosterUnapplied: {
+		loudDocLayout:   {"a profile roster that was not applied"},
+		loudDocCommands: {"a profile roster that could not be applied"},
+		loudDocGlossary: {"an unapplied profile roster"},
+	},
+	kindContextAnomaly: {
+		loudDocLayout:   {"an unreadable context file", "standing content over its Budget share"},
+		loudDocCommands: {"an unreadable context file", "standing content over its Budget share"},
+		loudDocGlossary: {"an unreadable context file", "standing content over its Budget share"},
+	},
+	kindColorScheme: {
+		loudDocLayout:   {"colour-scheme warning"},
+		loudDocCommands: {"colour-scheme warning"},
+		loudDocGlossary: {"colour-scheme warning"},
+	},
+	kindRebindFailed: {
+		loudDocLayout:   {"a refused rebind"},
+		loudDocCommands: {"a rebind the server refused"},
+		loudDocGlossary: {"refused rebind"},
+	},
+	kindWindowUnknown: {
+		loudDocLayout:   {"an unknown context window"},
+		loudDocCommands: {"an unknown context window"},
+		loudDocGlossary: {"an unknown context window"},
+	},
+	kindEffortCleared: {
+		loudDocLayout:   {"an effort level the new model dropped"},
+		loudDocCommands: {"an effort level the new model dropped"},
+		loudDocGlossary: {"a dropped effort level"},
+	},
+	kindOffline: {
+		loudDocLayout:   {"the server going offline"},
+		loudDocCommands: {"the server going offline"},
+		loudDocGlossary: {"the server going offline"},
+	},
+	kindOnline: {
+		loudDocLayout:   {"or coming back"},
+		loudDocCommands: {"or coming back"},
+		loudDocGlossary: {"or coming back"},
+	},
+	kindRouting: {
+		loudDocLayout:   {"a routing notice"},
+		loudDocCommands: {"`sub-agents: …` routing notice"},
+		loudDocGlossary: {"a routing notice"},
+	},
+}
+
+// TestLoudKindsNamedInDocs pins the docs' lists of the notices that keep their own line to the one
+// table: every loud kind in [noticeKinds] (the reserved zero kind aside) is named in each doc, every
+// kind the phrases name is still loud, and each doc points at the file the table lives in. The docs
+// are hard-wrapped, so each is matched with its whitespace folded to single spaces.
+func TestLoudKindsNamedInDocs(t *testing.T) {
+	t.Parallel()
+
+	docs := map[string]string{}
+	for _, path := range []string{loudDocLayout, loudDocCommands, loudDocGlossary} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("reading %s: %v", path, err)
+		}
+		docs[path] = strings.Join(strings.Fields(string(raw)), " ")
+		if !strings.Contains(docs[path], "`internal/tui/noticekind.go`") {
+			t.Errorf("%s does not say the notice kinds are defined in `internal/tui/noticekind.go`", path)
+		}
+	}
+
+	for kind, row := range noticeKinds {
+		if kind == kindUnset || row.class != classLoud {
+			continue
+		}
+		if _, ok := loudKindPhrases[kind]; !ok {
+			t.Errorf("loud kind %d has no docs phrases — name it in each doc and add it to loudKindPhrases", kind)
+		}
+	}
+
+	for kind, perDoc := range loudKindPhrases {
+		if row, ok := noticeKinds[kind]; !ok || row.class != classLoud || kind == kindUnset {
+			t.Errorf("kind %d has docs phrases but is not a declared loud kind — drop its phrases from the docs and the map", kind)
+		}
+		for path, doc := range docs {
+			phrases := perDoc[path]
+			if len(phrases) == 0 {
+				t.Errorf("kind %d has no phrase for %s", kind, path)
+			}
+			for _, phrase := range phrases {
+				if !strings.Contains(doc, phrase) {
+					t.Errorf("%s no longer names loud kind %d as %q", path, kind, phrase)
+				}
+			}
+		}
 	}
 }

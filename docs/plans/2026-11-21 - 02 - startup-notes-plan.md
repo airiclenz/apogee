@@ -169,7 +169,7 @@ internal/tui/watch_test.go — TestSessionViewHoldsEveryFieldTheBoundariesReset,
 Depends on item 5.
 **Commit:** `refactor(tui): a session boundary and a box restatement are one chrome call each`
 
-## 7. Docs name every loud kind, pinned by a drift test
+## 7. Docs name every loud kind, pinned by a drift test — ✅ DONE (2026-11-21)
 
 **What:**
 **Goal:** layout.md §"The start-up box", docs/manual/commands.md §"The start-up session log" and the glossary Note `session-log` list every loud kind in `noticeKinds` (including the MCP tool list cut short and standing content over its Budget share) and name the git refusal as routine; a test fails when a loud kind is added without a docs phrase or a docs phrase loses its kind; the docs say the list is defined in `internal/tui/noticekind.go`.

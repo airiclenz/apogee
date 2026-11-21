@@ -256,18 +256,20 @@ into one block below the start-up card, collapsed to its counted header —
 loaded, Auto's disclosed fence residuals
 ([Auto mode's blast radius](configuration.md#auto-modes-blast-radius)), and the notes of the
 first heartbeat against the server: the model profile it matched, the tools that profile adds or
-removes, a model that always reasons, a model the server did not list but your config named. A
+removes, a model that always reasons, a model the server did not list but your config named. It
+also holds the note explaining a `git refused` footer marker: a git refusal is routine. A
 click on the header opens it, as does `⌥↑` into navigation mode and `⏎` on it; the `▶` turns `▼`
 and every note is its own `· ` row beneath it, word for word. The fold is the log's own: it moves
 no task card and saves nothing.
 
 **A notice that needs you is never folded away.** Auto running unconfined, Auto degraded on a host
-that cannot fence writes, a skipped MCP server, a config file other members of your
-`sessions.share-group` can read, an unreadable context file, a colour-scheme
-warning, a rebind the server refused, a profile roster that could not be applied, an unknown
-context window, an effort level the new model dropped, the server going offline or coming back,
-and every `sub-agents: …` routing notice keep their own line, exactly as before. A start with no
-routine note shows no log at all.
+that cannot fence writes, a skipped MCP server, an MCP server whose tool list was cut short, a
+config file other members of your `sessions.share-group` can read, an unreadable context file,
+standing content over its Budget share, a colour-scheme warning, a rebind the server refused, a
+profile roster that could not be applied, an unknown context window, an effort level the new model
+dropped, the server going offline or coming back, and every `sub-agents: …` routing notice keep
+their own line, exactly as before. Which notices are loud and which routine is defined once, in
+`internal/tui/noticekind.go`. A start with no routine note shows no log at all.
 
 Each session boundary — launch, `/clear`, `/new`, a `/sessions` restore — opens a fresh log, and
 it takes notes until the session's first Exchange starts: a prompt you send, `/continue`, a
