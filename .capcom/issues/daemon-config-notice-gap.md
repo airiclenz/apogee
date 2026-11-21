@@ -4,6 +4,7 @@ status: open
 type: task
 priority: 3
 labels: [driver-parity, security]
+plan: 2026-11-21 - 01 - driver-notice-parity-plan.md
 created: 2026-11-21T12:44:48Z
 ---
 
