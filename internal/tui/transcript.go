@@ -1087,9 +1087,9 @@ func (t *transcript) addSessionLogNote(text string) bool {
 
 // foldHardBreaks is text as one paragraph: every run of whitespace that holds a line break — the
 // break, the indent after it and any blank lines — becomes one space, and the ends are trimmed.
-// Whitespace inside a line stays as it was. A note worded for stderr lays its clauses out on
-// indented lines of their own (probe.ResidualNotice); the session log keeps the words and drops the
-// layout, since a hard break inside a `· ` row would wrap at a width the note was never shown at.
+// Whitespace inside a line stays as it was. It is the log's own invariant, whatever the note: a note
+// in the log is one paragraph, so the log keeps a note's words and drops any line layout it arrived
+// with, since a hard break inside a `· ` row would wrap at a width the note was never shown at.
 func foldHardBreaks(text string) string {
 	lines := strings.Split(text, "\n")
 	kept := lines[:0]

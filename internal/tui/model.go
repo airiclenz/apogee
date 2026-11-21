@@ -1096,15 +1096,15 @@ func (m *Model) noteColorSchemeWarnings(warnings []string) {
 
 // noteStartupNotices repeats, in order, what the binary printed on stderr about the start-up posture
 // before the alternate screen opened (Options.StartupNotices) — in stderr's words, or in the
-// transcript's own where a notice carries them (Notice.Log, one note each). The lines are composed
-// by the binary; this only places them — a LOUD notice on its own line, a routine one inside the
+// transcript's own for a kind the TUI words itself (transcriptNotes, one note each). The stderr lines
+// are composed by the binary; this only words and places them — a LOUD notice on its own line, a routine one inside the
 // session log (noteRoutine) — and both EPHEMERALLY, for the same reason the colour-scheme warnings
 // are: each is re-derived from the mode, the config and the host's backend at every launch, so
 // persisting one would stack a duplicate into the record on every resume while telling the next
 // launch nothing it does not re-discover.
 func (m *Model) noteStartupNotices(notices []Notice) {
 	for _, n := range notices {
-		for _, note := range n.transcriptNotes() {
+		for _, note := range m.transcriptNotes(n) {
 			if n.Loud() {
 				m.transcript.addEphemeralNote(note)
 				continue

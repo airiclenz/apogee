@@ -1289,20 +1289,13 @@ type Engine interface {
 // session log, folded under its counted header (layout.md, "The start-up box"). The transcript
 // escape-strips every note at its seam.
 type Notice struct {
-	// Text is the notice exactly as stderr printed it, and the transcript's wording whenever Log
-	// is empty.
+	// Text is the notice exactly as stderr printed it, and the transcript's wording for every kind
+	// the TUI does not word itself ([Model.transcriptNotes]).
 	Text string
 
-	// Log is the transcript's own wording, when the stderr text does not read right there: one
-	// note each, in order, placed where Text would have been (its own line when loud, the session
-	// log when routine). The residual disclosure sets it — stderr's header over indented clause
-	// lines becomes one "<backend> cannot fence <token> — <consequence>" note per residual. Empty
-	// ⇒ Text is the one note. It is read ONLY from Options.StartupNotices: a Notice handed back in
-	// RebindResult.Notices has Log ignored, and no rebind producer sets it.
-	Log []string
-
-	// Kind names what the notice is about; its class — loud or routine — is read from the TUI's own
-	// table ([noticeKinds]), not decided by the producer. The zero value is loud.
+	// Kind names what the notice is about; its class — loud or routine — and its transcript wording
+	// are the TUI's own ([noticeKinds], [Model.transcriptNotes]), not decided by the producer. The
+	// zero value is loud.
 	Kind NoticeKind
 }
 
@@ -1310,15 +1303,6 @@ type Notice struct {
 // [noticeKinds]. A notice whose producer named no Kind is loud.
 func (n Notice) Loud() bool {
 	return classOf(n.Kind) == classLoud
-}
-
-// transcriptNotes is what the transcript places for this notice: Log's notes when it has any,
-// otherwise Text as the one note.
-func (n Notice) transcriptNotes() []string {
-	if len(n.Log) > 0 {
-		return n.Log
-	}
-	return []string{n.Text}
 }
 
 // Options carries the wiring the binary resolves (the composition root, cmd/apogee) and
@@ -1428,7 +1412,7 @@ type Options struct {
 	// warning, a repo MCP server the connect skipped — printed on stderr before the alternate screen
 	// opened; repeated here so the moment is not lost when that screen opens over the line. Each is
 	// placed at construction, in print order, after the colour-scheme warnings — in stderr's words,
-	// or in the transcript's own where the notice carries them (Notice.Log): a loud one as its own
+	// or in the transcript's own where the TUI words the kind itself: a loud one as its own
 	// ephemeral transcript note, a routine one inside the session log (Notice). Nil on the ordinary
 	// run, where the posture needed no announcing.
 	StartupNotices []Notice

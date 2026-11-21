@@ -80,7 +80,9 @@ cmd/apogee/wire_live.go — sessionStoreOptions shareWarning announce; cmd/apoge
 Depends on item 1.
 **Commit:** `refactor(apogee): start-up notices name their NoticeKind`
 
-## 3. The TUI owns a notice's transcript wording
+## 3. The TUI owns a notice's transcript wording — ✅ DONE (2026-11-21)
+NOTES (2026-11-21): consequential edit — internal/tui/doc.go: made necessary by noticekind.go now holding the residual kind's transcript wording (Model.transcriptNotes) beside the class table; its file-map line names it.
+NOTES (2026-11-21): TestStartupNoticesPlaceTheirLogWordingOneNoteEach is renamed TestStartupNoticesWordTheResidualFromTheConfinementFacts (still under the Acceptance's TestStartupNotices filter); it also pins the zero-ConfinementInfo fallback to Text. assertResidualLogWording keeps its name and now takes tui.Options, asserting the Kind, the byte-identical stderr text, and that Options.Confinement carries the backend and caps the TUI words the notes from.
 
 **What:**
 **Goal:** `tui.Notice` has no `Log` field; the TUI derives each kind's transcript wording itself — `NoticeFenceResidual` renders the `probe.ResidualNotes` lines for `Options.Confinement`, every other kind its `Text`; the session log shows the same lines as at the base.

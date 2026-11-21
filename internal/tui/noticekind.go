@@ -1,5 +1,10 @@
 package tui
 
+import (
+	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/probe"
+)
+
 // NoticeKind names one kind of start-up notice the transcript places — what the notice is about, as
 // against what it says. The kind is the producer's only decision: whether the notice needs the human
 // (its class) and where it comes from (its source) are declared once, in [noticeKinds], on this side
@@ -100,4 +105,24 @@ func kindRow(k NoticeKind) noticeKindRow {
 // classOf is k's class, read through the table.
 func classOf(k NoticeKind) noticeClass {
 	return kindRow(k).class
+}
+
+// transcriptNotes is what the transcript places for n, one note each, in order, where its class puts
+// them: the TUI's own wording for a kind whose stderr text does not read right there, and Text as the
+// one note for every other kind.
+//
+// The residual disclosure ([NoticeFenceResidual]) is the one kind worded here: stderr's header over
+// indented clause lines becomes one "<backend> cannot fence <token> — <consequence>" note per
+// residual, composed by probe.ResidualNotes from the same backend and capabilities the binary built
+// the stderr text from (Options.Confinement). The kind attests that the disclosure's gate fired —
+// Auto, with confinement asked for — so the gate's inputs are passed as fired. A notice the
+// confinement facts cannot word (the zero ConfinementInfo) falls back to Text.
+func (m *Model) transcriptNotes(n Notice) []string {
+	if n.Kind == NoticeFenceResidual {
+		info := m.opts.Confinement
+		if notes := probe.ResidualNotes(info.Backend, info.Caps, domain.ModeAuto, true); len(notes) > 0 {
+			return notes
+		}
+	}
+	return []string{n.Text}
 }

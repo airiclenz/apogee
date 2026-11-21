@@ -25,6 +25,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/testtime"
@@ -9021,41 +9022,45 @@ func TestStartupNoticesPostAsEphemeralNotes(t *testing.T) {
 	}
 }
 
-// TestStartupNoticesPlaceTheirLogWordingOneNoteEach pins Notice.Log: a notice whose stderr text
-// does not read right in the transcript — the residual disclosure's header over indented clause
-// lines — carries the transcript's own wording, and each Log entry is its own note, in order,
-// where Text would have gone. The stderr text itself is never placed. A loud notice with Log keeps
-// each entry on its own line, outside the log.
-func TestStartupNoticesPlaceTheirLogWordingOneNoteEach(t *testing.T) {
+// TestStartupNoticesWordTheResidualFromTheConfinementFacts pins the transcript wording the TUI owns:
+// a residual-disclosure notice is placed as probe.ResidualNotes' notes for Options.Confinement — one
+// session-log note per residual, in order, where Text would have gone — never as its stderr text,
+// whose header over indented clause lines does not read right there. Every other kind is placed as
+// its Text, and a residual notice the confinement facts cannot word (the zero ConfinementInfo) falls
+// back to its Text too.
+func TestStartupNoticesWordTheResidualFromTheConfinementFacts(t *testing.T) {
 	t.Parallel()
 
-	routine := Notice{
-		Text: "apogee: auto mode fences terminal commands, but landlock cannot fence:\n" +
-			"  truncate(2) — a confined command can still empty an existing file\n" +
-			"  connect(2) AF_UNIX — a same-user socket service can run commands outside the fence",
-		Log: []string{
-			"landlock cannot fence truncate(2) — a confined command can still empty an existing file",
-			"landlock cannot fence connect(2) AF_UNIX — a same-user socket service can run commands outside the fence",
-		},
-		Kind: NoticeFenceResidual,
+	info := ConfinementInfo{
+		Backend: "landlock",
+		Caps:    domain.ConfinementCaps{FSWrite: true, Residuals: []string{"truncate(2)", domain.ResidualUnixEgress}},
 	}
-	loud := Notice{Text: "apogee: loud stderr text", Log: []string{"loud first", "loud second"}, Kind: NoticeAutoDegraded}
+	residual := Notice{Text: probe.ResidualNotice(info.Backend, info.Caps, domain.ModeAuto, true), Kind: NoticeFenceResidual}
+	loud := Notice{Text: "apogee: loud stderr text", Kind: NoticeAutoDegraded}
+	want := probe.ResidualNotes(info.Backend, info.Caps, domain.ModeAuto, true)
+	if len(want) != len(info.Caps.Residuals) {
+		t.Fatalf("setup: probe.ResidualNotes = %q, want one note per residual %v", want, info.Caps.Residuals)
+	}
 
 	m := newModel(context.Background(), &fakeEngine{}, Options{
-		StartupNotices: []Notice{routine, loud},
+		StartupNotices: []Notice{residual, loud},
+		Confinement:    info,
 		UI:             testUIPrefs,
 	}, nil)
 
-	if got := sessionLogNotes(m); !slices.Equal(got, routine.Log) {
-		t.Errorf("session log notes = %q; want exactly the notice's Log entries %q", got, routine.Log)
+	if got := sessionLogNotes(m); !slices.Equal(got, want) {
+		t.Errorf("session log notes = %q; want probe.ResidualNotes' notes %q", got, want)
 	}
-	for _, note := range loud.Log {
-		if !hasEntry(m, entryNote, note) {
-			t.Errorf("the loud notice's Log entry %q is not its own note", note)
-		}
+	if !hasEntry(m, entryNote, loud.Text) {
+		t.Errorf("the loud notice's text %q is not its own note", loud.Text)
 	}
-	if hasEntry(m, entryNote, loud.Text) {
-		t.Errorf("the stderr text %q was placed although the notice carries its own wording", loud.Text)
+
+	unworded := newModel(context.Background(), &fakeEngine{}, Options{
+		StartupNotices: []Notice{residual},
+		UI:             testUIPrefs,
+	}, nil)
+	if got, wantText := sessionLogNotes(unworded), []string{foldHardBreaks(residual.Text)}; !slices.Equal(got, wantText) {
+		t.Errorf("with no confinement facts, session log notes = %q; want the notice's text %q", got, wantText)
 	}
 }
 

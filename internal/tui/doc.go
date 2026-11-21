@@ -912,8 +912,9 @@
 // seam boundary the binary sees ([Run], [Options], and the [Engine], [SkillCatalog] and
 // [SessionHost] interfaces); noticekind.go the [NoticeKind] enum beside the one table
 // ([noticeKinds]) that declares each start-up notice kind's class — loud on its own line or routine
-// in the session log — and its source (the launch, the ambient workspace, a rebind beat), so a
-// producer names a kind and never decides its loudness; bridge.go the late-bound programRef every seam sends the running
+// in the session log — and its source (the launch, the ambient workspace, a rebind beat), plus the
+// transcript wording of a kind the TUI words itself (the residual disclosure), so a producer names a
+// kind and never decides its loudness or its transcript wording; bridge.go the late-bound programRef every seam sends the running
 // program through — including [Bridge.NotifySchedule], the composition root's own way in, which is
 // how a Firing narrates from the scheduler's goroutine without the renderer knowing one exists, and
 // [Bridge.NotifyRouting] beside it, the same way in for the Sub-agent server's routing state (ADR

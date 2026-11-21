@@ -580,20 +580,22 @@ func TestRunRootConfinementStartupNotices(t *testing.T) {
 				}
 			}
 
-			// The residual's transcript wording is its own (probe.ResidualNotes): one session-log note
-			// per residual, each a sentence naming the backend, with no "apogee: " prefix — while
-			// stderr above still prints probe.ResidualNotice byte for byte.
+			// The residual's transcript wording is the TUI's (its kind's): it words the session-log
+			// notes from tui.Options.Confinement, so the notice names its kind and the TUI is handed
+			// the same backend and capabilities stderr's text was built from — while stderr above
+			// still prints probe.ResidualNotice byte for byte.
 			if tt.wantResidual {
-				assertResidualLogWording(t, rec.opts.StartupNotices, stderr, tt.caps)
+				assertResidualLogWording(t, rec.opts, stderr, tt.caps)
 			}
 		})
 	}
 }
 
 // assertResidualLogWording checks the one residual notice runRoot announced: stderr carries
-// probe.ResidualNotice's text, and the notice's Log holds one "<backend> cannot fence <token>"
-// note per write-class residual, in the fake backend's name.
-func assertResidualLogWording(t *testing.T, notices []tui.Notice, stderr string, caps apogee.ConfinementCaps) {
+// probe.ResidualNotice's text byte for byte, the notice carrying it names the residual kind (whose
+// transcript wording the TUI composes), and opts.Confinement hands the TUI the fake backend's name
+// and the capabilities that text was built from — the facts the TUI words the session-log notes off.
+func assertResidualLogWording(t *testing.T, opts tui.Options, stderr string, caps apogee.ConfinementCaps) {
 	t.Helper()
 
 	backend := probe.BackendName(fakeConfiner{})
@@ -601,18 +603,15 @@ func assertResidualLogWording(t *testing.T, notices []tui.Notice, stderr string,
 	if !strings.Contains(stderr, want+"\n") {
 		t.Errorf("stderr = %q; want probe.ResidualNotice's text byte for byte %q", stderr, want)
 	}
-	at := slices.IndexFunc(notices, func(n tui.Notice) bool { return n.Text == want })
+	at := slices.IndexFunc(opts.StartupNotices, func(n tui.Notice) bool { return n.Text == want })
 	if at < 0 {
-		t.Fatalf("no startup notice carries the residual text; notices = %+v", notices)
+		t.Fatalf("no startup notice carries the residual text; notices = %+v", opts.StartupNotices)
 	}
-	log := notices[at].Log
-	if len(log) != len(caps.Residuals) {
-		t.Fatalf("residual Log = %q; want one note per residual %v", log, caps.Residuals)
+	if kind := opts.StartupNotices[at].Kind; kind != tui.NoticeFenceResidual {
+		t.Errorf("residual notice Kind = %v; want tui.NoticeFenceResidual", kind)
 	}
-	for i, note := range log {
-		if prefix := backend + " cannot fence " + caps.Residuals[i]; !strings.HasPrefix(note, prefix) {
-			t.Errorf("residual Log[%d] = %q; want it to start %q", i, note, prefix)
-		}
+	if got := opts.Confinement; got.Backend != backend || !reflect.DeepEqual(got.Caps, caps) {
+		t.Errorf("tui.Options.Confinement = %+v; want backend %q with the announced caps %+v", got, backend, caps)
 	}
 }
 
