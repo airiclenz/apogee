@@ -2,14 +2,16 @@ package tui
 
 // blockshape.go is the one home of tool-block shape: the walk primitives that say which tool block
 // an entry belongs to — the umbrella over groupable calls (toolSuperGroup, built from same-label
-// runs), the Sub-agent and Skill groups (ownGroup, ownGroupAt and their delegation forms) — and the
-// blockShape enum naming which shape the painter answered with. Paint, fold and hit-testing ask
-// these rather than restating the order or the group-of-one rule.
+// runs), the Sub-agent and Skill groups (ownGroup, ownGroupAt and their delegation forms) — the
+// blockShape enum naming which shape the painter answered with, and the shape answer built from
+// them ([toolBlockAt]: which block entries[i] is in, its head, end and member position). Paint, fold
+// and hit-testing ask these rather than restating the order or the group-of-one rule.
 
 // blockShape names which shape [transcript.resolveBlock] answered with for a block — the shape
 // itself, not anything derived from it. Every value is spent by that one resolver, as the shape
 // field of the [resolvedBlock] it returns, so the enum and the decision that picks from it cannot
-// drift apart.
+// drift apart. The shape answer ([toolBlock.kind]) names the foldable tool blocks with the same
+// values, so the fold side and the painter speak of one shape by one name.
 //
 // It was redundant when there were three, and deliberately kept: a head that changed branches also
 // changed the length of its span, so the flags string already differed (a sub-agent call whose first
@@ -231,4 +233,98 @@ func ownGroupAt(entries []entry, i int, name string) (group []groupBlock, pos in
 // subAgentGroupAt is [ownGroupAt] asked of the delegation tool.
 func subAgentGroupAt(entries []entry, i int) (group []groupBlock, pos int, ok bool) {
 	return ownGroupAt(entries, i, subAgentToolName)
+}
+
+// toolBlock is the shape answer: which tool block an entry belongs to, asked from any of its entries
+// ([toolBlockAt]). kind is shapeToolSuper for a Tools umbrella (a group of one included),
+// shapeSubAgentGroup or shapeSkillGroup for a folded list of delegations or skill fetches, and
+// shapeEntry for everything else — an entry that is a block of its own and folds as none.
+//
+// The block covers [head, end): an umbrella's calls, or a group's members together with every
+// member's span. pos is the asked entry's member index inside a group — 0 at the group's first
+// member, which alone carries its header and its fold — and 0 for every other shape. sup is the
+// umbrella's runs and group the group's members; each is nil for every other shape.
+type toolBlock struct {
+	kind  blockShape
+	head  int // index of the block's first entry: the umbrella's first call, the group's first member
+	pos   int // member index inside a Sub-agent or Skill group; 0 for every other shape
+	end   int // index one past the block's last entry, the last member's span included
+	sup   superGroup
+	group []groupBlock
+}
+
+// foldable reports whether the block folds to a header of its own: a Tools umbrella, a Sub-agent
+// group or a Skill group. Its fold lives on the head's entry, so a caller asking about the fold of
+// an index that is not the head ([toolBlock.head]) asks about a block that index does not head.
+func (b toolBlock) foldable() bool {
+	switch b.kind {
+	case shapeToolSuper, shapeSubAgentGroup, shapeSkillGroup:
+		return true
+	}
+	return false
+}
+
+// groupOfOne reports whether the block is a group of one: an umbrella over one call, or a Sub-agent
+// or Skill group of one member (ADR 0035 amendment 1120c). Such a block has no type row — its
+// header folds the call's own block — so nothing inside it is a type row to open.
+func (b toolBlock) groupOfOne() bool {
+	switch b.kind {
+	case shapeToolSuper:
+		return b.sup.calls() == 1
+	case shapeSubAgentGroup, shapeSkillGroup:
+		return len(b.group) == 1
+	}
+	return false
+}
+
+// toolBlockAt is the shape of the tool block entries[i] belongs to, asked from ANY entry of it — the
+// head, a type row's head, any umbrella call, any group member. It is the one place the block order
+// is stated: a Sub-agent group first, then a Skill group, then the umbrella; no entry answers two,
+// since a group's members are solo calls and so never groupable.
+//
+// A group member finds its group's first member by [ownGroupAt]'s walk back. An umbrella call finds
+// its head by walking back over the adjacent groupable calls at its own depth — the stretch
+// toolSuperGroup consumes whole, since it is only correct asked at a block head. An entry inside a
+// group member's span belongs to that run's own blocks, never to the group, and every entry that
+// is in neither shape — narration, a solo or targetless call, a background sub-agent, a workflow
+// block, an index outside the list — answers shapeEntry over [i, i+1).
+func toolBlockAt(entries []entry, i int) toolBlock {
+	if group, pos, ok := subAgentGroupAt(entries, i); ok {
+		return groupShape(shapeSubAgentGroup, group, pos)
+	}
+	if group, pos, ok := ownGroupAt(entries, i, loadSkillToolName); ok {
+		return groupShape(shapeSkillGroup, group, pos)
+	}
+	lone := toolBlock{kind: shapeEntry, head: i, end: i + 1}
+	if sameLabelRun(entries, i) == 0 {
+		return lone
+	}
+	head := i
+	for head > 0 && extendsGroupableStretch(entries, head) {
+		head--
+	}
+	sup := toolSuperGroup(entries, head)
+	end := head + sup.calls()
+	if i >= end {
+		return lone
+	}
+	return toolBlock{kind: shapeToolSuper, head: head, end: end, sup: sup}
+}
+
+// groupShape is the shape answer for a member at pos of a Sub-agent or Skill group: the block
+// starts at the first member and reaches past the last member's span.
+func groupShape(kind blockShape, group []groupBlock, pos int) toolBlock {
+	last := group[len(group)-1]
+	return toolBlock{kind: kind, head: group[0].at, pos: pos, end: last.at + 1 + last.span, group: group}
+}
+
+// extendsGroupableStretch reports whether the entry before entries[i] is a groupable call at i's
+// depth — the stretch toolSuperGroup consumes whole — so entries[i] is not where that stretch
+// starts. i must be a groupable call itself, as [toolBlockAt] asks it only of one.
+func extendsGroupableStretch(entries []entry, i int) bool {
+	if i <= 0 || i >= len(entries) {
+		return false
+	}
+	prev := entries[i-1]
+	return prev.kind == entryToolCall && prev.depth == entries[i].depth && groupable(prev.tool)
 }

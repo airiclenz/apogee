@@ -91,7 +91,7 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 			for _, e := range build() {
 				m = m.foldEvent(e)
 			}
-			if _, ok := foldableHead(m.transcript.entries, head); !ok {
+			if block := toolBlockAt(m.transcript.entries, head); !block.foldable() || block.head != head {
 				t.Fatalf("setup: entries[%d] heads no foldable block", head)
 			}
 			if m.transcript.blockFolded(head) {

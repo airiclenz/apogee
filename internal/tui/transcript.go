@@ -2264,11 +2264,14 @@ func (t *transcript) setToolsFoldOver(n int) bool {
 // umbrella a sub-agent's run view shows while the parent Turn runs folds exactly as the transcript's
 // own would at the prompt.
 //
-// head must be the umbrella's own head (toolSuperGroup is only correct at a run boundary); an index
-// heading no umbrella answers false.
+// head must be the umbrella's own head ([toolBlockAt]); a member past it, and an index heading no
+// umbrella, answers false.
 func (t *transcript) umbrellaIsLarge(head int) bool {
-	sup := toolSuperGroup(t.entries, head)
-	return len(sup) > 0 && t.toolsFoldOver > 0 && len(sup) > t.toolsFoldOver
+	b := toolBlockAt(t.entries, head)
+	if b.kind != shapeToolSuper || b.head != head {
+		return false
+	}
+	return t.toolsFoldOver > 0 && len(b.sup) > t.toolsFoldOver
 }
 
 // blockFoldRule names which rule decides an umbrella's fold ([transcript.blockFoldBy]) — the
@@ -2304,18 +2307,22 @@ const (
 // folds on its head flag alone, live or settled, auto-collapse on or off. The paint
 // ([transcript.blockFolded]) and the reader's fold actions both ask it, so the two can never
 // disagree about which fold a header shows.
+//
+// Only the block's head ([toolBlockAt]) has a fold to resolve: a group's member past the first —
+// where paint resumes a list an open member ended — and an umbrella call past the head answer
+// foldByNone, as does every index in no foldable block.
 func (t *transcript) blockFoldBy(head int) blockFoldRule {
-	end, ok := foldableHead(t.entries, head)
-	if !ok {
+	block := toolBlockAt(t.entries, head)
+	if !block.foldable() || block.head != head {
 		return foldByNone
 	}
 	headEntry := t.entries[head]
 	switch {
-	case t.toolsAutoCollapse && !headEntry.foldTouched && t.blockSettled(head, end):
+	case t.toolsAutoCollapse && !headEntry.foldTouched && t.blockSettled(head, block.end):
 		return foldBySettled
 	case headEntry.foldTouched && headEntry.foldOwn:
 		return foldByHead
-	case t.umbrellaIsLarge(head):
+	case block.kind == shapeToolSuper && t.umbrellaIsLarge(head):
 		return foldByShared
 	}
 	return foldByHead
@@ -2377,7 +2384,7 @@ func (t *transcript) blockFolded(head int) bool {
 // the run's own next entry or proves the run's stretch has ended — a sibling's, a parent's, a host
 // note parked at the tail. Deeper entries between are runs nested inside this one, and are skipped.
 //
-// The block's span [head, end) is the caller's, read off the head ([foldableHead]), and both rules
+// The block's span [head, end) is the caller's, read off the head ([toolBlockAt]), and both rules
 // read only the block's OWN members — the entries at the head's depth in that span — never the
 // deeper entries a group member's run holds, whose narration is never marked done and whose Turns
 // are that child's; a delegation member is over when its own head says so, whatever its span holds.
@@ -2441,7 +2448,7 @@ func (e entry) waitsOnUser() bool {
 // A run with no entry of its own yet — a delegation whose first Turn committed nothing, a legacy
 // child whose stretch ends behind host notes parked at the tail — marks nothing ([lastOwnEntry]).
 //
-// Only an entry that ends a FOLDABLE block at this moment is marked ([foldHeadOf]) — an umbrella
+// Only an entry that ends a FOLDABLE block at this moment is marked ([toolBlockAt]) — an umbrella
 // (a group of one included), a Sub-agent or Skill group (a lone delegation or skill fetch is a
 // group of one) — because the mark is what keeps a block the boundary folded folded while the next
 // Turn extends it: a folded "✦ Sub-agents (1)" the next Turn's delegation joins stays folded and
@@ -2451,7 +2458,7 @@ func (t *transcript) closeTurn(run runRef) {
 	if !ok || t.entries[at].turnClosed {
 		return
 	}
-	if _, foldable := foldHeadOf(t.entries, at); !foldable {
+	if !toolBlockAt(t.entries, at).foldable() {
 		return
 	}
 	t.entries[at].turnClosed = true
@@ -2546,86 +2553,18 @@ func (t *transcript) setBlockFolded(head int, folded bool) bool {
 	return true
 }
 
-// foldHeadOf is the head of the foldable tool block entries[i] belongs to — a Tools umbrella's
-// head, a type row's head or any member, a group of one's lone call itself, or any member of a
-// Sub-agent or Skill group (the group's first, [toolGroupAt]) — and whether it belongs to one at
-// all. toolSuperGroup is only correct at a block head, so this finds the head the paint's walk
-// would: back over the adjacent groupable calls at i's own depth, which is the stretch
-// toolSuperGroup consumes whole, to its first call, and then asks whether that call heads a
-// foldable block reaching i ([foldableHead]). An entry in a group member's span belongs to that
-// run's own blocks, never to the group, and a solo call outside any group and every other kind
-// belong to none.
-func foldHeadOf(entries []entry, i int) (int, bool) {
-	if group, _, ok := toolGroupAt(entries, i); ok {
-		return group[0].at, true
-	}
-	if sameLabelRun(entries, i) == 0 {
-		return -1, false
-	}
-	first := i
-	for first > 0 && extendsGroupableStretch(entries, first) {
-		first--
-	}
-	if end, ok := foldableHead(entries, first); ok && i < end {
-		return first, true
-	}
-	return -1, false
-}
-
-// extendsGroupableStretch reports whether the entry before entries[i] is a groupable call at i's
-// depth — the stretch toolSuperGroup consumes whole — so entries[i] is not where that stretch
-// starts. i must be a groupable call itself, as both callers ask it only of one.
-func extendsGroupableStretch(entries []entry, i int) bool {
-	if i <= 0 || i >= len(entries) {
-		return false
-	}
-	prev := entries[i-1]
-	return prev.kind == entryToolCall && prev.depth == entries[i].depth && groupable(prev.tool)
-}
-
-// foldableHead reports whether entries[head] heads a foldable tool block and, when it does, the
-// index one past the block's last entry. It is the ONE place a tool-block shape is recognised as
-// foldable — [foldHeadOf] and [transcript.blockFoldBy] both dispatch on it — and it knows the
-// Sub-agent and Skill GROUPS ([toolGroupAt], asked at their first member, the block reaching past
-// the last member's span) and the Tools umbrella (toolSuperGroup, the adjacent same-depth calls it
-// folds, a lone groupable call as a group of one). The groups are asked first, in render.go's
-// resolveBlock order; no entry answers two of them, since a group's members are solo calls.
-func foldableHead(entries []entry, head int) (end int, ok bool) {
-	if group, pos, inGroup := toolGroupAt(entries, head); inGroup {
-		if pos != 0 {
-			return 0, false
-		}
-		last := group[len(group)-1]
-		return last.at + 1 + last.span, true
-	}
-	if sup := toolSuperGroup(entries, head); len(sup) > 0 {
-		return head + sup.calls(), true
-	}
-	return 0, false
-}
-
-// toolGroupAt is the Sub-agent or Skill group entries[i] is a MEMBER of ([ownGroupAt]) and its
-// position in it — the two tools whose calls fold into a list of their own (render.go's
-// resolveBlock). ok is false for every entry in neither.
-func toolGroupAt(entries []entry, i int) (group []groupBlock, pos int, ok bool) {
-	if group, pos, ok := subAgentGroupAt(entries, i); ok {
-		return group, pos, true
-	}
-	return ownGroupAt(entries, i, loadSkillToolName)
-}
-
 // markBlockTouched records that the reader acted on the foldable tool block entries[index] belongs
-// to ([foldHeadOf]) — opened a type row, a member or its body, or moved its header's fold —
+// to ([toolBlockAt]) — opened a type row, a member or its body, or moved its header's fold —
 // which exempts it from auto-collapse from then on ([transcript.blockFoldBy]), and reports
 // whether the mark moved. It leaves the block's fold where it stands: a touched umbrella without
 // a fold of its own folds by its size again, the fold it showed before it settled. An index in no
 // foldable block changes nothing, and the generation moves only on a move, setBlockFolded's rule.
 func (t *transcript) markBlockTouched(index int) bool {
-	head, ok := foldHeadOf(t.entries, index)
-	if !ok {
+	block := toolBlockAt(t.entries, index)
+	if !block.foldable() {
 		return false
 	}
-	e := &t.entries[head]
+	e := &t.entries[block.head]
 	if e.foldTouched {
 		return false
 	}
@@ -2640,10 +2579,10 @@ func (t *transcript) markBlockTouched(index int) bool {
 // reader's open of an auto-collapsed umbrella, which opens that one and writes nothing (ratified
 // "Large-umbrella click"). A further click flips that same head flag (Model.toggleBlockAt), so a
 // group of one — a lone call — re-folds like any umbrella. A Sub-agent or Skill group opens like
-// an umbrella. It reports whether anything moved; an index heading no foldable block changes
-// nothing.
+// an umbrella. It reports whether anything moved; an index heading no foldable block — a member
+// past its block's head included ([toolBlockAt]) — changes nothing.
 func (t *transcript) openBlockAlone(head int) bool {
-	if _, ok := foldableHead(t.entries, head); !ok {
+	if block := toolBlockAt(t.entries, head); !block.foldable() || block.head != head {
 		return false
 	}
 	e := &t.entries[head]
@@ -2664,20 +2603,19 @@ func (t *transcript) openBlockAlone(head int) bool {
 // the header — so a flag left there would open a type row the moment the group grows. An index in
 // no foldable block changes nothing.
 func (t *transcript) revealBlockMember(index int) {
-	head, ok := foldHeadOf(t.entries, index)
-	if !ok {
+	block := toolBlockAt(t.entries, index)
+	if !block.foldable() {
 		return
 	}
-	if t.blockFolded(head) {
-		t.openBlockAlone(head)
+	if t.blockFolded(block.head) {
+		t.openBlockAlone(block.head)
 	} else {
-		t.markBlockTouched(head)
+		t.markBlockTouched(block.head)
 	}
-	sup := toolSuperGroup(t.entries, head)
-	if sup.calls() < 2 {
+	if block.kind != shapeToolSuper || block.groupOfOne() {
 		return
 	}
-	for _, run := range sup {
+	for _, run := range block.sup {
 		if index >= run.at && index < run.at+run.n {
 			t.setTypeExpanded(run.at, true)
 			return

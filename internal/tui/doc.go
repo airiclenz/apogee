@@ -809,7 +809,7 @@
 // label (the [theme] toolLabel role, styled before the wrap — the markdown.go posture); and
 // consecutive groupable calls at the same depth — one standing alone included, as a group of one —
 // fold under one umbrella (toolSuperGroup / groupable — blockshape.go is the one home of
-// tool-block shape: the umbrella and Sub-agent/Skill group walks and the [blockShape] enum) headed by its Group summary ("✦ Read 3 files, ran 4 commands"), one type row per run of a single label — a run of four
+// tool-block shape: the umbrella and Sub-agent/Skill group walks, the [blockShape] enum and the shape answer [toolBlockAt]) headed by its Group summary ("✦ Read 3 files, ran 4 commands"), one type row per run of a single label — a run of four
 // terminals and a read followed by a terminal take that same shape (plan "2026-09-02 - 01"; the
 // separate "✦ Label (N)" group it replaced is gone). Grouping is render-time only — the append-only
 // entry list, the call/result pairing, and transcript.hasOpenToolCall are untouched, so a call

@@ -62,9 +62,10 @@ func TestUmbrellaHeadOfFindsTheHeadFromAnyMember(t *testing.T) {
 	tr.addNote("saved")                   // 4
 	runCall(tr, "t2", "go vet", "ok", 0)  // 5: a group of one
 	for i, want := range []int{-1, 1, 1, 1, -1, 5} {
-		head, ok := foldHeadOf(tr.entries, i)
-		if ok != (want >= 0) || (ok && head != want) {
-			t.Errorf("foldHeadOf(%d) = %d, %v; want %d, %v", i, head, ok, want, want >= 0)
+		block := toolBlockAt(tr.entries, i)
+		ok := block.foldable()
+		if ok != (want >= 0) || (ok && block.head != want) {
+			t.Errorf("toolBlockAt(%d) = head %d, foldable %v; want %d, %v", i, block.head, ok, want, want >= 0)
 		}
 	}
 }

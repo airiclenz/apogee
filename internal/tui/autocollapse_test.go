@@ -22,11 +22,11 @@ func autoCollapseUmbrella(t *testing.T) *transcript {
 	return tr
 }
 
-// settledAt asks blockSettled of the block entries[head] heads, its end read off the head
-// (foldableHead) as every production caller reads it; an index heading no block answers false.
+// settledAt asks blockSettled of the block entries[head] heads, its end read off the shape answer
+// (toolBlockAt) as every production caller reads it; an index heading no block answers false.
 func settledAt(tr *transcript, head int) bool {
-	end, ok := foldableHead(tr.entries, head)
-	return ok && tr.blockSettled(head, end)
+	block := toolBlockAt(tr.entries, head)
+	return block.foldable() && block.head == head && tr.blockSettled(head, block.end)
 }
 
 // TestAutoCollapseSettlesOnWhatFollows pins the settle half of the rule: a done umbrella folds the

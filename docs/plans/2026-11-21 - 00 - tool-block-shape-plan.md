@@ -56,7 +56,11 @@ internal/tui/doc.go — grouping narration (toolSuperGroup / groupable); interna
 - `grep -nE '^func (toolSuperGroup|sameLabelRun|ownGroup|ownGroupAt|subAgentGroupAt)\(' internal/tui/blockshape.go | wc -l` prints 5
 **Commit:** `refactor(tui): move the tool-block walk primitives into blockshape.go`
 
-## 2. Add the shape answer and make the fold side ask it
+## 2. Add the shape answer and make the fold side ask it — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): consequential edit — internal/tui/doc.go: made necessary by blockshape.go now holding the shape answer (toolBlockAt); the package map's description of blockshape.go names it.
+NOTES (2026-11-21): umbrellaIsLarge, blockFoldBy and openBlockAlone now answer false/foldByNone at an umbrella call past its head (foldableHead used to treat it as the head of the sub-umbrella from there); every production caller passes a block head, so paint and clicks are unchanged — the head-only contract the item's regression guard names.
+NOTES (2026-11-21): the shared size rule is still read through umbrellaIsLarge from blockFoldBy, so a fold query walks toolBlockAt twice at an umbrella head, as foldableHead + umbrellaIsLarge walked toolSuperGroup twice before.
 
 Depends on item 1.
 

@@ -1116,7 +1116,7 @@ func previewTail(s string) string {
 func (t *transcript) resolveGroup(head int, in paintInput, width int, blink bool,
 	root paintRoot, buf []paintInput, grp []groupBlock, pos int, shape blockShape) resolvedBlock {
 	// Only the group's first block carries the header, and so only it can stand folded: a member
-	// further in heads no foldable block (foldableHead), so it answers open.
+	// further in is no block's head (toolBlockAt), so it answers open.
 	folded := t.blockFolded(head)
 	end := len(grp) - 1
 	for k := pos; k < len(grp) && !folded; k++ {
