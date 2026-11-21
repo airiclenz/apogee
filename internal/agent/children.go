@@ -627,14 +627,15 @@ func (l *delegationLedger) reserve(callID string) {
 
 // open returns the spawn index for the delegation answering callID as its run begins: the one
 // reserve set aside for it, consumed, or else the next fresh index. Indices are 1-based and count
-// every entry into runSubAgent, refused ones included — and every delegation settled before its
-// child started, which never enters runSubAgent and is opened and recorded by its bracket
-// (childBracket.neverStarted): a call refused past the reply's fan-out ceiling, opened as
-// prepareCall refuses it, after every earlier slot of a pooled group has been reserved, so the
-// refused rows number behind them (refusePastCeiling); a pooled delegation the human stopped
-// before it started, at the index its group reserved for it (stopQueuedDelegation); one the
-// user's cancel reached first (settleCancelledDelegation); and one a queued message pre-empted, at
-// its reserved index in a pooled group or the next fresh one at width 1 (preemptDelegation).
+// every delegation whose bracket (childBracket) carries the ledger: every dispatched run
+// (runDelegation), refused ones included — and every delegation settled before its child started,
+// opened and recorded by its bracket as it is settled (childBracket.neverStarted): a call refused
+// past the reply's fan-out ceiling, opened as prepareCall refuses it, after every earlier slot of a
+// pooled group has been reserved, so the refused rows number behind them (refusePastCeiling); a
+// pooled delegation the human stopped before it started, at the index its group reserved for it
+// (stopQueuedDelegation); one the user's cancel reached first (settleCancelledDelegation); and one
+// a queued message pre-empted, at its reserved index in a pooled group or the next fresh one at
+// width 1 (preemptDelegation).
 func (l *delegationLedger) open(callID string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()

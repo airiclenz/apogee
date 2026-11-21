@@ -306,8 +306,8 @@ func (a *Agent) dispatchGroup(ctx context.Context, turn, width int, calls []doma
 		slots[i] = a.prepareCall(ctx, turn, call, false, i, len(calls))
 		// The delegate ledger numbers a delegation by the order the model issued its calls in
 		// (children.go): reserved here, in call order, before any worker can dequeue one — a
-		// pool's dequeue order is its own, and runSubAgent would otherwise take the next index
-		// as each worker happens to reach it.
+		// pool's dequeue order is its own, and runDelegation's bracket would otherwise take the
+		// next index as each worker happens to reach it.
 		if slots[i].verdict.kind == resolveDelegate {
 			a.delegations.reserve(call.ID)
 		}
@@ -484,14 +484,13 @@ func (a *Agent) preemptDelegation(turn int, slot *dispatchSlot) bool {
 
 // refusePastCeiling is the one rule by which a reply's fan-out is bounded (ADR 0039, amended
 // 2026-09-20, and by ADR 0094 D6): when the slot is a delegation (isDelegationCall — a background
-// sub_agent call is never counted) sitting at or past the fan-out ceiling in its
-// group — index counts from 0, so the first `ceiling` delegations in emitted order run as they
-// always have — the slot is settled through its bracket at once (childBracket.neverStarted,
-// unstartedPastCeiling): the ceiling refusal, its finished phase alone and its delegate-ledger row,
-// `refused` with the refusal's head line as its cause, booked here because the call never reaches
-// runSubAgent; the run flag is cleared, so no audit record is booked, and true is returned. A leaf
-// tool is never counted or refused, whatever its group holds, and a ceiling of 0
-// (rounds 0) refuses nothing.
+// sub_agent call is never counted) sitting at or past the fan-out ceiling in its group — index
+// counts from 0, so the first `ceiling` delegations in emitted order run as they always have — the
+// slot is settled through its bracket at once (childBracket.neverStarted, unstartedPastCeiling):
+// the ceiling refusal, its finished phase alone and its delegate-ledger row, `refused` with the
+// refusal's head line as its cause, booked here because the call never reaches runDelegation; the
+// run flag is cleared, so no audit record is booked, and true is returned. A leaf tool is never
+// counted or refused, whatever its group holds, and a ceiling of 0 (rounds 0) refuses nothing.
 //
 // The overflow is REFUSED rather than held back and re-issued by the engine (owner, 2026-09-20):
 // the coordinator that asked for more than the ceiling is told so in its own results, in the same
@@ -724,14 +723,14 @@ func (a *Agent) runPooledSlot(ctx context.Context, turn int, slot *dispatchSlot)
 	a.runCall(ctx, turn, slot)
 }
 
-// settleCancelledDelegation settles a delegation the user's cancel reached before its child
-// started — dequeued by a pool worker, or reached by the width-1 loop, after the cancel (ADR 0088
-// D2): nothing is built or run, it is settled through its bracket at once
-// (childBracket.neverStarted, unstartedCancelled) — the not-started result
-// (cancelledQueuedDelegationContent), its finished phase alone and its delegate-ledger row,
-// `cancelled`, booked here since the call never reaches runSubAgent — and its run flag is cleared
-// so commitCall books no audit record. True is returned for a slot it settled; a leaf, a slot with
-// nothing left to run, and any slot while the context is live are left alone.
+// settleCancelledDelegation settles a delegation the user's cancel reached before its child started
+// — dequeued by a pool worker, or reached by the width-1 loop, after the cancel (ADR 0088 D2):
+// nothing is built or run, it is settled through its bracket at once (childBracket.neverStarted,
+// unstartedCancelled) — the not-started result (cancelledQueuedDelegationContent), its finished
+// phase alone and its delegate-ledger row, `cancelled`, booked here since the call never reaches
+// runDelegation — and its run flag is cleared so commitCall books no audit record. True is returned
+// for a slot it settled; a leaf, a slot with nothing left to run, and any slot while the context is
+// live are left alone.
 func (a *Agent) settleCancelledDelegation(ctx context.Context, turn int, slot *dispatchSlot) bool {
 	if ctx.Err() == nil || !slot.run || slot.verdict.kind != resolveDelegate {
 		return false
@@ -745,9 +744,9 @@ func (a *Agent) settleCancelledDelegation(ctx context.Context, turn int, slot *d
 // 0086 D4): read at the dequeue under the registry's lock (childRegistry.dequeue), a marked slot
 // runs nothing and folds nothing. It is settled through its bracket at once
 // (childBracket.neverStarted, unstartedStopped) — the stopped-unstarted result, its finished phase
-// alone and its delegate-ledger row, `stopped`, at the index its group reserved for it, booked
-// here since the call never reaches runSubAgent — and its run flag is cleared so commitCall books
-// no audit record for a child that never ran. True is returned for a stopped slot.
+// alone and its delegate-ledger row, `stopped`, at the index its group reserved for it, booked here
+// since the call never reaches runDelegation — and its run flag is cleared so commitCall books no
+// audit record for a child that never ran. True is returned for a stopped slot.
 func (a *Agent) stopQueuedDelegation(turn int, slot *dispatchSlot) bool {
 	if slot.runID == "" || !a.children.dequeue(slot.runID) {
 		return false

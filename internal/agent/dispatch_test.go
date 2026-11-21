@@ -2984,11 +2984,11 @@ func TestDispatch_UnknownToolNamesItsNearMatch(t *testing.T) {
 }
 
 // TestDispatch_SerialDelegationPanicRecoversAtTheChildBoundary is the width-1 mirror of
-// TestFanOut_ChildPanicRecoversWithoutKillingTheSibling: a reply carrying ONE sub_agent call
-// never reaches the pool, so the delegation runs inline on the dispatching goroutine — and a panic
-// raised inside that child is still contained at runSubAgent's frame, the one recover boundary
-// every width shares. The parent Step continues with an error tool result naming the panic, the
-// ErrorEvent carries the parent's current Turn, and the parent Exchange completes.
+// TestFanOut_ChildPanicRecoversWithoutKillingTheSibling: a reply carrying ONE sub_agent call never
+// reaches the pool, so the delegation runs inline on the dispatching goroutine — and a panic raised
+// inside that child is still contained at the delegation's bracket (childBracket), the one recover
+// boundary every width shares. The parent Step continues with an error tool result naming the
+// panic, the ErrorEvent carries the parent's current Turn, and the parent Exchange completes.
 func TestDispatch_SerialDelegationPanicRecoversAtTheChildBoundary(t *testing.T) {
 	sink := &recordingSink{}
 	up := newRoutedResponder().

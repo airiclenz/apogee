@@ -634,10 +634,10 @@ func TestFanOut_CancelKeepsASiblingRetainedBeforeIt(t *testing.T) {
 }
 
 // TestFanOut_ChildPanicRecoversWithoutKillingTheSibling pins the per-child fault boundary (ADR
-// 0007) on the pooled path — runSubAgent's frame, inside each worker goroutine's call chain: a
-// panic raised inside one worker's nested Agent becomes that call's error result, and the sibling
-// and the parent Exchange carry on. TestDispatch_SerialDelegationPanicRecoversAtTheChildBoundary
-// is its serial-path mirror.
+// 0007) on the pooled path — the delegation's bracket (childBracket), inside each worker
+// goroutine's call chain: a panic raised inside one worker's nested Agent becomes that call's error
+// result, and the sibling and the parent Exchange carry on.
+// TestDispatch_SerialDelegationPanicRecoversAtTheChildBoundary is its serial-path mirror.
 func TestFanOut_ChildPanicRecoversWithoutKillingTheSibling(t *testing.T) {
 	sink := &recordingSink{}
 	probe := newConcurrencyProbe(2, testtime.Budget(3*time.Second))
