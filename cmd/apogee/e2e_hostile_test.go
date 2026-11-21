@@ -707,8 +707,8 @@ const glyphFooterSeparator = "✦"
 // count its own heading states.
 //
 // Authored rows are told from wrapped ones by their indent, which is the note's own layout and not a
-// heuristic: failedSkillLines and shadowedSkillLines indent an entry's two lines by two and four
-// (internal/tui/skills.go) on top of the note's body column, while a line the frame had to WRAP
+// heuristic: skills.FailedLines and skills.ShadowedLines indent an entry's two lines by two and four
+// (internal/skills/report.go) on top of the note's body column, while a line the frame had to WRAP
 // resumes at that body column. So a row indented further than the heading is a row the section wrote,
 // and a row at the heading's own indent is the tail of the row above it.
 func assertSkillSectionRows(t *testing.T, f tuitest.Frame, heading string, want int) {

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -100,7 +99,8 @@ func (m *Model) noteSkillCatalog() {
 // then, when the listing carries a skill of apogee's own, the one verb that forks it
 // (exportShippedHintLines). list
 // arrives in the catalog's own order (sorted by display name), the order the merged "/" menu takes;
-// skipped arrives in discovery order and is partitioned here on its cause.
+// skipped arrives in discovery order and is partitioned on its cause by skills.FailedLines and
+// skills.ShadowedLines, which own the wording of those two halves.
 //
 // A skip is reported even when NOTHING loaded: "no skills found" would be a lie when discovery
 // found a skill and refused it, and the case where the library's only skill is the broken one is
@@ -114,12 +114,11 @@ func skillCatalogNote(list []skills.Skill, skipped []skills.SkipError, roots ski
 	if len(list) == 0 && len(skipped) == 0 {
 		return strings.Join(emptyCatalogLines(roots), "\n")
 	}
-	failed, shadowed := partitionSkips(skipped)
 	var lines []string
 	for _, section := range [][]string{
 		loadedSkillLines(list, roots),
-		failedSkillLines(failed),
-		shadowedSkillLines(shadowed),
+		skills.FailedLines(skipped),
+		skills.ShadowedLines(skipped),
 		exportShippedHintLines(list, roots),
 	} {
 		if len(section) == 0 {
@@ -376,91 +375,6 @@ func skillTriggerLine(triggers []string) string {
 		return ""
 	}
 	return "    triggers: " + clipRunes(joined, maxTriggerCells)
-}
-
-// shadowedBy reports the winning SKILL.md's path when this skip is a lost id collision rather
-// than a load failure (skills.ShadowedError, reached through the skip's cause). It is the one
-// place the report asks "which kind of skip is this?", so the partition and the rendering can
-// never disagree about it.
-func shadowedBy(sk skills.SkipError) (string, bool) {
-	var shadow skills.ShadowedError
-	if errors.As(sk, &shadow) {
-		return shadow.By, true
-	}
-	return "", false
-}
-
-// partitionSkips splits one scan's skips on their cause: the SKILL.md files that could not be
-// turned into a skill, and the ones that parsed fine and simply lost an id collision (ADR 0032).
-// They travel down the same channel but are not the same news — a failure is a file to go and fix,
-// a shadow is a file that is merely not the copy the id resolves to — so heading them both with
-// "found but not loaded" would send the human hunting for a defect in a healthy file. Each half
-// keeps discovery order.
-func partitionSkips(skipped []skills.SkipError) (failed, shadowed []skills.SkipError) {
-	for _, sk := range skipped {
-		if _, ok := shadowedBy(sk); ok {
-			shadowed = append(shadowed, sk)
-			continue
-		}
-		failed = append(failed, sk)
-	}
-	return failed, shadowed
-}
-
-// failedSkillLines renders the failure half: every SKILL.md discovery found but could not load,
-// named by the ID it WOULD have had, with the reason and the file to go and fix. Discovery skips
-// a bad skill softly so one malformed file cannot sink the catalog; printing the skip here is
-// what keeps soft from meaning silent — otherwise a broken skill and an absent one look
-// identical from the merged "/" menu, with nowhere to look for the difference.
-//
-// All three repo-authored fields are FLATTENED (flattenField) — the name, the reason and the path:
-// a note is painted one row per line and addNote's strip deliberately keeps "\n" (it sanitizes
-// prose, and prose has paragraphs), so a folder name or a multi-line YAML error would otherwise
-// write further lines into this report — lines it could shape as a loaded skill's row, source
-// label and all, under a heading that counted one fewer, on the very surface that exists to
-// disclose an impersonation.
-func failedSkillLines(failed []skills.SkipError) []string {
-	if len(failed) == 0 {
-		return nil
-	}
-	head := fmt.Sprintf("%d skills found but not loaded:", len(failed))
-	if len(failed) == 1 {
-		head = "1 skill found but not loaded:"
-	}
-	lines := make([]string, 0, 2*len(failed)+1)
-	lines = append(lines, head)
-	for _, sk := range failed {
-		lines = append(lines, "  "+flattenField(sk.Name())+" — "+flattenField(sk.Reason()))
-		lines = append(lines, "    "+flattenField(sk.Path))
-	}
-	return lines
-}
-
-// shadowedSkillLines renders the collision half: one pair per shadowed skill — the copy that lost,
-// then the copy that is live. Both paths are named because that is the whole question a shadow
-// raises ("which of my two files is /<id> actually running?"), and the answer is a file the user
-// can open. Nothing here is broken, so the wording deliberately never says "not loaded".
-//
-// The name, the losing path and the winning one are FLATTENED (flattenField) for the reason the
-// other halves are: addNote's strip deliberately keeps "\n", so a newline in any of them would
-// paint rows this section never authored — and here a forged row answers the shadow's one
-// question with a file that is not the live copy.
-func shadowedSkillLines(shadowed []skills.SkipError) []string {
-	if len(shadowed) == 0 {
-		return nil
-	}
-	head := fmt.Sprintf("%d skills shadowed by another of the same id:", len(shadowed))
-	if len(shadowed) == 1 {
-		head = "1 skill shadowed by another of the same id:"
-	}
-	lines := make([]string, 0, 2*len(shadowed)+1)
-	lines = append(lines, head)
-	for _, sk := range shadowed {
-		by, _ := shadowedBy(sk) // partitioned on it above, so it is there
-		lines = append(lines, "  "+flattenField(sk.Name())+" — "+flattenField(sk.Path))
-		lines = append(lines, "    the live copy is "+flattenField(by))
-	}
-	return lines
 }
 
 // exportShippedHintLines renders the fourth section: the one verb that turns a skill apogee ships

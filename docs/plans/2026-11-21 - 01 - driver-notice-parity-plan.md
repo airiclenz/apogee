@@ -76,7 +76,10 @@ cmd/apogee/keymigrate_test.go — plaintextConfig, subAgentsFlagYAML; docs/manua
 **Closes:** daemon-config-notice-gap
 **Commit:** `feat(daemon): warn on stderr about plaintext keys and the retired sub-agents flag`
 
-## 3. Move the skip-report wording into internal/skills
+## 3. Move the skip-report wording into internal/skills — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): `internal/tui/skills_test.go` (named in Files) does not exist; the TUI's `/skills` tests live in `internal/tui/skill_test.go` and pass unchanged, so no TUI test file was edited.
+NOTES (2026-11-21): `FailedLines`/`ShadowedLines` each take the whole `[]SkipError` and partition it themselves (unexported `partitionSkips`/`shadowedBy` moved alongside), so `skillCatalogNote` passes `skipped` straight to both; `internal/skills` carries its own unexported `flattenField`/`fieldBreaks` copy of the TUI rule (the TUI's copy stays, still used by other TUI surfaces).
 
 **What:**
 **Goal:** `internal/skills` exports the wording for skills that failed to load and for shadowed skills, built from `[]SkipError`. The TUI's `/skills` report renders through it, and its output is byte-identical to the output at base.
