@@ -35,7 +35,13 @@
 - Any change to the destination of boundary or ambient notes, or to stderr notice text.
 - Deduplicating notes already stored in existing session records.
 
-## 1. Server-move notes route through the start-up chrome
+## 1. Server-move notes route through the start-up chrome — ✅ DONE (2026-11-21)
+
+NOTES (2026-11-21): `choiceRecord.warn` returns `(string, bool)` (the plan's alternative form); each of the seven callers places the text with `<model>.note(kindChoiceUnrecorded, contactEvent, w)` only when ok, so a move with no warning places no empty entry.
+
+NOTES (2026-11-21): new kinds named `kindServerSwitch`, `kindServerFallback`, `kindFallbackUnfollowed`, `kindChoiceUnrecorded`. All three docs and `loudKindPhrases` use one phrase per loud kind: "a server fallback the display could not follow" and "a choice that could not be saved to config.yaml".
+
+NOTES (2026-11-21): `TestServerSwitchHappyPath`'s new not-ephemeral assertion was checked by mutation: with `kindServerSwitch` declared `sourceAmbient` it fails ("last entry … ephemeral true"), and it passes once restored.
 
 **What:**
 **Goal:** every note `Model.foldServerSwitch`, `Model.followFallback`, `choiceRecord.warn` and the server-fallback note in `foldEvent` write reaches the transcript through `Model.note` with a row in `noticeKinds`; none of them calls `transcript.addNote` directly. Each note keeps its exact text and its destination today: its own persisted line, with the session log open or closed.

@@ -646,8 +646,10 @@ func (m Model) foldServerSwitch(from string, result ServerSwitchResult, record c
 	// the server this session is now on rather than the one it launched against (applyRebind's own
 	// reason, one level up).
 	m.restateBox()
-	m.transcript.addNote(serverSwitchNote(from, m.opts, record.saved))
-	record.warn(&m.transcript)
+	m.note(kindServerSwitch, contactEvent, serverSwitchNote(from, m.opts, record.saved))
+	if w, ok := record.warn(); ok {
+		m.note(kindChoiceUnrecorded, contactEvent, w)
+	}
 	// The fresh generation IS the retirement of the old chain, so the first beat is armed rather than
 	// merely issued — in a statement of its own, per [Model.armBeat].
 	beat := m.armBeat()
@@ -687,7 +689,7 @@ func (m Model) followFallback(e domain.UpstreamSwitchedEvent) (Model, tea.Cmd) {
 	}
 	result, err := m.opts.Server.FollowFallback(e.ToServer)
 	if err != nil {
-		m.transcript.addNote("server fallback: the display could not follow " + e.ToServer + ": " + err.Error())
+		m.note(kindFallbackUnfollowed, contactEvent, "server fallback: the display could not follow "+e.ToServer+": "+err.Error())
 		return m, nil
 	}
 	m.opts.Endpoint = result.Endpoint

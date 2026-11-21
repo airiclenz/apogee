@@ -73,6 +73,17 @@ const (
 	kindOnline
 	// kindRouting: the Sub-agent server's routing state changed ([Model.foldRoutingNotice]).
 	kindRouting
+
+	// kindServerSwitch: a committed `/server` move ([serverSwitchNote]).
+	kindServerSwitch
+	// kindServerFallback: a seat fell over to a fallback server ([fallbackNote], ADR 0105).
+	kindServerFallback
+	// kindFallbackUnfollowed: the session's own seat fell over, but the display could not follow it
+	// onto the fallback ([Model.followFallback]).
+	kindFallbackUnfollowed
+	// kindChoiceUnrecorded: a choice the human made — a server, a model, the sub-agents server, a
+	// launch profile — could not be saved to config.yaml ([choiceRecord.warn]).
+	kindChoiceUnrecorded
 )
 
 // noticeClass is whether a notice needs the human. A LOUD notice keeps its own note line; a ROUTINE
@@ -93,8 +104,8 @@ const (
 	sourceBoundary noticeSource = iota
 	// sourceAmbient: re-derived from the live workspace at every session boundary (context files).
 	sourceAmbient
-	// sourceBeat: raised by a rebind (RebindResult.Notices) — the session's first-contact beat among
-	// them.
+	// sourceBeat: raised by a heartbeat rebind (RebindResult.Notices) — the session's first-contact
+	// beat among them — or a server move the session made.
 	sourceBeat
 )
 
@@ -129,6 +140,10 @@ var noticeKinds = map[NoticeKind]noticeKindRow{
 	kindOffline:            {class: classLoud, source: sourceBeat},
 	kindOnline:             {class: classLoud, source: sourceBeat},
 	kindRouting:            {class: classLoud, source: sourceAmbient},
+	kindServerSwitch:       {class: classRoutine, source: sourceBeat},
+	kindServerFallback:     {class: classRoutine, source: sourceBeat},
+	kindFallbackUnfollowed: {class: classLoud, source: sourceBeat},
+	kindChoiceUnrecorded:   {class: classLoud, source: sourceBeat},
 }
 
 // kindRow is k's row in [noticeKinds]; a kind with no row reads as the reserved zero kind's, so an

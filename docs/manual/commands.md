@@ -267,7 +267,8 @@ that cannot fence writes, a skipped MCP server, an MCP server whose tool list wa
 config file other members of your `sessions.share-group` can read, an unreadable context file,
 standing content over its Budget share, a colour-scheme warning, a rebind the server refused, a
 profile roster that could not be applied, an unknown context window, an effort level the new model
-dropped, the server going offline or coming back, and every `sub-agents: …` routing notice keep
+dropped, the server going offline or coming back, every `sub-agents: …` routing notice, a server
+fallback the display could not follow, and a choice that could not be saved to config.yaml keep
 their own line, exactly as before. Which notices are loud and which routine is defined once, in
 `internal/tui/noticekind.go`. A start with no routine note shows no log at all.
 

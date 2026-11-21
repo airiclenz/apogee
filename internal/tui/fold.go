@@ -85,7 +85,7 @@ func (m Model) foldEventAgainst(e domain.Event, window int, model string) Model 
 	// the live path follows it too (Model.followFallback); this fold only says so, which is all a
 	// watcher of the journal may do.
 	if switched, ok := e.(domain.UpstreamSwitchedEvent); ok {
-		m.transcript.addNote(fallbackNote(switched))
+		m.note(kindServerFallback, contactEvent, fallbackNote(switched))
 	}
 	// The transcript fold's second half, and separate for one reason: a sub-agent's usage reading
 	// is a FILL, so it needs the window it fills — and where the reading names none, that window is

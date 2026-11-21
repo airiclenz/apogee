@@ -1853,7 +1853,8 @@ never folded away:** Auto running unconfined, degraded Auto, a skipped MCP serve
 tool list cut short, a group-readable config under `sessions.share-group`, an unreadable context
 file, standing content over its Budget share, a colour-scheme warning, a refused rebind, a profile
 roster that was not applied, an unknown context window, an effort level the new model dropped, the
-server going offline or coming back, and a routing notice each keep their own `· …` note line
+server going offline or coming back, a routing notice, a server fallback the display could not
+follow, and a choice that could not be saved to config.yaml each keep their own `· …` note line
 outside the log, exactly as before. These loud kinds, and the routine ones, are defined once, in
 `internal/tui/noticekind.go` (`noticeKinds`); a drift test fails when a loud kind is missing from
 this list. The log holds routine notes only, so a start with none paints no log at all — never an

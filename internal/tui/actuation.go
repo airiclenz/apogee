@@ -485,7 +485,9 @@ func (m *Model) recordLoadedProfile(profile string) {
 	if record.saved {
 		m.transcript.addNote(launchProfileSavedNote)
 	}
-	record.warn(&m.transcript)
+	if w, ok := record.warn(); ok {
+		m.note(kindChoiceUnrecorded, contactEvent, w)
+	}
 }
 
 // recordLaunchProfile persists the profile a load just committed as the one the actuating entry comes

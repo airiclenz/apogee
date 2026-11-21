@@ -700,7 +700,9 @@ func (m Model) switchToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
 		if record.saved {
 			m.transcript.addNote(serverSavedNote)
 		}
-		record.warn(&m.transcript)
+		if w, ok := record.warn(); ok {
+			m.note(kindChoiceUnrecorded, contactEvent, w)
+		}
 		return m, nil
 	}
 	from := hostDisplay(m.opts) // the label the footer used for the old server, captured before it moves
@@ -996,7 +998,9 @@ func (m Model) retargetSubAgents(name string) (tea.Model, tea.Cmd) {
 		}
 	}
 	m.transcript.addNote("sub-agents server: " + label + clause)
-	record.warn(&m.transcript)
+	if w, ok := record.warn(); ok {
+		m.note(kindChoiceUnrecorded, contactEvent, w)
+	}
 	return m, nil
 }
 
@@ -1383,7 +1387,9 @@ func (m Model) bindPickedModel(picked heartbeat.ModelSummary) (tea.Model, tea.Cm
 		if record.saved {
 			m.transcript.addNote(modelSavedNote)
 		}
-		record.warn(&m.transcript)
+		if w, ok := record.warn(); ok {
+			m.note(kindChoiceUnrecorded, contactEvent, w)
+		}
 		return m, nil
 	}
 	m.hb.observedModel, m.hb.observedWindow = id, window
@@ -1402,7 +1408,9 @@ func (m Model) bindPickedModel(picked heartbeat.ModelSummary) (tea.Model, tea.Cm
 		if record.saved {
 			next.transcript.addNote(modelSavedNote)
 		}
-		record.warn(&next.transcript)
+		if w, ok := record.warn(); ok {
+			next.note(kindChoiceUnrecorded, contactEvent, w)
+		}
 	}
 	return next, nil
 }

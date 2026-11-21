@@ -183,7 +183,9 @@ func (m Model) foldServerBind(result ServerSwitchResult, record choiceRecord) (M
 	m.opts.ContextWindow = result.ContextWindow
 	m.restateBox()
 	m.transcript.addNote(serverBindNote(m.opts, record.saved))
-	record.warn(&m.transcript)
+	if w, ok := record.warn(); ok {
+		m.note(kindChoiceUnrecorded, contactEvent, w)
+	}
 	// Arming is a statement of its own: it takes a pointer, and in `return m, m.armBeat()` the order
 	// of the bump and the copy of m is unspecified (ADR 0011, [Model.armBeat]).
 	beat := m.armBeat()
@@ -231,13 +233,12 @@ type choiceRecord struct {
 	warning string
 }
 
-// warn appends the failed-write warning to the transcript, and nothing at all when there is none. It
-// takes the transcript by pointer because a Model is copied by value on every Update (ADR 0011) —
-// the caller's own copy is the one that must carry the note.
-func (r choiceRecord) warn(t *transcript) {
-	if r.warning != "" {
-		t.addNote(r.warning)
-	}
+// warn is the failed-write warning and true, or "" and false when there is nothing to say. The
+// caller places it through [Model.note] as a [kindChoiceUnrecorded] note on its OWN Model copy —
+// a Model is copied by value on every Update (ADR 0011) — and places nothing at all when warn says
+// false, since an empty note would still commit an entry.
+func (r choiceRecord) warn() (string, bool) {
+	return r.warning, r.warning != ""
 }
 
 // recordServerChoice persists the name this session is now on as the one the NEXT session starts on

@@ -57,7 +57,9 @@ func TestStartupChromeDestination(t *testing.T) {
 	// once a prompt has closed it; its notes that need the human — a refused rebind, the roster
 	// that was not applied, an unknown window, a cleared override — keep a persisted line while the
 	// log is open; a `/model` pick's, the post-`/server` seed's and a fallback settle's notes are
-	// news on a persisted line of their own; and a routing change keeps an ephemeral one.
+	// news on a persisted line of their own, as is every note a server move writes — the switch, a
+	// fallback, a fallback the display could not follow, a choice that could not be saved; and a
+	// routing change keeps an ephemeral one.
 	heartbeat := []struct {
 		name       string
 		kind       NoticeKind
@@ -81,6 +83,10 @@ func TestStartupChromeDestination(t *testing.T) {
 		{"offline", kindOffline, contactEvent, destLinePersisted, destLinePersisted},
 		{"online", kindOnline, contactEvent, destLinePersisted, destLinePersisted},
 		{"routing", kindRouting, contactEvent, destLineEphemeral, destLineEphemeral},
+		{"a /server switch", kindServerSwitch, contactEvent, destLinePersisted, destLinePersisted},
+		{"a server fallback", kindServerFallback, contactEvent, destLinePersisted, destLinePersisted},
+		{"a fallback the display could not follow", kindFallbackUnfollowed, contactEvent, destLinePersisted, destLinePersisted},
+		{"a choice that could not be saved", kindChoiceUnrecorded, contactEvent, destLinePersisted, destLinePersisted},
 	}
 	for _, tt := range heartbeat {
 		t.Run("heartbeat/"+tt.name, func(t *testing.T) {

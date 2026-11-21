@@ -39,6 +39,10 @@ func TestNoticeKindClasses(t *testing.T) {
 		{"offline", kindOffline, classLoud, sourceBeat},
 		{"online", kindOnline, classLoud, sourceBeat},
 		{"routing", kindRouting, classLoud, sourceAmbient},
+		{"server switch", kindServerSwitch, classRoutine, sourceBeat},
+		{"server fallback", kindServerFallback, classRoutine, sourceBeat},
+		{"fallback unfollowed", kindFallbackUnfollowed, classLoud, sourceBeat},
+		{"choice unrecorded", kindChoiceUnrecorded, classLoud, sourceBeat},
 	}
 	if len(tests) != len(noticeKinds) {
 		t.Fatalf("the test pins %d kinds, the table declares %d — pin the new kind here", len(tests), len(noticeKinds))
@@ -171,6 +175,16 @@ var loudKindPhrases = map[NoticeKind]map[string][]string{
 		loudDocLayout:   {"a routing notice"},
 		loudDocCommands: {"`sub-agents: …` routing notice"},
 		loudDocGlossary: {"a routing notice"},
+	},
+	kindFallbackUnfollowed: {
+		loudDocLayout:   {"a server fallback the display could not follow"},
+		loudDocCommands: {"a server fallback the display could not follow"},
+		loudDocGlossary: {"a server fallback the display could not follow"},
+	},
+	kindChoiceUnrecorded: {
+		loudDocLayout:   {"a choice that could not be saved to config.yaml"},
+		loudDocCommands: {"a choice that could not be saved to config.yaml"},
+		loudDocGlossary: {"a choice that could not be saved to config.yaml"},
 	},
 }
 

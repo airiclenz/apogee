@@ -16,7 +16,8 @@ their own lines. A notice that needs the human (Auto unconfined, degraded Auto, 
 server, an MCP server's tool list cut short, a group-readable config under `sessions.share-group`,
 an unreadable context file, standing content over its Budget share, a colour-scheme warning, a
 refused rebind, an unapplied profile roster, an unknown context window, a dropped effort level, the
-server going offline or coming back, a routing notice) is **loud** and never enters it, and a start
+server going offline or coming back, a routing notice, a server fallback the display could not
+follow, a choice that could not be saved to config.yaml) is **loud** and never enters it, and a start
 with no routine note has no log. Each notice kind's class, loud or routine, is defined once, in
 `internal/tui/noticekind.go`. The log is an **ephemeral** entry (see **Session**): never encoded into a Session
 record. Its fold is per-block and session-only, never the shared `ui.task-list-open`. Only the TUI's

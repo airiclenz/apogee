@@ -1014,6 +1014,12 @@ func TestServerSwitchHappyPath(t *testing.T) {
 	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
 		t.Errorf("notes = %v, want %q", got, want)
 	}
+	// The switch records a move the session made, so its note is its own persisted line — saved with
+	// the session record, never folded into the start-up log nor dropped as re-derived chrome.
+	if last := m.transcript.entries[len(m.transcript.entries)-1]; last.kind != entryNote || last.text != want || last.ephemeral {
+		t.Errorf("last entry = {kind %d, %q, ephemeral %t}, want the switch note on a persisted line",
+			last.kind, last.text, last.ephemeral)
+	}
 	if len(rb.calls) != 0 {
 		t.Errorf("rebind calls = %v, want none — the switch binds nothing; the first beat does", rb.calls)
 	}

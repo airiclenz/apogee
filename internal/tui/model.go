@@ -1780,7 +1780,7 @@ func (m *Model) noteWorkflowSessionSwitch(e domain.Event) (domain.UpstreamSwitch
 	if !ok || switched.Seat != domain.UpstreamSeatSession {
 		return domain.UpstreamSwitchedEvent{}, false
 	}
-	m.transcript.addNote(fallbackNote(switched))
+	m.note(kindServerFallback, contactEvent, fallbackNote(switched))
 	return switched, true
 }
 
