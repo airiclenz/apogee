@@ -1369,7 +1369,7 @@ func (w *rootWiring) RetryFailedMCP() (bool, error) {
 	if !w.mcpSet.hasFailedDial() {
 		return false, nil
 	}
-	if _, err := w.settingsApplier().requestMCP(true); err != nil {
+	if err := w.settingsApplier().requestMCP(true); err != nil {
 		return false, err
 	}
 	return w.mcpSet.isDialQueued(), nil

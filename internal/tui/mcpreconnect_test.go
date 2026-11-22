@@ -414,12 +414,13 @@ type mcpRowApplies struct {
 	watched []bool
 }
 
-// apply answers every apply with the in-progress note, as the binary does for a request that dials.
+// apply answers every apply with no note, as the binary does: whether the request queued a dial is
+// the host's MCPDialQueued, and the TUI words the row's in-progress state itself.
 func (a *mcpRowApplies) apply(_, _ string, watched bool) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.watched = append(a.watched, watched)
-	return MCPReconnectingNote, nil
+	return "", nil
 }
 
 // mcpRowModel opens the settings pane over the `mcp-servers` row with host as the MCP seam; the
@@ -505,6 +506,64 @@ func TestMCPRowShowsTheOutcomeWhenTheDialsLand(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestMCPRowArmsOnAQueuedDialWhateverTheNote: an `mcp-servers` apply that answers no note yet left a
+// dial queued on the host arms the row on `reconnecting MCP…` — the row's own commit and a watched
+// save alike, since the arm reads the host's fact, never the apply's note.
+func TestMCPRowArmsOnAQueuedDialWhateverTheNote(t *testing.T) {
+	t.Parallel()
+	applied := []AppliedSetting{{Path: settingKeyMCPServers, Value: "2 servers"}}
+	for _, tc := range []struct {
+		name        string
+		msg         tea.Msg
+		wantWatched []bool
+	}{
+		{name: "the row's own commit", msg: settingsEditedMsg{path: settingKeyMCPServers}, wantWatched: []bool{false}},
+		{name: "a watched save", msg: configChangedMsg{alive: true}, wantWatched: []bool{true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			host := &fakeMCPHost{}
+			applies := &mcpRowApplies{}
+			m := mcpRowModel(t, host, applied, applies)
+			host.queue(instantDial)
+
+			m, _ = stepCmd(t, m, tc.msg)
+
+			if got, want := m.settingsNote(mcpServersRow()), "· "+MCPReconnectingNote; got != want {
+				t.Errorf("row note = %q, want %q", got, want)
+			}
+			if !m.mcp.row.isArmed {
+				t.Error("the row watch is not armed over a queued dial")
+			}
+			if !slices.Equal(applies.watched, tc.wantWatched) {
+				t.Errorf("applies watched %v, want %v", applies.watched, tc.wantWatched)
+			}
+		})
+	}
+}
+
+// TestMCPRowRemovalOnlyNeverArms: an `mcp-servers` apply that only removes a server queues no dial,
+// so the row is not armed and reads as saved, while the removal still commits at the same fold.
+func TestMCPRowRemovalOnlyNeverArms(t *testing.T) {
+	t.Parallel()
+	host := &fakeMCPHost{}
+	applies := &mcpRowApplies{}
+	m := mcpRowModel(t, host, []AppliedSetting{{Path: settingKeyMCPServers, Value: "0 servers"}}, applies)
+	host.queue()
+
+	m = step(t, m, settingsEditedMsg{path: settingKeyMCPServers})
+
+	if m.mcp.row.isArmed {
+		t.Error("the row watch armed with no dial queued")
+	}
+	if edit, _ := m.settingEditOf(settingKeyMCPServers); edit.note != "" {
+		t.Errorf("journaled note = %q, want none", edit.note)
+	}
+	if len(applies.watched) != 1 || host.commitCount() != 1 {
+		t.Errorf("applies %d, commits %d; want one apply and the removal committed", len(applies.watched), host.commitCount())
 	}
 }
 

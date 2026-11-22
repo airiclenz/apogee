@@ -202,7 +202,11 @@ cmd/apogee/wire_mcp_test.go — TestMCPLostServerIsRedialledByTheRetryGesture
 
 **Commit:** `refactor(tui): the MCP host answers whether dials are queued`
 
-## 6. The mcp-servers row arms on the queued-dials fact, not a note string
+## 6. The mcp-servers row arms on the queued-dials fact, not a note string — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): the arm in settingsApplied is gated on the apply having run (reset or non-empty value) as well as no error and a wired host, through a small helper `Model.isMCPDialQueuedBy(row)`; clearMCPReconnectingNote's code is unchanged (its comparison already reads only the note the TUI itself set), only its doc comment now says so.
+
+NOTES (2026-11-22): the three TestApplySettingMCP… asserts in wire_settings_test.go now want an empty note plus `fixture.set.isDialQueued()` rather than tui.MCPReconnectingNote.
 
 Depends on items 4 and 5.
 

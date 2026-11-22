@@ -1234,9 +1234,10 @@ var settingsTable = slices.Concat([]settingsEntry{
 			// dialled off the Update loop, and the session moves onto the servers that answered at the
 			// next idle point (ADR 0109, adr-0037-amend-1107). The value the pane persisted is not
 			// read, for the `servers:` reason — a list of blocks is a shape no single string spells.
-			// The note is the in-progress one while a dial runs; each server's outcome arrives later,
-			// as a transcript note and on the row (tui.MCPHost).
-			return a.requestMCP(a.retryFailedMCP)
+			// It answers no note: whether the request queued a dial is tui.MCPHost.MCPDialQueued's
+			// fact, and the TUI words the row's in-progress state itself; each server's outcome
+			// arrives later, as a transcript note and on the row.
+			return "", a.requestMCP(a.retryFailedMCP)
 		},
 	},
 	{
@@ -2112,10 +2113,10 @@ func (a settingsApplier) reloadServers() (bool, error) {
 // A global file that no longer parses is refused before anything is requested, so a typo in an
 // unrelated key cannot cost the session the servers it is talking to; that error is the loader's,
 // unwrapped. The rest are requestMCPFrom's.
-func (a settingsApplier) requestMCP(retryFailed bool) (string, error) {
+func (a settingsApplier) requestMCP(retryFailed bool) error {
 	layered, err := a.layeredConfig()
 	if err != nil {
-		return "", err
+		return err
 	}
 	return a.requestMCPFrom(layered, retryFailed)
 }
@@ -2123,19 +2124,16 @@ func (a settingsApplier) requestMCP(retryFailed bool) (string, error) {
 // requestMCPFrom records the request for layered's `mcp-servers:` block — requestMCP without the
 // read, for a caller that already holds the resolved layered set. It widens the scrub first
 // (widenSecretEnv), reads no file, and guards each dial by the url-safety host lists the live tool
-// set is on now. The note is tui.MCPReconnectingNote when the request queued a dial and "" when it
-// queued none (an unchanged set, or a removal only). The error is a set mcp.ValidateServers refuses,
-// worded by mcpReconnectFailed; nothing is requested then.
-func (a settingsApplier) requestMCPFrom(layered config.Options, retryFailed bool) (string, error) {
+// set is on now. Whether the request queued a dial is the holder's fact (liveMCP.isDialQueued), not
+// an answer of this call. The error is a set mcp.ValidateServers refuses, worded by
+// mcpReconnectFailed; nothing is requested then.
+func (a settingsApplier) requestMCPFrom(layered config.Options, retryFailed bool) error {
 	a.widenSecretEnv(layered)
 	spec := a.tools.built()
 	if err := a.mcp.request(layered.MCPServers, mcpGuard(spec.allowHosts, spec.denyHosts), retryFailed); err != nil {
-		return "", mcpReconnectFailed(err)
+		return mcpReconnectFailed(err)
 	}
-	if a.mcp.isDialQueued() {
-		return tui.MCPReconnectingNote, nil
-	}
-	return "", nil
+	return nil
 }
 
 // reloadReactions re-reads the `reactions:` block — layered: the global reactions plus the adopted

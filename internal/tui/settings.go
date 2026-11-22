@@ -193,8 +193,9 @@ type settingsPendingSave struct {
 // the next session boundary rather than at once ("applies at next clear"), empty for a key already
 // in force, which is almost all of them. It is carried on the edit rather than in a slot of its own
 // because it describes THIS key's landing and stays true for as long as the edit does — bar the one
-// in-progress note, `mcp-servers:`'s [MCPReconnectingNote], which the dials' outcome clears once
-// they are committed (mcpreconnect.go).
+// in-progress note, `mcp-servers:`'s [MCPReconnectingNote], which the TUI words itself when the apply
+// left a dial queued (settingsApplied) and the dials' outcome clears once they are committed
+// (mcpreconnect.go).
 //
 // watched marks WHERE the edit came from: a save on disk this program had nothing to do with (the
 // config watcher, ADR 0041 decision 5) rather than an in-pane commit or the pane's own editor round

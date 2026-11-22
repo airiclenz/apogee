@@ -73,10 +73,11 @@ type mcpState struct {
 	row mcpRowWatch
 }
 
-// mcpRowWatch is the `mcp-servers` row's watch: armed by an apply or a retry that answered
-// [MCPReconnectingNote], it collects each commit's row failures and resolves the row once no dial is
-// in flight and nothing is left uncommitted (settleMCPRow). failures is the joined text rather than
-// a slice, so a value-copied Model shares no array (ADR 0011).
+// mcpRowWatch is the `mcp-servers` row's watch: armed by an apply or a retry that left a dial queued
+// on the host (the row then reads [MCPReconnectingNote]), it collects each commit's row failures and
+// resolves the row once no dial is in flight and nothing is left uncommitted (settleMCPRow).
+// failures is the joined text rather than a slice, so a value-copied Model shares no array
+// (ADR 0011).
 type mcpRowWatch struct {
 	isArmed  bool
 	failures string
@@ -213,8 +214,8 @@ func (m *Model) settleMCPRow() {
 	}
 }
 
-// clearMCPReconnectingNote takes [MCPReconnectingNote] off the `mcp-servers` row wherever it was
-// put: the journaled edit's note (rebuilt FRESH, the value-copied Model's rule, ADR 0011) and the
+// clearMCPReconnectingNote takes [MCPReconnectingNote] off the `mcp-servers` row wherever the TUI
+// put it (settingsApplied, retryFailedMCP): the journaled edit's note (rebuilt FRESH, the value-copied Model's rule, ADR 0011) and the
 // answer slot.
 func (m *Model) clearMCPReconnectingNote() {
 	if m.settings.answer.path == settingKeyMCPServers && m.settings.answer.msg == MCPReconnectingNote {

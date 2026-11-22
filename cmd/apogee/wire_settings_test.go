@@ -2278,8 +2278,9 @@ func TestApplySettingMCPReconnectSwapsTheToolsAndClosesTheOldSessions(t *testing
 	apply := applySettingFor(applier)
 
 	note, err := apply("mcp-servers", "1 server")
-	if err != nil || note != tui.MCPReconnectingNote {
-		t.Fatalf("apply mcp-servers = (%q, %v), want (%q, nil): the dial runs off the caller", note, err, tui.MCPReconnectingNote)
+	if err != nil || note != "" || !fixture.set.isDialQueued() {
+		t.Fatalf("apply mcp-servers = (%q, %v), dial queued %t; want (\"\", nil) and a queued dial: the dial runs off the caller",
+			note, err, fixture.set.isDialQueued())
 	}
 	if _, err := drainMCP(t, fixture.set, fixture.tools, spy); err != nil {
 		t.Fatalf("drain: %v", err)
@@ -2332,8 +2333,9 @@ func TestApplySettingMCPServersRecordsADialWithoutDialling(t *testing.T) {
 
 	note, err := applySettingFor(applier)("mcp-servers", "1 server")
 
-	if err != nil || note != tui.MCPReconnectingNote {
-		t.Fatalf("apply mcp-servers = (%q, %v), want (%q, nil)", note, err, tui.MCPReconnectingNote)
+	if err != nil || note != "" || !fixture.set.isDialQueued() {
+		t.Fatalf("apply mcp-servers = (%q, %v), dial queued %t; want (\"\", nil) and a queued dial",
+			note, err, fixture.set.isDialQueued())
 	}
 	if entered.Load() {
 		t.Error("the apply entered connect on its caller")
@@ -2418,8 +2420,9 @@ func TestApplySettingMCPServersRowCommitRetriesTheFailedServer(t *testing.T) {
 
 	note, err := applySettingFor(applier)("mcp-servers", "3 servers")
 
-	if err != nil || note != tui.MCPReconnectingNote {
-		t.Fatalf("apply mcp-servers = (%q, %v), want (%q, nil)", note, err, tui.MCPReconnectingNote)
+	if err != nil || note != "" || !fixture.set.isDialQueued() {
+		t.Fatalf("apply mcp-servers = (%q, %v), dial queued %t; want (\"\", nil) and a queued dial",
+			note, err, fixture.set.isDialQueued())
 	}
 	if got, want := jobServers(fixture.set.takeWork()), []string{"wiki", "news"}; !slices.Equal(got, want) {
 		t.Errorf("queued dials = %v, want %v: the failed server and the added one, never docs", got, want)
@@ -4871,9 +4874,9 @@ func TestSettingsApplierReloadsRefuseAnUnparseableFile(t *testing.T) {
 			return err
 		}},
 		{"requestMCP", func(t *testing.T) error {
-			note, err := a.requestMCP(true)
-			if note != "" {
-				t.Errorf("requestMCP noted %q off a file it refused", note)
+			err := a.requestMCP(true)
+			if a.mcp.isDialQueued() {
+				t.Error("requestMCP queued a dial off a file it refused")
 			}
 			return err
 		}},

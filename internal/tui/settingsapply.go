@@ -357,20 +357,38 @@ func (m Model) settingsPendingValue(row SettingRow) string {
 // switch rebuilds every style under a screen already painted in the previous palette, so the frame
 // has to be cleared rather than redrawn over (settingsApplyLocal). Every other key returns nil and
 // every caller passes whatever comes back on unchanged.
+//
+// An `mcp-servers` apply that left a dial queued on the host arms the row's watch, and the TUI words
+// that state itself: the edit's note becomes [MCPReconnectingNote], whatever the apply answered, and
+// the dials' outcome later clears it (settleMCPRow). A watched save arms exactly as the row's own
+// commit does.
 func (m Model) settingsApplied(row SettingRow, edit settingEdit) (Model, tea.Cmd) {
 	var applyErr error
 	var cmd tea.Cmd
-	if edit.reset || edit.value != "" {
+	isApplied := edit.reset || edit.value != ""
+	if isApplied {
 		m, edit.note, cmd, applyErr = m.settingsApplyLive(edit)
+	}
+	isDialling := isApplied && applyErr == nil && m.isMCPDialQueuedBy(row)
+	if isDialling {
+		edit.note = MCPReconnectingNote
 	}
 	m = m.recordSettingEdit(edit)
 	if applyErr != nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: settingsApplyFailedNote + applyErr.Error()}
 	}
-	if row.Path == settingKeyMCPServers && edit.note == MCPReconnectingNote {
+	if isDialling {
 		m.armMCPRow()
 	}
 	return m, cmd
+}
+
+// isMCPDialQueuedBy reports whether row is `mcp-servers` and the apply that just landed left a dial
+// queued on the host ([MCPHost.MCPDialQueued]): the fact the row arms on (settingsApplied), worded
+// here as [MCPReconnectingNote] rather than read from the apply's note. It holds for a watched save
+// as for the row's own commit. Unwired, no dial is ever queued.
+func (m Model) isMCPDialQueuedBy(row SettingRow) bool {
+	return row.Path == settingKeyMCPServers && m.opts.MCP != nil && m.opts.MCP.MCPDialQueued()
 }
 
 // settingsApplyLive puts one persisted key into effect and reports what the row has to say about it:

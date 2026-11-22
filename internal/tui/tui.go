@@ -331,9 +331,10 @@ type SettingsHost interface {
 	// the answer for almost every key — and the answer a host with no live apply at all gives for
 	// every key, leaving the write to stand on its own: the degrade a bench or headless Driver
 	// composes deliberately (ADR 0031). It never defers to a restart: a key that could only take
-	// effect the next time the process starts has no business in this seam. The one other note is
-	// an in-progress one: `mcp-servers:` answers [MCPReconnectingNote] while the dials it requested
-	// run, and the row's note is replaced by their outcome once they are committed ([MCPHost]).
+	// effect the next time the process starts has no business in this seam. `mcp-servers:` answers
+	// no note: whether its apply queued a dial is [MCPHost.MCPDialQueued]'s fact, and the TUI words
+	// the row's in-progress state itself ([MCPReconnectingNote]) until the dials' outcome replaces
+	// it once they are committed.
 	//
 	// watched says the edit came from a watched save on disk rather than from the pane or its
 	// `$EDITOR` round trip. Only `mcp-servers:` reads it: the row's own commit also re-dials every

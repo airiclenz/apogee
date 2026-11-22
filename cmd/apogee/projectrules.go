@@ -306,10 +306,9 @@ func (w *rootWiring) applyMovedKinds(moved project.Moved, layered config.Options
 	applier := w.settingsApplier()
 	var errs []error
 	if moved.Servers && w.mcpSet != nil && w.toolSet != nil {
-		// The note is the `mcp-servers` row's; an answer has no such row, and the busy indicator
-		// shows the dials while they run.
-		_, err := applier.requestMCPFrom(layered, false)
-		errs = append(errs, err)
+		// An answer has no `mcp-servers` row to arm; the busy indicator shows the dials while they
+		// run.
+		errs = append(errs, applier.requestMCPFrom(layered, false))
 	}
 	if moved.Reactions && w.engine != nil && w.live != nil {
 		errs = append(errs, applier.reloadReactionsFrom(layered))
