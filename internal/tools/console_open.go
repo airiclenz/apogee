@@ -193,11 +193,11 @@ func (t *ConsoleOpen) Execute(ctx context.Context, call domain.ToolCall) (domain
 	}
 
 	header := fmt.Sprintf("console %d opened: %s", opened.ID, args.Command)
-	tail := consoleOpenTail(ctx, opened, consoleWait(args.WaitMS, consoleOpenWaitDefaultMS, consoleOpenWaitMaxMS))
+	tail, ending := consoleOpenTail(ctx, opened, consoleWait(args.WaitMS, consoleOpenWaitDefaultMS, consoleOpenWaitMaxMS))
 	if tail == "" {
-		return okResult(call.ID, header), nil
+		return okSummary(call.ID, header, ending), nil
 	}
-	return okResult(call.ID, header+"\n"+tail), nil
+	return okSummary(call.ID, header+"\n"+tail, ending), nil
 }
 
 // consoleArgv resolves the argv the Console actually runs: the platform shell wrapped around the

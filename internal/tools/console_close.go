@@ -57,7 +57,8 @@ func (t *ConsoleClose) ReadOnly() bool { return true }
 func (t *ConsoleClose) DefaultOff() bool { return true }
 
 // Execute kills the Console's process group, waits for it to be reaped, and returns the output
-// nobody had read yet together with how the process ended.
+// nobody had read yet together with how the process ended — in its closing line, and as the
+// result's domain.ProcessEnding.
 //
 // The tail is taken AFTER the teardown rather than before it, which is what makes it the whole
 // tail: the registry's close waits for the process's output to finish draining into the buffer,
@@ -87,7 +88,7 @@ func (t *ConsoleClose) Execute(ctx context.Context, call domain.ToolCall) (domai
 	closeErr := registry.Close(target.ID)
 	// A wait of 0 drains before it looks at ctx, so whether it gathered anything cannot turn
 	// this finished teardown into an error.
-	tail, _ := consoleTail(ctx, target, 0)
+	tail, ending, _ := consoleTail(ctx, target, 0)
 	if closeErr != nil {
 		// The Console is gone from the registry whatever the teardown said, so this is not a
 		// call to retry: an error here is the pseudo-terminal refusing to be released, not a
@@ -97,7 +98,7 @@ func (t *ConsoleClose) Execute(ctx context.Context, call domain.ToolCall) (domai
 		tail = fmt.Sprintf("console %d was stopped, but releasing its terminal failed: %v\n%s",
 			target.ID, closeErr, tail)
 	}
-	return okResult(call.ID, tail), nil
+	return okSummary(call.ID, tail, ending), nil
 }
 
 var (

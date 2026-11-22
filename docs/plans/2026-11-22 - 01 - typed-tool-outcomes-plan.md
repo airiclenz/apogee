@@ -137,7 +137,11 @@ internal/workflow/stages.go — scriptReceipt, runState.runScript; internal/agen
 
 **Commit:** `refactor(tools): a one-shot run's ending travels as a ProcessEnding`
 
-## 5. Console tools attach their ending
+## 5. Console tools attach their ending — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): consoleTail now returns three values (tail, ending, gathered); TestConsoleTail_ZeroWaitReadsTheTailUnderACancelledContext's one call site takes the new middle return as `_` (the guard's "update that call site" branch); its assertions are unchanged. console_open_test.go, listed in Files, needed no edit.
+NOTES (2026-11-22): the ending mirrors the closing line exactly as worded: a killed process is ProcessKilled with ExitCode -1; a Windows job-terminated tree whose ExitCode is >= 0 reads "exited with code N" and so is ProcessExited with that code. DenialStopped comes from the same c.DenialStopped() read the fence label uses.
+NOTES (2026-11-22): TestConsoleResultsCarryTheirEnding also covers console_send (running) and a refusal (nil summary) beyond the plan's three named cases.
 
 Depends on items 2 and 3.
 

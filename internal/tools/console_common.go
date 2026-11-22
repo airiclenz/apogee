@@ -139,8 +139,9 @@ func consoleInputBytes(input string, raw bool, enter string) []byte {
 const consoleCutShortNote = "[wait cut short by cancel]"
 
 // consoleTail renders what a Console has to say, returning as soon as SOME output arrives — the
-// polling shape console_read wants, where the question is "has anything happened yet" — and
-// reports whether the read gathered anything (output or a dropped-bytes count).
+// polling shape console_read wants, where the question is "has anything happened yet" — together
+// with the ending its closing line states (renderConsoleTail), and reports whether the read
+// gathered anything (output or a dropped-bytes count).
 //
 // A ctx cancelled mid-wait ends the read at once and gathers nothing, leaving the buffered output
 // for the next read; a wait of 0 drains what is buffered before it ever looks at ctx, which is
@@ -149,27 +150,32 @@ const consoleCutShortNote = "[wait cut short by cancel]"
 // Its one read can hand back everything the ring holds (up to 1 MiB, four times the model's
 // ceiling), so the string is capped here, after the fact: the ring already bounds what that read
 // held in memory, and the cap bounds what the model reads.
-func consoleTail(ctx context.Context, c *console.Console, wait time.Duration) (string, bool) {
+func consoleTail(ctx context.Context, c *console.Console, wait time.Duration) (string, domain.ProcessEnding, bool) {
 	output, dropped := c.ReadContext(ctx, wait)
 	gathered := output != "" || dropped > 0
-	return renderConsoleTail(c, capConsoleOutput(output), dropped, true, confinementBox(ctx)), gathered
+	tail, ending := renderConsoleTail(c, capConsoleOutput(output), dropped, true, confinementBox(ctx))
+	return tail, ending, gathered
 }
 
 // consoleWindowTail renders what a Console produces over the WHOLE window rather than stopping
 // at the first byte, ending early when the process exits. It is what console_send needs: a
 // terminal echoes the line it was sent before the program answers it, so a collector returning
-// at the first output would hand the model back its own keystrokes and nothing else.
-func consoleWindowTail(ctx context.Context, c *console.Console, wait time.Duration) string {
+// at the first output would hand the model back its own keystrokes and nothing else. The ending
+// it returns is the one the tail's closing line states; a cut-short note changes nothing in it.
+func consoleWindowTail(ctx context.Context, c *console.Console, wait time.Duration) (string, domain.ProcessEnding) {
 	output, dropped, cutShort := collectConsoleWindow(ctx, c, wait)
-	return withCutShortNote(renderConsoleTail(c, output, dropped, true, confinementBox(ctx)), cutShort)
+	tail, ending := renderConsoleTail(c, output, dropped, true, confinementBox(ctx))
+	return withCutShortNote(tail, cutShort), ending
 }
 
 // consoleOpenTail is consoleWindowTail without the "alive" line: console_open's first line has
 // already said the Console is open, so the only liveness fact left worth adding is the one that
-// contradicts it — a program that exited before anyone could speak to it.
-func consoleOpenTail(ctx context.Context, c *console.Console, wait time.Duration) string {
+// contradicts it — a program that exited before anyone could speak to it. Its ending is reported
+// even when that line is left out: a running Console is still a ProcessRunning fact for a host.
+func consoleOpenTail(ctx context.Context, c *console.Console, wait time.Duration) (string, domain.ProcessEnding) {
 	output, dropped, cutShort := collectConsoleWindow(ctx, c, wait)
-	return withCutShortNote(renderConsoleTail(c, output, dropped, false, confinementBox(ctx)), cutShort)
+	tail, ending := renderConsoleTail(c, output, dropped, false, confinementBox(ctx))
+	return withCutShortNote(tail, cutShort), ending
 }
 
 // withCutShortNote appends consoleCutShortNote to a rendered tail when a cancel ended its window.
@@ -249,7 +255,9 @@ func awaitConsoleExit(ctx context.Context, c *console.Console, deadline time.Tim
 
 // renderConsoleTail assembles one Console result: the fence label when the kill-on-denial watch
 // stopped this Console, the dropped-bytes note when its buffer overflowed, the output itself,
-// and a closing line saying whether the process is still running. The output arrives already
+// and a closing line saying whether the process is still running — and returns beside it the
+// domain.ProcessEnding that closing line and fence label state, taken from the same reads, so the
+// value a host reads can never disagree with the prose the model reads. The output arrives already
 // capped at the ceiling every execution tool's is (maxSubprocessOutputBytes), marker included —
 // by capConsoleOutput on the single-read path, by collectConsoleWindow's own buffer on the window
 // path — so one flooding program cannot fill the model's context from a single call, and a
@@ -260,9 +268,10 @@ func awaitConsoleExit(ctx context.Context, c *console.Console, deadline time.Tim
 // box is the confinement policy the Console was opened under, whose roots the fence label names
 // by path; nil is the unconfined case, where DenialStopped is always false and the label cannot
 // fire at all.
-func renderConsoleTail(c *console.Console, output string, dropped int, withAlive bool, box *domain.ConfinementBox) string {
+func renderConsoleTail(c *console.Console, output string, dropped int, withAlive bool, box *domain.ConfinementBox) (string, domain.ProcessEnding) {
 	lines := make([]string, 0, 4)
-	if c.DenialStopped() {
+	denialStopped := c.DenialStopped()
+	if denialStopped {
 		var fence domain.ConfinementBox
 		if box != nil {
 			fence = *box
@@ -275,22 +284,27 @@ func renderConsoleTail(c *console.Console, output string, dropped int, withAlive
 	if text := strings.TrimRight(output, "\r\n"); text != "" {
 		lines = append(lines, text)
 	}
-	if status := consoleStatus(c); withAlive || status != consoleAliveStatus {
+	status, ending := consoleStatus(c)
+	if withAlive || status != consoleAliveStatus {
 		lines = append(lines, status)
 	}
-	return strings.Join(lines, "\n")
+	ending.DenialStopped = denialStopped
+	return strings.Join(lines, "\n"), ending
 }
 
 // consoleStatus is the one-line verdict on a Console's process: still running, exited with a
-// code, or killed by a signal — the teardown's own kill, or the denial watch's.
-func consoleStatus(c *console.Console) string {
+// code, or killed by a signal — the teardown's own kill, or the denial watch's — and the
+// domain.ProcessEnding that line states, built from the one Alive / ExitCode read it is worded
+// from. A killed process keeps the -1 ExitCode reports for it, the code a one-shot run's killed
+// ending carries too.
+func consoleStatus(c *console.Console) (string, domain.ProcessEnding) {
 	if c.Alive() {
-		return consoleAliveStatus
+		return consoleAliveStatus, domain.ProcessEnding{State: domain.ProcessRunning}
 	}
 	if code := c.ExitCode(); code >= 0 {
-		return fmt.Sprintf("exited with code %d", code)
+		return fmt.Sprintf("exited with code %d", code), domain.ProcessEnding{State: domain.ProcessExited, ExitCode: code}
 	}
-	return "killed"
+	return "killed", domain.ProcessEnding{State: domain.ProcessKilled, ExitCode: -1}
 }
 
 // capConsoleOutput bounds one call's output at the same ceiling a one-shot subprocess call has,

@@ -175,12 +175,99 @@ func TestConsoleTail_ZeroWaitReadsTheTailUnderACancelledContext(t *testing.T) {
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
 
-	tail, gathered := consoleTail(cancelled, target, 0)
+	tail, _, gathered := consoleTail(cancelled, target, 0)
 
 	if !gathered || !strings.Contains(tail, "tail-bytes") {
 		t.Errorf("tail = %q (gathered=%t), want the output nobody had read yet", tail, gathered)
 	}
 	if !strings.HasSuffix(tail, "exited with code 3") {
 		t.Errorf("tail = %q, want it to end with the program's exit code", tail)
+	}
+}
+
+// TestConsoleResultsCarryTheirEnding pins the structured half of every Console result that
+// renders a tail: the domain.ProcessEnding a host reads is the state the closing line states —
+// running after an open, exited with its code once the program is over, killed after a close
+// that ended it — and a refusal that reached no Console carries none.
+func TestConsoleResultsCarryTheirEnding(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+	running := domain.ProcessEnding{State: domain.ProcessRunning}
+	cases := []struct {
+		name string
+		call func(t *testing.T, ctx context.Context) domain.ToolResult
+		want domain.ToolSummary
+	}{
+		{
+			name: "open of a live program",
+			call: func(t *testing.T, ctx context.Context) domain.ToolResult {
+				res, err := NewConsoleOpen(t.TempDir(), nil).Execute(ctx, consoleOpenCall("c1", "cat", 200))
+				if err != nil {
+					t.Fatalf("console_open err = %v, want nil", err)
+				}
+				return res
+			},
+			want: running,
+		},
+		{
+			name: "send to a live program",
+			call: func(t *testing.T, ctx context.Context) domain.ToolResult {
+				id := openTestConsole(t, ctx, "cat")
+				res, err := NewConsoleSend().Execute(ctx, consoleSendCall("c1", id, "hello", false, 200))
+				if err != nil {
+					t.Fatalf("console_send err = %v, want nil", err)
+				}
+				return res
+			},
+			want: running,
+		},
+		{
+			name: "read after the program exited",
+			call: func(t *testing.T, ctx context.Context) domain.ToolResult {
+				id, target := openUndrainedConsole(t, ctx, "exit 4")
+				waitForConsoleExit(t, target)
+				res, err := NewConsoleRead().Execute(ctx, consoleReadCall("c1", id, 0))
+				if err != nil {
+					t.Fatalf("console_read err = %v, want nil", err)
+				}
+				return res
+			},
+			want: domain.ProcessEnding{State: domain.ProcessExited, ExitCode: 4},
+		},
+		{
+			name: "close of a live program",
+			call: func(t *testing.T, ctx context.Context) domain.ToolResult {
+				id := openTestConsole(t, ctx, "cat")
+				res, err := NewConsoleClose().Execute(ctx, consoleCloseCall("c1", id))
+				if err != nil {
+					t.Fatalf("console_close err = %v, want nil", err)
+				}
+				return res
+			},
+			want: domain.ProcessEnding{State: domain.ProcessKilled, ExitCode: -1},
+		},
+		{
+			name: "refusal naming no console",
+			call: func(t *testing.T, ctx context.Context) domain.ToolResult {
+				res, err := NewConsoleRead().Execute(ctx, consoleReadCall("c1", 99, 0))
+				if err != nil {
+					t.Fatalf("console_read err = %v, want nil", err)
+				}
+				return res
+			},
+			want: nil,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, _ := consoleTestCtx(t)
+
+			res := testCase.call(t, ctx)
+
+			if res.Summary != testCase.want {
+				t.Errorf("Summary = %#v, want %#v (content %q)", res.Summary, testCase.want, res.Content)
+			}
+		})
 	}
 }

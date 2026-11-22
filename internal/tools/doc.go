@@ -19,7 +19,7 @@
 // prose half, written for the MODEL, and its wording is free to change. A domain.ToolSummary
 // attached beside it (okSummary, tools.go) is the structured half, written for a HOST — the
 // TUI's tool card today, a headless or bench renderer later — carrying as data the facts the
-// tool already computed for its own header. Exactly FIFTEEN built-ins attach one: read_file
+// tool already computed for its own header. Exactly NINETEEN built-ins attach one: read_file
 // and git_show (ReadSpan), list_dir (ListedEntries), grep (MatchedLines),
 // view_diff (DiffStat), web_search (SearchHits), git_status (ChangedFiles, the three section
 // counts its report states), web_fetch and http_request (FetchedBody, the status line and
@@ -27,10 +27,13 @@
 // write_file, single_find_and_replace, multi_find_and_replace and edit_existing_file
 // (EditRegions, the changed regions of the write they just applied), and the two one-shot
 // execution tools terminal and python_exec (ProcessEnding, how the run ended: the code its exit
-// marker states, and whether apogee killed it at its time limit or at the denial watch) — the
+// marker states, and whether apogee killed it at its time limit or at the denial watch), and the
+// four Console tools console_open, console_send, console_read and console_close (ProcessEnding
+// again, the state their tail's closing line states: running, exited with its code, or killed,
+// and whether the denial watch stopped it; a refusal that reached no Console carries none) — the
 // ones whose outcome a host would otherwise have to re-derive from the sentence (a fetch's
 // truncation is otherwise only the content's closing marker line, a run's code only its
-// `[exit code N]` line). The rest
+// `[exit code N]` line, a console's state only its `exited with code N` / `killed` line). The rest
 // deliberately do not, and that is not an omission to fill in later: quoting a fixed one-line
 // sentence (ask_user, present_document) or compressing
 // free-form output to a first line plus a count (the other git tools,

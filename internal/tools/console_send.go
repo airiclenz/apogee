@@ -146,7 +146,8 @@ func (t *ConsoleSend) Execute(ctx context.Context, call domain.ToolCall) (domain
 	}
 
 	wait := consoleWait(args.WaitMS, consoleSendWaitDefaultMS, consoleSendWaitMaxMS)
-	return okResult(call.ID, consoleWindowTail(ctx, target, wait)), nil
+	tail, ending := consoleWindowTail(ctx, target, wait)
+	return okSummary(call.ID, tail, ending), nil
 }
 
 // consoleSendUnfenced reports that a send to target must be demoted rather than typed: the call
