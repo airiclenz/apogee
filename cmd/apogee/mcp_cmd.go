@@ -73,17 +73,13 @@ type mcpLoginTarget struct {
 }
 
 // loginMCPServer runs one interactive OAuth login for server and saves the record under the
-// target's home: the endpoint's vetted client carries the probe, the guarded authorization-server
-// client everything else, and the terminal fetcher — bound first, so its redirect URL is known
-// before a client is registered — obtains the code. It never touches a session.
+// target's home: the binding internal/mcp assembles for a connect too (mcp.OAuthBinding) — the
+// endpoint's vetted client carries the probe, the host's guarded authorization-server client
+// everything else — and the terminal fetcher, bound first so its redirect URL is known before a
+// client is registered, obtains the code. It never touches a session.
 func loginMCPServer(ctx context.Context, deps mcpLoginDeps, target mcpLoginTarget, server mcp.ServerConfig) error {
 	deps = deps.withDefaults()
-	host := deps.mcpHost(target.home)
-	endpoint, endpointClient, err := mcp.EndpointClient(ctx, host, server, target.guard)
-	if err != nil {
-		return err
-	}
-	secret, err := mcpClientSecret(server)
+	binding, err := mcp.OAuthBinding(ctx, deps.mcpHost(target.home), server, target.guard)
 	if err != nil {
 		return err
 	}
@@ -97,35 +93,11 @@ func loginMCPServer(ctx context.Context, deps mcpLoginDeps, target mcpLoginTarge
 	defer closeFetcher()
 
 	_, err = mcpauth.Login(ctx, mcpauth.LoginConfig{
-		Binding: mcpauth.Binding{
-			Name:           server.Name,
-			Endpoint:       endpoint,
-			Store:          host.OAuthStore,
-			EndpointClient: endpointClient,
-			AuthClient:     deps.newAuthClient(target.guard, host.Proxy),
-			ClientID:       server.ClientID,
-			ClientSecret:   secret,
-			Issuer:         server.Issuer,
-		},
+		Binding:     binding,
 		RedirectURL: redirectURL,
 		FetchCode:   fetch,
 	})
 	return err
-}
-
-// mcpClientSecret is a preregistered client's secret, read from its `client-secret-env:` variable
-// at login time so it never sits in the config file. A server naming no variable has none; a
-// variable that is not set is refused, naming the server and the variable but never a value.
-func mcpClientSecret(server mcp.ServerConfig) (string, error) {
-	if server.ClientSecretEnv == "" {
-		return "", nil
-	}
-	secret, isSet := os.LookupEnv(server.ClientSecretEnv)
-	if !isSet {
-		return "", fmt.Errorf("apogee: MCP server %q: client-secret-env: the environment variable %s is not set",
-			server.Name, server.ClientSecretEnv)
-	}
-	return secret, nil
 }
 
 // ----------------------------------------------------------------------------

@@ -50,6 +50,7 @@ type fakeOAuthMCP struct {
 	// rejectRefresh makes the token endpoint refuse every refresh grant with invalid_grant.
 	rejectRefresh bool
 
+	requests      atomic.Int64 // every request the MCP server received
 	exchanges     atomic.Int64
 	exchangedAt   atomic.Int64
 	firstServedAt atomic.Int64
@@ -83,6 +84,7 @@ func (f *fakeOAuthMCP) endpoint() string { return f.resource.URL + "/mcp" }
 // serveResource is the MCP server: its protected-resource metadata, and the endpoint behind the
 // bearer check.
 func (f *fakeOAuthMCP) serveResource(w http.ResponseWriter, r *http.Request, next http.Handler) {
+	f.requests.Add(1)
 	metadataPath := "/.well-known/oauth-protected-resource/mcp"
 	if r.URL.Path == metadataPath {
 		writeFakeJSON(w, http.StatusOK, oauthex.ProtectedResourceMetadata{
@@ -444,6 +446,32 @@ func TestMCPCmdLoginRefusesAnotherIssuer(t *testing.T) {
 	}
 	if n := fake.exchanges.Load(); n != 0 {
 		t.Errorf("the token endpoint exchanged %d code(s); want none", n)
+	}
+	requireStored(t, home, "remote", fake.endpoint(), false)
+}
+
+// A login whose `client-secret-env:` variable is not set is refused in connect's own sentence
+// before the endpoint sees any request. The variable is one no test sets.
+func TestMCPCmdLoginRefusesAnUnsetClientSecret(t *testing.T) {
+	t.Parallel()
+	const secretEnv = "APOGEE_TEST_MCP_LOGIN_CLIENT_SECRET_NEVER_SET"
+	fake := newFakeOAuthMCP(t, &atomic.Int64{})
+	home := t.TempDir()
+	server := fake.serverConfig("remote")
+	server.ClientID = "apogee-client"
+	server.ClientSecretEnv = secretEnv
+	server.Issuer = "https://issuer.example.com"
+	writeMCPConfig(t, home, server)
+	input := &scriptedInput{scripts: [][]string{{""}}}
+
+	_, err := runMCPCommand(t, testMCPLoginDeps(t, input, &bytes.Buffer{}, true), "login", "remote", "--config", home)
+
+	want := `mcp: server "remote": client-secret-env: the environment variable ` + secretEnv + " is not set"
+	if err == nil || err.Error() != want {
+		t.Fatalf("mcp login error = %v; want %q", err, want)
+	}
+	if n := fake.requests.Load(); n != 0 {
+		t.Errorf("the MCP server saw %d request(s); want none", n)
 	}
 	requireStored(t, home, "remote", fake.endpoint(), false)
 }

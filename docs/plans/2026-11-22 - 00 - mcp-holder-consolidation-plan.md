@@ -76,7 +76,7 @@ internal/mcp/transport.go — newOAuthHandler; cmd/apogee/mcp_cmd.go — loginMC
 
 **Commit:** `refactor(mcpauth): login and connect configs embed one OAuth binding`
 
-## 2. internal/mcp assembles the OAuth binding for login and connect
+## 2. internal/mcp assembles the OAuth binding for login and connect — ✅ DONE (2026-11-22)
 
 Depends on item 1.
 

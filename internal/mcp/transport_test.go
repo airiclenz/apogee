@@ -1492,10 +1492,16 @@ func TestConnect_OAuthServerRefusals(t *testing.T) {
 		hasStore  bool
 		seed      *mcpauth.Record // saved for the server before the connect, when set
 		issuer    string
+		clientID  string
+		secretEnv string // a `client-secret-env:` variable, never set by any test
 		wantLogin bool
 		wantText  string
 	}{
 		{name: "no token store", wantText: `server "remote"`},
+		{name: "unset client-secret-env", hasStore: true, clientID: "apogee-client",
+			secretEnv: unsetClientSecretEnv, issuer: "https://auth.example.com",
+			wantText: `mcp: server "remote": client-secret-env: the environment variable ` +
+				unsetClientSecretEnv + " is not set"},
 		{name: "no stored record", hasStore: true, wantLogin: true, wantText: "apogee mcp login remote"},
 		{name: "a stored record of another issuer", hasStore: true, wantLogin: true,
 			seed: &mcpauth.Record{
@@ -1526,6 +1532,8 @@ func TestConnect_OAuthServerRefusals(t *testing.T) {
 			}
 			cfg := oauthServerConfig(o.endpoint())
 			cfg.Issuer = tt.issuer
+			cfg.ClientID = tt.clientID
+			cfg.ClientSecretEnv = tt.secretEnv
 
 			_, err := ConnectWith(context.Background(), host, []ServerConfig{cfg}, security.URLGuard{}, t.TempDir())
 
@@ -1539,6 +1547,63 @@ func TestConnect_OAuthServerRefusals(t *testing.T) {
 				t.Errorf("the MCP server saw %d request(s); want none", n)
 			}
 		})
+	}
+}
+
+// unsetClientSecretEnv is a `client-secret-env:` variable no test sets, so reading it always
+// finds it unset.
+const unsetClientSecretEnv = "APOGEE_TEST_MCP_CLIENT_SECRET_NEVER_SET"
+
+// TestOAuthBindingCarriesTheConfiguredFacts pins that the one binding a login and a connect share
+// carries the server's configured OAuth facts over its vetted endpoint — the host's store and
+// authorization-server client, the client id, the issuer and the secret variable's value — and
+// that the secret is read on each call, never cached. Assembling it sends the server nothing. Not
+// parallel: it sets the secret's environment variable.
+func TestOAuthBindingCarriesTheConfiguredFacts(t *testing.T) {
+	const secretEnv = "APOGEE_TEST_MCP_BINDING_CLIENT_SECRET"
+	o := newOAuthServer(t, "access-old")
+	store := mcpauth.NewStore(t.TempDir())
+	authClient := &http.Client{Timeout: 10 * time.Second}
+	host := Host{
+		OAuthStore: store,
+		NewOAuthClient: func(security.URLGuard, func(*http.Request) (*url.URL, error)) *http.Client {
+			return authClient
+		},
+	}
+	cfg := oauthServerConfig(o.endpoint())
+	cfg.ClientID = "apogee-client"
+	cfg.ClientSecretEnv = secretEnv
+	cfg.Issuer = "https://auth.example.com"
+	t.Setenv(secretEnv, "secret-1")
+
+	binding, err := OAuthBinding(context.Background(), host, cfg, security.URLGuard{})
+
+	if err != nil {
+		t.Fatalf("OAuthBinding: %v", err)
+	}
+	if binding.Name != "remote" || binding.Endpoint != o.endpoint() {
+		t.Errorf("binding names %q at %q; want %q at %q", binding.Name, binding.Endpoint, "remote", o.endpoint())
+	}
+	if binding.Store != store || binding.AuthClient != authClient || binding.EndpointClient == nil {
+		t.Errorf("binding store/auth client/endpoint client = %p/%p/%p; want %p/%p/non-nil",
+			binding.Store, binding.AuthClient, binding.EndpointClient, store, authClient)
+	}
+	if binding.ClientID != cfg.ClientID || binding.Issuer != cfg.Issuer || binding.ClientSecret != "secret-1" {
+		t.Errorf("binding client id/issuer/secret = %q/%q/%q; want %q/%q/%q",
+			binding.ClientID, binding.Issuer, binding.ClientSecret, cfg.ClientID, cfg.Issuer, "secret-1")
+	}
+
+	t.Setenv(secretEnv, "secret-2")
+	again, err := OAuthBinding(context.Background(), host, cfg, security.URLGuard{})
+
+	if err != nil {
+		t.Fatalf("OAuthBinding, second call: %v", err)
+	}
+	if again.ClientSecret != "secret-2" {
+		t.Errorf("second binding's secret = %q; want the variable's current value %q", again.ClientSecret, "secret-2")
+	}
+	if n := o.seen.Load(); n != 0 {
+		t.Errorf("the MCP server saw %d request(s); want none", n)
 	}
 }
 

@@ -633,9 +633,10 @@ func buildSSETransport(ctx context.Context, host Host, cfg ServerConfig, guard s
 }
 
 // buildStreamableTransport builds a streamable-http client transport the same way — same vetting,
-// same pinned client. A server with `auth: oauth` also gets the OAuth handler (newOAuthHandler)
-// that sets its stored bearer token on every request; the token rides the origin-pinned client,
-// so it only ever reaches the configured endpoint's origin.
+// same pinned client. A server with `auth: oauth` also gets the OAuth handler over its binding
+// (oauthBinding) that sets its stored bearer token on every request; the token rides the
+// origin-pinned client, so it only ever reaches the configured endpoint's origin. The endpoint is
+// vetted once and the binding built from that vetting: a second vet would pin DNS a second time.
 func buildStreamableTransport(ctx context.Context, host Host, cfg ServerConfig, guard security.URLGuard) (mcpsdk.Transport, error) {
 	endpoint, client, err := vetEndpoint(ctx, host, cfg, guard)
 	if err != nil {
@@ -646,7 +647,11 @@ func buildStreamableTransport(ctx context.Context, host Host, cfg ServerConfig, 
 		HTTPClient: client,
 	}
 	if cfg.Auth == AuthOAuth {
-		handler, err := newOAuthHandler(host, cfg, guard, endpoint, client)
+		binding, err := oauthBinding(host, cfg, guard, endpoint, client)
+		if err != nil {
+			return nil, err
+		}
+		handler, err := mcpauth.NewHandler(mcpauth.HandlerConfig{Binding: binding})
 		if err != nil {
 			return nil, err
 		}
@@ -655,29 +660,43 @@ func buildStreamableTransport(ctx context.Context, host Host, cfg ServerConfig, 
 	return transport, nil
 }
 
-// newOAuthHandler builds an `auth: oauth` server's connected handler over the host's token store:
-// the stored bearer, refreshed through the authorization-server client (Host.NewOAuthClient) or,
-// for a token endpoint on the endpoint's own origin, through the endpoint's client. It never
-// prompts. A host with no store, an unset `client-secret-env:` variable and an unreadable record
-// fail the connect naming the server; a missing record is mcpauth.ErrLoginRequired, whose text
-// names `apogee mcp login <name>`. The secret variable is read here, so each connect and
-// reconnect sends its current value, as HeadersEnv does.
-func newOAuthHandler(
+// OAuthBinding vets an `auth: oauth` server's endpoint and assembles its OAuth binding, for a
+// caller that must reach the server outside a session: `apogee mcp login`. It is vetEndpoint
+// then oauthBinding, so the login sees exactly the refusals and the facts a connect does — the
+// endpoint client is pinned to the endpoint's origin and carries the configured headers, the
+// authorization-server client is the host's (Host.NewOAuthClient), and the secret is the
+// `client-secret-env:` variable's value now.
+func OAuthBinding(ctx context.Context, host Host, cfg ServerConfig, guard security.URLGuard) (mcpauth.Binding, error) {
+	endpoint, endpointClient, err := vetEndpoint(ctx, host, cfg, guard)
+	if err != nil {
+		return mcpauth.Binding{}, err
+	}
+	return oauthBinding(host, cfg, guard, endpoint, endpointClient)
+}
+
+// oauthBinding assembles the OAuth facts an `auth: oauth` server's login and connect share, over
+// its vetted endpoint and that endpoint's client: the host's token store, the
+// authorization-server client (Host.NewOAuthClient, or mcpauth.NewAuthClient when the host names
+// none), the configured client id and issuer, and the client secret. A host with no store and an
+// unset `client-secret-env:` variable are refused naming the server, never a value. The secret
+// variable is read here, on every call — so each login, connect and reconnect sends its current
+// value, as HeadersEnv does — and never at config load, so it never sits in a loaded config.
+func oauthBinding(
 	host Host,
 	cfg ServerConfig,
 	guard security.URLGuard,
 	endpoint string,
 	endpointClient *http.Client,
-) (*mcpauth.Handler, error) {
+) (mcpauth.Binding, error) {
 	if host.OAuthStore == nil {
-		return nil, fmt.Errorf("mcp: server %q: auth: %s needs a token store, and this host has none",
+		return mcpauth.Binding{}, fmt.Errorf("mcp: server %q: auth: %s needs a token store, and this host has none",
 			cfg.Name, AuthOAuth)
 	}
 	var secret string
 	if cfg.ClientSecretEnv != "" {
-		value, ok := os.LookupEnv(cfg.ClientSecretEnv)
-		if !ok {
-			return nil, fmt.Errorf("mcp: server %q: client-secret-env: the environment variable %s is not set",
+		value, isSet := os.LookupEnv(cfg.ClientSecretEnv)
+		if !isSet {
+			return mcpauth.Binding{}, fmt.Errorf("mcp: server %q: client-secret-env: the environment variable %s is not set",
 				cfg.Name, cfg.ClientSecretEnv)
 		}
 		secret = value
@@ -686,7 +705,7 @@ func newOAuthHandler(
 	if newClient == nil {
 		newClient = mcpauth.NewAuthClient
 	}
-	return mcpauth.NewHandler(mcpauth.HandlerConfig{Binding: mcpauth.Binding{
+	return mcpauth.Binding{
 		Name:           cfg.Name,
 		Endpoint:       endpoint,
 		Store:          host.OAuthStore,
@@ -695,7 +714,7 @@ func newOAuthHandler(
 		ClientID:       cfg.ClientID,
 		ClientSecret:   secret,
 		Issuer:         cfg.Issuer,
-	}})
+	}, nil
 }
 
 // vetEndpoint turns a configured HTTP endpoint into the two things an SDK transport needs: the
@@ -754,16 +773,6 @@ func vetEndpoint(ctx context.Context, host Host, cfg ServerConfig, guard securit
 		return "", nil, endpointRefusal(cfg.Name, err)
 	}
 	return u.String(), client, nil
-}
-
-// EndpointClient returns an HTTP-transported server's vetted endpoint string and the client its
-// transport speaks over — vetEndpoint's pair, with the same refusals — for a caller that must
-// reach the endpoint outside a session: the OAuth login's unauthenticated probe and its
-// endpoint-origin metadata fetches (internal/mcpauth). The client is pinned to the endpoint's
-// origin and carries the configured headers, so it is never the client for an authorization
-// server on another origin.
-func EndpointClient(ctx context.Context, host Host, cfg ServerConfig, guard security.URLGuard) (string, *http.Client, error) {
-	return vetEndpoint(ctx, host, cfg, guard)
 }
 
 // endpointRefusal words a GuardedClient refusal in this package's own sentences, unchanged from
