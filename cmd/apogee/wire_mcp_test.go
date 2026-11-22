@@ -1343,11 +1343,11 @@ func (r *mcpEventRecorder) take() []string {
 	return lines
 }
 
-// recordMCPEvents points the fixture's holder at a fresh recorder.
+// recordMCPEvents is the recorder the fixture's holder was born over, emptied of every Event the
+// holder emitted before the call, so a test reads only what its own steps cause.
 func recordMCPEvents(fixture *mcpFixture) *mcpEventRecorder {
-	recorder := &mcpEventRecorder{set: fixture.set}
-	fixture.set.emitThrough(recorder)
-	return recorder
+	fixture.events.take()
+	return fixture.events
 }
 
 // mcpEventLines spells each Event as one comparable line: `<server> <phase>`, then the tool count of
@@ -1620,8 +1620,9 @@ func TestLiveMCPNeverEmitsUnderLock(t *testing.T) {
 	t.Parallel()
 	old, _ := liveServer(stdioServer("old", "old-mcp"))
 	fixture := newMCPFixtureWith([]mcpEntry{old}, "", newMCPDialRecorder().connect)
-	events := &mcpEventRecorder{set: fixture.set, gate: make(chan struct{})}
-	fixture.set.emitThrough(events)
+	events := recordMCPEvents(fixture)
+	// Set before anything is posted, so every drainer that reads it starts after this write.
+	events.gate = make(chan struct{})
 
 	requested := make(chan struct{})
 	go func() {
@@ -2128,20 +2129,171 @@ func TestMCPLostUnchangedServerDuringACommit(t *testing.T) {
 	}
 }
 
-// A startup session that ends before the holder is wired to emit is not lost from view: it is
-// watched from emitThrough on, so it reads `disconnected (lost)` on top of the startup seed rather
-// than vanishing from it.
-func TestMCPLostBeforeEmitThroughIsSeenLost(t *testing.T) {
+// A startup session that ends while startup is still dialling the rest is not lost from view: the
+// holder watches it from its birth, so it reads `disconnected (lost)` on top of the startup seed
+// rather than vanishing from it.
+func TestMCPLostDuringStartupIsSeenLost(t *testing.T) {
 	t.Parallel()
-	entry, session := liveServer(stdioServer("docs", "docs-mcp"))
-	fixture := newMCPFixtureWith([]mcpEntry{entry}, "", newMCPDialRecorder().connect)
-	session.die(errors.New("signal: killed"))
+	docs, session := liveServer(stdioServer("docs", "docs-mcp"))
+	wiki, _ := liveServer(stdioServer("wiki", "wiki-mcp"))
+	startup := heldMCPStartup([]mcpEntry{docs, wiki})
+	dialHeld := startup.dial
+	startup.dial = func(ctx context.Context, server mcp.ServerConfig, allowHosts, denyHosts []string) (mcpSession, error) {
+		if server.Name == "wiki" {
+			session.die(errors.New("signal: killed"))
+		}
+		return dialHeld(ctx, server, allowHosts, denyHosts)
+	}
+	events := &mcpEventRecorder{}
 
-	events := recordMCPEvents(fixture)
-	awaitMCPDropped(t, fixture.set, "docs")
+	set, _, err := startLiveMCP(context.Background(), []mcp.ServerConfig{docs.config, wiki.config}, openGuard,
+		startup, refuseMCPDial, events)
 
+	if err != nil {
+		t.Fatalf("startLiveMCP: %v", err)
+	}
+	events.set = set
+	awaitMCPDropped(t, set, "docs")
 	assertMCPEvents(t, "the startup loss", events.take(), "docs disconnected lost: signal: killed")
-	assertMCPEvents(t, "the seed after it", mcpEventLines(fixture.set.stateEvents()),
-		"docs disconnected lost: signal: killed")
-	_ = fixture.set.close()
+	assertMCPEvents(t, "the seed after it", mcpEventLines(set.stateEvents()),
+		"docs disconnected lost: signal: killed", "wiki connected 1")
+	_ = set.close()
+}
+
+// refuseMCPDial is a holder's recipe for a later dial in a test that dials nothing after startup.
+func refuseMCPDial(context.Context, mcp.ServerConfig, []string, []string) (mcpSession, error) {
+	return nil, errors.New("no dial expected after startup")
+}
+
+// startupDialRecorder is a startup recipe over fake sessions that keeps the context each server was
+// dialled under; a server named in failing fails its dial with that error.
+type startupDialRecorder struct {
+	failing map[string]error
+
+	mu       sync.Mutex
+	sessions map[string]*fakeMCPSession
+	contexts map[string]context.Context
+}
+
+func newStartupDialRecorder() *startupDialRecorder {
+	return &startupDialRecorder{
+		failing:  map[string]error{},
+		sessions: map[string]*fakeMCPSession{},
+		contexts: map[string]context.Context{},
+	}
+}
+
+func (r *startupDialRecorder) dial(ctx context.Context, server mcp.ServerConfig, _, _ []string) (mcpSession, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.contexts[server.Name] = ctx
+	if err := r.failing[server.Name]; err != nil {
+		return nil, err
+	}
+	session := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: server.Name + "__live"}}}
+	r.sessions[server.Name] = session
+	return session, nil
+}
+
+// TestStartLiveMCPClosesEverythingOnAFailedDial: startup is all-or-nothing (ADR 0109 decision 11) —
+// a failed dial returns its own error and no holder, every session opened before it closed and every
+// dial's context released, and nothing is emitted.
+func TestStartLiveMCPClosesEverythingOnAFailedDial(t *testing.T) {
+	t.Parallel()
+	refused := errors.New("dial: connection refused")
+	dials := newStartupDialRecorder()
+	dials.failing["gamma"] = refused
+	events := &mcpEventRecorder{}
+	servers := []mcp.ServerConfig{
+		stdioServer("alpha", "alpha-mcp"), stdioServer("beta", "beta-mcp"),
+		stdioServer("gamma", "gamma-mcp"), stdioServer("delta", "delta-mcp"),
+	}
+
+	set, _, err := startLiveMCP(context.Background(), servers, openGuard, mcpStartupDial{dial: dials.dial},
+		refuseMCPDial, events)
+
+	if !errors.Is(err, refused) || set != nil {
+		t.Fatalf("startLiveMCP = %v, %v; want no holder and gamma's own error", set, err)
+	}
+	for _, name := range []string{"alpha", "beta"} {
+		if !dials.sessions[name].isClosed() {
+			t.Errorf("%s's session is open after the failed startup; want it closed", name)
+		}
+	}
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		if dials.contexts[name].Err() == nil {
+			t.Errorf("%s's dial context is live after the failed startup; want it released", name)
+		}
+	}
+	if _, isDialled := dials.contexts["delta"]; isDialled {
+		t.Error("the server after the failed one was dialled; want startup to stop at the failure")
+	}
+	if len(events.events) != 0 {
+		t.Errorf("the failed startup emitted %d Event(s); want none", len(events.events))
+	}
+}
+
+// TestStartLiveMCPSessionsAreCancellable: every session startup opens is held with a cancel of its
+// own, over a context of its own that stays live while the session serves and is released when the
+// holder closes it.
+func TestStartLiveMCPSessionsAreCancellable(t *testing.T) {
+	t.Parallel()
+	dials := newStartupDialRecorder()
+	servers := []mcp.ServerConfig{stdioServer("alpha", "alpha-mcp"), stdioServer("beta", "beta-mcp")}
+
+	set, _, err := startLiveMCP(context.Background(), servers, openGuard, mcpStartupDial{dial: dials.dial},
+		refuseMCPDial, &mcpEventRecorder{})
+
+	if err != nil {
+		t.Fatalf("startLiveMCP: %v", err)
+	}
+	entries, _ := set.snapshot()
+	for _, server := range servers {
+		if entries[server.Name].cancel == nil {
+			t.Errorf("%s is held with no cancel; want every startup session cancellable", server.Name)
+		}
+		if dials.contexts[server.Name].Err() != nil {
+			t.Errorf("%s's context ended while its session serves", server.Name)
+		}
+	}
+	if dials.contexts["alpha"] == dials.contexts["beta"] {
+		t.Error("the startup sessions share one context; want one each")
+	}
+
+	_ = set.close()
+
+	for _, server := range servers {
+		if dials.contexts[server.Name].Err() == nil {
+			t.Errorf("%s's context is live after close; want it released", server.Name)
+		}
+	}
+}
+
+// TestStartLiveMCPPrimesTheSeedWithoutEmitting: the state startup left — each connected server with
+// its tool count, then each skipped one, failed with the moved pin's cause — is the seed, and none of
+// it is emitted, so a journal seeded from it never records it twice and no Reaction fires on it.
+func TestStartLiveMCPPrimesTheSeedWithoutEmitting(t *testing.T) {
+	t.Parallel()
+	skipped := &fakeMCPSession{skipped: []mcp.Denied{{Name: "wiki", Err: errors.New("mcp: server \"wiki\": pin moved")}}}
+	docs, _ := liveServer(stdioServer("docs", "docs-mcp"))
+	wiki := mcpEntry{config: stdioServer("wiki", "wiki-mcp"), session: skipped}
+	events := &mcpEventRecorder{}
+
+	set, report, err := startLiveMCP(context.Background(), []mcp.ServerConfig{wiki.config, docs.config}, openGuard,
+		heldMCPStartup([]mcpEntry{wiki, docs}), refuseMCPDial, events)
+
+	if err != nil {
+		t.Fatalf("startLiveMCP: %v", err)
+	}
+	events.set = set
+	assertMCPEvents(t, "the seed", mcpEventLines(set.stateEvents()),
+		"docs connected 1", "wiki failed: server \"wiki\": pin moved")
+	assertMCPEvents(t, "the Events emitted", events.take())
+	if len(report.skipped) != 1 || report.skipped[0].Name != "wiki" {
+		t.Errorf("startup report skipped %+v; want wiki", report.skipped)
+	}
+	if !skipped.isClosed() {
+		t.Error("the skipped server's session is open; want it closed, since it holds nothing")
+	}
+	_ = set.close()
 }

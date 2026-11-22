@@ -225,7 +225,7 @@ type rootWiring struct {
 	// firingInputs. nil is the production value, resolved by raise when the Firing is raised.
 	runner func(context.Context, run.Spec) (run.Result, error)
 	// mcpLogin is the boot's other half of rootDeps the session reads later: what the startup login
-	// of an `auth: oauth` MCP server talks through (connectMCPServers).
+	// of an `auth: oauth` MCP server talks through (mcpStartupDial).
 	mcpLogin mcpLoginDeps
 	// reactionHost is this session's Reaction host (ADR 0073, reactions.Host): its observe lane,
 	// whose Runner is the observe-only decorator installed as Config.Events over the Bridge's own

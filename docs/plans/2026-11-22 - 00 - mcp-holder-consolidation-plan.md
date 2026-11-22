@@ -331,7 +331,23 @@ cmd/apogee/wire_mcp_test.go — TestMCPSeedCarriesTheStartupState, recordMCPEven
 
 **Commit:** `refactor(mcp): a startup-skipped repo server is an ordinary failed server`
 
-## 9. Startup is the MCP holder's first request
+## 9. Startup is the MCP holder's first request — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): re-derived from the assumption that `startupDial` is one per-server recipe — the startup recipe is an `mcpStartupDial{login, dial}` value built by `rootWiring.mcpStartupDial(guard)` in mcp_cmd.go: `login` is the once-over-the-set `offerUnsaved` prelude (run after `mcp.ValidateServers`, before the first dial) and `dial` wraps `connectStartupServer`; `connectMCPServers` is deleted.
+
+NOTES (2026-11-22): `newLiveMCP` is deleted rather than kept beside `startLiveMCP`; the test fixtures (`newMCPFixtureDialling`, `fakeApplier`) build through a new `startHeldMCP` helper, and the fixture's holder is born over its own `mcpEventRecorder`, so `recordMCPEvents` now returns that recorder emptied of earlier Events, and every fixture's startup sessions are watched from construction.
+
+NOTES (2026-11-22): the seed keeps item 8's order (connected servers in config order, then skipped ones) so no view's row order moves; `requested` is now strict config order from startup on.
+
+NOTES (2026-11-22): the unlocked `liveMCP.install` lost its only caller and was removed; the outbox is never nil now, so the nil branches in `postLocked`, `stateEvents`, `seedJournal` and `mcpOutbox.wait` went with `emitThrough`.
+
+NOTES (2026-11-22): on a fatal startup failure, truncation notices for servers dialled before it are no longer printed to stderr ahead of the abort (they now come from the report of a startup that succeeded).
+
+NOTES (2026-11-22): added `TestStartLiveMCPPrimesTheSeedWithoutEmitting` beside the two planned tests, pinning the goal's "primed, not emitted" clause.
+
+NOTES (2026-11-22): consequential edit — cmd/apogee/wire.go: made necessary by deleting `connectMCPServers` (the `mcpLogin` field comment named it).
+
+NOTES (2026-11-22): consequential edit — docs/design/mcp-client.md: made necessary by startup becoming the holder's first request with a primed outbox.
 
 Depends on item 8.
 

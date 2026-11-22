@@ -300,7 +300,8 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   `dialling` → `connected | failed` with no `disconnected` between. The posts land in an ordered
   outbox drained off the TUI's Update goroutine and never under the holder's lock, and leave through
   the engine's own serialised sink (`apogee.SerializeEvents`), so the engine stays MCP-blind. The
-  startup state — each connected server and its tool count, and a repo server skipped for a moved
+  startup connect is the holder's first request, and its outbox is born with it, primed with — not
+  fed Events for — the startup state: each connected server and its tool count, and a repo server skipped for a moved
   pin as `failed`, which the holder holds as an ordinary failed server (no session; re-dialled only
   by a re-adoption, the retry gesture or a restart, `adr-0109-amend-1122`) — seeds the TUI's state at launch and opens every live Event journal (fresh,
   resumed, or reborn after `/clear`) right after `run_started`. Every Driver view folds those Events

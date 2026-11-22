@@ -443,67 +443,44 @@ func findMCPServer(servers []mcp.ServerConfig, name string) (mcp.ServerConfig, b
 // The startup login
 // ----------------------------------------------------------------------------
 
-// connectMCPServers is the session's startup connect with the login a fresh `auth: oauth` server
-// needs. It is all-or-nothing and the caller makes it fatal, as it always was, but it dials server by
-// server so the session holds one connection per server (ADR 0109): the whole set is validated first
-// (mcp.ValidateServers), then each server is dialled in config order, and a failure closes every
-// server dialled before it and returns that failure's own error.
+// mcpStartupDial is the session's startup connect recipe (startLiveMCP) with the login a fresh
+// `auth: oauth` server needs, over the session's home, workspace and guard.
 //
-// Before the first dial, every `auth: oauth` server with no saved token is offered a login; after it,
-// a server whose dial still fails for want of a login (a refresh the authorization server rejected)
-// is offered one and dialled again — at most once per server, so the loop always ends. Each offer
-// asks on stderr while it is still a safe place to write: declined, or with stdin not a terminal, the
-// launch aborts with the error naming `apogee mcp login <name>`. A server whose tool list discovery
-// cut short connects as any other and is announced, naming each cause (announceTruncatedMCP). A repo
-// server the connect skipped for a moved or unreadable pin does not abort the launch and holds no
-// entry: it is announced and the entry asked about again (announceSkippedMCP), and the session starts
-// on the rest of the set. It is returned, its config and the skip's cause, in config order, for the
-// MCP holder to hold as an ordinary failed server (newLiveMCP, adr-0109-amend-1122) and to seed the
-// views and journals with as failed (liveMCP.emitThrough, ADR 0111 decision 8).
-func (w *rootWiring) connectMCPServers(ctx context.Context) ([]mcpEntry, []mcpSkip, error) {
+// Before the first dial, every `auth: oauth` server with no saved token is offered a login, once over
+// the whole set; after it, a server whose dial still fails for want of a login (a refresh the
+// authorization server rejected) is offered one and dialled again — at most once per server, so the
+// loop always ends. Each offer asks on stderr while it is still a safe place to write: declined, or
+// with stdin not a terminal, the launch aborts with the error naming `apogee mcp login <name>`. A
+// server whose tool list discovery cut short connects as any other; a repo server the connect skipped
+// for a moved or unreadable pin does not abort the launch. The wiring announces both from the
+// startup report (announceTruncatedMCP, announceSkippedMCP).
+func (w *rootWiring) mcpStartupDial(guard security.URLGuard) mcpStartupDial {
 	deps := w.mcpLogin.withDefaults()
 	host := deps.mcpHost(w.roots.config)
-	guard := mcpGuard(w.cfg.URLAllowHosts, w.cfg.URLDenyHosts)
 	login := mcpStartupLogin{
 		deps:   deps,
 		target: mcpLoginTarget{home: w.roots.config, workspace: w.roots.workspace, guard: guard},
 	}
-
-	if err := mcp.ValidateServers(w.opts.MCPServers); err != nil {
-		return nil, nil, err
-	}
-	for _, server := range w.opts.MCPServers {
-		if server.Auth != mcp.AuthOAuth {
-			continue
-		}
-		if err := login.offerUnsaved(ctx, host.OAuthStore, server); err != nil {
-			return nil, nil, err
-		}
-	}
-
-	entries := make([]mcpEntry, 0, len(w.opts.MCPServers))
-	var skipped []mcp.Denied
-	var skips []mcpSkip
-	for _, server := range w.opts.MCPServers {
-		client, err := connectStartupServer(ctx, host, server, guard, w.roots.workspace, login)
-		if err != nil {
-			for _, entry := range entries {
-				// The launch is aborting over err, the failure worth reporting; a close that fails
-				// describes a connection nobody is going to use either way.
-				_ = closeSession(entry.session)
+	return mcpStartupDial{
+		login: func(ctx context.Context, servers []mcp.ServerConfig) error {
+			for _, server := range servers {
+				if server.Auth != mcp.AuthOAuth {
+					continue
+				}
+				if err := login.offerUnsaved(ctx, host.OAuthStore, server); err != nil {
+					return err
+				}
 			}
-			return nil, nil, err
-		}
-		if s := client.Skipped(); len(s) > 0 {
-			skipped = append(skipped, s...)
-			skips = append(skips, mcpSkip{config: server, cause: s[0].Err})
-			continue
-		}
-		w.announceTruncatedMCP(client.Truncated())
-		entries = append(entries, mcpEntry{config: server, session: client})
+			return nil
+		},
+		dial: func(ctx context.Context, server mcp.ServerConfig, allowHosts, denyHosts []string) (mcpSession, error) {
+			client, err := connectStartupServer(ctx, host, server, mcpGuard(allowHosts, denyHosts), w.roots.workspace, login)
+			if err != nil {
+				return nil, err
+			}
+			return client, nil
+		},
 	}
-	w.announceSkippedMCP(skipped)
-	return entries, skips, nil
 }
 
 // connectStartupServer dials one server at startup, offering an `auth: oauth` server a login and

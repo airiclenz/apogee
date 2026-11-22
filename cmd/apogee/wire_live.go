@@ -129,9 +129,9 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// a misconfiguration the user should see, not a silently-dropped capability — startup stays
 	// all-or-nothing, though it dials server by server so the session holds one connection per server
 	// (ADR 0109). The one exception is a repo server whose pin moved: the connect skips it rather than
-	// failing the set (mcp.Client.Skipped), and connectMCPServers announces the skip and cues the
-	// re-read that asks about the server again, so the session starts on the rest (announceSkippedMCP).
-	// The holder below holds it as an ordinary failed server (newLiveMCP, adr-0109-amend-1122).
+	// failing the set (mcp.Client.Skipped): the holder holds it as an ordinary failed server
+	// (startLiveMCP, adr-0109-amend-1122), and the wiring announces the skip and cues the re-read that
+	// asks about the server again, so the session starts on the rest (announceSkippedMCP).
 	//
 	// The endpoint of an `sse`/`streamable-http` server is checked against the operator's OWN
 	// url-safety host lists — scheme/host allow-deny, with the resolved-IP floor disabled for it
@@ -141,12 +141,9 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// 2026-08-25 F-40); a denied host is now refused at startup with the url-safety message.
 	//
 	// An `auth: oauth` server with no usable token is offered a login on stderr first, before the
-	// alternate screen opens (connectMCPServers, mcp_cmd.go); declined, or with no terminal to ask
+	// alternate screen opens (mcpStartupDial, mcp_cmd.go); declined, or with no terminal to ask
 	// on, the launch aborts naming `apogee mcp login <name>`.
-	mcpEntries, mcpSkipped, err := w.connectMCPServers(ctx)
-	if err != nil {
-		return fmt.Errorf("apogee: connect MCP servers: %w", err)
-	}
+	//
 	// The connections are held rather than captured, because `mcp-servers:` is editable mid-session
 	// (ADR 0037 decision 6): a reconnect dials the servers an edit adds or changes, swaps them in and
 	// closes the sessions they replaced, one server at a time (ADR 0109, adr-0037-amend-1107), so what
@@ -170,7 +167,18 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// admitted (applyURLSafetyHosts): a server the operator has just closed is dropped on the
 	// keystroke, mid-Turn included, and one the lists newly admit is requested and dialled off the
 	// loop, rather than either waiting until something else happens to dial.
-	w.mcpSet = newLiveMCP(mcpEntries, mcpSkipped, func(dialCtx context.Context, server mcp.ServerConfig, allowHosts, denyHosts []string) (mcpSession, error) {
+	//
+	// Every dial the holder starts and finishes, and every server it closes, is an MCPServerEvent
+	// (ADR 0111 decision 8), emitted through the engine's own serialised sink — the handle
+	// resolveConfig put on Config.Events — so it shares the engine's mutex, reaches the journal and
+	// every observer in one linear stream, and leaves the holder's outbox in the order its state moved,
+	// never under its lock and never on the Update goroutine (mcpOutbox). The startup connect is the
+	// holder's first request, and the outbox is born with it primed with the state startup left — the
+	// skipped repo servers' failed state with it — rather than fed Events, which the TUI is seeded with
+	// at construction (MCPHost.MCPServerStates) and every live Event journal at its birth
+	// (sessionHost.mcpSeed, attached below).
+	startupGuard := mcpGuard(w.cfg.URLAllowHosts, w.cfg.URLDenyHosts)
+	mcpSet, startup, err := startLiveMCP(ctx, w.opts.MCPServers, startupGuard, w.mcpStartupDial(startupGuard), func(dialCtx context.Context, server mcp.ServerConfig, allowHosts, denyHosts []string) (mcpSession, error) {
 		// It never offers a login: a server that needs one fails its dial with the error naming
 		// `apogee mcp login <name>`, which that server's transcript note carries.
 		client, err := mcp.ConnectWith(dialCtx, w.mcpLogin.mcpHost(w.roots.config), []mcp.ServerConfig{server},
@@ -182,16 +190,13 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		// the re-read cued here asks about it again.
 		w.cueSkippedMCP(client.Skipped())
 		return client, nil
-	})
-	// Every dial the holder starts and finishes, and every server it closes, is an MCPServerEvent
-	// (ADR 0111 decision 8), emitted through the engine's own serialised sink — the handle
-	// resolveConfig put on Config.Events — so it shares the engine's mutex, reaches the journal and
-	// every observer in one linear stream, and leaves the holder's outbox in the order its state moved,
-	// never under its lock and never on the Update goroutine (mcpOutbox). Startup dialled before any
-	// of them listened, so the outbox starts out on the state startup left — the skipped repo servers'
-	// failed state with it — which the TUI is seeded with at construction (MCPHost.MCPServerStates)
-	// and every live Event journal at its birth (sessionHost.mcpSeed, attached below).
-	w.mcpSet.emitThrough(w.cfg.Events)
+	}, w.cfg.Events)
+	if err != nil {
+		return fmt.Errorf("apogee: connect MCP servers: %w", err)
+	}
+	w.mcpSet = mcpSet
+	w.announceTruncatedMCP(startup.truncated)
+	w.announceSkippedMCP(startup.skipped)
 	// The resolver a user reaction's mcp: handler calls through (adr-0076-amend-1029), over the live
 	// set rather than this startup snapshot, so a reconnect's servers are what the next firing
 	// resolves against without a restart. It reads w.mcpSet through a closure, never a method value:

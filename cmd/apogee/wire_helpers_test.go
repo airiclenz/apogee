@@ -267,6 +267,8 @@ type mcpFixture struct {
 	set   *liveMCP
 	tools *liveTools
 	built []string // the endpoints the whole set was rebuilt for, in order
+	// events is the sink the holder was born over (recordMCPEvents).
+	events *mcpEventRecorder
 }
 
 // newMCPFixture seeds start as ONE live server named `seed` with an empty config, so a reconnect onto
@@ -291,8 +293,9 @@ func newMCPFixtureWith(entries []mcpEntry, endpoint string, connect func([]mcp.S
 // newMCPFixtureDialling is newMCPFixtureWith over the whole connect seam, for a test that needs the
 // dial's context — a dial held open until it is cancelled.
 func newMCPFixtureDialling(entries []mcpEntry, endpoint string, connect mcpConnect) *mcpFixture {
-	f := &mcpFixture{}
-	f.set = newLiveMCP(entries, nil, connect)
+	f := &mcpFixture{events: &mcpEventRecorder{}}
+	f.set = startHeldMCP(entries, connect, f.events)
+	f.events.set = f.set
 	f.tools = newLiveTools(apogee.NewToolRegistry(), toolSetSpec{endpoint: endpoint}, func(spec toolSetSpec) *apogee.ToolRegistry {
 		f.built = append(f.built, spec.endpoint)
 		registry := apogee.NewToolRegistry()
@@ -304,6 +307,35 @@ func newMCPFixtureDialling(entries []mcpEntry, endpoint string, connect mcpConne
 		return registry
 	})
 	return f
+}
+
+// startHeldMCP is startLiveMCP over entries as the sessions startup opens — its dial hands each
+// server its entry's session, and it offers no login — with connect for every later dial and sink
+// for the holder's Events. A set that fails validation is a fixture written wrong, so it panics.
+func startHeldMCP(entries []mcpEntry, connect mcpConnect, sink apogee.EventSink) *liveMCP {
+	servers := make([]mcp.ServerConfig, 0, len(entries))
+	for _, entry := range entries {
+		servers = append(servers, entry.config)
+	}
+	set, _, err := startLiveMCP(context.Background(), servers, mcpGuard(nil, nil), heldMCPStartup(entries), connect, sink)
+	if err != nil {
+		panic("startHeldMCP: " + err.Error())
+	}
+	return set
+}
+
+// heldMCPStartup is a startup recipe that offers no login and whose dial hands each server the
+// session its entry holds.
+func heldMCPStartup(entries []mcpEntry) mcpStartupDial {
+	sessions := make(map[string]mcpSession, len(entries))
+	for _, entry := range entries {
+		sessions[entry.config.Name] = entry.session
+	}
+	return mcpStartupDial{
+		dial: func(_ context.Context, server mcp.ServerConfig, _, _ []string) (mcpSession, error) {
+			return sessions[server.Name], nil
+		},
+	}
 }
 
 // drainMCP is what the idle point does with a request, inline: it takes the queued dial jobs

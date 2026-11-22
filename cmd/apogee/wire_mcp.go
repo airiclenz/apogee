@@ -39,8 +39,8 @@ type mcpEntry struct {
 	session mcpSession
 	// cancel releases the context the session was dialled under, and is called only once the session
 	// is closed (mcpEntry.close): go-sdk's SSE transport binds its stream to the Connect context, so
-	// cancelling it any earlier would end the session under its tools. Nil for a session startup
-	// dialled, which lives on the wiring's own context.
+	// cancelling it any earlier would end the session under its tools. Every held session has one, a
+	// startup session too (startLiveMCP); it is nil only on a failed dial's entry, which holds none.
 	cancel context.CancelFunc
 }
 
@@ -74,19 +74,8 @@ type mcpServerState struct {
 	// result is the finished current-generation dial, held until a commit takes it in.
 	result *mcpDialResult
 	// hasFailed says the server's last finished dial failed: the retry-failed flag re-dials it. A
-	// repo server the startup connect skipped starts out failed (newLiveMCP).
+	// repo server the startup connect skipped starts out failed (startLiveMCP).
 	hasFailed bool
-	// skipCause is why the startup connect skipped the server — a project file its adoption pinned
-	// moved or could not be read — which the seed's failed state carries (emitThrough), its one
-	// reader. Nil for a server startup did not skip.
-	skipCause error
-}
-
-// mcpSkip is one repo server the startup connect skipped because a project file its adoption pinned
-// moved or could not be read (mcp.Client.Skipped): the config it is configured with, and why.
-type mcpSkip struct {
-	config mcp.ServerConfig
-	cause  error
 }
 
 // mcpDialResult is a finished dial: on success the entry it would install, on failure the cause
@@ -138,7 +127,7 @@ type liveMCP struct {
 	order []string
 
 	// servers is the last-requested configured set, by name (mcpServerState), and requested its names
-	// in config order — at startup, the connected servers' before the skipped ones' (newLiveMCP).
+	// in config order — startup's set first (startLiveMCP).
 	servers   map[string]*mcpServerState
 	requested []string
 	// jobs are the queued dials takeWork has not handed out yet, in request order.
@@ -169,68 +158,27 @@ type liveMCP struct {
 	// session it returns reports as skipped (mcpSession.Skipped).
 	connect mcpConnect
 
-	// outbox carries the lifecycle Events the holder decides on to the Event stream (mcpOutbox); nil
-	// until emitThrough points it at a sink, and then a holder that emits nothing.
+	// outbox carries the lifecycle Events the holder decides on to the Event stream (mcpOutbox). It is
+	// born with the holder (startLiveMCP), primed with the state startup left, and never replaced.
 	outbox *mcpOutbox
-}
-
-// emitThrough points the holder's MCP server lifecycle Events (ADR 0111 decision 8) at sink — the
-// engine's own serialised sink (apogee.SerializeEvents) — through an ordered outbox drained off the
-// caller (mcpOutbox). It is called once, as the holder is wired and before any request. The outbox
-// starts out holding the state startup left — each connected server with its tool count, in config
-// order, then each repo server the startup connect skipped, failed with the skip's cause — which is
-// what a view or a journal born before any Event is seeded with (stateEvents, seedJournal). Startup's
-// sessions are watched from here on (watch), not before: one that ended before the outbox existed is
-// reported lost on top of that seed, rather than vanishing from it.
-func (m *liveMCP) emitThrough(sink apogee.EventSink) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	outbox := &mcpOutbox{sink: sink}
-	for _, name := range m.requested {
-		if entry, isLive := m.entries[name]; isLive {
-			event := mcpServerEvent(entry.config, apogee.MCPServerConnected)
-			event.Tools = len(entry.session.Tools())
-			outbox.states.Fold(event)
-		}
-	}
-	for _, name := range m.requested {
-		if state := m.servers[name]; state.skipCause != nil {
-			event := mcpServerEvent(state.config, apogee.MCPServerFailed)
-			event.Cause = mcpSentence(state.skipCause)
-			outbox.states.Fold(event)
-		}
-	}
-	m.outbox = outbox
-	for _, name := range m.order {
-		m.watchLocked(name, m.entries[name].session)
-	}
 }
 
 // stateEvents is every server's current state as the Events emitted so far leave it, the startup
 // state included, as the snapshot a view born late is seeded with (ADR 0111 decision 8): one Event
 // per server — two where the connection that serves has tools the last phase does not carry
-// (sidepanel.MCPServers.Events) — in the order the servers were first reported. Nil before emitThrough.
-// It never waits on the drainer, so it may be read on any goroutine.
+// (sidepanel.MCPServers.Events) — in the order the servers were first reported. It never waits on the
+// drainer, so it may be read on any goroutine.
 func (m *liveMCP) stateEvents() []apogee.MCPServerEvent {
-	outbox := m.currentOutbox()
-	if outbox == nil {
-		return nil
-	}
-	return outbox.stateEvents()
+	return m.currentOutbox().stateEvents()
 }
 
 // seedJournal hands birth the servers' current state (stateEvents) under the outbox's emit-order
 // lock, so nothing drains past it until birth returns: a journal birth writes those Events and only
 // then starts recording the stream, so its seed comes before any live mcp_server line and no line is
-// lost between the two. Before emitThrough, birth is handed nothing. The caller must not be the TUI's
-// Update goroutine, which the drainer may be waiting on while it holds that lock (mcpOutbox).
+// lost between the two. The caller must not be the TUI's Update goroutine, which the drainer may be
+// waiting on while it holds that lock (mcpOutbox).
 func (m *liveMCP) seedJournal(birth func(states []apogee.MCPServerEvent)) {
-	outbox := m.currentOutbox()
-	if outbox == nil {
-		birth(nil)
-		return
-	}
-	outbox.seed(birth)
+	m.currentOutbox().seed(birth)
 }
 
 // currentOutbox reads the outbox under the lock, and releases it: a reader of the outbox's own state
@@ -244,9 +192,7 @@ func (m *liveMCP) currentOutbox() *mcpOutbox {
 // postLocked queues event for emission, in the order the holder's state moved. The caller holds
 // the lock; nothing is emitted under it (mcpOutbox).
 func (m *liveMCP) postLocked(event apogee.MCPServerEvent) {
-	if m.outbox != nil {
-		m.outbox.post(event)
-	}
+	m.outbox.post(event)
 }
 
 // postDisconnectedLocked queues the disconnected phase of state's server, for reason. The caller
@@ -398,41 +344,141 @@ func (o *mcpOutbox) seed(birth func(states []apogee.MCPServerEvent)) {
 	birth(o.stateEvents())
 }
 
-// wait blocks until every Event posted so far has been emitted. A nil outbox has none.
+// wait blocks until every Event posted so far has been emitted.
 func (o *mcpOutbox) wait() {
-	if o != nil {
-		o.drains.Wait()
-	}
+	o.drains.Wait()
 }
 
-// newLiveMCP holds the servers this run's startup connect left as the last-requested set — the
-// connected ones, in config order, then the skipped ones, in config order — and the recipe for
-// dialling another. Each is admitted, since startup refuses a denied endpoint. A skipped repo server
-// is an ordinary failed server (ADR 0109 decision 7, adr-0109-amend-1122): it holds no session, and
-// only a request that changes its config (a re-adoption moves its pin), the retry-failed flag, or a
-// restart dials it again — never an unrelated request.
-func newLiveMCP(entries []mcpEntry, skipped []mcpSkip, connect mcpConnect) *liveMCP {
-	m := &liveMCP{connect: connect, servers: make(map[string]*mcpServerState, len(entries)+len(skipped))}
-	held := make(map[string]mcpEntry, len(entries))
-	order := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		held[entry.config.Name] = entry
-		order = append(order, entry.config.Name)
-		m.servers[entry.config.Name] = &mcpServerState{config: entry.config, isAdmitted: true}
+// mcpStartupDial is the startup connect's own recipe (ADR 0109 decision 11). It differs from the
+// holder's mid-session connect in one respect: it may offer a login on stderr, which is still a safe
+// place to write before the alternate screen opens.
+type mcpStartupDial struct {
+	// login runs once over the whole validated set, before the first dial: the offer of a login to
+	// every `auth: oauth` server with no saved token, so every offer precedes every connect. Nil offers
+	// none.
+	login func(ctx context.Context, servers []mcp.ServerConfig) error
+	// dial connects one server, as mcpConnect does, offering it a login once more when its dial still
+	// fails for want of one.
+	dial mcpConnect
+}
+
+// mcpStartupReport is what the startup connect has to announce: each server's tool list that
+// discovery cut short, and each repo server it skipped for a moved or unreadable pin, in config order.
+type mcpStartupReport struct {
+	truncated []mcp.Truncation
+	skipped   []mcp.Denied
+}
+
+// startLiveMCP builds the holder over servers and runs the startup connect as its first request:
+// synchronous, and all-or-nothing, so the caller makes a failure fatal (ADR 0109 decision 11). The
+// whole set is validated first (mcp.ValidateServers), startup's login offers run once (login), and
+// then each server is dialled in config order through startup.dial under guard. A failure closes
+// every session opened before it and returns that failure's own error, with no holder.
+//
+// Each session is dialled under a context of its own derived from ctx — which must live as long as
+// the session — cancelled once the session is closed, as a later dial's is. A repo server the
+// connect skipped for a moved or unreadable pin holds no session: it is held as an ordinary failed
+// server (ADR 0109 decision 7, adr-0109-amend-1122), so only a request that changes its config (a
+// re-adoption moves its pin), the retry-failed flag, or a restart dials it again — never an
+// unrelated request. Every other server is held admitted, since startup refuses a denied endpoint.
+//
+// The outbox is born here over sink (mcpOutbox), primed with the state startup left — each connected
+// server with its tool count, in config order, then each skipped one, failed with the skip's cause —
+// rather than fed Events: that state is what a view or a journal born before any Event is seeded with (stateEvents,
+// seedJournal), so nothing is emitted twice and no Reaction fires on it. Every startup session is
+// watched from here on (watch): one that ended while startup was still dialling is reported lost on
+// top of that seed. connect is the holder's recipe for every later dial (mcpConnect).
+func startLiveMCP(
+	ctx context.Context,
+	servers []mcp.ServerConfig,
+	guard security.URLGuard,
+	startup mcpStartupDial,
+	connect mcpConnect,
+	sink apogee.EventSink,
+) (*liveMCP, mcpStartupReport, error) {
+	if err := mcp.ValidateServers(servers); err != nil {
+		return nil, mcpStartupReport{}, err
 	}
-	requested := slices.Clone(order)
-	for _, skip := range skipped {
-		requested = append(requested, skip.config.Name)
-		m.servers[skip.config.Name] = &mcpServerState{
-			config:     skip.config,
-			isAdmitted: true,
-			hasFailed:  true,
-			skipCause:  skip.cause,
+	if startup.login != nil {
+		if err := startup.login(ctx, servers); err != nil {
+			return nil, mcpStartupReport{}, err
 		}
 	}
-	m.requested = requested
-	m.install(held, order)
-	return m
+	m := &liveMCP{
+		connect: connect,
+		servers: make(map[string]*mcpServerState, len(servers)),
+		outbox:  &mcpOutbox{sink: sink},
+	}
+	entries := make(map[string]mcpEntry, len(servers))
+	order := make([]string, 0, len(servers))
+	var report mcpStartupReport
+	var skips []apogee.MCPServerEvent
+	for _, server := range servers {
+		entry, skipped, err := dialStartupServer(ctx, server, guard, startup.dial)
+		if err != nil {
+			opened := make([]mcpEntry, 0, len(order))
+			for _, name := range order {
+				opened = append(opened, entries[name])
+			}
+			// The launch is aborting over err, the failure worth reporting; a close that fails
+			// describes a connection nobody is going to use either way.
+			_ = closeInParallel(opened)
+			return nil, mcpStartupReport{}, err
+		}
+		state := &mcpServerState{config: server, isAdmitted: true}
+		m.servers[server.Name] = state
+		m.requested = append(m.requested, server.Name)
+		if len(skipped) > 0 {
+			state.hasFailed = true
+			report.skipped = append(report.skipped, skipped...)
+			event := mcpServerEvent(server, apogee.MCPServerFailed)
+			event.Cause = mcpSentence(skipped[0].Err)
+			skips = append(skips, event)
+			continue
+		}
+		report.truncated = append(report.truncated, entry.session.Truncated()...)
+		entries[server.Name] = entry
+		order = append(order, server.Name)
+		event := mcpServerEvent(server, apogee.MCPServerConnected)
+		event.Tools = len(entry.session.Tools())
+		m.outbox.states.Fold(event)
+	}
+	for _, event := range skips {
+		m.outbox.states.Fold(event)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.installLocked(entries, order)
+	for _, name := range order {
+		m.watchLocked(name, entries[name].session)
+	}
+	return m, report, nil
+}
+
+// dialStartupServer dials ONE server for the startup connect under a context of its own derived from
+// ctx, through dial and guard's host lists: the entry it would hold, or — the connect skipped the
+// server for a moved or unreadable pin — no entry and the skip, its session closed, since it holds
+// nothing. A failed or skipped dial's context is released at once.
+func dialStartupServer(
+	ctx context.Context,
+	server mcp.ServerConfig,
+	guard security.URLGuard,
+	dial mcpConnect,
+) (mcpEntry, []mcp.Denied, error) {
+	sessionCtx, cancel := context.WithCancel(ctx)
+	session, err := dial(sessionCtx, server, guard.AllowHosts, guard.DenyHosts)
+	if err != nil {
+		cancel()
+		return mcpEntry{}, nil, err
+	}
+	if skipped := session.Skipped(); len(skipped) > 0 {
+		// A session that skipped its one server holds nothing; a close that fails leaves the human
+		// nothing to do about it.
+		_ = closeSession(session)
+		cancel()
+		return mcpEntry{}, skipped, nil
+	}
+	return mcpEntry{config: server, session: session, cancel: cancel}, nil, nil
 }
 
 // tools surfaces what the connected servers advertise, in config order, for folding into a registry
@@ -1115,14 +1161,8 @@ func (m *liveMCP) snapshot() (map[string]mcpEntry, []string) {
 	return m.entries, m.order
 }
 
-// install puts entries and their order in force under the lock. Neither is written after this.
-func (m *liveMCP) install(entries map[string]mcpEntry, order []string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.installLocked(entries, order)
-}
-
-// installLocked is install for a caller that already holds the lock.
+// installLocked puts entries and their order in force. Neither is written after this. The caller
+// holds the lock.
 func (m *liveMCP) installLocked(entries map[string]mcpEntry, order []string) {
 	m.entries, m.order = entries, order
 }
