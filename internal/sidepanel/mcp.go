@@ -28,9 +28,11 @@ type MCPServerRow struct {
 	Reason    domain.MCPDisconnectReason
 }
 
-// MCPServers is the folded MCP server state of one process, keyed by server name, the rows in the
-// order their servers were first reported. Every Driver view folds the same MCPServerEvents into
-// it — live, a watched journal's, and the startup seed — so they all answer the same rows.
+// MCPServers is the folded MCP server state of one process, keyed by the raw server name, the rows
+// in the order their servers were first reported. It is the one fold of MCPServerEvents: every
+// Driver view folds the same Events into it — live, a watched journal's, and the startup seed — so
+// they all answer the same rows, and the process's own MCP outbox folds what it emits into one too,
+// whose Events are the seed a view or journal born late starts from.
 //
 // It is a plain value, safe in a value-copied holder (ADR 0011): Fold replaces its slice whole and
 // never writes into the one a copy still holds. The zero value holds no server.
@@ -38,17 +40,18 @@ type MCPServers struct {
 	rows []mcpEntry
 }
 
-// mcpEntry is one row with the raw server name it is keyed by: the row's own Server is stripped,
-// and two raw names that strip alike are still two servers.
+// mcpEntry is one server's raw last Event, which it is keyed by (last.Server), and its row. The
+// row's own Server is stripped, and two raw names that strip alike are still two servers; the last
+// Event stays raw so Events restates it unstripped.
 type mcpEntry struct {
-	key string
-	row MCPServerRow
+	last domain.MCPServerEvent
+	row  MCPServerRow
 }
 
 // Fold applies one MCPServerEvent. A disconnected server removed from the configuration drops its
 // row; every other phase sets or updates the server's row.
 func (s *MCPServers) Fold(event domain.MCPServerEvent) {
-	at := slices.IndexFunc(s.rows, func(entry mcpEntry) bool { return entry.key == event.Server })
+	at := slices.IndexFunc(s.rows, func(entry mcpEntry) bool { return entry.last.Server == event.Server })
 	if event.Phase == domain.MCPServerDisconnected && event.Reason == domain.MCPDisconnectRemoved {
 		if at >= 0 {
 			s.rows = slices.Delete(slices.Clone(s.rows), at, at+1)
@@ -60,7 +63,7 @@ func (s *MCPServers) Fold(event domain.MCPServerEvent) {
 		previous = s.rows[at].row
 	}
 	next := slices.Clone(s.rows)
-	entry := mcpEntry{key: event.Server, row: foldMCPRow(previous, event)}
+	entry := mcpEntry{last: event, row: foldMCPRow(previous, event)}
 	if at >= 0 {
 		next[at] = entry
 	} else {
@@ -105,6 +108,28 @@ func (s MCPServers) Rows() []MCPServerRow {
 		rows = append(rows, entry.row)
 	}
 	return rows
+}
+
+// Events restates the state as MCPServerEvents a fold replays to the same rows, in the order the
+// servers were first reported, as a fresh slice: each server's raw last Event, preceded by a
+// connected one carrying the serving connection's tool count when that last Event is a dialling or
+// kept-failed phase, which carries the count forward rather than restating it. The text is the
+// Events' own, unstripped — a journal records what was emitted, and Rows is where it is stripped.
+func (s MCPServers) Events() []domain.MCPServerEvent {
+	events := make([]domain.MCPServerEvent, 0, len(s.rows))
+	for _, entry := range s.rows {
+		last := entry.last
+		carriesForward := last.Phase == domain.MCPServerDialling ||
+			last.Phase == domain.MCPServerFailed && last.Kept
+		if carriesForward && entry.row.Tools > 0 {
+			serving := last
+			serving.Phase, serving.Tools = domain.MCPServerConnected, entry.row.Tools
+			serving.Cause, serving.Kept, serving.Reason = "", false, ""
+			events = append(events, serving)
+		}
+		events = append(events, last)
+	}
+	return events
 }
 
 // IsLive reports whether any server's row is not connected: one dialling, failed or disconnected.

@@ -210,7 +210,77 @@ func TestMCPServersFoldLeavesACopyAlone(t *testing.T) {
 	if got := original.Rows(); !slices.Equal(got, want) {
 		t.Errorf("the copy's fold moved the original: Rows() = %+v, want %+v", got, want)
 	}
+	wantEvents := []domain.MCPServerEvent{
+		mcpEvent("files", domain.MCPServerDialling), mcpEvent("web", domain.MCPServerDialling),
+	}
+	if got := original.Events(); !slices.Equal(got, wantEvents) {
+		t.Errorf("the copy's fold moved the original: Events() = %+v, want %+v", got, wantEvents)
+	}
 	if got := updated.Rows(); len(got) != 1 || got[0].Phase != domain.MCPServerConnected {
 		t.Errorf("the folded copy answers %+v, want files connected alone", got)
+	}
+}
+
+// TestMCPServersEventsReplayTheFold: Events restates the stream folded so far as Events a fold
+// replays to the same rows the whole stream folds to — a dialling or kept-failed server keeps the
+// serving connection's tool count through a connected Event ahead of its last phase, a server
+// removed from the configuration drops out, and the servers keep the order they were first reported.
+func TestMCPServersEventsReplayTheFold(t *testing.T) {
+	t.Parallel()
+	connected := func(server string, tools int) domain.MCPServerEvent {
+		event := mcpEvent(server, domain.MCPServerConnected)
+		event.Tools = tools
+		return event
+	}
+	kept := mcpEvent("kept", domain.MCPServerFailed)
+	kept.Cause, kept.Kept = "refused", true
+	lost := mcpEvent("lost", domain.MCPServerFailed)
+	lost.Cause = "refused"
+	removed := mcpEvent("gone", domain.MCPServerDisconnected)
+	removed.Reason = domain.MCPDisconnectRemoved
+	denied := mcpEvent("closed", domain.MCPServerDisconnected)
+	denied.Reason = domain.MCPDisconnectDenied
+	stream := []domain.MCPServerEvent{
+		connected("dialling", 5), connected("kept", 3), connected("lost", 2), connected("gone", 1),
+		connected("closed", 4), mcpEvent("dialling", domain.MCPServerDialling), kept, lost, removed, denied,
+	}
+
+	var whole MCPServers
+	for _, event := range stream {
+		whole.Fold(event)
+	}
+	seed := whole.Events()
+	var seeded MCPServers
+	for _, event := range seed {
+		seeded.Fold(event)
+	}
+
+	if got, want := seeded.Rows(), whole.Rows(); !slices.Equal(got, want) {
+		t.Errorf("the seed folds to %+v; want the whole stream's %+v", got, want)
+	}
+	want := []domain.MCPServerEvent{
+		connected("dialling", 5), mcpEvent("dialling", domain.MCPServerDialling),
+		connected("kept", 3), kept, lost, denied,
+	}
+	if !slices.Equal(seed, want) {
+		t.Errorf("Events() = %+v; want %+v", seed, want)
+	}
+}
+
+// TestMCPServersEventsKeepRawText: Events restates the Events' own text, escapes and all, for the
+// journal and the seed to record, while Rows strips the same text for display.
+func TestMCPServersEventsKeepRawText(t *testing.T) {
+	t.Parallel()
+	escaped := mcpEvent("ev\x1b[31mil", domain.MCPServerFailed)
+	escaped.Transport, escaped.Cause = "std\x1b]0;x\x07io", "no\x1b[2Jpe"
+	var servers MCPServers
+	servers.Fold(escaped)
+
+	if got, want := servers.Events(), []domain.MCPServerEvent{escaped}; !slices.Equal(got, want) {
+		t.Errorf("Events() = %+v; want the raw %+v", got, want)
+	}
+	wantRows := []MCPServerRow{{Server: "evil", Transport: "stdio", Phase: domain.MCPServerFailed, Cause: "nope"}}
+	if got := servers.Rows(); !slices.Equal(got, wantRows) {
+		t.Errorf("Rows() = %+v; want the stripped %+v", got, wantRows)
 	}
 }

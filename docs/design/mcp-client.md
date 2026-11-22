@@ -302,7 +302,10 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   resumed, or reborn after `/clear`) right after `run_started`. Every Driver view folds those Events
   into one per-server state (`internal/sidepanel`'s `MCPServers`), which the read-only `/mcp` report
   pane and the side panel's `mcp` section read, and a watch folds the watched process's journal
-  lines instead. The transcript notes stay; they are no longer the only place an outcome is seen.
+  lines instead. That fold is the only one: the outbox folds each Event it emits into an
+  `MCPServers` of its own, and the seed is its `Events()` — each server's raw last Event, behind a
+  `connected` one restating the serving tool count where the last phase carries it forward — so
+  the seed replays to the rows the whole stream folds to; only `Rows()` strips the text. The transcript notes stay; they are no longer the only place an outcome is seen.
 - **A session that ends on its own is lost (ADR 0111, amendment 2026-11-09).** `Client` parks one
   watcher per session on the SDK's `ClientSession.Wait()` and reports, once, a session that ends
   while the Client is neither retired nor closed: `Lost()` closes and `LostCause()` holds the

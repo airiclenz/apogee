@@ -138,7 +138,9 @@ docs/design/mcp-client.md — token-store paragraph ("keyed by the server name a
 
 **Commit:** `docs(adr): ADR 0095 amendment — a stored token matches on client id too`
 
-## 4. One MCP state fold serves the seed and the side panel
+## 4. One MCP state fold serves the seed and the side panel — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): `mcpEntry` keeps the raw last Event in place of its separate `key` string — the entry is keyed by `last.Server`, still the raw name — and `Events()` reads the carried tool count from the row's `Tools`, which follows the serving connection exactly as `mcpServerStates.tools` did.
 
 **What:**
 **Goal:** One fold of `MCPServerEvent`s exists: `sidepanel.MCPServers`. It keeps each server's raw last Event and tool count, and `Events()` restates the state for the journal and TUI seed with the raw text unstripped. `Rows()` alone strips escapes. `cmd/apogee` has no separate state fold.

@@ -25,6 +25,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/sidepanel"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -181,11 +182,11 @@ func (m *liveMCP) emitThrough(sink apogee.EventSink, skipped []apogee.MCPServerE
 		if entry, isLive := m.entries[name]; isLive {
 			event := mcpServerEvent(entry.config, apogee.MCPServerConnected)
 			event.Tools = len(entry.session.Tools())
-			outbox.states = outbox.states.fold(event)
+			outbox.states.Fold(event)
 		}
 	}
 	for _, event := range skipped {
-		outbox.states = outbox.states.fold(event)
+		outbox.states.Fold(event)
 	}
 	m.outbox = outbox
 	m.skipped = slices.Clone(skipped)
@@ -197,7 +198,7 @@ func (m *liveMCP) emitThrough(sink apogee.EventSink, skipped []apogee.MCPServerE
 // stateEvents is every server's current state as the Events emitted so far leave it, the startup
 // state included, as the snapshot a view born late is seeded with (ADR 0111 decision 8): one Event
 // per server — two where the connection that serves has tools the last phase does not carry
-// (mcpServerStates.events) — in the order the servers were first reported. Nil before emitThrough.
+// (sidepanel.MCPServers.Events) — in the order the servers were first reported. Nil before emitThrough.
 // It never waits on the drainer, so it may be read on any goroutine.
 func (m *liveMCP) stateEvents() []apogee.MCPServerEvent {
 	outbox := m.currentOutbox()
@@ -328,7 +329,7 @@ type mcpOutbox struct {
 	mu         sync.Mutex
 	pending    []apogee.MCPServerEvent
 	isDraining bool
-	states     mcpServerStates
+	states     sidepanel.MCPServers
 	// drains counts the drainer running, so teardown can wait for the Events already posted.
 	drains sync.WaitGroup
 }
@@ -364,17 +365,18 @@ func (o *mcpOutbox) drain() {
 		for _, event := range batch {
 			o.sink.Emit(event)
 			o.mu.Lock()
-			o.states = o.states.fold(event)
+			o.states.Fold(event)
 			o.mu.Unlock()
 		}
 	}
 }
 
-// stateEvents is the servers' state as the Events emitted so far leave it (mcpServerStates.events).
+// stateEvents is the servers' state as the Events emitted so far leave it, restated raw by the one
+// MCP state fold (sidepanel.MCPServers.Events).
 func (o *mcpOutbox) stateEvents() []apogee.MCPServerEvent {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return o.states.events()
+	return o.states.Events()
 }
 
 // seed hands birth the servers' state under the emit-order lock, so no Event is emitted until birth
@@ -383,67 +385,6 @@ func (o *mcpOutbox) seed(birth func(states []apogee.MCPServerEvent)) {
 	o.emitMu.Lock()
 	defer o.emitMu.Unlock()
 	birth(o.stateEvents())
-}
-
-// mcpServerStates is each server's state as a stream of MCPServerEvents leaves it, in the order the
-// servers were first reported: the last Event and the tool count of the connection that serves,
-// which a dialling phase or a failed one whose previous connection was kept carries forward rather
-// than restating (sidepanel.MCPServers folds it the same way). It is the outbox's record of what it
-// has emitted, and the seed a view or journal born late starts from.
-type mcpServerStates []mcpServerStateEntry
-
-// mcpServerStateEntry is one server's last Event and the tool count of the connection serving it.
-type mcpServerStateEntry struct {
-	last  apogee.MCPServerEvent
-	tools int
-}
-
-// fold moves the states by event into a fresh slice: a server removed from the configuration drops
-// out, and any other phase sets the server's last Event, its tool count following the connection
-// that serves.
-func (s mcpServerStates) fold(event apogee.MCPServerEvent) mcpServerStates {
-	at := slices.IndexFunc(s, func(entry mcpServerStateEntry) bool { return entry.last.Server == event.Server })
-	if event.Phase == apogee.MCPServerDisconnected && event.Reason == apogee.MCPDisconnectRemoved {
-		if at < 0 {
-			return s
-		}
-		return slices.Delete(slices.Clone(s), at, at+1)
-	}
-	entry := mcpServerStateEntry{last: event}
-	if at >= 0 {
-		entry.tools = s[at].tools
-	}
-	switch {
-	case event.Phase == apogee.MCPServerConnected:
-		entry.tools = event.Tools
-	case event.Phase == apogee.MCPServerDisconnected, event.Phase == apogee.MCPServerFailed && !event.Kept:
-		entry.tools = 0
-	}
-	next := slices.Clone(s)
-	if at >= 0 {
-		next[at] = entry
-		return next
-	}
-	return append(next, entry)
-}
-
-// events restates the states as Events a fold replays to the same rows: each server's last Event,
-// preceded by a connected one carrying the serving connection's tool count when that last Event is
-// a dialling or kept-failed phase that does not carry the count itself.
-func (s mcpServerStates) events() []apogee.MCPServerEvent {
-	out := make([]apogee.MCPServerEvent, 0, len(s))
-	for _, entry := range s {
-		last := entry.last
-		carriesForward := last.Phase == apogee.MCPServerDialling || last.Phase == apogee.MCPServerFailed && last.Kept
-		if carriesForward && entry.tools > 0 {
-			serving := last
-			serving.Phase, serving.Tools = apogee.MCPServerConnected, entry.tools
-			serving.Cause, serving.Kept, serving.Reason = "", false, ""
-			out = append(out, serving)
-		}
-		out = append(out, last)
-	}
-	return out
 }
 
 // wait blocks until every Event posted so far has been emitted. A nil outbox has none.

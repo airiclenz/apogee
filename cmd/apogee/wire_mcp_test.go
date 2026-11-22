@@ -16,7 +16,6 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
-	"github.com/airiclenz/apogee/internal/sidepanel"
 	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -1524,55 +1523,6 @@ func TestLiveMCPNeverEmitsUnderLock(t *testing.T) {
 		"old disconnected removed", "new dialling", "new connected 1")
 	if events.lockHeld != 0 {
 		t.Errorf("%d Event(s) were emitted while the holder's lock was held", events.lockHeld)
-	}
-}
-
-// TestMCPSeedStatesReplayTheFold: the outbox's state restates the stream it has emitted as Events a
-// fold replays to the same rows the whole stream folds to — a dialling or kept-failed server keeps
-// the serving connection's tool count through a connected line ahead of its last phase, a server
-// removed from the configuration drops out, and the servers keep the order they were first reported.
-func TestMCPSeedStatesReplayTheFold(t *testing.T) {
-	t.Parallel()
-	connected := func(server string, tools int) apogee.MCPServerEvent {
-		return apogee.MCPServerEvent{Server: server, Transport: "stdio", Phase: apogee.MCPServerConnected, Tools: tools}
-	}
-	phase := func(server string, phase apogee.MCPServerPhase) apogee.MCPServerEvent {
-		return apogee.MCPServerEvent{Server: server, Transport: "stdio", Phase: phase}
-	}
-	kept := phase("kept", apogee.MCPServerFailed)
-	kept.Cause, kept.Kept = "refused", true
-	lost := phase("lost", apogee.MCPServerFailed)
-	lost.Cause = "refused"
-	removed := phase("gone", apogee.MCPServerDisconnected)
-	removed.Reason = apogee.MCPDisconnectRemoved
-	denied := phase("closed", apogee.MCPServerDisconnected)
-	denied.Reason = apogee.MCPDisconnectDenied
-	stream := []apogee.MCPServerEvent{
-		connected("dialling", 5), connected("kept", 3), connected("lost", 2), connected("gone", 1),
-		connected("closed", 4), phase("dialling", apogee.MCPServerDialling), kept, lost, removed, denied,
-	}
-
-	var states mcpServerStates
-	var whole sidepanel.MCPServers
-	for _, event := range stream {
-		states = states.fold(event)
-		whole.Fold(event)
-	}
-	seed := states.events()
-	var seeded sidepanel.MCPServers
-	for _, event := range seed {
-		seeded.Fold(event)
-	}
-
-	if got, want := seeded.Rows(), whole.Rows(); !slices.Equal(got, want) {
-		t.Errorf("the seed folds to %+v; want the whole stream's %+v", got, want)
-	}
-	want := []string{
-		"dialling connected 5", "dialling dialling", "kept connected 3", "kept failed kept: refused",
-		"lost failed: refused", "closed disconnected denied",
-	}
-	if got := mcpEventLines(seed); !slices.Equal(got, want) {
-		t.Errorf("the seed is %q; want %q", got, want)
 	}
 }
 

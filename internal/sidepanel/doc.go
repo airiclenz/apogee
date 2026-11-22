@@ -11,7 +11,8 @@
 // Files:
 //   - sidepanel.go — the per-run panel State: the Event fold and each section's rows, summary and
 //     live predicate (sub-agents, tasks, changed files, usage).
-//   - mcp.go — MCPServers, the per-server MCP lifecycle fold (ADR 0111 decisions 9 and 10) a Driver
-//     holds beside the State: one row per configured server, and whether any is not connected.
+//   - mcp.go — MCPServers, the one per-server MCP lifecycle fold (ADR 0111 decisions 9 and 10): a
+//     Driver holds it beside the State for one row per configured server and whether any is not
+//     connected, and the MCP outbox holds one for the state it restates as the startup seed.
 //   - doc.go — this map.
 package sidepanel
