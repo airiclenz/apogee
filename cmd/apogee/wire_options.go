@@ -22,7 +22,6 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
-	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/recall"
@@ -581,18 +580,12 @@ func withBootUnreportedKeys(current, boot map[string]bool) map[string]bool {
 // that FAILED
 // changed no file and refreshes nothing.
 //
-// The keys of the `ui.side-panel:` block go to the writer that owns that block
-// (config.SaveSidePanelSetting), the same writer WriteSidePanelSection persists one section's mode
-// through; the scalar writer reaches the block's depth too, but the host routes the block as one.
-// That writer answers no landed text, so a side-panel key answers the value it wrote.
+// The keys of the `ui.side-panel:` block go through the same writer: its two scalars splice at the
+// block's depth, and its two lists — `sections` and `folded` — take a one-section delta from a pin,
+// hide or fold gesture, merged into the file's own list under the edit lock, landed being the list
+// the file then resolves to.
 func (h settingsHost) Write(key, value string) (string, error) {
-	save := config.SaveConfigSetting
-	if config.IsSidePanelKey(key) {
-		save = func(path, key, value string) (string, error) {
-			return value, config.SaveSidePanelSetting(path, key, value)
-		}
-	}
-	landed, err := save(h.configPath, key, value)
+	landed, err := config.SaveConfigSetting(h.configPath, key, value)
 	if err != nil {
 		return "", err
 	}
@@ -600,45 +593,11 @@ func (h settingsHost) Write(key, value string) (string, error) {
 	return landed, nil
 }
 
-// WriteSidePanelSection persists one side-panel section's mode — a pin, unpin or hide (ADR 0110) —
-// through the `ui.side-panel:` block's writer, and answers the list the file now resolves to. A
-// landed write re-takes the external-edit baseline for Write's reason (ADR 0041 decision 8); a
-// refused one changed no file and refreshes nothing.
-func (h settingsHost) WriteSidePanelSection(section domain.SidePanelSection,
-	mode domain.SidePanelMode) (domain.SidePanelSections, error) {
-	sections, err := config.SaveSidePanelSection(h.configPath, section, mode)
-	if err != nil {
-		return "", err
-	}
-	h.edits.refresh()
-	return sections, nil
-}
-
-// WriteSidePanelFolded persists one side-panel section's fold through the `ui.side-panel:` block's
-// writer (config.SaveSidePanelFold), and answers the list the file now holds. A landed write
-// re-takes the external-edit baseline for Write's reason (ADR 0041 decision 8); a refused one
-// changed no file and refreshes nothing.
-func (h settingsHost) WriteSidePanelFolded(section domain.SidePanelSection,
-	folded bool) (domain.SidePanelFolded, error) {
-	written, err := config.SaveSidePanelFold(h.configPath, section, folded)
-	if err != nil {
-		return "", err
-	}
-	h.edits.refresh()
-	return written, nil
-}
-
 // Reset is the same write in reverse: the key's active line is REMOVED, so the value goes back to
 // the binary's default rather than being pinned to today's spelling of it. It refreshes the same
-// baseline for the same reason — a removed line is a change to the file like any other. A key of the
-// `ui.side-panel:` block goes to that block's own reset (config.ResetSidePanelSetting), for Write's
-// reason.
+// baseline for the same reason — a removed line is a change to the file like any other.
 func (h settingsHost) Reset(key string) error {
-	reset := config.ResetConfigSetting
-	if config.IsSidePanelKey(key) {
-		reset = config.ResetSidePanelSetting
-	}
-	if err := reset(h.configPath, key); err != nil {
+	if err := config.ResetConfigSetting(h.configPath, key); err != nil {
 		return err
 	}
 	h.edits.refresh()

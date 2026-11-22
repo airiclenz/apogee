@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee"
@@ -44,29 +43,30 @@ func TestRunRootWiresTheConfiguredCurrency(t *testing.T) {
 	}
 }
 
-// A pin, unpin or hide persisted through the host lands in the file, answers the list the file now
-// resolves to, and re-takes the external-edit baseline (ADR 0041 decision 8): the watcher reports
-// nothing for apogee's own write, so the session does not apply it a second time.
+// A pin, unpin or hide persisted through the host's Write as a one-section delta lands in the file,
+// answers the list the file now resolves to, and re-takes the external-edit baseline (ADR 0041
+// decision 8): the watcher reports nothing for apogee's own write, so the session does not apply it
+// a second time.
 func TestSettingsHostSidePanelSectionsWriteRefreshesTheBaseline(t *testing.T) {
 	t.Parallel()
 	c := newWatchedConfig(t, "ui:\n  side-panel:\n    show: auto\n")
 	h := settingsHost{configPath: c.path, edits: c.edits}
 
-	sections, err := h.WriteSidePanelSection(domain.SidePanelTasks, domain.SidePanelModePinned)
+	landed, err := h.Write(domain.UIKeySidePanelSections, "tasks: pinned")
 
 	if err != nil {
-		t.Fatalf("WriteSidePanelSection: %v", err)
+		t.Fatalf("Write sections: %v", err)
 	}
 	const want = "[sub-agents: auto, tasks: pinned, changed-files: auto, usage: auto, mcp: auto]"
-	if sections != want {
-		t.Errorf("sections = %q, want %q", sections, want)
+	if landed != want {
+		t.Errorf("landed = %q, want %q", landed, want)
 	}
 	data, err := os.ReadFile(c.path)
 	if err != nil {
 		t.Fatalf("read the config back: %v", err)
 	}
-	if !strings.Contains(string(data), "sections: "+want) {
-		t.Errorf("the config does not carry the list:\n%s", data)
+	if wantFile := "ui:\n  side-panel:\n    show: auto\n    sections: " + want + "\n"; string(data) != wantFile {
+		t.Errorf("config =\n%s\nwant\n%s", data, wantFile)
 	}
 	applied, err := c.reload(t, "apogee's own sections write")
 	if err != nil {
@@ -77,29 +77,30 @@ func TestSettingsHostSidePanelSectionsWriteRefreshesTheBaseline(t *testing.T) {
 	}
 }
 
-// A section's fold persisted through the host lands in the file, answers the list the file now
-// holds, reloads as that list, and re-takes the external-edit baseline (ADR 0041 decision 8): the
-// watcher reports nothing for apogee's own write, so the session does not apply it a second time.
+// A section's fold persisted through the host's Write as a one-section delta lands in the file,
+// answers the list the file now holds, reloads as that list, and re-takes the external-edit baseline
+// (ADR 0041 decision 8): the watcher reports nothing for apogee's own write, so the session does not
+// apply it a second time.
 func TestSettingsHostSidePanelFoldedWriteRoundTrips(t *testing.T) {
 	t.Parallel()
 	c := newWatchedConfig(t, "ui:\n  side-panel:\n    show: auto\n")
 	h := settingsHost{configPath: c.path, edits: c.edits}
 
-	folded, err := h.WriteSidePanelFolded(domain.SidePanelUsage, true)
+	landed, err := h.Write(domain.UIKeySidePanelFolded, "usage: folded")
 
 	if err != nil {
-		t.Fatalf("WriteSidePanelFolded: %v", err)
+		t.Fatalf("Write folded: %v", err)
 	}
 	const want = "[usage]"
-	if folded != want {
-		t.Errorf("folded = %q, want %q", folded, want)
+	if landed != want {
+		t.Errorf("landed = %q, want %q", landed, want)
 	}
 	data, err := os.ReadFile(c.path)
 	if err != nil {
 		t.Fatalf("read the config back: %v", err)
 	}
-	if !strings.Contains(string(data), "folded: "+want) {
-		t.Errorf("the config does not carry the list:\n%s", data)
+	if wantFile := "ui:\n  side-panel:\n    show: auto\n    folded: " + want + "\n"; string(data) != wantFile {
+		t.Errorf("config =\n%s\nwant\n%s", data, wantFile)
 	}
 	opts, err := config.LoadFileConfig(c.path, os.ReadFile, func(string) {})
 	if err != nil {
@@ -117,9 +118,9 @@ func TestSettingsHostSidePanelFoldedWriteRoundTrips(t *testing.T) {
 	}
 }
 
-// The `/settings` Reset of `ui.side-panel.show` goes to the block's writer too — before it did, the
-// pane announced a key it then could not reset — and re-takes the baseline as every landed write
-// does. The file reads back at the default.
+// The `/settings` Reset of `ui.side-panel.show` reaches the block's depth through the generic
+// writer — before the block was reachable, the pane announced a key it then could not reset — and
+// re-takes the baseline as every landed write does. The file reads back at the default.
 func TestSettingsHostResetsSidePanelShow(t *testing.T) {
 	t.Parallel()
 	c := newWatchedConfig(t, "ui:\n  spinner: glitter\n  side-panel:\n    show: \"off\"\n    sections: [usage: hidden]\n")
@@ -152,8 +153,9 @@ func TestSettingsHostResetsSidePanelShow(t *testing.T) {
 	}
 }
 
-// The `/settings` write of either `ui.side-panel` key goes to the block's writer — the host routes
-// the whole block there — and re-takes the baseline as every landed write does.
+// A write of either `ui.side-panel` key — the `show` scalar and a `sections` delta — goes through
+// the generic writer at the block's depth, answers the key's landed text, and re-takes the baseline
+// as every landed write does.
 func TestSettingsHostWritesBothSidePanelSectionsBlockKeys(t *testing.T) {
 	t.Parallel()
 	c := newWatchedConfig(t, "ui:\n  side-panel:\n    show: auto\n")
@@ -162,16 +164,20 @@ func TestSettingsHostWritesBothSidePanelSectionsBlockKeys(t *testing.T) {
 	if _, err := h.Write(domain.UIKeySidePanelShow, "off"); err != nil {
 		t.Fatalf("Write show: %v", err)
 	}
-	if _, err := h.Write(domain.UIKeySidePanelSections, "[usage: hidden]"); err != nil {
+	landed, err := h.Write(domain.UIKeySidePanelSections, "usage: hidden")
+	if err != nil {
 		t.Fatalf("Write sections: %v", err)
 	}
 
+	const sections = "[sub-agents: auto, tasks: auto, changed-files: auto, usage: hidden, mcp: auto]"
+	if landed != sections {
+		t.Errorf("landed = %q, want %q", landed, sections)
+	}
 	data, err := os.ReadFile(c.path)
 	if err != nil {
 		t.Fatalf("read the config back: %v", err)
 	}
-	want := "ui:\n  side-panel:\n    show: \"off\"\n" +
-		"    sections: [usage: hidden, sub-agents: auto, tasks: auto, changed-files: auto, mcp: auto]\n"
+	want := "ui:\n  side-panel:\n    show: \"off\"\n    sections: " + sections + "\n"
 	if string(data) != want {
 		t.Errorf("config =\n%s\nwant\n%s", data, want)
 	}

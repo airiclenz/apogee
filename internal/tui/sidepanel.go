@@ -1436,24 +1436,51 @@ func (m *Model) revealEntry(index int) {
 }
 
 // setPanelSectionMode sets one section's mode — what a pin-glyph click, and `/panel pin|unpin|hide`,
-// mean (ADR 0110) — and writes it back through [SettingsHost.WriteSidePanelSection]. The column
-// moves first: the screen shows what the human asked for whatever the file then does. A landed
-// write puts the list the files resolve to in force and journals it (recordSettingEdit); a failed
-// one speaks as one transcript error naming the key, and the change stands for the session — the
-// task-list fold's posture (toggleTaskListFold). A nil seam changes the session alone, the Driver
-// degrade (ADR 0031).
+// mean (ADR 0110) — and writes it back through [SettingsHost.Write] as the one-section delta
+// `<section>: <mode>` ([sidePanelDelta]), which the binary merges into the file's own list. The
+// column moves first: the screen shows what the human asked for whatever the file then does. A
+// landed write puts the list the files resolve to in force and journals it (landPanelList); a
+// failed one speaks as one transcript error naming the key, and the change stands for the session —
+// the task-list fold's posture (toggleTaskListFold). A nil seam changes the session alone, the
+// Driver degrade (ADR 0031).
 func (m Model) setPanelSectionMode(section domain.SidePanelSection, mode domain.SidePanelMode) Model {
 	m.opts.UI.SidePanelSections = withSectionMode(m.opts.UI.SidePanelSections, section, mode)
 	if m.opts.Settings == nil {
 		return m
 	}
-	sections, err := m.opts.Settings.WriteSidePanelSection(section, mode)
+	landed, err := m.opts.Settings.Write(domain.UIKeySidePanelSections, sidePanelDelta(section, string(mode)))
+	return m.landPanelList(domain.UIKeySidePanelSections, sidePanelSectionsSource, landed, err)
+}
+
+// The states a fold write's delta names for its section ([sidePanelDelta]): folded, or open.
+const (
+	sidePanelFoldedState = "folded"
+	sidePanelOpenState   = "open"
+)
+
+// sidePanelDelta is a side-panel gesture's write: one section's change, spelled `<section>: <state>`
+// — the section's mode for `ui.side-panel.sections`, [sidePanelFoldedState] or [sidePanelOpenState]
+// for `ui.side-panel.folded`. A gesture hands the binary this delta rather than the whole list, so
+// the binary merges it into the file's own list under its edit lock and a hand-kept list keeps what
+// it says of every other section.
+func sidePanelDelta(section domain.SidePanelSection, state string) string {
+	return string(section) + ": " + state
+}
+
+// landPanelList finishes a side-panel list write: a landed one puts landed — the list the files now
+// resolve to, in its canonical spelling — in force through the key's own domain parser
+// ([domain.UIPrefs.Set]) and journals it (recordSettingEdit); a failed one, or a landed text the
+// parser refuses, speaks as one transcript error under source, and the session keeps the change the
+// gesture already made.
+func (m Model) landPanelList(key, source, landed string, err error) Model {
+	if err == nil {
+		err = m.opts.UI.Set(key, landed)
+	}
 	if err != nil {
-		m.transcript.addError(sidePanelSectionsSource, taskListNotSavedNote+err.Error(), runRef{})
+		m.transcript.addError(source, taskListNotSavedNote+err.Error(), runRef{})
 		return m
 	}
-	m.opts.UI.SidePanelSections = sections
-	return m.recordSettingEdit(settingEdit{path: domain.UIKeySidePanelSections, value: string(sections)})
+	return m.recordSettingEdit(settingEdit{path: key, value: landed})
 }
 
 // panelFoldedSections is `ui.side-panel.folded` read into the sections it folds.
@@ -1470,7 +1497,8 @@ func (m Model) panelFoldedSections() []domain.SidePanelSection {
 // anywhere but its pin glyph means — isOpen being whether its header reads open ([panelLine]). A
 // section the overflow squeezed, not the human, opens into the session's opened tier
 // ([Model.panelOpened]) and writes nothing. Every other toggle writes the fold back through
-// [SettingsHost.WriteSidePanelFolded] as `ui.side-panel.folded`: toggleTaskListFold's contract — and
+// [SettingsHost.Write] as the delta `<section>: folded` or `<section>: open` to `ui.side-panel.folded`
+// ([sidePanelDelta]): toggleTaskListFold's contract — and
 // moves the tier with it, so one click always shows a change: unfolding a section the human folded
 // also opens it into the tier, so the overflow cannot squeeze it straight back, and folding a
 // section leaves the tier. The column moves first; a landed write puts the list the files resolve to
@@ -1491,13 +1519,12 @@ func (m Model) toggleSidePanelFold(section domain.SidePanelSection, isOpen bool)
 	if m.opts.Settings == nil {
 		return m
 	}
-	list, err := m.opts.Settings.WriteSidePanelFolded(section, isFolded)
-	if err != nil {
-		m.transcript.addError(sidePanelFoldedSource, taskListNotSavedNote+err.Error(), runRef{})
-		return m
+	state := sidePanelOpenState
+	if isFolded {
+		state = sidePanelFoldedState
 	}
-	m.opts.UI.SidePanelFolded = list
-	return m.recordSettingEdit(settingEdit{path: domain.UIKeySidePanelFolded, value: string(list)})
+	landed, err := m.opts.Settings.Write(domain.UIKeySidePanelFolded, sidePanelDelta(section, state))
+	return m.landPanelList(domain.UIKeySidePanelFolded, sidePanelFoldedSource, landed, err)
 }
 
 // withSectionFolded is `ui.side-panel.folded` with section folded or not, every other section kept

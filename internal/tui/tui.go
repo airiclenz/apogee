@@ -275,6 +275,12 @@ type SettingsHost interface {
 	// A landed write answers landed: the key's canonical text as the file now resolves it — also
 	// when the file already said it and nothing was written — so a caller can hold the value the
 	// next start will read rather than the spelling it handed over. A refused write answers "".
+	//
+	// The side panel's two lists are written one section at a time: a pin, unpin or hide hands
+	// `ui.side-panel.sections` the delta `<section>: <mode>`, and a fold toggle hands
+	// `ui.side-panel.folded` `<section>: folded` or `<section>: open` (ADR 0110). The binary merges
+	// the delta into the file's own list, the file's other entries kept, and landed is the whole
+	// list the file then resolves to, in the canonical spelling [domain.UIPrefs.Set] lands.
 	Write(path, value string) (landed string, err error)
 
 	// Reset returns one config key to its default by REMOVING the file's line for it (ADR 0035)
@@ -299,28 +305,6 @@ type SettingsHost interface {
 	// what the files then say for the key — the global file's value after a project reset, the
 	// project's after a global one, the default when neither sets it. Same contract as SaveTo.
 	ResetIn(target SettingTarget, path string) (SettingOutcome, error)
-
-	// WriteSidePanelSection persists one side-panel section's mode — what a pin, an unpin or a hide
-	// of that section means (ADR 0110) — into `ui.side-panel.sections` in the global config, the
-	// file's other entries kept with their modes and in their order. It answers the list the file
-	// now resolves to, in the canonical spelling [domain.UIPrefs.Set] lands for that key, so the
-	// caller lands it in the session and journals it (recordSettingEdit) under that one key.
-	//
-	// The [SettingsHost.Write] contract otherwise: synchronous on the keypress, errors reported and
-	// never swallowed, and the external-edit baseline re-taken after a landed write so the watcher
-	// does not report the write back as somebody's edit.
-	WriteSidePanelSection(section domain.SidePanelSection, mode domain.SidePanelMode) (domain.SidePanelSections, error)
-
-	// WriteSidePanelFolded persists one side-panel section's fold — folded true folds it, false
-	// opens it — into `ui.side-panel.folded` in the global config, the file's other folded sections
-	// kept folded. It answers the list the file now holds, in the canonical spelling
-	// [domain.UIPrefs.Set] lands for that key, so the caller lands it in the session. The write is
-	// silent, as a task-list card's fold writes `ui.task-list-open`: nothing is journalled.
-	//
-	// The [SettingsHost.Write] contract otherwise: synchronous on the keypress, errors reported and
-	// never swallowed, and the external-edit baseline re-taken after a landed write so the watcher
-	// does not report the write back as somebody's edit.
-	WriteSidePanelFolded(section domain.SidePanelSection, folded bool) (domain.SidePanelFolded, error)
 
 	// Apply makes one persisted key take effect in the RUNNING session — the apply half of every
 	// `/settings` edit (ADR 0037 decision 1: validate → persist → apply, on the same ⏎). path and

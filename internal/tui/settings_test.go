@@ -665,11 +665,11 @@ type fakeSettingsHost struct {
 	reset   func(path string) error
 	saveTo  func(target SettingTarget, path, value string) (SettingOutcome, error)
 	resetIn func(target SettingTarget, path string) (SettingOutcome, error)
-	// writeSection answers WriteSidePanelSection; nil refuses it as the other unwired writes are.
-	writeSection func(section domain.SidePanelSection, mode domain.SidePanelMode) (domain.SidePanelSections, error)
-	// writeFolded answers WriteSidePanelFolded; nil refuses it as the other unwired writes are.
-	writeFolded func(section domain.SidePanelSection, folded bool) (domain.SidePanelFolded, error)
-	apply       func(path, value string) (string, error)
+	// merge, when set, answers Write for the side panel's two lists in write's place, as the
+	// binary's merge does: handed a gesture's one-section delta, it answers the whole list the file
+	// would then resolve to. Nil leaves those keys to write like any other.
+	merge func(path, delta string) (string, error)
+	apply func(path, value string) (string, error)
 	// applyWatched, when set, answers Apply in apply's place and is told whether a watched save asked.
 	applyWatched func(path, value string, watched bool) (string, error)
 }
@@ -682,8 +682,13 @@ func (h fakeSettingsHost) Rows() []SettingRow {
 }
 
 // Write answers the value it was handed as the landed text — the fake keeps no file to re-resolve,
-// so a write the seam accepts lands exactly as spelled.
+// so a write the seam accepts lands exactly as spelled — save for a side-panel list's delta, which
+// merge answers when it is wired.
 func (h fakeSettingsHost) Write(path, value string) (string, error) {
+	isPanelList := path == domain.UIKeySidePanelSections || path == domain.UIKeySidePanelFolded
+	if isPanelList && h.merge != nil {
+		return h.merge(path, value)
+	}
 	if h.write == nil {
 		return "", errors.New(noSettingsWriterNote)
 	}
@@ -709,22 +714,6 @@ func (h fakeSettingsHost) ResetIn(target SettingTarget, path string) (SettingOut
 		return SettingOutcome{}, errors.New(noSettingsWriterNote)
 	}
 	return h.resetIn(target, path)
-}
-
-func (h fakeSettingsHost) WriteSidePanelSection(section domain.SidePanelSection,
-	mode domain.SidePanelMode) (domain.SidePanelSections, error) {
-	if h.writeSection == nil {
-		return "", errors.New(noSettingsWriterNote)
-	}
-	return h.writeSection(section, mode)
-}
-
-func (h fakeSettingsHost) WriteSidePanelFolded(section domain.SidePanelSection,
-	folded bool) (domain.SidePanelFolded, error) {
-	if h.writeFolded == nil {
-		return "", errors.New(noSettingsWriterNote)
-	}
-	return h.writeFolded(section, folded)
 }
 
 func (h fakeSettingsHost) Apply(path, value string, watched bool) (string, error) {

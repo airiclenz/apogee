@@ -177,7 +177,14 @@ Also: `fakeSettingsHost` keeps its field `write func(path, value string) error` 
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSettings' ./internal/tui/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSettingsHost' ./cmd/apogee/`
 **Commit:** `refactor(tui): settings host Write returns the landed value`
 
-## 7. Pin and fold gestures write through Write
+## 7. Pin and fold gestures write through Write — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): the delta spelling lives on the tui side (`sidePanelDelta`, `sidePanelFoldedState`/`sidePanelOpenState` in sidepanel.go), since tui cannot import config; the words now stand in both packages. Both gestures share one `landPanelList` that lands `landed` through `domain.UIPrefs.Set` (the key's domain parser) and journals `landed`; a `Set` refusal of `landed` is reported like a failed write.
+NOTES (2026-11-22): `fakeSettingsHost` gains a `merge` field that answers `Write` for the two side-panel list keys (the fake's `write` answers the handed value as landed, which a delta is not); `settingsSpy.sections`/`folds` now record the `Write` deltas as strings (`tasks: pinned`, `tasks: folded`/`tasks: open`).
+NOTES (2026-11-22): consequential edit — internal/config/configwrite_sections.go: made necessary by settingsHost.Write/Reset no longer routing the side-panel block to that writer (file header and IsSidePanelKey doc)
+NOTES (2026-11-22): consequential edit — internal/config/doc.go: made necessary by settingsHost.Write/Reset no longer routing the side-panel block to configwrite_sections.go
+NOTES (2026-11-22): consequential edit — internal/config/registry.go: made necessary by the fold toggle writing a merge delta rather than through SaveSidePanelFold (folded row comment)
+NOTES (2026-11-22): the side-panel engine (SaveSidePanelSetting/Section/Fold, ResetSidePanelSetting, IsSidePanelKey) now has no caller outside its tests; item 8 retires it.
 
 Depends on item 6.
 

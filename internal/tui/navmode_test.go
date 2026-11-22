@@ -617,7 +617,7 @@ func TestNavModePanelHeaderHasFoldAndPinStops(t *testing.T) {
 
 		m = step(t, m, keyEnter())
 
-		if want := []string{"tasks=true"}; !slices.Equal(spy.folds, want) || m.opts.UI.SidePanelFolded != "[tasks]" {
+		if want := []string{"tasks: folded"}; !slices.Equal(spy.folds, want) || m.opts.UI.SidePanelFolded != "[tasks]" {
 			t.Errorf("fold writes %v, folded %q; want %v and [tasks]", spy.folds, m.opts.UI.SidePanelFolded, want)
 		}
 		if m.opts.UI.SidePanelSections != sections || len(spy.sections) != 0 {
@@ -638,7 +638,7 @@ func TestNavModePanelHeaderHasFoldAndPinStops(t *testing.T) {
 		if want := string(domain.SidePanelTasks) + ": pinned"; !strings.Contains(string(m.opts.UI.SidePanelSections), want) {
 			t.Errorf("sections %q after ⏎ on the pin; want %q", m.opts.UI.SidePanelSections, want)
 		}
-		if want := []string{"tasks=true", "tasks=false"}; !slices.Equal(spy.folds, want) {
+		if want := []string{"tasks: folded", "tasks: open"}; !slices.Equal(spy.folds, want) {
 			t.Errorf("fold writes %v, want %v: ⏎ on the pin folded", spy.folds, want)
 		}
 		if got := panelCursorStop(t, m).id; got != pin {

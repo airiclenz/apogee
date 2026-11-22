@@ -16,7 +16,8 @@ import (
 // The `ui.side-panel:` block (ADR 0110) holds four keys three segments long, `ui.side-panel.show`,
 // `ui.side-panel.width`, `ui.side-panel.sections` and `ui.side-panel.folded`. This writer owns the
 // whole block — the scalar writer reaches its two scalars as well, but the two lists are merges no
-// scalar splice expresses, and the host routes the block's keys here as one. It finds `ui:` and `side-panel:`
+// scalar splice expresses. (The host no longer routes the block here: it writes every key of it
+// through SaveConfigSetting, the two lists by their registry merge hooks.) It finds `ui:` and `side-panel:`
 // in the parsed document, creates whichever of the two is absent, and splices the one line its key
 // sits on, under the contract every config writer keeps (configedit.go): comments, key order and the
 // other keys stay exactly as found, the result is re-parsed and compared before anything is written,
@@ -59,7 +60,7 @@ var sidePanelScalarLeaves = map[string]string{
 
 // IsSidePanelKey reports whether key is one of the `ui.side-panel:` block's keys, which
 // [SaveSidePanelSetting] writes and [ResetSidePanelSetting] resets rather than [SaveConfigSetting] and
-// [ResetConfigSetting]: the host routes the whole block to the writer that owns it.
+// [ResetConfigSetting] — the block's own writer, which the host no longer routes the block to.
 func IsSidePanelKey(key string) bool {
 	_, scalar := sidePanelScalarLeaves[key]
 	return scalar || key == domain.UIKeySidePanelSections || key == domain.UIKeySidePanelFolded

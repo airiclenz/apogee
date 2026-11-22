@@ -1487,7 +1487,7 @@ func TestSidePanelOverflowMarksAndOpens(t *testing.T) {
 		m = clickCell(t, m, panelBodyX(m), panelRowY(t, m, "Tasks"))
 
 		assertPanelGlyphs(t, m, map[string]string{"Usage": glyphExpanded, "Tasks": collapsed})
-		if m.opts.UI.SidePanelFolded != "[tasks]" || !slices.Equal(spy.folds, []string{"tasks=true"}) {
+		if m.opts.UI.SidePanelFolded != "[tasks]" || !slices.Equal(spy.folds, []string{"tasks: folded"}) {
 			t.Errorf("folded %q, writes %v; want the fold written", m.opts.UI.SidePanelFolded, spy.folds)
 		}
 	})
@@ -1503,14 +1503,14 @@ func TestSidePanelOverflowMarksAndOpens(t *testing.T) {
 
 		assertPanelGlyphs(t, m, map[string]string{"Usage": collapsed, "Tasks": glyphExpanded})
 		panelRowY(t, m, "read the plan")
-		if m.opts.UI.SidePanelFolded != "" || !slices.Equal(spy.folds, []string{"tasks=false"}) {
+		if m.opts.UI.SidePanelFolded != "" || !slices.Equal(spy.folds, []string{"tasks: open"}) {
 			t.Errorf("folded %q, writes %v; want the unfold written", m.opts.UI.SidePanelFolded, spy.folds)
 		}
 
 		m = clickCell(t, m, panelBodyX(m), panelRowY(t, m, "Tasks"))
 
 		assertPanelGlyphs(t, m, map[string]string{"Usage": glyphExpanded, "Tasks": collapsed})
-		if m.opts.UI.SidePanelFolded != "[tasks]" || !slices.Equal(spy.folds, []string{"tasks=false", "tasks=true"}) {
+		if m.opts.UI.SidePanelFolded != "[tasks]" || !slices.Equal(spy.folds, []string{"tasks: open", "tasks: folded"}) {
 			t.Errorf("folded %q, writes %v; want the fold written again", m.opts.UI.SidePanelFolded, spy.folds)
 		}
 	})
@@ -2133,16 +2133,17 @@ func entryOnScreen(m Model, at int) bool {
 	return line >= m.viewport.YOffset() && line < m.viewport.YOffset()+m.transcriptRows()
 }
 
-// settingsSpy is a settings host that records every write it is handed: the section and fold
-// writes it answers with the list a fresh file would resolve to, any other write, and every reset.
+// settingsSpy is a settings host that records every write it is handed: each delta a Write hands
+// either side-panel list, which it answers with the list a fresh file would resolve to, any other
+// write, and every reset.
 type settingsSpy struct {
-	sections []domain.SidePanelEntry
-	folds    []string // one `<section>=<folded>` per fold write
+	sections []string // each delta written to ui.side-panel.sections, `<section>: <mode>`
+	folds    []string // each delta written to ui.side-panel.folded, `<section>: folded|open`
 	writes   []string
 	resets   []string
 }
 
-// host is the spy as a SettingsHost, its section and fold writes failing with failure where one is
+// host is the spy as a SettingsHost, its side-panel list writes failing with failure where one is
 // given.
 func (s *settingsSpy) host(failure error) fakeSettingsHost {
 	return fakeSettingsHost{
@@ -2154,22 +2155,24 @@ func (s *settingsSpy) host(failure error) fakeSettingsHost {
 			s.resets = append(s.resets, path)
 			return nil
 		},
-		writeSection: func(section domain.SidePanelSection, mode domain.SidePanelMode) (domain.SidePanelSections, error) {
-			s.sections = append(s.sections, domain.SidePanelEntry{Section: section, Mode: mode})
+		merge: func(path, delta string) (string, error) {
+			section, state, _ := strings.Cut(delta, ": ")
+			if path == domain.UIKeySidePanelSections {
+				s.sections = append(s.sections, delta)
+			} else {
+				s.folds = append(s.folds, delta)
+			}
 			if failure != nil {
 				return "", failure
 			}
-			return withSectionMode(domain.DefaultSidePanelSections, section, mode), nil
-		},
-		writeFolded: func(section domain.SidePanelSection, folded bool) (domain.SidePanelFolded, error) {
-			s.folds = append(s.folds, string(section)+"="+strconv.FormatBool(folded))
-			if failure != nil {
-				return "", failure
+			if path == domain.UIKeySidePanelSections {
+				return string(withSectionMode(domain.DefaultSidePanelSections,
+					domain.SidePanelSection(section), domain.SidePanelMode(state))), nil
 			}
-			if !folded {
+			if state != sidePanelFoldedState {
 				return "", nil
 			}
-			return domain.SpellSidePanelFolded([]domain.SidePanelSection{section}), nil
+			return string(domain.SpellSidePanelFolded([]domain.SidePanelSection{domain.SidePanelSection(section)})), nil
 		},
 	}
 }
@@ -2922,7 +2925,7 @@ func TestSidePanelFoldTogglesAndWritesBack(t *testing.T) {
 			t.Errorf("the reopened header's edge holds %q, want %q", got, glyphExpanded)
 		}
 		panelRowY(t, m, "read the plan")
-		if want := []string{"tasks=true", "tasks=false"}; !slices.Equal(spy.folds, want) {
+		if want := []string{"tasks: folded", "tasks: open"}; !slices.Equal(spy.folds, want) {
 			t.Errorf("fold writes %v, want %v", spy.folds, want)
 		}
 		if m.opts.UI.SidePanelFolded != "" || len(spy.sections) != 0 {
@@ -2981,7 +2984,7 @@ func TestSidePanelFoldTogglesAndWritesBack(t *testing.T) {
 
 		m = clickCell(t, m, x, y)
 
-		if m.flash == watchRefusedFlash || m.opts.UI.SidePanelFolded != "[tasks]" || !slices.Equal(spy.folds, []string{"tasks=true"}) {
+		if m.flash == watchRefusedFlash || m.opts.UI.SidePanelFolded != "[tasks]" || !slices.Equal(spy.folds, []string{"tasks: folded"}) {
 			t.Errorf("flash %q, folded %q, writes %v; want the fold toggled and written", m.flash, m.opts.UI.SidePanelFolded, spy.folds)
 		}
 	})
@@ -3003,10 +3006,7 @@ func TestSidePanelPinTogglesAndWritesBack(t *testing.T) {
 		pinned := m.opts.UI.SidePanelSections
 		m = clickCell(t, m, m.panelPinX(), panelRowY(t, m, "Tasks"))
 
-		want := []domain.SidePanelEntry{
-			{Section: domain.SidePanelTasks, Mode: domain.SidePanelModePinned},
-			{Section: domain.SidePanelTasks, Mode: domain.SidePanelModeAuto},
-		}
+		want := []string{"tasks: pinned", "tasks: auto"}
 		if !slices.Equal(spy.sections, want) {
 			t.Errorf("section writes %v, want %v", spy.sections, want)
 		}
@@ -3561,7 +3561,7 @@ func TestSidePanelCommandDrivesTheSettings(t *testing.T) {
 
 			m = sendLine(t, m, "/panel "+verb+" tasks")
 
-			if w := []domain.SidePanelEntry{{Section: domain.SidePanelTasks, Mode: want}}; !slices.Equal(spy.sections, w) {
+			if w := []string{"tasks: " + string(want)}; !slices.Equal(spy.sections, w) {
 				t.Errorf("section writes %v, want %v", spy.sections, w)
 			}
 			if !strings.Contains(string(m.opts.UI.SidePanelSections), "tasks: "+string(want)) {

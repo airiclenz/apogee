@@ -54,8 +54,9 @@
 // configwrite_scalarsplice.go is that writer's splice machinery — where the key stands in the
 // parsed document, how a text key's block is rendered, and where a key the file does not set yet
 // is inserted.
-// configwrite_sections.go writes the `ui.side-panel:` block as a whole, which the host routes its
-// keys to: its `show` key, its `sections` list, and one section's mode set in place (ADR 0110).
+// configwrite_sections.go writes the `ui.side-panel:` block as a whole: its `show` key, its
+// `sections` list, and one section's mode set in place (ADR 0110). The host no longer routes the
+// block here — it writes every key of it through [SaveConfigSetting], the two lists by merge hook.
 // configwrite_keysource.go points one `servers:`
 // entry at a key command, or marks the entry as keeping the plaintext key it already carries
 // (ADR 0047).

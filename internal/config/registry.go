@@ -1320,7 +1320,7 @@ var KeyRegistry = bindRows([]Key{
 	},
 	{
 		// A list of section names, so structured — ui.side-panel.sections' posture, global-only by the
-		// same zero class — and written by the panel's own fold toggle (SaveSidePanelFold) rather than
+		// same zero class — and written by the panel's own fold toggle (a delta, merge) rather than
 		// a row, so gesture-written as sections is (Gesture, render, readBack, merge). Its Read is the
 		// canonical spelling, a text domain.ParseSidePanelFolded reads back
 		// (UIPrefs.Set lands it); the zero value folds nothing and reads `[]`, a list row's empty
