@@ -1065,12 +1065,9 @@ func (m *Model) noteContextFiles() {
 // ([startupChrome.place]): a routine record of the start inside the session's start-up log while
 // the log is open, every other note on its own line (layout.md, "The start-up box"). It is the one
 // entry every launch-side and heartbeat note goes through, and every destination escape-strips at
-// the transcript's seam. A first-contact note that takes its own line is also kept as one of the
-// binding's standing lines ([heartbeatState.firstContactLines]), for a transcript swap to re-place.
+// the transcript's seam. It writes only the session view, so a session boundary may call it: the
+// binding's standing first-contact lines are kept by the binding's own path ([Model.noteBinding]).
 func (m *Model) note(kind NoticeKind, c contact, text string) {
-	if c == contactFirst && destination(kindRow(kind), c, m.chrome.isLogOpen) != destLog {
-		m.hb.firstContactLines = append(slices.Clip(m.hb.firstContactLines), text)
-	}
 	m.chrome.place(&m.transcript, kind, c, text)
 }
 

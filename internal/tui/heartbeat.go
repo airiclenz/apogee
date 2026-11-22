@@ -88,7 +88,7 @@ type heartbeatState struct {
 	// rather than joining the start-up log ([destination]), in the order they were placed. Those
 	// lines are display-only, so a transcript swap — a /sessions restore or a /fork — would drop
 	// them while the binding they describe still stands; [Model.replaceFirstContactLines] puts them
-	// back. Only [Model.note] appends; a later binding ([Model.applyRebind] for any other contact)
+	// back. Only [Model.noteBinding] appends; a later binding ([Model.applyRebind] for any other contact)
 	// and a `/server` switch (which resets this whole state) supersede them. Only ever replaced or
 	// appended to a clipped copy, so it copies with the Model (ADR 0011).
 	firstContactLines []string
@@ -426,7 +426,7 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 			return m, false
 		}
 		m.hb.lastRebindFailed = intent.model
-		m.note(kindRebindFailed, intent.contact, rebindFailNote(oldModel, intent.model, err))
+		m.noteBinding(kindRebindFailed, intent.contact, rebindFailNote(oldModel, intent.model, err))
 		return m, true
 	}
 
@@ -441,13 +441,13 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	m.restateBox()
 	quiet := intent.contact != contactEvent
 	if note := rebindNote(oldModel, oldWindow, m.opts.Model, m.opts.ContextWindow, quiet); note != "" {
-		m.note(kindRebindChange, intent.contact, note)
+		m.noteBinding(kindRebindChange, intent.contact, note)
 	}
 	for _, notice := range result.Notices {
-		m.note(notice.Kind, intent.contact, notice.Text)
+		m.noteBinding(notice.Kind, intent.contact, notice.Text)
 	}
 	if m.opts.ContextWindow == 0 {
-		m.note(kindWindowUnknown, intent.contact, unknownWindowNote)
+		m.noteBinding(kindWindowUnknown, intent.contact, unknownWindowNote)
 	}
 	// The session effort override the newly bound model rules out, dropped rather than left to fail
 	// the next turn (ADR 0060 D8). It is decided HERE because this is the one seam every model switch
@@ -461,7 +461,7 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	// rows are (ADR 0060 D9).
 	if override, profile := m.eng.ThinkingEffort(); effortExcluded(intent.effort, override) {
 		m.eng.SetEffortOverride("")
-		m.note(kindEffortCleared, intent.contact, effortClearedNote(override, profile, m.opts.Model, intent.effort.Default))
+		m.noteBinding(kindEffortCleared, intent.contact, effortClearedNote(override, profile, m.opts.Model, intent.effort.Default))
 	}
 	// A model whose reasoning cannot be turned off is a host-side fact (ADR 0060 D9), so the human
 	// learns it the way the excluded-override clear above already tells them: a note at the bind,
@@ -469,9 +469,23 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	// as well as Mandatory because EffortSupport documents every field below Supported as meaningless
 	// when it is false — a beat that reports Mandatory with no dial is reporting nothing.
 	if intent.effort.Supported && intent.effort.Mandatory {
-		m.note(kindMandatoryEffort, intent.contact, mandatoryEffortNote(m.opts.Model))
+		m.noteBinding(kindMandatoryEffort, intent.contact, mandatoryEffortNote(m.opts.Model))
 	}
 	return m, true
+}
+
+// noteBinding places one note a binding raised at contact c ([Model.note]) and, when the session's
+// first contact raised it and it took a line of its own rather than joining the start-up log
+// ([destination]), keeps it as one of the binding's standing lines
+// ([heartbeatState.firstContactLines]) for a transcript swap to re-place. The stash lives here, on
+// the binding's own path, rather than in [Model.note]: a session boundary places its notes through
+// note too, and must write only the session view a watch parks
+// (TestSessionViewHoldsEveryFieldTheBoundariesReset).
+func (m *Model) noteBinding(kind NoticeKind, c contact, text string) {
+	if c == contactFirst && destination(kindRow(kind), c, m.chrome.isLogOpen) != destLog {
+		m.hb.firstContactLines = append(slices.Clip(m.hb.firstContactLines), text)
+	}
+	m.note(kind, c, text)
 }
 
 // effortExcluded reports whether a live session effort override is one the bound model has ruled
