@@ -277,7 +277,11 @@ Depends on item 1.
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'Apply' ./internal/tui/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestEveryEditableSettingKeyHasAnApply' ./cmd/apogee/`
 **Commit:** `refactor(tui): apply ui prefs through one module with an exported key set`
 
-## 11. One persist door for gesture write-backs
+## 11. One persist door for gesture write-backs — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): the door (`persistUIPref` in uiprefapply.go, taking a `uiPrefWrite{key, value, reset}`) returns the Model alone, not `landed`: for the two merged side-panel lists (`uiPrefMerges`) it lands the answered list through `domain.UIPrefs.Set` and journals it itself, so no caller needs `landed` and the old `landPanelList` is deleted; every other key journals the text written, as before.
+NOTES (2026-11-22): the transcript error's label is derived from the key (`strings.TrimPrefix(key, "ui.")`, const `uiBlockPrefix`), so the six per-key label consts (`taskListOpenSource`, `toolsOpenSource`, `sidePanelSectionsSource`, `sidePanelFoldedSource`, `sidePanelShowSource`, `sidePanelWidthSource`) are deleted; the five existing sidepanel_test.go asserts now spell the note text literally (same text). A reset journals `domain.UIDefaultText(key)` (`44` for the width, as `SidePanelWidth{}.Text()` did).
+NOTES (2026-11-22): consequential edit — internal/tui/doc.go: made necessary by uiprefapply.go now also holding the gestures' persist door (file-map entry).
 
 Depends on items 7 and 10.
 

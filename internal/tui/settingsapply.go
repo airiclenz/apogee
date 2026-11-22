@@ -592,12 +592,9 @@ const (
 	settingKeyMCPServers = "mcp-servers"
 )
 
-// taskListOpenSource is the label the fold gesture's one failure notice carries — the key's own
-// name, colorSchemeSource's posture, so a transcript line reads `task-list-open: not saved: …`.
-const taskListOpenSource = "task-list-open"
-
-// taskListNotSavedNote opens that notice: the fold happened on screen and the file did not take
-// it, which is the one thing a silent write has to say out loud (the ratified call of plan
+// taskListNotSavedNote opens a gesture's one failure notice, after the key it names
+// (persistUIPref) — `task-list-open: not saved: …`: the fold happened on screen and the file did
+// not take it, which is the one thing a silent write has to say out loud (the ratified call of plan
 // "2026-09-14 - 00", item 4 — a landed write says nothing, because the card itself is the report).
 const taskListNotSavedNote = "not saved: "
 
@@ -614,41 +611,16 @@ func (m *Model) setTaskListOpen(open bool) {
 }
 
 // toggleTaskListFold is what a click on a task-list card, or ⏎ at the block cursor on one, means
-// (toggleBlockAt): the shared fold flips on every card, and the flip is PERSISTED through
-// [SettingsHost.Write] as `ui.task-list-open` — the pane's own write, the pane's own journal entry
-// (recordSettingEdit, so the `/settings` row shows the toggled value with its ` *` marker), and
-// no note on success: the cards folding or opening under the pointer is the whole report, and a
-// `saved` line under every fold would be noise the reader learns to skip (ADR 0035 addendum).
-// Only a write that FAILED speaks, as one transcript error naming the key, and the flipped state
-// stands: the screen shows what the human asked for, and the file simply did not keep it.
-//
-// A nil seam flips and writes nothing — the Driver degrade (ADR 0031): a composition without a
-// settings host still has a fold, it just has nowhere to remember it. The binary's own seam
-// refreshes the config watcher's baseline on every landed write (ADR 0041 decision 8), which is
-// what keeps this write from coming back a second later as somebody else's edit.
-//
-// The write is synchronous, on the keypress, the [SettingsHost.Write] contract — and it returns
-// the Model alone, because nothing here schedules anything: the caller repaints, anchored, as it
-// does for every other flip.
+// (toggleBlockAt): the shared fold flips on every card, and the flip is PERSISTED as
+// `ui.task-list-open` through the gestures' one door (persistUIPref) — the pane's own write and
+// journal entry, no note on success (the cards folding or opening under the pointer is the whole
+// report), one transcript error naming the key when the write failed, the flipped state standing
+// either way, and a nil seam flipping without a write. It returns the Model alone: the caller
+// repaints, anchored, as it does for every other flip.
 func (m Model) toggleTaskListFold() Model {
 	m.setTaskListOpen(!m.opts.UI.TaskListOpen)
-	if m.opts.Settings == nil {
-		return m
-	}
-	value := settingFalse
-	if m.opts.UI.TaskListOpen {
-		value = settingTrue
-	}
-	if _, err := m.opts.Settings.Write(domain.UIKeyTaskListOpen, value); err != nil {
-		m.transcript.addError(taskListOpenSource, taskListNotSavedNote+err.Error(), runRef{})
-		return m
-	}
-	return m.recordSettingEdit(settingEdit{path: domain.UIKeyTaskListOpen, value: value})
+	return m.persistUIPref(uiPrefWrite{key: domain.UIKeyTaskListOpen, value: strconv.FormatBool(m.opts.UI.TaskListOpen)})
 }
-
-// toolsOpenSource is the label the umbrella fold gesture's one failure notice carries — the key's
-// own name, taskListOpenSource's posture, so a transcript line reads `tools-open: not saved: …`.
-const toolsOpenSource = "tools-open"
 
 // setToolsOpen moves the shared Tools umbrella fold on BOTH halves the Model keeps: the Option that
 // records the preference (Options.UI.ToolsOpen) and the transcript field the paint reads
@@ -665,25 +637,12 @@ func (m *Model) setToolsOpen(open bool) {
 // one, means (toggleBlockAt) while the shared preference is what holds its fold
 // (transcript.blockFoldBy's foldByShared) — an auto-collapsed umbrella, or one the reader gave a
 // fold of its own, moves its own head flag and writes nothing. The shared fold flips on every large
-// umbrella, and the flip is PERSISTED through [SettingsHost.Write] as `ui.tools-open` — toggleTaskListFold's whole contract,
-// mirrored: the pane's own write and journal entry (recordSettingEdit), no note on success, one
-// transcript error naming the key when the write failed, with the flipped state standing either
-// way. A nil seam flips and writes nothing — the Driver degrade (ADR 0031) — and the write is
-// synchronous on the keypress, returning the Model alone for the caller to repaint, anchored.
+// umbrella, and the flip is PERSISTED as `ui.tools-open` through the gestures' one door
+// (persistUIPref) — toggleTaskListFold's whole contract, mirrored — returning the Model alone for
+// the caller to repaint, anchored.
 func (m Model) toggleToolsFold() Model {
 	m.setToolsOpen(!m.opts.UI.ToolsOpen)
-	if m.opts.Settings == nil {
-		return m
-	}
-	value := settingFalse
-	if m.opts.UI.ToolsOpen {
-		value = settingTrue
-	}
-	if _, err := m.opts.Settings.Write(domain.UIKeyToolsOpen, value); err != nil {
-		m.transcript.addError(toolsOpenSource, taskListNotSavedNote+err.Error(), runRef{})
-		return m
-	}
-	return m.recordSettingEdit(settingEdit{path: domain.UIKeyToolsOpen, value: value})
+	return m.persistUIPref(uiPrefWrite{key: domain.UIKeyToolsOpen, value: strconv.FormatBool(m.opts.UI.ToolsOpen)})
 }
 
 // settingsApplyFailedNote opens the row's failure when the WRITE landed and the apply did not: the

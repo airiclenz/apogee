@@ -2,6 +2,7 @@ package tui
 
 import (
 	"slices"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -19,6 +20,10 @@ import (
 // the program to do something next, carry a follow-up row (uiPrefWidgets). The set of keys applied
 // here is exported (AppliedSettingKeys), so the binary's own guard reads it rather than keeping a
 // mirror of it.
+//
+// It is also the one door a screen gesture's change to a `ui.*` key goes back to the config file
+// through (persistUIPref): the write or the reset, the journal entry a landed one records, and the
+// one transcript error a failed one speaks.
 
 // uiPrefWidget is a `ui.*` key's follow-up to the Set: the widget the landed value has to be told
 // to, and the note and Cmd that telling produces. tell runs AFTER the Set and reads the landed
@@ -180,4 +185,88 @@ func tellGitFetch(m Model, _ string) (Model, string, tea.Cmd, error) {
 func tellColorScheme(m Model, value string) (Model, string, tea.Cmd, error) {
 	note, cmd, err := m.applyColorScheme(value)
 	return m, note, cmd, err
+}
+
+// ----------------------------------------------------------------------------
+// ui.* — persisting a gesture's change
+// ----------------------------------------------------------------------------
+
+// uiBlockPrefix opens every `ui.*` key; a failed write-back's transcript error names the key without
+// it (`task-list-open: not saved: …`, `side-panel.width: not saved: …`), the key as it reads inside
+// its block.
+const uiBlockPrefix = "ui."
+
+// uiPrefWrite is one gesture's write-back of a `ui.*` key: value written to key or, with reset, the
+// key's line removed from the file rather than its default written into it (ADR 0035). For a key
+// [uiPrefMerges] names, value is the gesture's one-section delta ([sidePanelDelta]), not the key's
+// whole text.
+type uiPrefWrite struct {
+	key   string
+	value string
+	reset bool
+}
+
+// persistUIPref is the one door a screen gesture's change to a `ui.*` key is written back through —
+// a fold of the task-list cards or the Tools umbrellas, a pin or fold in the side panel, the
+// separator's drag or reset, a `/panel` line. The gesture has already moved the session, so the
+// screen shows what the human asked for whatever the file then does.
+//
+// A landed write is journalled (recordSettingEdit, so the `/settings` row shows the value with its
+// ` *` marker) and says nothing more: the moved screen is the whole report, and a `saved` line
+// under every fold would be noise the reader learns to skip (ADR 0035 addendum). Only a write that
+// FAILED speaks, as one transcript error naming the key (uiBlockPrefix), and the gesture's change
+// stands for the session: the file simply did not keep it. A nil seam writes nothing — the Driver
+// degrade (ADR 0031): a composition without a settings host still has the gesture, it just has
+// nowhere to remember it. The binary's own seam refreshes the config watcher's baseline on every
+// landed write (ADR 0041 decision 8), which keeps the write from coming back a second later as
+// somebody else's edit.
+//
+// The write is synchronous, on the keypress — the [SettingsHost.Write] contract — and nothing here
+// schedules anything, so the door returns the Model alone for the caller to repaint.
+func (m Model) persistUIPref(write uiPrefWrite) Model {
+	if m.opts.Settings == nil {
+		return m
+	}
+	edit, err := m.writeUIPref(write)
+	if err != nil {
+		source := strings.TrimPrefix(write.key, uiBlockPrefix)
+		m.transcript.addError(source, taskListNotSavedNote+err.Error(), runRef{})
+		return m
+	}
+	return m.recordSettingEdit(edit)
+}
+
+// writeUIPref makes write's call on the settings host and answers the journal entry a landed one
+// records: the text written; for a reset, the key's documented default ([domain.UIDefaultText]),
+// the text its `/settings` row then reads; and for a merged list ([uiPrefMerges]), the whole list
+// the files now resolve to, which is first put in force through the key's own parser
+// ([domain.UIPrefs.Set]). A list text that parser refuses is reported like a refused write, and a
+// refused Set has touched nothing. It is a pointer method because that Set lands on the Model its
+// caller returns.
+func (m *Model) writeUIPref(write uiPrefWrite) (settingEdit, error) {
+	if write.reset {
+		if err := m.opts.Settings.Reset(write.key); err != nil {
+			return settingEdit{}, err
+		}
+		return settingEdit{path: write.key, value: domain.UIDefaultText(write.key), reset: true}, nil
+	}
+	landed, err := m.opts.Settings.Write(write.key, write.value)
+	if err != nil {
+		return settingEdit{}, err
+	}
+	if !uiPrefMerges(write.key) {
+		return settingEdit{path: write.key, value: write.value}, nil
+	}
+	if err := m.opts.UI.Set(write.key, landed); err != nil {
+		return settingEdit{}, err
+	}
+	return settingEdit{path: write.key, value: landed}, nil
+}
+
+// uiPrefMerges reports whether a gesture writes key as a one-section delta the binary merges into
+// the file's own list under its edit lock ([SettingsHost.Write]) — the side panel's two lists, so a
+// hand-kept list keeps what it says of every other section. What lands is then the whole list, not
+// the text the gesture handed over.
+func uiPrefMerges(key string) bool {
+	return key == domain.UIKeySidePanelSections || key == domain.UIKeySidePanelFolded
 }

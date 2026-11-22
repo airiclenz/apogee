@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -459,4 +460,115 @@ func TestSettingsApplyLocalFoldsTheSidePanel(t *testing.T) {
 	if _, _, _, _, err := m.settingsApplyLocal(domain.UIKeySidePanelFolded, "[nope]"); err == nil {
 		t.Error("a fold list naming no section was applied")
 	}
+}
+
+// TestUIPrefGesturesPersistThroughOneDoor drives every screen gesture that writes a `ui.*` key back
+// to the config file (persistUIPref). Against a host whose every write and reset fails, each one
+// keeps its change, speaks one transcript error naming the key — `<key without ui.>: not saved:
+// <why>` — and journals nothing; against a host that lands them, each journals the edit the
+// `/settings` row reads and says nothing.
+func TestUIPrefGesturesPersistThroughOneDoor(t *testing.T) {
+	t.Parallel()
+	pinnedTasks := string(withSectionMode(domain.DefaultSidePanelSections, domain.SidePanelTasks, domain.SidePanelModePinned))
+	tests := []struct {
+		name    string
+		gesture func(m Model) Model
+		note    string
+		edit    settingEdit
+	}{
+		{
+			name:    "a task-list fold",
+			gesture: Model.toggleTaskListFold,
+			note:    "task-list-open: not saved: disk full",
+			edit:    settingEdit{path: domain.UIKeyTaskListOpen, value: "true"},
+		},
+		{
+			name:    "a Tools umbrella fold",
+			gesture: Model.toggleToolsFold,
+			note:    "tools-open: not saved: disk full",
+			edit:    settingEdit{path: domain.UIKeyToolsOpen, value: "true"},
+		},
+		{
+			name:    "a separator drag",
+			gesture: func(m Model) Model { return m.setPanelWidth(60) },
+			note:    "side-panel.width: not saved: disk full",
+			edit:    settingEdit{path: domain.UIKeySidePanelWidth, value: "60"},
+		},
+		{
+			name:    "a width reset",
+			gesture: Model.resetPanelWidth,
+			note:    "side-panel.width: not saved: disk full",
+			edit:    settingEdit{path: domain.UIKeySidePanelWidth, value: "44", reset: true},
+		},
+		{
+			name: "a pin",
+			gesture: func(m Model) Model {
+				return m.setPanelSectionMode(domain.SidePanelTasks, domain.SidePanelModePinned)
+			},
+			note: "side-panel.sections: not saved: disk full",
+			edit: settingEdit{path: domain.UIKeySidePanelSections, value: pinnedTasks},
+		},
+		{
+			name:    "a side-panel fold",
+			gesture: func(m Model) Model { return m.toggleSidePanelFold(domain.SidePanelTasks, true) },
+			note:    "side-panel.folded: not saved: disk full",
+			edit:    settingEdit{path: domain.UIKeySidePanelFolded, value: "[tasks]"},
+		},
+		{
+			name:    "a /panel show",
+			gesture: func(m Model) Model { return m.setPanelShow(domain.SidePanelShowAuto) },
+			note:    "side-panel.show: not saved: disk full",
+			edit:    settingEdit{path: domain.UIKeySidePanelShow, value: "auto"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name+" that fails speaks once and journals nothing", func(t *testing.T) {
+			t.Parallel()
+			m := gestureModel(t)
+			failure := errors.New("disk full")
+			m.opts.Settings = fakeSettingsHost{
+				write: func(string, string) error { return failure },
+				reset: func(string) error { return failure },
+			}
+			entries := len(m.transcript.entries)
+
+			m = tt.gesture(m)
+
+			if got := len(m.transcript.entries) - entries; got != 1 {
+				t.Fatalf("the failed write added %d transcript entries, want 1", got)
+			}
+			if last := lastEntry(t, m); last.kind != entryError || last.text != tt.note {
+				t.Errorf("the failure reads %q (kind %v), want the error %q", last.text, last.kind, tt.note)
+			}
+			if len(m.settingEdits) != 0 {
+				t.Errorf("journal %+v after a failed write, want nothing", m.settingEdits)
+			}
+		})
+		t.Run(tt.name+" that lands journals silently", func(t *testing.T) {
+			t.Parallel()
+			m := gestureModel(t)
+			m.opts.Settings = (&settingsSpy{}).host(nil)
+			entries := len(m.transcript.entries)
+
+			m = tt.gesture(m)
+
+			if got := len(m.transcript.entries) - entries; got != 0 {
+				t.Errorf("the landed write added %d transcript entries, want none", got)
+			}
+			if !slices.Equal(m.settingEdits, []settingEdit{tt.edit}) {
+				t.Errorf("journal %+v, want [%+v]", m.settingEdits, tt.edit)
+			}
+		})
+	}
+}
+
+// gestureModel is a ready model with the side panel's default sections, both shared folds closed
+// and the width stated, so every persisting gesture moves something.
+func gestureModel(t *testing.T) Model {
+	t.Helper()
+	m := panelModel(t, domain.DefaultSidePanelSections, 30)
+	m.opts.UI.TaskListOpen = false
+	m.opts.UI.ToolsOpen = false
+	m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(50)
+	return m
 }

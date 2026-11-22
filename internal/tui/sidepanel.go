@@ -91,12 +91,6 @@ const (
 	// percentCap is a whole percentage: the scale a share is spelled in. A fill's percentage is
 	// clamped by sidepanel.ClampedPercent, not here.
 	percentCap = 100
-	// sidePanelSectionsSource is the label a failed pin write-back's transcript error carries — the
-	// key's own name, taskListOpenSource's posture.
-	sidePanelSectionsSource = "side-panel.sections"
-	// sidePanelFoldedSource is the label a failed fold write-back's transcript error carries —
-	// `side-panel.folded: not saved: …`, sidePanelSectionsSource's posture.
-	sidePanelFoldedSource = "side-panel.folded"
 )
 
 // subAgentFactsWidth is the cells subAgentFactsFormat's facts take, whatever they say.
@@ -1303,42 +1297,27 @@ func (m *Model) abandonHiddenPanelDrag() {
 	m.panelDrag = panelDrag{}
 }
 
-// setPanelWidth sets `ui.side-panel.width` and writes it back through [SettingsHost.Write], with
-// setPanelSectionMode's whole contract: the column moves first, a landed write is journalled
-// (recordSettingEdit), a failed one speaks as one transcript error naming the key and the width
-// stands for the session, and a nil seam changes the session alone (ADR 0031).
+// setPanelWidth sets `ui.side-panel.width` and writes it back through the gestures' one door
+// (persistUIPref): the column moves first, a landed write is journalled, a failed one speaks as
+// one transcript error naming the key and the width stands for the session, and a nil seam changes
+// the session alone (ADR 0031).
 func (m Model) setPanelWidth(width int) Model {
 	m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(width)
-	if m.opts.Settings == nil {
-		return m
-	}
-	value := strconv.Itoa(width)
-	if _, err := m.opts.Settings.Write(domain.UIKeySidePanelWidth, value); err != nil {
-		m.transcript.addError(sidePanelWidthSource, taskListNotSavedNote+err.Error(), runRef{})
-		return m
-	}
-	return m.recordSettingEdit(settingEdit{path: domain.UIKeySidePanelWidth, value: value})
+	return m.persistUIPref(uiPrefWrite{key: domain.UIKeySidePanelWidth, value: strconv.Itoa(width)})
 }
 
 // resetPanelWidth returns `ui.side-panel.width` to its default — the double-click on the grip
-// (adr-0110-amend-1108 (b)) and `/panel width reset` — through [SettingsHost.Reset], which removes
-// the key's line rather than writing the default into it (ADR 0035), with setPanelWidth's contract
-// otherwise: the column moves first, a landed reset is journalled as the reset it is, a failed one
-// speaks as one transcript error naming the key and the default stands for the session, and a nil
-// seam changes the session alone (ADR 0031). The session lands the unset width, which
-// [Model.configuredPanelWidth] resolves to the default, never a stated default: a reset width is one
-// nobody chose. The journal keeps the default's number, the text the width's row reads.
+// (adr-0110-amend-1108 (b)) and `/panel width reset` — as a reset through the gestures' one door
+// (persistUIPref), which removes the key's line rather than writing the default into it (ADR 0035),
+// with setPanelWidth's contract otherwise: the column moves first, a landed reset is journalled as
+// the reset it is, a failed one speaks as one transcript error naming the key and the default
+// stands for the session, and a nil seam changes the session alone (ADR 0031). The session lands
+// the unset width, which [Model.configuredPanelWidth] resolves to the default, never a stated
+// default: a reset width is one nobody chose. The journal keeps the default's number, the text the
+// width's row reads.
 func (m Model) resetPanelWidth() Model {
 	m.opts.UI.SidePanelWidth = domain.SidePanelWidth{}
-	if m.opts.Settings == nil {
-		return m
-	}
-	if err := m.opts.Settings.Reset(domain.UIKeySidePanelWidth); err != nil {
-		m.transcript.addError(sidePanelWidthSource, taskListNotSavedNote+err.Error(), runRef{})
-		return m
-	}
-	value := m.opts.UI.SidePanelWidth.Text()
-	return m.recordSettingEdit(settingEdit{path: domain.UIKeySidePanelWidth, value: value, reset: true})
+	return m.persistUIPref(uiPrefWrite{key: domain.UIKeySidePanelWidth, reset: true})
 }
 
 // followPanelTarget does what a click on target means: a pin toggles its section between pinned
@@ -1432,20 +1411,16 @@ func (m *Model) revealEntry(index int) {
 }
 
 // setPanelSectionMode sets one section's mode — what a pin-glyph click, and `/panel pin|unpin|hide`,
-// mean (ADR 0110) — and writes it back through [SettingsHost.Write] as the one-section delta
-// `<section>: <mode>` ([sidePanelDelta]), which the binary merges into the file's own list. The
-// column moves first: the screen shows what the human asked for whatever the file then does. A
-// landed write puts the list the files resolve to in force and journals it (landPanelList); a
-// failed one speaks as one transcript error naming the key, and the change stands for the session —
-// the task-list fold's posture (toggleTaskListFold). A nil seam changes the session alone, the
-// Driver degrade (ADR 0031).
+// mean (ADR 0110) — and writes it back through the gestures' one door (persistUIPref) as the
+// one-section delta `<section>: <mode>` ([sidePanelDelta]), which the binary merges into the file's
+// own list. The column moves first: the screen shows what the human asked for whatever the file
+// then does. A landed write puts the list the files resolve to in force and journals it; a failed
+// one speaks as one transcript error naming the key, and the change stands for the session. A nil
+// seam changes the session alone, the Driver degrade (ADR 0031).
 func (m Model) setPanelSectionMode(section domain.SidePanelSection, mode domain.SidePanelMode) Model {
 	m.opts.UI.SidePanelSections = withSectionMode(m.opts.UI.SidePanelSections, section, mode)
-	if m.opts.Settings == nil {
-		return m
-	}
-	landed, err := m.opts.Settings.Write(domain.UIKeySidePanelSections, sidePanelDelta(section, string(mode)))
-	return m.landPanelList(domain.UIKeySidePanelSections, sidePanelSectionsSource, landed, err)
+	delta := sidePanelDelta(section, string(mode))
+	return m.persistUIPref(uiPrefWrite{key: domain.UIKeySidePanelSections, value: delta})
 }
 
 // The states a fold write's delta names for its section ([sidePanelDelta]): folded, or open.
@@ -1463,22 +1438,6 @@ func sidePanelDelta(section domain.SidePanelSection, state string) string {
 	return string(section) + ": " + state
 }
 
-// landPanelList finishes a side-panel list write: a landed one puts landed — the list the files now
-// resolve to, in its canonical spelling — in force through the key's own domain parser
-// ([domain.UIPrefs.Set]) and journals it (recordSettingEdit); a failed one, or a landed text the
-// parser refuses, speaks as one transcript error under source, and the session keeps the change the
-// gesture already made.
-func (m Model) landPanelList(key, source, landed string, err error) Model {
-	if err == nil {
-		err = m.opts.UI.Set(key, landed)
-	}
-	if err != nil {
-		m.transcript.addError(source, taskListNotSavedNote+err.Error(), runRef{})
-		return m
-	}
-	return m.recordSettingEdit(settingEdit{path: key, value: landed})
-}
-
 // panelFoldedSections is `ui.side-panel.folded` read into the sections it folds.
 func (m Model) panelFoldedSections() []domain.SidePanelSection {
 	folded, err := domain.ParseSidePanelFolded(string(m.opts.UI.SidePanelFolded))
@@ -1493,9 +1452,8 @@ func (m Model) panelFoldedSections() []domain.SidePanelSection {
 // anywhere but its pin glyph means — isOpen being whether its header reads open ([panelLine]). A
 // section the overflow squeezed, not the human, opens into the session's opened tier
 // ([Model.panelOpened]) and writes nothing. Every other toggle writes the fold back through
-// [SettingsHost.Write] as the delta `<section>: folded` or `<section>: open` to `ui.side-panel.folded`
-// ([sidePanelDelta]): toggleTaskListFold's contract — and
-// moves the tier with it, so one click always shows a change: unfolding a section the human folded
+// the gestures' one door (persistUIPref) as the delta `<section>: folded` or `<section>: open` to
+// `ui.side-panel.folded` ([sidePanelDelta]) — and moves the tier with it, so one click always shows a change: unfolding a section the human folded
 // also opens it into the tier, so the overflow cannot squeeze it straight back, and folding a
 // section leaves the tier. The column moves first; a landed write puts the list the files resolve to
 // in force and journals it (recordSettingEdit), silently, the header's indicator being the whole
@@ -1512,15 +1470,12 @@ func (m Model) toggleSidePanelFold(section domain.SidePanelSection, isOpen bool)
 	isFolded := !wasFolded
 	m.panelOpened = withPanelOpened(m.panelOpened, section, !isFolded)
 	m.opts.UI.SidePanelFolded = m.withSectionFolded(section, isFolded)
-	if m.opts.Settings == nil {
-		return m
-	}
 	state := sidePanelOpenState
 	if isFolded {
 		state = sidePanelFoldedState
 	}
-	landed, err := m.opts.Settings.Write(domain.UIKeySidePanelFolded, sidePanelDelta(section, state))
-	return m.landPanelList(domain.UIKeySidePanelFolded, sidePanelFoldedSource, landed, err)
+	delta := sidePanelDelta(section, state)
+	return m.persistUIPref(uiPrefWrite{key: domain.UIKeySidePanelFolded, value: delta})
 }
 
 // withSectionFolded is `ui.side-panel.folded` with section folded or not, every other section kept
@@ -1602,14 +1557,6 @@ func sidePanelTranscriptFloor(show domain.SidePanelShow) (floor int, ok bool) {
 // ----------------------------------------------------------------------------
 // /panel — the side panel's settings from the prompt box (ADR 0110 decision 8)
 // ----------------------------------------------------------------------------
-
-// sidePanelShowSource is the label a failed `/panel on|off|auto` write's transcript error carries —
-// the key's own name, sidePanelSectionsSource's posture.
-const sidePanelShowSource = "side-panel.show"
-
-// sidePanelWidthSource is the label a failed width write's transcript error carries — the key's own
-// name, sidePanelShowSource's posture.
-const sidePanelWidthSource = "side-panel.width"
 
 // panelAction is the subcommand of a parsed /panel line. The zero value is panelReport, so a bare
 // "/panel" — and a line the parser never ran this grammar over, which is what the completion menu's
@@ -1760,20 +1707,13 @@ func (m Model) openPanelOverlay() Model {
 	return entered
 }
 
-// setPanelShow sets `ui.side-panel.show` and writes it back through [SettingsHost.Write], with
-// setPanelSectionMode's whole contract: the column moves first, a landed write is journalled
-// (recordSettingEdit), a failed one speaks as one transcript error naming the key and the change
-// stands for the session, and a nil seam changes the session alone (ADR 0031).
+// setPanelShow sets `ui.side-panel.show` and writes it back through the gestures' one door
+// (persistUIPref): the column moves first, a landed write is journalled, a failed one speaks as
+// one transcript error naming the key and the change stands for the session, and a nil seam changes
+// the session alone (ADR 0031).
 func (m Model) setPanelShow(show domain.SidePanelShow) Model {
 	m.opts.UI.SidePanelShow = show
-	if m.opts.Settings == nil {
-		return m
-	}
-	if _, err := m.opts.Settings.Write(domain.UIKeySidePanelShow, string(show)); err != nil {
-		m.transcript.addError(sidePanelShowSource, taskListNotSavedNote+err.Error(), runRef{})
-		return m
-	}
-	return m.recordSettingEdit(settingEdit{path: domain.UIKeySidePanelShow, value: string(show)})
+	return m.persistUIPref(uiPrefWrite{key: domain.UIKeySidePanelShow, value: string(show)})
 }
 
 // panelReportNote words the side panel's settings in force: the show mode, then every section with

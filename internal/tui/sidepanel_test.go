@@ -2943,7 +2943,7 @@ func TestSidePanelFoldTogglesAndWritesBack(t *testing.T) {
 		if got := panelHeaderGlyph(t, m, "Tasks"); got != m.th.glyphs.collapsed || m.opts.UI.SidePanelFolded != "[tasks]" {
 			t.Errorf("edge %q, folded %q after a failed write; want the fold to stand", got, m.opts.UI.SidePanelFolded)
 		}
-		if !strings.Contains(plain(m.View()), sidePanelFoldedSource+": "+taskListNotSavedNote+"disk full") {
+		if !strings.Contains(plain(m.View()), "side-panel.folded: not saved: disk full") {
 			t.Error("the failed write is not reported in the transcript")
 		}
 	})
@@ -3028,7 +3028,7 @@ func TestSidePanelPinTogglesAndWritesBack(t *testing.T) {
 		if !strings.Contains(panelText(t, m)[panelRowY(t, m, "Tasks")], defaultGlyphs.panelPinned) {
 			t.Errorf("the header does not wear %s after the pin:\n%s", defaultGlyphs.panelPinned, strings.Join(panelText(t, m), "\n"))
 		}
-		if !strings.Contains(plain(m.View()), sidePanelSectionsSource+": "+taskListNotSavedNote+"disk full") {
+		if !strings.Contains(plain(m.View()), "side-panel.sections: not saved: disk full") {
 			t.Error("the failed write is not reported in the transcript")
 		}
 	})
@@ -3218,7 +3218,7 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 		m = step(t, m, leftDrag(sep-14, separatorRow))
 		m = step(t, m, leftRelease(sep-14, separatorRow))
 
-		note := sidePanelWidthSource + ": " + taskListNotSavedNote + "disk full"
+		note := "side-panel.width: not saved: disk full"
 		if got := strings.Count(plain(m.View()), note); got != 1 {
 			t.Errorf("the failed write is reported %d times, want once: %q", got, note)
 		}
@@ -3501,7 +3501,7 @@ func TestSidePanelSeparatorDoubleClick(t *testing.T) {
 		*clock = clock.Add(100 * time.Millisecond)
 		m = pressSeparator(t, m, sep)
 
-		note := sidePanelWidthSource + ": " + taskListNotSavedNote + "disk full"
+		note := "side-panel.width: not saved: disk full"
 		if got := strings.Count(plain(m.View()), note); got != 1 {
 			t.Errorf("the failed reset is reported %d times, want once: %q", got, note)
 		}
@@ -3651,7 +3651,7 @@ func TestSidePanelCommandDrivesTheSettings(t *testing.T) {
 		if !m.panelShown() {
 			t.Error("the column did not move on the failed write")
 		}
-		if !strings.Contains(plain(m.View()), sidePanelShowSource+": "+taskListNotSavedNote+"disk full") {
+		if !strings.Contains(plain(m.View()), "side-panel.show: not saved: disk full") {
 			t.Error("the failed write is not reported in the transcript")
 		}
 	})
