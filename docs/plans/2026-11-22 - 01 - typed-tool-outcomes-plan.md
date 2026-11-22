@@ -88,7 +88,11 @@ internal/domain/toolsummary_test.go — TestToolSummaryVariantsAreSealed; apogee
 
 **Commit:** `feat(domain): ProcessEnding and an unstarted delegation outcome ride the event stream`
 
-## 3. The TUI reads a process run's ending off ProcessEnding
+## 3. The TUI reads a process run's ending off ProcessEnding — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): the six process presenters' `detail` hooks became `resultDetail` hooks by changing the existing functions' signatures to take the whole result (`subprocessDetail`, `consoleDetail`, `consoleOpenDetail` keep their names) rather than adding parallel hooks; `TestConsoleStatusWordMustBeginItsOwnLine` now calls `consoleDetail` with a summary-less `domain.ToolResult`.
+NOTES (2026-11-22): the typed strip keys on the line the ending states (`[exit code <ExitCode>…]` for the one-shot tools, `alive` / `exited with code N` / `killed` for a Console), so a misleading `[exit code 9]` the output printed stays in the body of a run whose ending carries code 2; `exitCodeStat` also reads the typed code (always 0 on its route).
+NOTES (2026-11-22): `internal/tui/toolblock_test.go` (named in Files) needed no change — the new rendering-parity check lives in `TestProcessEndingDecidesTheSlot` via `renderToolBlock`.
 
 Depends on item 2.
 

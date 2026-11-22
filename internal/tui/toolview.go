@@ -1452,8 +1452,9 @@ func hookedFailureBody(output, content string) []detailLine {
 // domain.ToolSummary skips them: what its slot says is its stat hook's word, and all such a result
 // leaves here is the body its presenter reads off it (view_diff's diff, read_file's located lines).
 // The one layer that runs either way is a presenter's resultDetail, which reads the summary itself
-// to decide how the prose lays out (sub_agent's, delegationResultDetail): skipping it for a
-// summary-bearing result would lose the report line its slot promotes.
+// to decide how the prose lays out (sub_agent's, delegationResultDetail; the process tools',
+// subprocessDetail and consoleDetail): skipping it for a summary-bearing result would lose the
+// report line its slot promotes, or a process run's whole body.
 func (tv *toolView) absorbProse(p toolPresenter, known bool, result domain.ToolResult) {
 	if known && p.resultDetail != nil {
 		out := p.resultDetail(result)

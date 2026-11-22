@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // detailsText joins a view's whole outcome — the branch-riding summary, then the body beneath
@@ -2529,8 +2530,194 @@ func TestConsoleStatusWordMustBeginItsOwnLine(t *testing.T) {
 			if ok && stat.spell() != tc.stat {
 				t.Errorf("slot = %q, want %q", stat.spell(), tc.stat)
 			}
-			if got := body(consoleDetail(tc.content)); got != tc.body {
+			if got := body(consoleDetail(domain.ToolResult{CallID: "1", Content: tc.content})); got != tc.body {
 				t.Errorf("body = %q, want %q", got, tc.body)
+			}
+		})
+	}
+}
+
+// A process run's slot and body are decided from the domain.ProcessEnding its result carries, not
+// from the marker its prose ends with: the code is the one the tool decided, the line that stated it
+// comes off the body wherever it stands, and whatever followed it — a tree-mutation warning, a
+// Console's cut-short note — stays. A clean run's card is unchanged by carrying its ending: the
+// same result without one renders byte for byte the same (matchesProse), one-line promotion and
+// empty output included.
+func TestProcessEndingDecidesTheSlot(t *testing.T) {
+	t.Parallel()
+
+	const (
+		warning = "[warning: this command changed workspace files: a.txt]"
+		cutNote = "[wait cut short by cancel]"
+	)
+	terminal := domain.ToolCall{ID: "1", Tool: "terminal", Arguments: []byte(`{"command":"make"}`)}
+	python := domain.ToolCall{ID: "1", Tool: "python_exec", Arguments: []byte(`{"code":"print(1)"}`)}
+	consoleOpen := domain.ToolCall{ID: "1", Tool: "console_open", Arguments: []byte(`{"command":"npm run dev"}`)}
+	consoleRead := domain.ToolCall{ID: "1", Tool: "console_read", Arguments: []byte(`{"id":1}`)}
+	consoleClose := domain.ToolCall{ID: "1", Tool: "console_close", Arguments: []byte(`{"id":1}`)}
+	exited := func(code int) domain.ProcessEnding {
+		return domain.ProcessEnding{State: domain.ProcessExited, ExitCode: code}
+	}
+
+	for _, tc := range []struct {
+		name     string
+		call     domain.ToolCall
+		content  string
+		isError  bool
+		ending   domain.ProcessEnding
+		wantSlot string
+		wantBody []string
+		// matchesProse marks a card the same result without its ending renders identically.
+		matchesProse bool
+	}{{
+		name:     "the typed code outranks a misleading marker",
+		call:     terminal,
+		content:  "cwd: /ws\nmake: *** [all] Error 2\n[exit code 9]",
+		isError:  true,
+		ending:   exited(2),
+		wantSlot: "error: exit 2",
+		wantBody: []string{"make: *** [all] Error 2", "[exit code 9]"},
+	}, {
+		name:     "a trailing tree-mutation warning stays in the body",
+		call:     terminal,
+		content:  "cwd: /ws\nwrote a.txt\n[exit code 1]\n" + warning,
+		isError:  true,
+		ending:   exited(1),
+		wantSlot: "error: exit 1",
+		wantBody: []string{"wrote a.txt", warning},
+	}, {
+		name:     "a killed terminal run reads its code, never killed",
+		call:     terminal,
+		content:  "cwd: /ws\npartial\n[exit code -1]",
+		isError:  true,
+		ending:   domain.ProcessEnding{State: domain.ProcessKilled, ExitCode: -1, DenialStopped: true},
+		wantSlot: "error: exit -1",
+		wantBody: []string{"partial"},
+	}, {
+		name:     "a timed-out run reads its code, never killed",
+		call:     python,
+		content:  "cwd: /ws\ncommand timed out\npartial\n[exit code -1]",
+		isError:  true,
+		ending:   domain.ProcessEnding{State: domain.ProcessKilled, ExitCode: -1, TimedOut: true},
+		wantSlot: "error: exit -1",
+		wantBody: []string{"command timed out", "partial"},
+	}, {
+		name:         "a failed run's card matches its prose",
+		call:         python,
+		content:      "cwd: /ws\nTraceback (most recent call last):\nSystemExit: 3\n[exit code 3]",
+		isError:      true,
+		ending:       exited(3),
+		wantSlot:     "error: exit 3",
+		wantBody:     []string{"Traceback (most recent call last):", "SystemExit: 3"},
+		matchesProse: true,
+	}, {
+		name:         "a clean run keeps its body",
+		call:         terminal,
+		content:      "cwd: /ws\nbuilt a\nbuilt b",
+		ending:       exited(0),
+		wantSlot:     "exit 0",
+		wantBody:     []string{"built a", "built b"},
+		matchesProse: true,
+	}, {
+		name:         "a one-line run keeps its promoted line",
+		call:         terminal,
+		content:      "cwd: /ws\nhello",
+		ending:       exited(0),
+		wantSlot:     "hello",
+		matchesProse: true,
+	}, {
+		name:         "an empty-output run opens onto its no-output body",
+		call:         python,
+		content:      "cwd: /ws\n",
+		ending:       exited(0),
+		wantSlot:     "exit 0",
+		wantBody:     []string{noOutputPhrase},
+		matchesProse: true,
+	}, {
+		name:         "a live console reads alive, the status line off",
+		call:         consoleRead,
+		content:      "still building\nstill\nalive",
+		ending:       domain.ProcessEnding{State: domain.ProcessRunning},
+		wantSlot:     "alive",
+		wantBody:     []string{"still building", "still"},
+		matchesProse: true,
+	}, {
+		name:         "a status-only console tail keeps the status in the slot",
+		call:         consoleRead,
+		content:      "alive",
+		ending:       domain.ProcessEnding{State: domain.ProcessRunning},
+		wantSlot:     "alive",
+		matchesProse: true,
+	}, {
+		name:         "a closed console reads its exit",
+		call:         consoleClose,
+		content:      "bye\nshutting down\nexited with code 0",
+		ending:       exited(0),
+		wantSlot:     "exit 0",
+		wantBody:     []string{"bye", "shutting down"},
+		matchesProse: true,
+	}, {
+		name:     "a console tail a cancel cut short reads its status",
+		call:     consoleRead,
+		content:  "building\nkilled\n" + cutNote,
+		ending:   domain.ProcessEnding{State: domain.ProcessKilled},
+		wantSlot: "killed",
+		wantBody: []string{"building", cutNote},
+	}, {
+		name:         "a typed running console_open keeps the id it produced",
+		call:         consoleOpen,
+		content:      "console 1 opened: npm run dev\n> dev\nready on :3000",
+		ending:       domain.ProcessEnding{State: domain.ProcessRunning},
+		wantSlot:     "console 1",
+		wantBody:     []string{"> dev", "ready on :3000"},
+		matchesProse: true,
+	}, {
+		name:     "a running console_open strips no line the program printed",
+		call:     consoleOpen,
+		content:  "console 1 opened: ./watch\nwatching\nalive",
+		ending:   domain.ProcessEnding{State: domain.ProcessRunning},
+		wantSlot: "console 1",
+		wantBody: []string{"watching", "alive"},
+	}, {
+		name:         "a console_open whose program already ended reads its exit",
+		call:         consoleOpen,
+		content:      "console 1 opened: ./once\ndone\nworking\nexited with code 4",
+		ending:       exited(4),
+		wantSlot:     "exit 4",
+		wantBody:     []string{"done", "working"},
+		matchesProse: true,
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			present := func(summary domain.ToolSummary) toolView {
+				tv := presentToolCall(tc.call, "", workspaceRoot{})
+				tv.enrichWithResult(domain.ToolResult{CallID: tc.call.ID, Content: tc.content,
+					IsError: tc.isError, Summary: summary}, workspaceRoot{})
+				return tv
+			}
+
+			typed := present(tc.ending)
+
+			if typed.Summary.Text != tc.wantSlot {
+				t.Errorf("slot = %q, want %q", typed.Summary.Text, tc.wantSlot)
+			}
+			body := make([]string, 0, typed.Details.len())
+			for _, d := range typed.Details.all() {
+				body = append(body, d.Text)
+			}
+			if !slices.Equal(body, tc.wantBody) {
+				t.Errorf("body = %q, want %q", body, tc.wantBody)
+			}
+			if !tc.matchesProse {
+				return
+			}
+			th := newTheme(scheme.Default())
+			render := func(tv toolView) string {
+				return strings.Join(renderToolBlock(th, tv, 80, blockState{expanded: true}).lines, "\n")
+			}
+			if got, want := render(typed), render(present(nil)); got != want {
+				t.Errorf("the typed card differs from its prose twin:\n--- typed\n%s\n--- prose\n%s", got, want)
 			}
 		})
 	}

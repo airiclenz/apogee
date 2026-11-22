@@ -3,8 +3,10 @@ package tui
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/floor"
@@ -112,9 +114,12 @@ type toolPresenter struct {
 	// (absorbProse). It is the seam for a tool whose typed outcome decides how its prose is laid
 	// out rather than replacing it: the summary path otherwise skips the prose layers and keeps
 	// only a body hook's lines, and such a tool's slot and body would go missing with them. It
-	// takes precedence over detail, so an entry sets one or the other; the one entry that sets it,
-	// sub_agent, reads how the run ended off its domain.DelegationOutcome while its report stays
-	// the child's own words (delegationResultDetail).
+	// takes precedence over detail, so an entry sets one or the other. sub_agent reads how the run
+	// ended off its domain.DelegationOutcome while its report stays the child's own words
+	// (delegationResultDetail); the two one-shot execution tools and the four Console calls read
+	// theirs off a domain.ProcessEnding, which says which line stated the ending so the body can
+	// drop it (subprocessDetail, consoleDetail, consoleOpenDetail) — each falling back to its prose
+	// for a result carrying none.
 	resultDetail func(res domain.ToolResult) toolOutcome
 
 	// stat words the right-hand outcome slot — the `<tool-top-level-details>` column of the
@@ -289,7 +294,10 @@ const loadSkillToolName = "load_skill"
 // sub_agent reports one as well (domain.DelegationOutcome) and takes the other route: how the run
 // ended decides how its report lays out, not just what the slot says, so it reads the summary in a
 // resultDetail hook the typed path still runs, and its prose readings of the engine's head and
-// trailer lines stay only as the floor for a delegation result carrying none. The rest quote their fixed sentence or hand free-form output (a command run, a
+// trailer lines stay only as the floor for a delegation result carrying none. The two one-shot
+// execution tools and the four Console calls take the same route for a domain.ProcessEnding: it
+// words their slot and says which line of the output stated the ending, and their prose markers
+// (exitCodeMarker, consoleStatusMarker) are read only for a result carrying none. The rest quote their fixed sentence or hand free-form output (a command run, a
 // sub-agent report) on as a body the collapsed paint shows the gist of: the chat compresses it
 // to a first line plus a remainder count until the block is expanded, and the model gets the
 // full text either way. One tool's result is nobody's words but the human's — ask_user's, which is
@@ -412,22 +420,22 @@ var toolRegistry = map[string]toolPresenter{
 		group:  deletedFilesPhrase,
 	},
 	"terminal": {
-		label:   "Terminal",
-		verb:    "running",
-		target:  stringArg("command"),
-		failure: subprocessFailure,
-		detail:  subprocessDetail,
-		stat:    exitCodeStat,
-		group:   ranCommandsPhrase,
+		label:        "Terminal",
+		verb:         "running",
+		target:       stringArg("command"),
+		failure:      subprocessFailure,
+		resultDetail: subprocessDetail,
+		stat:         exitCodeStat,
+		group:        ranCommandsPhrase,
 	},
 	"python_exec": {
-		label:   "Python",
-		verb:    "running python",
-		target:  firstLineArg("code"),
-		failure: subprocessFailure,
-		detail:  subprocessDetail,
-		stat:    exitCodeStat,
-		group:   ranCommandsPhrase,
+		label:        "Python",
+		verb:         "running python",
+		target:       firstLineArg("code"),
+		failure:      subprocessFailure,
+		resultDetail: subprocessDetail,
+		stat:         exitCodeStat,
+		group:        ranCommandsPhrase,
 	},
 	// The Console family (ADR 0059) drives ONE live process across four calls, so the four rows
 	// are written to be read together: the id the model steers by leads every branch but the
@@ -435,32 +443,32 @@ var toolRegistry = map[string]toolPresenter{
 	// The labels stay distinct — a family whose members share one label would fold a close into
 	// the read above it, and "which call was that" is the one thing a console run needs to say.
 	"console_open": {
-		label:  "Console",
-		verb:   "opening",
-		target: stringArg("command"),
-		detail: consoleOpenDetail,
-		stat:   consoleOpenStat,
+		label:        "Console",
+		verb:         "opening",
+		target:       stringArg("command"),
+		resultDetail: consoleOpenDetail,
+		stat:         consoleOpenStat,
 	},
 	"console_send": {
-		label:  "Console Send",
-		verb:   "sending to",
-		target: consoleSendTarget,
-		detail: consoleDetail,
-		stat:   consoleStatusStat,
+		label:        "Console Send",
+		verb:         "sending to",
+		target:       consoleSendTarget,
+		resultDetail: consoleDetail,
+		stat:         consoleStatusStat,
 	},
 	"console_read": {
-		label:  "Console Read",
-		verb:   "reading",
-		target: consoleTarget,
-		detail: consoleDetail,
-		stat:   consoleStatusStat,
+		label:        "Console Read",
+		verb:         "reading",
+		target:       consoleTarget,
+		resultDetail: consoleDetail,
+		stat:         consoleStatusStat,
 	},
 	"console_close": {
-		label:  "Console Close",
-		verb:   "closing",
-		target: consoleTarget,
-		detail: consoleDetail,
-		stat:   consoleStatusStat,
+		label:        "Console Close",
+		verb:         "closing",
+		target:       consoleTarget,
+		resultDetail: consoleDetail,
+		stat:         consoleStatusStat,
 	},
 	"git_branch": {
 		label:  "Git Branch",
@@ -839,7 +847,64 @@ func fileEditStat(args map[string]any) (statValue, bool) {
 // result (internal/tools: terminal and python_exec both flag it), which reads red from the error
 // layer above — so a result reaching here exited cleanly, and the slot says so. The table asks
 // for a duration beside it; no result carries one, so the code stands alone (design call 14).
-func exitCodeStat(domain.ToolResult) (statValue, bool) { return plainStat("exit 0"), true }
+//
+// A result carrying its domain.ProcessEnding words the code it carries — always 0 on this route —
+// so the slot reads the fact the tool decided rather than one this hook assumes.
+func exitCodeStat(res domain.ToolResult) (statValue, bool) {
+	if ending, ok := processEndingOf(res); ok {
+		return plainStat(exitPhrase(ending.ExitCode)), true
+	}
+	return plainStat(exitPhrase(0)), true
+}
+
+// processEndingOf is the domain.ProcessEnding a process tool attached to its result, and whether it
+// attached one. It is the one reading of that summary every process presenter asks — the slot, the
+// failure word and the body strip — so what counts as "this result states its ending" cannot come
+// to mean two things; a result without one is an older producer's line, which those presenters read
+// off its prose marker instead (exitMarkerPhrase).
+func processEndingOf(res domain.ToolResult) (domain.ProcessEnding, bool) {
+	ending, ok := res.Summary.(domain.ProcessEnding)
+	return ending, ok
+}
+
+// exitPhrase words an exit code for the slot — "exit 2" — the spelling exitMarkerPhrase gives a
+// marker's code, so a typed ending and a prose one read the same.
+func exitPhrase(code int) string { return "exit " + strconv.Itoa(code) }
+
+// The status words a Console's result ends with (consoleStatus, internal/tools/console_common.go) —
+// the same words consoleStatusMarker reads off a result carrying no ending. The slot repeats the
+// first and last as they stand and words the middle one's code as exitPhrase.
+const (
+	consoleAliveStatus  = "alive"
+	consoleExitedLead   = "exited with code "
+	consoleKilledStatus = "killed"
+)
+
+// withoutLastLine hands back content with the LAST line isMarker accepts taken off — the line a
+// process tool stated its ending on, wherever in the output it stands — and content whole when no
+// line is accepted. It is the typed path's strip: the ending says WHICH line the tool wrote, so the
+// strip takes that line itself rather than "the last line", and whatever the engine appended after
+// it (a tree-mutation warning, a Console's cut-short note) stays in the body.
+func withoutLastLine(content string, isMarker func(line string) bool) string {
+	lines := strings.Split(content, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if isMarker(strings.TrimRightFunc(lines[i], unicode.IsSpace)) {
+			return strings.Join(slices.Delete(lines, i, i+1), "\n")
+		}
+	}
+	return content
+}
+
+// isExitCodeLine accepts the "[exit code N]" marker subprocessToolResult writes for code — the
+// code followed by the closing bracket or the note the tool added inside it, never by another digit,
+// so the marker for 1 is not read off "[exit code 12]".
+func isExitCodeLine(code int) func(line string) bool {
+	lead := "[exit code " + strconv.Itoa(code)
+	return func(line string) bool {
+		rest, ok := strings.CutPrefix(line, lead)
+		return ok && strings.HasSuffix(rest, "]") && (rest[0] < '0' || rest[0] > '9')
+	}
+}
 
 // exitCodeMarker matches the "[exit code N]" line subprocessToolResult appends to a FAILED
 // subprocess result (internal/tools/terminal.go). It is anchored at the end of the output, where
@@ -849,7 +914,9 @@ func exitCodeStat(domain.ToolResult) (statValue, bool) { return plainStat("exit 
 // note the tool added about WHY the run failed (the terminal's fail-fast note) — the slot wants the
 // code, so everything after it up to the closing bracket is matched and dropped.
 //
-// Its two groups are the shape exitMarkerPhrase reads: the whole marker, then the code inside it.
+// Its two groups are the shape exitMarkerPhrase reads: the whole marker, then the code inside it. It
+// is read only for a result carrying no domain.ProcessEnding — an older producer's line — since a
+// typed ending states the code itself (exitCodeFailure).
 var exitCodeMarker = regexp.MustCompile(`\n?(\[exit code (-?\d+)[^\]]*\])\s*$`)
 
 // consoleStatusMarker matches the status line every Console result ends with — "alive", "exited
@@ -857,7 +924,8 @@ var exitCodeMarker = regexp.MustCompile(`\n?(\[exit code (-?\d+)[^\]]*\])\s*$`)
 // bracketed phrase, those words are ordinary prose, so end-anchoring alone would read the last word
 // of a program's own last line ("the dev server is alive") as the verdict on it: the status must
 // BEGIN a line as well as end the output, which is what `(?:^|\n)` says and an optional `\n?` did
-// not. It captures the status first and the code inside it second, exitMarkerPhrase's shape.
+// not. It captures the status first and the code inside it second, exitMarkerPhrase's shape. Like
+// exitCodeMarker it is read only for a result carrying no domain.ProcessEnding (consoleEnding).
 var consoleStatusMarker = regexp.MustCompile(`(?:^|\n)(alive|exited with code (-?\d+)|killed)\s*$`)
 
 // exitMarkerPhrase words one anchored process-status marker for the outcome slot and hands back
@@ -888,10 +956,19 @@ func exitMarkerPhrase(marker *regexp.Regexp, content string) (phrase, output str
 // says the command failed; its first output line often says something else entirely ("total
 // 20760"), which is what the slot used to spend itself on.
 //
+// A result carrying its domain.ProcessEnding is worded off that instead: the code is the one the
+// tool decided, every State worded "exit N" — a killed or timed-out run keeps the -1 its marker
+// states, so it still reads `error: exit -1`, never `killed` — and the marker line that code
+// matches comes off the body (isExitCodeLine), whatever follows it. The regex runs only for a
+// result with no ending, an older producer's line.
+//
 // A result with no marker is not this shape — a run the tool refused, a fault raised before the
 // process started — so it falls back to that first line, where such a result does word its own
 // failure.
-func exitCodeFailure(content string) (string, string, bool) {
+func exitCodeFailure(res domain.ToolResult, content string) (string, string, bool) {
+	if ending, ok := processEndingOf(res); ok {
+		return exitPhrase(ending.ExitCode), withoutLastLine(content, isExitCodeLine(ending.ExitCode)), true
+	}
 	return exitMarkerPhrase(exitCodeMarker, content)
 }
 
@@ -903,7 +980,7 @@ func exitCodeFailure(content string) (string, string, bool) {
 // This is the FAILURE route (absorbFailure → failure hook → outputBody), which does not pass
 // through the success detail, so the strip has to be applied on both.
 func subprocessFailure(res domain.ToolResult) (string, string, bool) {
-	return exitCodeFailure(domain.StripCwdLine(res.Content))
+	return exitCodeFailure(res, domain.StripCwdLine(res.Content))
 }
 
 // subprocessDetail is outputDetail for the same two tools on the SUCCESS route, with the `cwd:`
@@ -915,8 +992,13 @@ func subprocessFailure(res domain.ToolResult) (string, string, bool) {
 // — and a run that printed nothing is a fact the reader should be able to open the row to confirm,
 // the same row a failed twin opens onto its failure text (hookedFailureBody). The slot keeps
 // `exit 0`; a collapsed lone row counts the one line beside it like any other body.
-func subprocessDetail(content string) toolOutcome {
-	output := domain.StripCwdLine(content)
+//
+// It is the two tools' resultDetail hook, not a detail one, because a clean run's result may carry
+// its domain.ProcessEnding and the typed path skips the detail extractor (toolView.absorbProse):
+// without the hook the ending would take the body with it. The ending changes nothing here — a
+// clean run writes no marker to take off — so the hook reads the prose alone.
+func subprocessDetail(res domain.ToolResult) toolOutcome {
+	output := domain.StripCwdLine(res.Content)
 	if strings.TrimSpace(output) == "" {
 		return toolOutcome{Details: []detailLine{{Text: noOutputPhrase}}}
 	}
@@ -932,11 +1014,39 @@ func subprocessDetail(content string) toolOutcome {
 // A result in no such shape keeps its own prose floor: the Console refusals are error results
 // whose first line IS the message ("no console 7 (open consoles: 1, 2)").
 func consoleStatusStat(res domain.ToolResult) (statValue, bool) {
-	phrase, _, ok := exitMarkerPhrase(consoleStatusMarker, res.Content)
+	phrase, _, ok := consoleEnding(res, res.Content, true)
 	if !ok {
 		return statValue{}, false
 	}
 	return plainStat(phrase), true
+}
+
+// consoleEnding words a Console result's ending for the slot and hands back the output left once
+// the status line stating it is off — exitMarkerPhrase's shape, for the Console family. A result
+// carrying its domain.ProcessEnding is read off that: the word from its State ("alive", "exit N",
+// "killed"), and the status line consoleStatus wrote for it taken off wherever it stands, so a tail
+// a cancel cut short ("[wait cut short by cancel]" after the status) still reads its status. Only a
+// result with no ending — an older producer's line — is read through consoleStatusMarker.
+//
+// hasAliveLine is false for console_open alone, whose tail states a live process with no line at
+// all (consoleOpenTail): a typed running ending there words nothing and strips nothing, so the slot
+// keeps the id the open produced and a program's own last "alive" stays in its body.
+func consoleEnding(res domain.ToolResult, content string, hasAliveLine bool) (phrase, output string, ok bool) {
+	ending, typed := processEndingOf(res)
+	if !typed {
+		return exitMarkerPhrase(consoleStatusMarker, content)
+	}
+	if ending.State == domain.ProcessRunning && !hasAliveLine {
+		return "", content, false
+	}
+	phrase, line := consoleAliveStatus, consoleAliveStatus
+	switch ending.State {
+	case domain.ProcessExited:
+		phrase, line = exitPhrase(ending.ExitCode), consoleExitedLead+strconv.Itoa(ending.ExitCode)
+	case domain.ProcessKilled:
+		phrase, line = consoleKilledStatus, consoleKilledStatus
+	}
+	return phrase, withoutLastLine(content, func(l string) bool { return l == line }), true
 }
 
 // consoleOpenedHead matches the header console_open writes its result with — "console 3 opened:
@@ -960,7 +1070,7 @@ func consoleOpenedID(content string) (id, output string, ok bool) {
 // is nowhere else on the card. A program that was over before the call returned is worded by its
 // exit instead: an id nothing can address any more is not the outcome of that open.
 func consoleOpenStat(res domain.ToolResult) (statValue, bool) {
-	if phrase, _, ok := exitMarkerPhrase(consoleStatusMarker, res.Content); ok {
+	if phrase, _, ok := consoleEnding(res, res.Content, false); ok {
 		return plainStat(phrase), true
 	}
 	if id, _, ok := consoleOpenedID(res.Content); ok {
@@ -2102,8 +2212,18 @@ func outputDetail(content string) toolOutcome {
 // (consoleStatusStat). The line is the tool's verdict on the process rather than something the
 // program said, and a body repeating "alive" under a branch that already reads "alive" spends a
 // row saying nothing twice. Everything else is free-form output and lays out as such.
-func consoleDetail(content string) toolOutcome {
-	if _, output, ok := exitMarkerPhrase(consoleStatusMarker, content); ok {
+//
+// It is a resultDetail hook, reading the status line through consoleEnding, because a result that
+// carries its domain.ProcessEnding skips the detail extractor (toolView.absorbProse) and would lose
+// its body with it.
+func consoleDetail(res domain.ToolResult) toolOutcome {
+	return consoleOutputDetail(res, res.Content, true)
+}
+
+// consoleOutputDetail is consoleDetail over the output left in content, the status line off it
+// when consoleEnding finds one (hasAliveLine means what it does there).
+func consoleOutputDetail(res domain.ToolResult, content string, hasAliveLine bool) toolOutcome {
+	if _, output, ok := consoleEnding(res, content, hasAliveLine); ok {
 		content = output
 	}
 	return outputDetail(content)
@@ -2114,11 +2234,9 @@ func consoleDetail(content string) toolOutcome {
 // command IS the target, and the id is in the slot (consoleOpenStat). So the header comes off and
 // the body is what the program actually printed in the open's wait window, which is the one thing
 // on the card the model has not already been told.
-func consoleOpenDetail(content string) toolOutcome {
-	if _, output, ok := consoleOpenedID(content); ok {
-		content = output
-	}
-	return consoleDetail(content)
+func consoleOpenDetail(res domain.ToolResult) toolOutcome {
+	_, output, _ := consoleOpenedID(res.Content)
+	return consoleOutputDetail(res, output, false)
 }
 
 // outputBody is the body half of that split on its own: free-form output as the lines it lays out
