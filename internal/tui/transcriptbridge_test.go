@@ -2346,6 +2346,124 @@ func TestTranscriptCodecReadsAQuotedDelegationVerdictOffItsStat(t *testing.T) {
 	}
 }
 
+// TestDelegationVerdictFromWordsReadsEveryRecordedVerdict pins the one parser of a delegation's
+// words (delegationVerdictFromWords) over what a record keeps: every verdict the live row words
+// (delegationOutcomeVerdict, absorbFailure, closeInterruptedCalls) reads back to its own enum; a
+// delegation that never started is read off the body beneath its slot, the human's acts neutral and
+// the ceiling refusal red, whether the record's slot carries today's words or an older record's
+// `error`; words that name no verdict read as the zero verdict; and a quoted one-line report is
+// read through the stat stored behind it.
+func TestDelegationVerdictFromWordsReadsEveryRecordedVerdict(t *testing.T) {
+	t.Parallel()
+
+	t.Run("each painted verdict round-trips to its enum", func(t *testing.T) {
+		t.Parallel()
+		for _, outcome := range []domain.DelegationOutcome{
+			{},
+			{SteeredMessages: 2},
+			{HasNoReport: true},
+			{HasNoReport: true, SteeredMessages: 1},
+			{IsStoppedByUser: true},
+			{IsStoppedByUser: true, SteeredMessages: 1},
+			{Bound: domain.DelegationStepCap},
+			{Bound: domain.DelegationTokenBudget, SteeredMessages: 3},
+			{Bound: domain.DelegationTimeLimit},
+		} {
+			slot := delegationOutcomeVerdict(outcome)
+			got, _ := delegationVerdictFromWords(delegationWords{recorded: true, slot: slot})
+			if want := delegationVerdictOf(outcome, false); got != want {
+				t.Errorf("slot %q reads verdict %d, want %d", slot, got, want)
+			}
+		}
+		for slot, want := range map[string]delegationVerdict{
+			erroredSummary:                          delegationVerdictFailed,
+			errorSummaryPrefix + "sub-agent failed": delegationVerdictFailed,
+			interruptedSummary:                      delegationVerdictInterrupted,
+			delegationPreemptedVerdict:              delegationVerdictPreempted,
+		} {
+			if got, _ := delegationVerdictFromWords(delegationWords{recorded: true, slot: slot}); got != want {
+				t.Errorf("slot %q reads verdict %d, want %d", slot, got, want)
+			}
+		}
+	})
+
+	const ceilingRefusal = "sub-agent not started: this reply fanned out 9 delegations and the ceiling is 8 " +
+		"— delegate fewer at once"
+	neverStarted := []struct {
+		name       string
+		slot       string
+		body       string
+		want       delegationVerdict
+		wantWords  string
+		wantFailed bool
+	}{
+		{"a pre-emption", delegationPreemptedVerdict, delegationPreemptedContent,
+			delegationVerdictPreempted, delegationPreemptedVerdict, false},
+		{"a turn cancel of a queued member", delegationStoppedVerdict, delegationCancelledQueuedContent,
+			delegationVerdictCancelledQueued, delegationStoppedVerdict, false},
+		{"a queued stop", delegationStoppedVerdict, delegationStoppedQueuedContent,
+			delegationVerdictStoppedQueued, delegationStoppedVerdict, false},
+		{"an older record's error over a pre-emption", erroredSummary, delegationPreemptedContent,
+			delegationVerdictPreempted, delegationPreemptedVerdict, false},
+		{"an older record's error over a turn cancel", erroredSummary, delegationCancelledQueuedContent,
+			delegationVerdictCancelledQueued, delegationStoppedVerdict, false},
+		{"an older record's error over a queued stop", erroredSummary, delegationStoppedQueuedContent,
+			delegationVerdictStoppedQueued, delegationStoppedVerdict, false},
+		{"the ceiling refusal", erroredSummary, ceilingRefusal,
+			delegationVerdictRefused, erroredSummary, true},
+	}
+	for _, tc := range neverStarted {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, outcome := delegationVerdictFromWords(delegationWords{recorded: true, slot: tc.slot, prose: tc.body})
+
+			if got != tc.want {
+				t.Errorf("verdict = %d, want %d", got, tc.want)
+			}
+			if !got.neverStarted() {
+				t.Errorf("verdict %d does not count as never started", got)
+			}
+			if got.failure() != tc.wantFailed {
+				t.Errorf("verdict %d paints red = %v, want %v", got, got.failure(), tc.wantFailed)
+			}
+			if words := delegationOutcomeVerdict(outcome); words != tc.wantWords {
+				t.Errorf("the outcome read off the body words %q, want %q", words, tc.wantWords)
+			}
+
+			replayed := fromWireToolView(&session.ToolView{
+				Name:    subAgentToolName,
+				Summary: session.BranchSummary{DetailLine: session.DetailLine{Text: tc.slot}},
+				Details: []session.DetailLine{{Text: tc.body}},
+			}, true)
+			if replayed.Summary.Text != tc.wantWords || replayed.Summary.verdict != tc.want ||
+				replayed.Summary.failed != tc.wantFailed {
+				t.Errorf("replayed slot = %q (verdict %d, failed %v), want %q (verdict %d, failed %v)",
+					replayed.Summary.Text, replayed.Summary.verdict, replayed.Summary.failed,
+					tc.wantWords, tc.want, tc.wantFailed)
+			}
+		})
+	}
+
+	t.Run("an unknown recorded word reads the zero verdict", func(t *testing.T) {
+		t.Parallel()
+		for _, slot := range []string{"", "all clear", "done deal", "1 tool call · done", "not started"} {
+			if got, _ := delegationVerdictFromWords(delegationWords{recorded: true, slot: slot}); got != delegationVerdictNone {
+				t.Errorf("slot %q reads verdict %d, want the zero verdict", slot, got)
+			}
+		}
+	})
+
+	t.Run("a quoted one-line report over a recorded done stat reads done", func(t *testing.T) {
+		t.Parallel()
+		words := delegationWords{recorded: true, slot: delegationNoReportVerdict, quoted: true, stat: delegationDoneVerdict}
+
+		if got, _ := delegationVerdictFromWords(words); got != delegationVerdictDone {
+			t.Errorf("verdict = %d, want done — read off the stat, never the quoted report", got)
+		}
+	})
+}
+
 // TestTranscriptCodecReplaysANoReportDelegationWithoutACheck is the replay half of the no-report
 // verdict (plan "2026-09-24 - 01", item 6): the verdict is recovered from the slot's words the record
 // keeps (fromWireToolView restores them), with no field of its own on the wire, so a delegation that

@@ -905,8 +905,9 @@
 // too — domain.DelegationOutcome, how the run ended — and reads it in a resultDetail hook as well as
 // its stat, because the ending decides whether the report is promoted; it is pinned where the engine
 // attaches it (internal/agent's subagent tests) and through the cmd/apogee delegation runs, and the
-// delegation readers' prose regexes over the engine's head and trailer lines are only the floor for a
-// delegation result carrying none. sub_agent is not the only resultDetail reader: terminal,
+// one parser of a delegation's words (transcriptbridge.go's delegationVerdictFromWords, whose prose
+// regexes over the engine's head and trailer lines are its private parts) is only the floor for a
+// delegation result carrying none, and replay's reader of the words a record keeps. sub_agent is not the only resultDetail reader: terminal,
 // python_exec and the four Console calls read a domain.ProcessEnding in theirs, and in their stat
 // and failure hooks, to word the slot and take the line that stated the ending off the body, with
 // the exit-code and Console-status markers only the floor for a result carrying none.

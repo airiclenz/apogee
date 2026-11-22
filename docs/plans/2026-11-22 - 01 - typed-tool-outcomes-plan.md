@@ -217,7 +217,14 @@ internal/agent/dispatch.go — settleCancelledDelegation, stopQueuedDelegation, 
 
 **Commit:** `feat(agent): a never-started delegation's result names why it never ran`
 
-## 8. Delegation words are parsed in one place
+## 8. Delegation words are parsed in one place — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): re-derived from the assumption that `toolView.runVerdict` is a word read back through `succeededSummary` (true at base 95c0d0cd; item 6 made it a typed `delegationVerdict` field). It reads no words now, so it is kept as named. The prose-guard grep's only hits outside the parser are that field (toolview.go, subagentblock.go, toolleader.go:40, toolpresent_test.go). Renaming it would be an unrequested identifier rename in subagentblock.go, a file outside the item's Files list.
+NOTES (2026-11-22): re-derived from the assumption that `delegationNeverStartedVerdict` and `entry.neverStarted`'s prefix check still exist (item 7 already removed both). `unstartedDelegationPrefix` moved from transcript.go into the parser.
+NOTES (2026-11-22): the parser is `delegationVerdictFromWords(delegationWords) (delegationVerdict, domain.DelegationOutcome)`. It also returns the outcome because the summary-less live fallback (`delegationOutcomeOf`, now merged with the retired `failedDelegationOutcome` through `res.IsError`) still needs the bound and steering facts to word the slot. Replay also uses that outcome to re-word an older record's `error` slot. The private parts moved from toolregistry.go into transcriptbridge.go: the prose readers, the engine-prose constants, `delegationBoundHead`/`delegationBoundNamed` and the steering/body-note matchers. `succeededSummary`, `endedWithoutReportSummary` and `stoppedSummary` became one private `isDelegationVerdictWord`. `delegationDetail` was deleted and its tests now go through `delegationResultDetail`.
+NOTES (2026-11-22): `namedSummary` and `typedSummary` no longer set `succeeded`. `toolView.demoted`'s ordinary path now carries a delegation head's typed verdict over the swap (`withVerdict`), so a demoted done head keeps its green. A summary-less error-shaped delegation's failure outcome now carries the steering its notice reports. `delegationSteering` reads the count off `delegationOutcomeOf` for both shapes, so `delegationFailure` behaves as before.
+NOTES (2026-11-22): subagentblock_test.go is in the item's Files list but needed no edit: it names no deleted reader (`e.neverStarted()` is the kept entry method).
+NOTES (2026-11-22): the stale `toolView.settleDelegationVerdict` reference in the delegationVerdict doc comment was corrected to `toolView.enrichWithResult` in the sentence this item rewrote.
 
 Depends on items 6 and 7.
 

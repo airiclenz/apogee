@@ -389,12 +389,12 @@ func TestDelegationDetailDoesNotPromoteAStoppedText(t *testing.T) {
 	t.Parallel()
 
 	for _, content := range []string{delegationStoppedHead, delegationStoppedQueuedContent} {
-		out := delegationDetail(content)
+		out := delegationResultDetail(domain.ToolResult{Content: content})
 		if out.Summary.Text != "" {
-			t.Errorf("delegationDetail(%q) promoted %q into the slot; want it laid out as a body", content, out.Summary.Text)
+			t.Errorf("delegationResultDetail(%q) promoted %q into the slot; want it laid out as a body", content, out.Summary.Text)
 		}
 		if len(out.Details) == 0 {
-			t.Errorf("delegationDetail(%q) laid out no body", content)
+			t.Errorf("delegationResultDetail(%q) laid out no body", content)
 		}
 	}
 }
@@ -464,7 +464,7 @@ func TestDelegationRecognisersReadThroughTheRoutingNote(t *testing.T) {
 // worded by the existing failure layer from their first line, exactly as a faulted child's is: the
 // engine's line is the summary, the child's text is the body beneath it, and the steering cell
 // still rides the line. Its third shape, the no-report marker, is a non-error result the verdict
-// reads as a delegation that ended without a report (delegationEndedWithoutReport).
+// reads as a delegation that ended without a report (domain.DelegationOutcome.HasNoReport).
 func TestDelegationValidationFaultsReadThroughTheErrorSlot(t *testing.T) {
 	t.Parallel()
 
@@ -545,7 +545,7 @@ func TestDelegationVerdictReadsANonReport(t *testing.T) {
 }
 
 // The no-report verdict is an OUTCOME ENVELOPE, like the bound head: it takes the slot ahead of a
-// one-line narration the child closed on, which is never promoted into it (delegationDetail), and
+// one-line narration the child closed on, which is never promoted into it (delegationResultDetail), and
 // the line lays out as the body instead. A one-line REPORT is promoted exactly as before.
 func TestDelegationDetailNeverPromotesANonReport(t *testing.T) {
 	t.Parallel()
@@ -553,7 +553,7 @@ func TestDelegationDetailNeverPromotesANonReport(t *testing.T) {
 	t.Run("a one-line narration is body, not the slot", func(t *testing.T) {
 		t.Parallel()
 
-		out := delegationDetail("Let me now read X.")
+		out := delegationResultDetail(domain.ToolResult{Content: "Let me now read X."})
 		if out.Summary.Text != "" {
 			t.Errorf("summary = %q, want none — the verdict takes the slot", out.Summary.Text)
 		}
@@ -565,7 +565,7 @@ func TestDelegationDetailNeverPromotesANonReport(t *testing.T) {
 	t.Run("a one-line report is still promoted", func(t *testing.T) {
 		t.Parallel()
 
-		out := delegationDetail("all clear")
+		out := delegationResultDetail(domain.ToolResult{Content: "all clear"})
 		if out.Summary.Text != "all clear" || !out.Summary.quoted {
 			t.Errorf("summary = %+v, want the report promoted into the slot, quoted", out.Summary)
 		}
@@ -614,9 +614,10 @@ func TestDelegationOutcomeOutranksTheProse(t *testing.T) {
 }
 
 // proseVerdictWords is the slot a delegation result known only by its prose is worded with: the
-// outcome read off the prose (proseDelegationOutcome), worded by delegationOutcomeVerdict.
+// outcome read off its words (delegationOutcomeOf, for a result carrying none), worded by
+// delegationOutcomeVerdict.
 func proseVerdictWords(content string) string {
-	return delegationOutcomeVerdict(proseDelegationOutcome(content))
+	return delegationOutcomeVerdict(delegationOutcomeOf(domain.ToolResult{Content: content}))
 }
 
 // TestDelegationVerdictIsTypedOnTheSummary pins the typed verdict a sub_agent head's summary
@@ -674,7 +675,7 @@ func TestDelegationVerdictIsTypedOnTheSummary(t *testing.T) {
 			tv := presentToolCall(call, "", workspaceRoot{})
 			content := report
 			if tc.outcome.Unstarted != domain.DelegationRan {
-				content = unstartedDelegationPrefix + " the engine's own words"
+				content = "sub-agent not started: the engine's own words"
 			}
 
 			tv.enrichWithResult(domain.ToolResult{CallID: "s1", Content: content, IsError: tc.isError,

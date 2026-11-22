@@ -9,7 +9,6 @@ import (
 	"unicode"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/floor"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/tasklist"
 	"github.com/airiclenz/apogee/internal/title"
@@ -1089,11 +1088,13 @@ func cleanStat(domain.ToolResult) (statValue, bool) { return plainStat("clean"),
 // run the engine capped mid-task did not finish — delegationCappedVerdict is the step cap's, and
 // the token and time bounds word theirs from the same lead and the bound's own name
 // (delegationBoundVerdict); `stopped by you` replaces it for a run the HUMAN stopped (ADR 0086 D4,
-// delegationStoppedByUser) — "stopped" is the human's word alone, which is why an engine bound
-// reads "capped" here although the engine's own result head still says "stopped at its"; `ended
-// without a report` replaces it for a child that reached its boundary with nothing to hand back
-// (delegationEndedWithoutReport); and the steering cell is appended to whichever verdict stands,
-// since a human may steer a child on any outcome (ADR 0063 D3).
+// domain.DelegationOutcome.IsStoppedByUser) — "stopped" is the human's word alone, which is why an
+// engine bound reads "capped" here although the engine's own result head still says "stopped at
+// its"; `ended without a report` replaces it for a child that reached its boundary with nothing to
+// hand back (domain.DelegationOutcome.HasNoReport); and the steering cell is appended to whichever
+// verdict stands, since a human may steer a child on any outcome (ADR 0063 D3). Replay reads these
+// same words back to a verdict (delegationVerdictFromWords), so a reworded verdict here is read there
+// through the same constants.
 const (
 	delegationDoneVerdict     = "done"
 	delegationNoReportVerdict = "ended without a report"
@@ -1105,23 +1106,14 @@ const (
 )
 
 // delegationPreemptedVerdict is the slot of a delegation a queued user message pre-empted before it
-// started (delegationPreemptedContent, ADR 0025): it never ran, by the human's act, so it is neither
+// started (domain.DelegationSkipped, ADR 0025): it never ran, by the human's act, so it is neither
 // `done` nor the child's failure.
 const delegationPreemptedVerdict = "not started · your message"
 
-// delegationBoundHead matches the marker line a delegation stopped at one of its BOUNDS opens with
-// — "[delegate stopped at its step cap (3 steps); partial result — engine summary and closing report follow]",
-// or the same shape naming its token budget or its time limit (internal/agent's
-// stepCapResultFormat, tokenCapResultFormat and timeCapResultFormat) — anchored at the START, where
-// the engine writes it, so a line the child itself printed cannot be read as the marker. The one
-// submatch is the bound's name, which the verdict repeats.
-var delegationBoundHead = regexp.MustCompile(
-	`^\[delegate stopped at its (step cap \(\d+ steps?\)|token budget \(\d+ tokens?\)|time limit \([^)]+\));`)
-
 // delegationBoundNames spells each engine bound as the slot names it — the bound's name as the
-// engine's own head writes it (delegationBoundHead), without the parenthesis that carries its
-// number. It is the one spelling both readings share: the typed outcome's bound is worded through
-// it, and a matched head's name is read back to its bound through it (delegationBoundNamed).
+// engine's own head writes it, without the parenthesis that carries its number. It is the one
+// spelling both readings share: the typed outcome's bound is worded through it, and the words of a
+// result carrying no outcome are read back to their bound through it (delegationVerdictFromWords).
 var delegationBoundNames = map[domain.DelegationBound]string{
 	domain.DelegationStepCap:     "step cap",
 	domain.DelegationTokenBudget: "token budget",
@@ -1130,46 +1122,10 @@ var delegationBoundNames = map[domain.DelegationBound]string{
 
 // delegationBoundVerdict words the slot for a bound: `capped at its step cap`, `capped at its
 // token budget`, `capped at its time limit` — the name without the number the parent model reads
-// and the row has no room for. The head itself keeps the engine's "stopped at its"
-// (delegationBoundHead): it is the model's contract, byte-identical across sessions, and only the
-// row's wording is the human's.
+// and the row has no room for. The head itself keeps the engine's "stopped at its": it is the
+// model's contract, byte-identical across sessions, and only the row's wording is the human's.
 func delegationBoundVerdict(bound domain.DelegationBound) string {
 	return delegationBoundLead + delegationBoundNames[bound]
-}
-
-// delegationBoundNamed is the bound a matched head's submatch names — "step cap (3 steps)" is the
-// step cap — read through delegationBoundNames. A name no bound is spelled with is
-// DelegationUnbounded, which the head's own pattern never lets through.
-func delegationBoundNamed(match string) domain.DelegationBound {
-	name, _, _ := strings.Cut(match, " (")
-	for bound, spelled := range delegationBoundNames {
-		if spelled == name {
-			return bound
-		}
-	}
-	return domain.DelegationUnbounded
-}
-
-// delegationSteeredTail matches the PARENT NOTICE a steered delegation's result closes with — "(the
-// user sent 2 messages to this sub-agent while it ran)" (internal/agent's userSteeredTrailer, ADR
-// 0063 D3) — anchored at the END, which is both where the engine appends it and the half the
-// structural clamp keeps, so a result clipped on its way to the parent still reads here.
-var delegationSteeredTail = regexp.MustCompile(`\n\(the user sent (\d+) messages? to this sub-agent while it ran\)$`)
-
-// readDelegationSteering splits the parent notice off a delegation's result: the content without it,
-// and how many messages it reports. A result carrying no notice comes back whole with a zero, which
-// is the ordinary unsteered case and the only answer a foreign shape can give.
-func readDelegationSteering(content string) (body string, steered int) {
-	trimmed := strings.TrimRight(content, "\n")
-	m := delegationSteeredTail.FindStringSubmatchIndex(trimmed)
-	if m == nil {
-		return content, 0
-	}
-	n, err := strconv.Atoi(trimmed[m[2]:m[3]])
-	if err != nil || n <= 0 {
-		return content, 0
-	}
-	return strings.TrimRight(trimmed[:m[0]], "\n"), n
 }
 
 // delegationSteeredCell spells the steering the slot reports: how many messages the human sent into
@@ -1180,175 +1136,24 @@ func delegationSteeredCell(steered int) string {
 	return delegationSteeredLead + plural(steered, delegationSteeredMessage)
 }
 
-// delegationStoppedHead is the marker line a delegation the HUMAN stopped opens with (internal/agent's
-// stoppedResultHead, ADR 0086 D4): a non-error partial result, the engine fold and the child's last
-// words beneath it. delegationStoppedQueuedContent is the whole of the error-shaped result a pooled
-// delegation stopped before it started carries (internal/agent's stoppedQueuedDelegationContent),
-// under the unstarted head (unstartedDelegationPrefix) every never-ran kind shares. Both are spelled
-// again here as the bound head is: the engine formats them deliberately. The stopped head is read
-// only for a result carrying no typed outcome (proseDelegationOutcome); the queued stop's text is
-// read the same way, for a result carrying no outcome (proseFailedDelegationOutcome) — the engine
-// attaches the unstarted one to every result for a delegation that never ran.
-//
-// Two more never-ran kinds are the human's act rather than the child's failure, and are spelled
-// again here for the same reason: delegationCancelledQueuedContent is the whole result of a
-// delegation still queued when the human cancelled the turn (internal/agent's
-// cancelledQueuedDelegationContent) — a stop of the whole turn, worded `stopped by you` like the
-// queued stop — and delegationPreemptedContent is the whole result of one a queued user message
-// pre-empted (internal/agent's skippedDelegationContent, ADR 0025), worded
-// delegationPreemptedVerdict. Both stay error-shaped on the wire for the model; only the row's
-// verdict is neutral (proseFailedDelegationOutcome, absorbFailure).
-const (
-	delegationStoppedHead          = "[stopped by the user — engine summary follows]"
-	delegationStoppedQueuedContent = "sub-agent not started: the user stopped it before it started; " +
-		"delegate again if the task is still needed"
-	delegationCancelledQueuedContent = "sub-agent not started: the user cancelled the turn before it started; " +
-		"delegate again if the task is still needed"
-	delegationPreemptedContent = "sub-agent not started: the user sent a message while this group was running; " +
-		"delegate again if the task is still needed"
-)
-
-// delegationStoppedByUser reads the human's stop off a delegation's result: the stopped head as the
-// body's first line — anchored at the START, where the engine writes it, so a line the child printed
-// cannot be read as the marker — or the whole text of a queued stop or of a turn cancel that caught
-// the delegation queued. body is the result with the steering notice already taken off
-// (readDelegationSteering).
-func delegationStoppedByUser(body string) bool {
-	head, _, _ := strings.Cut(body, "\n")
-	whole := strings.TrimSpace(body)
-	return head == delegationStoppedHead || whole == delegationStoppedQueuedContent ||
-		whole == delegationCancelledQueuedContent
-}
-
-// failedDelegationOutcome is how an ERROR-SHAPED delegation result ended: the typed outcome the
-// engine attached, or — for a result carrying none — the facts read back off its prose
-// (proseFailedDelegationOutcome). It is the failure layer's twin of delegationOutcomeOf, kept apart
-// because an error-shaped result's prose says different things: never a bound or a missing report,
-// only whether the human's act settled it, or whether it never started at all.
-func failedDelegationOutcome(res domain.ToolResult) domain.DelegationOutcome {
-	if outcome, ok := res.Summary.(domain.DelegationOutcome); ok {
-		return outcome
-	}
-	return proseFailedDelegationOutcome(res.Content)
-}
-
-// proseFailedDelegationOutcome reads an error-shaped delegation result the engine attached no
-// outcome to: the human's act that settled it before its child ran — a queued stop
-// (delegationStoppedQueuedContent), a turn cancel that caught it queued
-// (delegationCancelledQueuedContent), a pre-emption by a queued message (delegationPreemptedContent)
-// — the human's stop of a started run (delegationStoppedHead), or, for any other result under the
-// unstarted head (unstartedDelegationPrefix), the fan-out ceiling's refusal. Everything else is a
-// child's own failure, the zero outcome. The human's acts are matched on the WHOLE content, so a
-// failure that merely quotes the words is still a failure.
-func proseFailedDelegationOutcome(content string) domain.DelegationOutcome {
-	body, _ := readDelegationSteering(content)
-	whole := strings.TrimSpace(body)
-	head, _, _ := strings.Cut(body, "\n")
-	switch {
-	case whole == delegationStoppedQueuedContent:
-		return domain.DelegationOutcome{Unstarted: domain.DelegationStoppedQueued}
-	case whole == delegationCancelledQueuedContent:
-		return domain.DelegationOutcome{Unstarted: domain.DelegationCancelled}
-	case whole == delegationPreemptedContent:
-		return domain.DelegationOutcome{Unstarted: domain.DelegationSkipped}
-	case head == delegationStoppedHead:
-		return domain.DelegationOutcome{IsStoppedByUser: true}
-	case strings.HasPrefix(whole, unstartedDelegationPrefix):
-		return domain.DelegationOutcome{Unstarted: domain.DelegationRefused}
-	}
-	return domain.DelegationOutcome{}
-}
-
-// delegationNoReportMarker is the whole of the result a child gets back to its parent when its
-// closing text was a bare acknowledgement — "Done.", "OK" (internal/agent's noReportMarker, spelled
-// again here as the bound head is: the engine formats it deliberately, and this package reads it
-// off a result carrying no typed outcome, proseDelegationOutcome).
-const delegationNoReportMarker = "[delegate returned no report]"
-
-// delegationEndedWithoutReport reads the no-report half of the result envelope: a delegation that
-// reached its own boundary — no bound head (delegationBoundHead), which is the engine's word that
-// the run was stopped short and outranks this one — and handed back either the no-report marker or
-// a closing text the shared classifier judges not a report (floor.IsNonReport: narration of a next
-// step, a pasted file, a grep dump). body is the result with the steering notice already taken off
-// (readDelegationSteering), so a steered child's narration is read as the narration it is; the
-// engine's body notes are taken off it here (delegationChildText), for the same reason.
-//
-// It is the ROW's reading and nothing more (ratified call "Non-report" of plan "2026-09-24 - 01"):
-// the parent model receives the result exactly as the engine wrote it, and the classifier is the one
-// internal/agent's capped path judges the same text with, so the row and the capped head cannot
-// come to disagree about what a report is.
-func delegationEndedWithoutReport(body string) bool {
-	if delegationBoundHead.MatchString(body) || delegationStoppedByUser(body) {
-		return false
-	}
-	text := delegationChildText(body)
-	return strings.TrimSpace(text) == delegationNoReportMarker || floor.IsNonReport(text)
-}
-
-// delegationBodyNote matches the body notes the engine appends BENEATH a delegation's text on any
-// outcome — the routing note a result gains when its call asked for the Sub-agent server and ran on
-// the session server instead (internal/agent's SeatFallbackNote, ADR 0069), and the clamp note a
-// `max_steps` above the configured cap earns (its stepCapClampNoteFormat). Each is a whole line the
-// engine formats deliberately, anchored at both ends so a line the child wrote that merely opens the
-// same way is not one.
-var delegationBodyNote = regexp.MustCompile(
-	`^(?:note: ran on the session server — the sub-agents server was unavailable|` +
-		`\[max_steps \d+ requested; the configured cap is \d+ — \d+ applied\])$`)
-
-// delegationChildText is a delegation's body with the engine's trailing body notes
-// (delegationBodyNote) taken off: the text the CHILD closed on, which is what the no-report reading
-// judges. Without it a narrating child whose call was clamped or fell back would close on the
-// engine's note rather than on its own last line, and read as a report — a fallen-back result must
-// classify exactly as the plain one does.
-func delegationChildText(body string) string {
-	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
-	for len(lines) > 0 && delegationBodyNote.MatchString(lines[len(lines)-1]) {
-		lines = lines[:len(lines)-1]
-	}
-	return strings.Join(lines, "\n")
-}
-
 // delegationOutcomeOf is how a delegation ended: the typed domain.DelegationOutcome the engine
-// attaches to every result it renders for a run, or — for a result carrying none — the same facts
-// read back off its prose (proseDelegationOutcome). The prose readings stay as that fallback: a
-// result a reaction re-summarised carries no outcome, and neither does an older producer's line.
+// attaches to every result it renders for a run, the never-started ones and the error-shaped ones
+// included, or — for a result carrying none — the same facts read back off its words by the one
+// parser of them (delegationVerdictFromWords), error status and all. That parse is the fallback
+// alone: a result a reaction re-summarised carries no outcome, and neither does an older producer's
+// line.
 func delegationOutcomeOf(res domain.ToolResult) domain.DelegationOutcome {
 	if outcome, ok := res.Summary.(domain.DelegationOutcome); ok {
 		return outcome
 	}
-	return proseDelegationOutcome(res.Content)
-}
-
-// proseDelegationOutcome reads a delegation's ending off the RESULT ENVELOPE the engine wraps a
-// child's answer in — the head it opens with, the no-report reading of what it carries, and the
-// parent notice it closes with — for a result that carries no typed outcome. Each is anchored on a
-// line the engine formats deliberately, and the reading is TOTAL: a shape it does not recognise is
-// the plain reported outcome. The human's stop (delegationStoppedByUser) outranks the bound head,
-// which outranks the no-report reading, the order the engine decides them in.
-func proseDelegationOutcome(content string) domain.DelegationOutcome {
-	body, steered := readDelegationSteering(content)
-	outcome := domain.DelegationOutcome{SteeredMessages: steered}
-	bound := delegationBoundHead.FindStringSubmatch(body)
-	switch {
-	case delegationStoppedByUser(body):
-		outcome.IsStoppedByUser = true
-	case bound != nil:
-		outcome.Bound = delegationBoundNamed(bound[1])
-	case delegationEndedWithoutReport(body):
-		outcome.HasNoReport = true
-	}
+	_, outcome := delegationVerdictFromWords(delegationWords{prose: res.Content, isError: res.IsError})
 	return outcome
 }
 
 // delegationResultDetail is sub_agent's result hook (toolPresenter.resultDetail): the result laid
-// out by delegationOutcomeDetail for the outcome it carries, or the one read off its prose.
+// out by delegationOutcomeDetail for the outcome it carries, or the one read off its words.
 func delegationResultDetail(res domain.ToolResult) toolOutcome {
 	return delegationOutcomeDetail(delegationOutcomeOf(res), res.Content)
-}
-
-// delegationDetail is delegationResultDetail for a result known only by its prose.
-func delegationDetail(content string) toolOutcome {
-	return delegationOutcomeDetail(proseDelegationOutcome(content), content)
 }
 
 // delegationOutcomeDetail lays a finished delegation's result out as outputDetail does, with one
@@ -1405,9 +1210,9 @@ func delegationOutcomeVerdict(outcome domain.DelegationOutcome) string {
 // failed and succeeded fields it sets), the done ✓ (subAgentFinished), the Esc stop hint's
 // never-started count (entry.neverStarted) and a collapsed run's demotion (toolView.demoted) — so
 // none of them reads the slot's words back. It is settled once, where a sub_agent head's result is
-// absorbed (toolView.settleDelegationVerdict, toolView.absorbFailure), and on replay from the
-// record's words (replayedDelegationVerdict). It is TUI-private and never on the wire: the record
-// keeps the rendered words (ADR 0083 §1), and replay reads the verdict back off them.
+// absorbed (toolView.enrichWithResult, toolView.absorbFailure), and on replay from the record's
+// words (delegationVerdictFromWords). It is TUI-private and never on the wire: the record keeps the
+// rendered words (ADR 0083 §1), and replay reads the verdict back off them.
 //
 // The zero value is no verdict at all — a call still in flight, a card that heads no run, or a
 // replayed slot whose words name none — and it withholds nothing: a reported head with no verdict
@@ -1535,14 +1340,12 @@ func delegationFailure(res domain.ToolResult) (word, output string, ok bool) {
 }
 
 // delegationSteering splits the parent notice off a delegation's result: the content without it,
-// and how many messages the human sent. A result carrying a typed outcome says the count, and its
-// notice is then its final line by the engine's own guarantee (ADR 0063 D3), so the body is the
-// content above that line; a result carrying none is read by readDelegationSteering.
+// and how many messages the human sent. The outcome says the count (delegationOutcomeOf — the typed
+// one, or the one read off a result carrying none, whose count is read off that very notice), and
+// the notice is then the result's final line by the engine's own guarantee (ADR 0063 D3), so the
+// body is the content above that line.
 func delegationSteering(res domain.ToolResult) (body string, steered int) {
-	outcome, ok := res.Summary.(domain.DelegationOutcome)
-	if !ok {
-		return readDelegationSteering(res.Content)
-	}
+	outcome := delegationOutcomeOf(res)
 	if outcome.SteeredMessages == 0 {
 		return res.Content, 0
 	}

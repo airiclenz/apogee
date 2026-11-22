@@ -1168,9 +1168,9 @@ func TestPromotionCarriesBothReadingsOfTheOutcome(t *testing.T) {
 // and nothing lands in the body — a run's row opens its run view, never a body in place (ADR 0063).
 //
 // The verdicts have to survive the swap, which is what the first two cases are about: the composed
-// line is not the bare word succeededSummary reads, so the green a finished run is painted in comes
-// from [toolView.runVerdict] itself — and only from the done verdict, so a run stopped at its step
-// cap keeps the ordinary marker tone.
+// line is no bare verdict word, and no slot's words are read for one anyway, so the green a finished
+// run is painted in comes from [toolView.runVerdict] itself — and only from the done verdict, so a
+// run stopped at its step cap keeps the ordinary marker tone.
 //
 // The third case is the gate: the same view with no verdict on it is an ordinary promotion and
 // takes the ordinary demotion, line into the body and all.

@@ -2792,19 +2792,10 @@ func (e entry) spawned() runRef {
 	return runRef{depth: e.depth + 1, spawn: e.callID, id: e.spawnRunID}
 }
 
-// unstartedDelegationPrefix opens the result of a delegation the engine settled BEFORE it started —
-// pre-empted by a queued user message, refused past the reply's fan-out ceiling, or stopped by the
-// human while it queued (internal/agent/dispatch.go's skippedDelegationContent,
-// fanOutCeilingResultFormat and stoppedQueuedDelegationContent; ADR 0039, ADR 0086 D4). It is
-// restated here because this package cannot read the engine's constants: the unstarted kinds share
-// the head so a reader can tell them from a child's own failure, and a rewording over
-// there has to fail the test that pins it here.
-const unstartedDelegationPrefix = "sub-agent not started:"
-
 // neverStarted reports whether a run head's child never ran — the pre-emption, the ceiling refusal,
 // the queued stop and the queued turn cancel, the unstarted verdicts on its summary
 // ([delegationVerdict.neverStarted]), settled where its result was absorbed (absorbFailure) or read
-// back on replay (replayedDelegationVerdict). Such a head is neither finished work nor a queued job,
+// back on replay (delegationVerdictFromWords). Such a head is neither finished work nor a queued job,
 // whatever its phase says: the engine closes it through its finished phase alone
 // (childBracket.neverStarted), so a count that read the phase would take a refused delegation for a
 // report a stop keeps.

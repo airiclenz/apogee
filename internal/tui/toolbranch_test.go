@@ -1329,8 +1329,10 @@ func TestDelegationDoneReadsInTheSuccessTone(t *testing.T) {
 // The success verdict is anchored on the DELEGATION vocabulary and on nothing else. Every other
 // plain phrase an outcome slot carries is a tool's reading of its own work — diagnostics' `clean`, a
 // command's `PASS`, a process's `exit 0` — and apogee does not paint those green: the green says
-// the ENGINE drove a run to its boundary. The match is on the whole phrase too, so a sentence that
-// merely contains the word is not the verdict.
+// the ENGINE drove a run to its boundary. A replayed slot's words are read to the done verdict by
+// the one parser of them (delegationVerdictFromWords), on the whole phrase, so a sentence that
+// merely contains the word is not the verdict; and no seam that words a slot paints a phrase green
+// by its words (namedSummary, typedSummary).
 func TestSummaryStyleGreensOnlyTheDelegationVerdict(t *testing.T) {
 	t.Parallel()
 
@@ -1357,14 +1359,23 @@ func TestSummaryStyleGreensOnlyTheDelegationVerdict(t *testing.T) {
 		t.Run(tc.text, func(t *testing.T) {
 			t.Parallel()
 
-			got := succeededSummary(tc.text)
-			if got != tc.want {
-				t.Fatalf("succeededSummary(%q) = %v, want %v", tc.text, got, tc.want)
+			verdict, _ := delegationVerdictFromWords(delegationWords{recorded: true, slot: tc.text})
+			if got := verdict == delegationVerdictDone; got != tc.want {
+				t.Fatalf("delegationVerdictFromWords(%q) = %d; done = %v, want %v", tc.text, verdict, got, tc.want)
 			}
 
-			style := summaryStyle(th, branchSummary{succeeded: got}, false)
+			replayed := namedSummary(detailLine{Text: tc.text}).withVerdict(verdict)
+			style := summaryStyle(th, replayed, false)
 			if green := reflect.DeepEqual(style, th.successMark); green != tc.want {
 				t.Errorf("slot %q painted in the success role = %v, want %v", tc.text, green, tc.want)
+			}
+			for name, unread := range map[string]branchSummary{
+				"namedSummary": namedSummary(detailLine{Text: tc.text}),
+				"typedSummary": typedSummary(plainStat(tc.text)),
+			} {
+				if unread.succeeded {
+					t.Errorf("%s(%q) painted the success verdict off its words", name, tc.text)
+				}
 			}
 		})
 	}

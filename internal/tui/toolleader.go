@@ -291,11 +291,11 @@ func toolRowCells(th theme, width int) int {
 // makes that red the only failure marking, so no glyph and no header changes with it.
 //
 // A finished DELEGATION is the one non-failure exception to the marker pair, and it is narrow by
-// construction: a summary carrying the success verdict ([branchSummary.succeeded], anchored on the
-// delegation vocabulary alone) takes the scheme's `success` role — the very style the done ✓ on that
-// row already wears (theme.successMark), so the two marks on one run are one colour and one fact
-// rather than two that could drift. Nothing else on screen reaches it: no other tool's `clean`,
-// `PASS` or `exit 0` is put to that vocabulary, and a quoted line carries no verdict at all. Where
+// construction: a summary carrying the success verdict ([branchSummary.succeeded], set from a
+// delegation's typed done verdict alone) takes the scheme's `success` role — the very style the done
+// ✓ on that row already wears (theme.successMark), so the two marks on one run are one colour and
+// one fact rather than two that could drift. Nothing else on screen reaches it: no other tool's
+// `clean`, `PASS` or `exit 0` carries that verdict, and a quoted line carries no verdict at all. Where
 // both verdicts stand, failure wins — a run the engine faulted is red whatever its words say.
 //
 // It is the MARKER role and not the two-tone detail gray the rest of the row wears (design call 2 of
@@ -360,63 +360,6 @@ func failedSummary(text string) bool {
 	}
 	n, noun, ok := countPhrase(text)
 	return ok && n > 0 && strings.TrimSuffix(noun, "s") == errorNoun
-}
-
-// succeededSummary reads a WORDING for the one verdict of success apogee paints: a delegation the
-// engine drove to its own boundary, whose slot delegationOutcomeVerdict words `done` — alone, or with the
-// steering cell a human's messages append to whichever verdict stands (delegationSteeredCell, ADR
-// 0063 D3).
-//
-// It is failedSummary's mirror and is read at the same seams, once, on the way in (namedSummary,
-// typedSummary), so no painter asks the words again. What it deliberately is NOT is a general
-// vocabulary of good news: it is anchored on the delegation constants and matches nothing else, so
-// `capped at its step cap` — a run the engine capped mid-task, which did not finish — stays in the
-// ordinary marker tone, and diagnostics' `clean`, a test command's `PASS` and a process's `exit 0`
-// are readings a TOOL made of its own work rather than a verdict apogee reached about a run it drove
-// (ratified call 3 of docs/plans/archived/"2026-08-31 - 05"). The match is on the WHOLE phrase for the same
-// reason: a sentence that merely contains the word — a report line, a target reading "done deal" —
-// is not this verdict.
-func succeededSummary(text string) bool {
-	if text == delegationDoneVerdict {
-		return true
-	}
-	return strings.HasPrefix(text, delegationDoneVerdict+slotSeparator+delegationSteeredLead)
-}
-
-// endedWithoutReportSummary reads a WORDING for the verdict a delegation that came back with nothing
-// to report wears — `ended without a report`, alone or with the steering cell (delegationOutcomeVerdict,
-// domain.DelegationOutcome.HasNoReport). It is succeededSummary's sibling and matches the same way, on the
-// WHOLE phrase, so a report line that merely mentions the words is not this verdict.
-//
-// It is read by one seam alone, the replay reader (replayedDelegationVerdict), which recovers the
-// typed no-report verdict a live head carries ([branchSummary.verdict]) from the slot's words the
-// record keeps, so a record needs no field of its own for it. The verdict sets neither painted
-// field: it is neither a failure nor a success, so it takes no red and no green and reads in the
-// ordinary marker tone `capped at its step cap` does, and subAgentFinished withholds the done ✓ from
-// such a run.
-func endedWithoutReportSummary(text string) bool {
-	if text == delegationNoReportVerdict {
-		return true
-	}
-	return strings.HasPrefix(text, delegationNoReportVerdict+slotSeparator+delegationSteeredLead)
-}
-
-// stoppedSummary reads a WORDING for the verdict a delegation the HUMAN stopped wears — `stopped by
-// you`, alone or with the steering cell (delegationOutcomeVerdict, domain.DelegationOutcome.IsStoppedByUser; ADR 0086 D4) —
-// matched like endedWithoutReportSummary, on the WHOLE phrase. Its one reader is the replay reader
-// (replayedDelegationVerdict), which recovers the typed stopped verdict from the record's words;
-// subAgentFinished withholds the done ✓ from that verdict: a stopped run did not do what it was
-// sent for. The verdict sets no painted field, so it reads in the step cap's ordinary marker tone —
-// neither the red of a failure nor the green of done — and a queued stop, whose result is
-// error-shaped, is worded so too rather than red (toolView.absorbFailure), because the human's stop
-// is not the child's failure. A delegation a
-// queued message pre-empted (`not started · your message`, delegationPreemptedVerdict) reads the same
-// way for the same reason: it never ran, by the human's act, and is neither done nor failed.
-func stoppedSummary(text string) bool {
-	if text == delegationStoppedVerdict || text == delegationPreemptedVerdict {
-		return true
-	}
-	return strings.HasPrefix(text, delegationStoppedVerdict+slotSeparator+delegationSteeredLead)
 }
 
 // clipCells fits text into ONE row of at most cells columns, ending it in clipTail when it had to

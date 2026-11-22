@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/floor"
 	"github.com/airiclenz/apogee/internal/session"
 )
 
@@ -102,55 +105,28 @@ func decodeTranscript(data []byte) ([]entry, error) {
 }
 
 // replayedDelegationSummary is a replayed sub_agent head's summary with its delegation verdict
-// read back off the record ([branchSummary.verdict]): the verdict word is the slot's own text where
-// the slot is the presenter's wording, and the stored stat's where the slot holds a QUOTED report
-// line — the stat is the verdict delegationStat worded behind it (applyStat), exactly as the live
-// head carried it. A head whose stored body opens under the unstarted head
-// (unstartedDelegationPrefix) never started, and is read off that body instead
-// (proseFailedDelegationOutcome); an older record's `error` slot over the human's act is re-worded
-// with the neutral verdict the live row now shows.
+// read back off the record ([branchSummary.verdict]) by the one parser of a delegation's words
+// (delegationVerdictFromWords): the slot's text, the stat stored behind a quoted slot, and the body
+// a never-started delegation's failure laid out beneath it. A record written before the human's
+// acts took their neutral verdict stored the failure's `error` over such a body; that slot is
+// re-worded with the words the live row now shows.
 func replayedDelegationSummary(summary branchSummary, stat statValue, body []detailLine) branchSummary {
-	if len(body) > 0 && strings.HasPrefix(body[0].Text, unstartedDelegationPrefix) {
-		texts := make([]string, 0, len(body))
-		for _, d := range body {
-			texts = append(texts, d.Text)
-		}
-		outcome := proseFailedDelegationOutcome(strings.Join(texts, "\n"))
-		verdict := delegationVerdictOf(outcome, true)
-		if verdict.humanSettled() && !summary.quoted && summary.Text == erroredSummary {
-			words := detailLine{Kind: summary.Kind, Text: delegationOutcomeVerdict(outcome)}
-			summary = branchSummary{detailLine: words}
-		}
-		return summary.withVerdict(verdict)
+	texts := make([]string, 0, len(body))
+	for _, d := range body {
+		texts = append(texts, d.Text)
 	}
-	word := summary.Text
-	if summary.quoted {
-		word = stat.spell()
+	verdict, outcome := delegationVerdictFromWords(delegationWords{
+		recorded: true,
+		slot:     summary.Text,
+		quoted:   summary.quoted,
+		stat:     stat.spell(),
+		prose:    strings.Join(texts, "\n"),
+	})
+	if verdict.neverStarted() && verdict.humanSettled() && !summary.quoted && summary.Text == erroredSummary {
+		words := detailLine{Kind: summary.Kind, Text: delegationOutcomeVerdict(outcome)}
+		summary = branchSummary{detailLine: words}
 	}
-	return summary.withVerdict(replayedDelegationVerdict(word))
-}
-
-// replayedDelegationVerdict reads a started delegation's verdict back off the words its slot was
-// rendered with (delegationOutcomeVerdict, absorbFailure, closeInterruptedCalls). Words that name
-// no verdict read as the zero verdict, which withholds nothing.
-func replayedDelegationVerdict(word string) delegationVerdict {
-	switch {
-	case succeededSummary(word):
-		return delegationVerdictDone
-	case endedWithoutReportSummary(word):
-		return delegationVerdictNoReport
-	case word == delegationPreemptedVerdict:
-		return delegationVerdictPreempted
-	case stoppedSummary(word):
-		return delegationVerdictStopped
-	case strings.HasPrefix(word, delegationBoundLead):
-		return delegationVerdictCapped
-	case word == interruptedSummary:
-		return delegationVerdictInterrupted
-	case failedSummary(word):
-		return delegationVerdictFailed
-	}
-	return delegationVerdictNone
+	return summary.withVerdict(verdict)
 }
 
 // closeInterruptedCalls closes every tool call a decoded record left OPEN, wording each one with the
@@ -715,7 +691,8 @@ func fromWireToolView(w *session.ToolView, done bool) toolView {
 		tv.denied = deniedFailureBody(tv.Details.all())
 	}
 	// A delegation head's verdict is not on the wire ([branchSummary.verdict]) and is read back off
-	// the record's words (replayedDelegationVerdict) — the same rendered words the live row showed
+	// the record's words by the one parser of them (delegationVerdictFromWords, fed the slot's text,
+	// or the stat behind a quoted slot) — the same rendered words the live row showed
 	// (ADR 0083 §1). A delegation the human's act settled before it started is re-derived from its
 	// stored body as well rather than trusted: a session recorded before those rows took their
 	// neutral verdict stored the failure's `error`, and replaying it as such would paint red what the
@@ -819,4 +796,291 @@ func fromWireStatValue(w *session.StatValue, text string) statValue {
 		}
 	}
 	return diffedStat(w.Added, w.Removed)
+}
+
+// ----------------------------------------------------------------------------
+// Delegation words: the one parser
+// ----------------------------------------------------------------------------
+//
+// A delegation's verdict travels typed wherever the engine decides it (domain.DelegationOutcome,
+// [branchSummary.verdict]); words are read back in exactly two places, and both come through
+// delegationVerdictFromWords. REPLAY reads the words a record kept — the slot's rendered verdict and
+// the body beneath it — because the record keeps rendered words and no typed verdict (ADR 0083 §1).
+// A LIVE result carrying no outcome — one a reaction re-summarised, an older producer's line — is
+// read off the engine's own text (delegationOutcomeOf). Every matcher and every restated engine
+// sentence below is this parser's private part: no other seam reads a delegation's words.
+
+// delegationWords is what a delegation left in WORDS, as delegationVerdictFromWords reads them: the
+// engine's own text, and — for a record — the words its slot was rendered with.
+type delegationWords struct {
+	// recorded says the words are a session record's (replayedDelegationSummary) rather than a live
+	// result's; a record's verdict is read off its slot, a live result's off its text.
+	recorded bool
+	// slot is a record's slot text: the verdict's words, or the child's report where quoted is set.
+	slot string
+	// quoted says the record's slot quotes the child's one-line report, so the verdict's words are
+	// the stat stored behind it (applyStat) rather than the slot's own.
+	quoted bool
+	// stat is the stat a record stored behind its slot.
+	stat string
+	// prose is the engine's text: a live result's content, or the body a record kept beneath its
+	// slot — the failure body a never-started delegation's result laid out as (absorbFailure).
+	prose string
+	// isError is a live result's error status; a record keeps none, and reads its slot instead.
+	isError bool
+}
+
+// delegationVerdictFromWords is the ONE reader of a delegation's words: it maps them to the verdict
+// the row paints and to the outcome they state.
+//
+// A record's verdict is read off the words its slot was rendered with (delegationOutcomeVerdict,
+// absorbFailure, closeInterruptedCalls) — the slot's own text, or the stat behind a quoted report —
+// unless its body opens under the unstarted head (unstartedDelegationPrefix): such a delegation never
+// ran, and why is read off that body, which is also how an older record's `error` slot over a
+// human's act is told from a failure. A live result's outcome is read off the engine's envelope
+// (proseDelegationOutcome, or proseFailedDelegationOutcome for an error-shaped one) and its verdict
+// follows from it as a typed outcome's would (delegationVerdictOf).
+//
+// The reading is TOTAL: words that name no verdict read as the zero verdict, which withholds
+// nothing, and the outcome comes back zero wherever the words state none — a record's slot carries a
+// verdict, never the facts beneath it.
+func delegationVerdictFromWords(words delegationWords) (delegationVerdict, domain.DelegationOutcome) {
+	if !words.recorded {
+		outcome := proseDelegationOutcome(words.prose)
+		if words.isError {
+			outcome = proseFailedDelegationOutcome(words.prose)
+		}
+		return delegationVerdictOf(outcome, words.isError), outcome
+	}
+	if strings.HasPrefix(words.prose, unstartedDelegationPrefix) {
+		outcome := proseFailedDelegationOutcome(words.prose)
+		return delegationVerdictOf(outcome, true), outcome
+	}
+	if words.quoted {
+		return delegationVerdictOfSlot(words.stat), domain.DelegationOutcome{}
+	}
+	return delegationVerdictOfSlot(words.slot), domain.DelegationOutcome{}
+}
+
+// delegationVerdictOfSlot reads a started delegation's verdict back off the words its slot was
+// rendered with. Each verdict is matched on the WHOLE phrase, alone or with the steering cell
+// (isDelegationVerdictWord), so a report line that merely mentions the words is not the verdict; a
+// bound's words share one lead whatever the bound. Words that name no verdict read as the zero
+// verdict.
+func delegationVerdictOfSlot(word string) delegationVerdict {
+	switch {
+	case isDelegationVerdictWord(word, delegationDoneVerdict):
+		return delegationVerdictDone
+	case isDelegationVerdictWord(word, delegationNoReportVerdict):
+		return delegationVerdictNoReport
+	case word == delegationPreemptedVerdict:
+		return delegationVerdictPreempted
+	case isDelegationVerdictWord(word, delegationStoppedVerdict):
+		return delegationVerdictStopped
+	case strings.HasPrefix(word, delegationBoundLead):
+		return delegationVerdictCapped
+	case word == interruptedSummary:
+		return delegationVerdictInterrupted
+	case failedSummary(word):
+		return delegationVerdictFailed
+	}
+	return delegationVerdictNone
+}
+
+// isDelegationVerdictWord reports whether word is the verdict, alone or with the steering cell a
+// human's messages append to whichever verdict stands (delegationSteeredCell, ADR 0063 D3).
+func isDelegationVerdictWord(word, verdict string) bool {
+	return word == verdict || strings.HasPrefix(word, verdict+slotSeparator+delegationSteeredLead)
+}
+
+// unstartedDelegationPrefix opens the result of a delegation the engine settled BEFORE it started —
+// pre-empted by a queued user message, refused past the reply's fan-out ceiling, or stopped by the
+// human while it queued (internal/agent/dispatch.go's skippedDelegationContent,
+// fanOutCeilingResultFormat and stoppedQueuedDelegationContent; ADR 0039, ADR 0086 D4). It is
+// restated here because this package cannot read the engine's constants: the unstarted kinds share
+// the head so a reader can tell them from a child's own failure, and a rewording over
+// there has to fail the test that pins it here.
+const unstartedDelegationPrefix = "sub-agent not started:"
+
+// delegationBoundHead matches the marker line a delegation stopped at one of its BOUNDS opens with
+// — "[delegate stopped at its step cap (3 steps); partial result — engine summary and closing report follow]",
+// or the same shape naming its token budget or its time limit (internal/agent's
+// stepCapResultFormat, tokenCapResultFormat and timeCapResultFormat) — anchored at the START, where
+// the engine writes it, so a line the child itself printed cannot be read as the marker. The one
+// submatch is the bound's name, which the verdict repeats.
+var delegationBoundHead = regexp.MustCompile(
+	`^\[delegate stopped at its (step cap \(\d+ steps?\)|token budget \(\d+ tokens?\)|time limit \([^)]+\));`)
+
+// delegationBoundNamed is the bound a matched head's submatch names — "step cap (3 steps)" is the
+// step cap — read through delegationBoundNames. A name no bound is spelled with is
+// DelegationUnbounded, which the head's own pattern never lets through.
+func delegationBoundNamed(match string) domain.DelegationBound {
+	name, _, _ := strings.Cut(match, " (")
+	for bound, spelled := range delegationBoundNames {
+		if spelled == name {
+			return bound
+		}
+	}
+	return domain.DelegationUnbounded
+}
+
+// delegationSteeredTail matches the PARENT NOTICE a steered delegation's result closes with — "(the
+// user sent 2 messages to this sub-agent while it ran)" (internal/agent's userSteeredTrailer, ADR
+// 0063 D3) — anchored at the END, which is both where the engine appends it and the half the
+// structural clamp keeps, so a result clipped on its way to the parent still reads here.
+var delegationSteeredTail = regexp.MustCompile(`\n\(the user sent (\d+) messages? to this sub-agent while it ran\)$`)
+
+// readDelegationSteering splits the parent notice off a delegation's result: the content without it,
+// and how many messages it reports. A result carrying no notice comes back whole with a zero, which
+// is the ordinary unsteered case and the only answer a foreign shape can give.
+func readDelegationSteering(content string) (body string, steered int) {
+	trimmed := strings.TrimRight(content, "\n")
+	m := delegationSteeredTail.FindStringSubmatchIndex(trimmed)
+	if m == nil {
+		return content, 0
+	}
+	n, err := strconv.Atoi(trimmed[m[2]:m[3]])
+	if err != nil || n <= 0 {
+		return content, 0
+	}
+	return strings.TrimRight(trimmed[:m[0]], "\n"), n
+}
+
+// delegationStoppedHead is the marker line a delegation the HUMAN stopped opens with (internal/agent's
+// stoppedResultHead, ADR 0086 D4): a non-error partial result, the engine fold and the child's last
+// words beneath it. delegationStoppedQueuedContent is the whole of the error-shaped result a pooled
+// delegation stopped before it started carries (internal/agent's stoppedQueuedDelegationContent),
+// under the unstarted head (unstartedDelegationPrefix) every never-ran kind shares. Both are spelled
+// again here as the bound head is: the engine formats them deliberately. They are read by this
+// parser alone — off a live result carrying no typed outcome (proseDelegationOutcome,
+// proseFailedDelegationOutcome), and off the body a record kept beneath a never-started delegation's
+// slot — since the engine attaches the outcome, the unstarted one included, to every result it
+// renders for a delegation.
+//
+// Two more never-ran kinds are the human's act rather than the child's failure, and are spelled
+// again here for the same reason: delegationCancelledQueuedContent is the whole result of a
+// delegation still queued when the human cancelled the turn (internal/agent's
+// cancelledQueuedDelegationContent) — a stop of the whole turn, worded `stopped by you` like the
+// queued stop — and delegationPreemptedContent is the whole result of one a queued user message
+// pre-empted (internal/agent's skippedDelegationContent, ADR 0025), worded
+// delegationPreemptedVerdict. Both stay error-shaped on the wire for the model; only the row's
+// verdict is neutral (proseFailedDelegationOutcome, absorbFailure).
+const (
+	delegationStoppedHead          = "[stopped by the user — engine summary follows]"
+	delegationStoppedQueuedContent = "sub-agent not started: the user stopped it before it started; " +
+		"delegate again if the task is still needed"
+	delegationCancelledQueuedContent = "sub-agent not started: the user cancelled the turn before it started; " +
+		"delegate again if the task is still needed"
+	delegationPreemptedContent = "sub-agent not started: the user sent a message while this group was running; " +
+		"delegate again if the task is still needed"
+)
+
+// delegationStoppedByUser reads the human's stop off a delegation's result: the stopped head as the
+// body's first line — anchored at the START, where the engine writes it, so a line the child printed
+// cannot be read as the marker — or the whole text of a queued stop or of a turn cancel that caught
+// the delegation queued. body is the result with the steering notice already taken off
+// (readDelegationSteering).
+func delegationStoppedByUser(body string) bool {
+	head, _, _ := strings.Cut(body, "\n")
+	whole := strings.TrimSpace(body)
+	return head == delegationStoppedHead || whole == delegationStoppedQueuedContent ||
+		whole == delegationCancelledQueuedContent
+}
+
+// proseFailedDelegationOutcome reads an error-shaped delegation result the engine attached no
+// outcome to: the human's act that settled it before its child ran — a queued stop
+// (delegationStoppedQueuedContent), a turn cancel that caught it queued
+// (delegationCancelledQueuedContent), a pre-emption by a queued message (delegationPreemptedContent)
+// — the human's stop of a started run (delegationStoppedHead), or, for any other result under the
+// unstarted head (unstartedDelegationPrefix), the fan-out ceiling's refusal. Everything else is a
+// child's own failure, the zero outcome with the steering its notice reports, which the failure hook
+// carries onto the red line (delegationFailure). The human's acts are matched on the WHOLE content,
+// so a failure that merely quotes the words is still a failure.
+func proseFailedDelegationOutcome(content string) domain.DelegationOutcome {
+	body, steered := readDelegationSteering(content)
+	whole := strings.TrimSpace(body)
+	head, _, _ := strings.Cut(body, "\n")
+	switch {
+	case whole == delegationStoppedQueuedContent:
+		return domain.DelegationOutcome{Unstarted: domain.DelegationStoppedQueued}
+	case whole == delegationCancelledQueuedContent:
+		return domain.DelegationOutcome{Unstarted: domain.DelegationCancelled}
+	case whole == delegationPreemptedContent:
+		return domain.DelegationOutcome{Unstarted: domain.DelegationSkipped}
+	case head == delegationStoppedHead:
+		return domain.DelegationOutcome{IsStoppedByUser: true}
+	case strings.HasPrefix(whole, unstartedDelegationPrefix):
+		return domain.DelegationOutcome{Unstarted: domain.DelegationRefused}
+	}
+	return domain.DelegationOutcome{SteeredMessages: steered}
+}
+
+// delegationNoReportMarker is the whole of the result a child gets back to its parent when its
+// closing text was a bare acknowledgement — "Done.", "OK" (internal/agent's noReportMarker, spelled
+// again here as the bound head is: the engine formats it deliberately, and this package reads it
+// off a result carrying no typed outcome, proseDelegationOutcome).
+const delegationNoReportMarker = "[delegate returned no report]"
+
+// delegationEndedWithoutReport reads the no-report half of the result envelope: a delegation that
+// reached its own boundary — no bound head (delegationBoundHead), which is the engine's word that
+// the run was stopped short and outranks this one — and handed back either the no-report marker or
+// a closing text the shared classifier judges not a report (floor.IsNonReport: narration of a next
+// step, a pasted file, a grep dump). body is the result with the steering notice already taken off
+// (readDelegationSteering), so a steered child's narration is read as the narration it is; the
+// engine's body notes are taken off it here (delegationChildText), for the same reason.
+//
+// It is the ROW's reading and nothing more (ratified call "Non-report" of plan "2026-09-24 - 01"):
+// the parent model receives the result exactly as the engine wrote it, and the classifier is the one
+// internal/agent's capped path judges the same text with, so the row and the capped head cannot
+// come to disagree about what a report is.
+func delegationEndedWithoutReport(body string) bool {
+	if delegationBoundHead.MatchString(body) || delegationStoppedByUser(body) {
+		return false
+	}
+	text := delegationChildText(body)
+	return strings.TrimSpace(text) == delegationNoReportMarker || floor.IsNonReport(text)
+}
+
+// delegationBodyNote matches the body notes the engine appends BENEATH a delegation's text on any
+// outcome — the routing note a result gains when its call asked for the Sub-agent server and ran on
+// the session server instead (internal/agent's SeatFallbackNote, ADR 0069), and the clamp note a
+// `max_steps` above the configured cap earns (its stepCapClampNoteFormat). Each is a whole line the
+// engine formats deliberately, anchored at both ends so a line the child wrote that merely opens the
+// same way is not one.
+var delegationBodyNote = regexp.MustCompile(
+	`^(?:note: ran on the session server — the sub-agents server was unavailable|` +
+		`\[max_steps \d+ requested; the configured cap is \d+ — \d+ applied\])$`)
+
+// delegationChildText is a delegation's body with the engine's trailing body notes
+// (delegationBodyNote) taken off: the text the CHILD closed on, which is what the no-report reading
+// judges. Without it a narrating child whose call was clamped or fell back would close on the
+// engine's note rather than on its own last line, and read as a report — a fallen-back result must
+// classify exactly as the plain one does.
+func delegationChildText(body string) string {
+	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	for len(lines) > 0 && delegationBodyNote.MatchString(lines[len(lines)-1]) {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// proseDelegationOutcome reads a delegation's ending off the RESULT ENVELOPE the engine wraps a
+// child's answer in — the head it opens with, the no-report reading of what it carries, and the
+// parent notice it closes with — for a result that carries no typed outcome. Each is anchored on a
+// line the engine formats deliberately, and the reading is TOTAL: a shape it does not recognise is
+// the plain reported outcome. The human's stop (delegationStoppedByUser) outranks the bound head,
+// which outranks the no-report reading, the order the engine decides them in.
+func proseDelegationOutcome(content string) domain.DelegationOutcome {
+	body, steered := readDelegationSteering(content)
+	outcome := domain.DelegationOutcome{SteeredMessages: steered}
+	bound := delegationBoundHead.FindStringSubmatch(body)
+	switch {
+	case delegationStoppedByUser(body):
+		outcome.IsStoppedByUser = true
+	case bound != nil:
+		outcome.Bound = delegationBoundNamed(bound[1])
+	case delegationEndedWithoutReport(body):
+		outcome.HasNoReport = true
+	}
+	return outcome
 }
