@@ -363,6 +363,52 @@ func TestOfflineDebouncesAtIdle(t *testing.T) {
 	}
 }
 
+// An outage once a beat has landed, or on a server `/server` moved to, is news about the session
+// rather than a record of how it started: its offline note, and the change the recovering beat
+// brings, stay saved with the session record — only a cold start's are display-only.
+func TestOfflineMidSessionStaysInTheRecord(t *testing.T) {
+	t.Parallel()
+
+	saved := func(t *testing.T, m Model) string {
+		t.Helper()
+		p, ok := m.snapshotPayload(domain.Session{})
+		if !ok {
+			t.Fatal("snapshotPayload failed")
+		}
+		return string(p.transcript)
+	}
+
+	t.Run("a mid-session outage", func(t *testing.T) {
+		t.Parallel()
+		m := wireRebind(t, testOpts, &fakeHeartbeat{}, &fakeRebind{})
+		m = foldBeatMsg(t, m, upBeat("test-model", 32768))
+		for range offlineFailureThreshold {
+			m = foldBeatMsg(t, m, downBeat("timeout"))
+		}
+		m = foldBeatMsg(t, m, upBeat("other-model", 16384))
+
+		blob := saved(t, m)
+		if !strings.Contains(blob, offlineNote("timeout")) {
+			t.Errorf("the record lost the mid-session offline note: %s; notes = %q", blob, noteTexts(m))
+		}
+		if !strings.Contains(blob, "→ other-model") {
+			t.Errorf("the record lost the recovering beat's change: %s; notes = %q", blob, noteTexts(m))
+		}
+	})
+
+	t.Run("a /server switch's cold failure", func(t *testing.T) {
+		t.Parallel()
+		m := wireRebind(t, testOpts, &fakeHeartbeat{}, &fakeRebind{})
+		m = foldBeatMsg(t, m, upBeat("test-model", 32768))
+		next, _ := m.foldServerSwitch("test-host", ServerSwitchResult{Endpoint: "http://elsewhere:1", HostAlias: "elsewhere"}, choiceRecord{})
+		m = foldBeatMsg(t, next.(Model), downBeat("refused"))
+
+		if blob := saved(t, m); !strings.Contains(blob, offlineNote("refused")) {
+			t.Errorf("the record lost the switched server's offline note: %s; notes = %q", blob, noteTexts(m))
+		}
+	})
+}
+
 // A failed beat while an Exchange is in flight is IGNORED — state, counter and words untouched. A
 // streaming reply is stronger evidence that the server is there than a timed-out /v1/models on a
 // single-slot server busy serving that very stream.

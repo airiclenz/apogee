@@ -84,11 +84,13 @@ type heartbeatState struct {
 	// the refusal is noted once per distinct target instead of once every Interval. Only
 	// [Model.applyRebind] sets it; "" once a rebind succeeds.
 	lastRebindFailed string
-	// firstContactLines are the first-contact notes that took a line of their own rather than
-	// joining the start-up log ([destination]), in the order they were placed. Those lines are
-	// display-only, so a transcript swap — a /sessions restore or a /fork — would drop them while
-	// the binding they describe still stands; [Model.replaceFirstContactLines] puts them back. Only
-	// [Model.noteBinding] appends. A later binding ([Model.applyRebind] for any other contact) and a
+	// firstContactLines are the binding notes of the session's first contact — or of the first
+	// landing after a cold-start failure ([contactColdRecovery]) — that took a line of their own
+	// rather than joining the start-up log ([destination]), in the order they were placed. Those
+	// lines are display-only, so a transcript swap — a /sessions restore or a /fork — would drop them
+	// while the binding they describe still stands; [Model.replaceFirstContactLines] puts them back.
+	// Only [Model.noteBinding] appends. Neither liveness note is one of them: the footer's offline
+	// marker carries that state. A later binding ([Model.applyRebind] for any other contact) and a
 	// `/server` switch (which resets this whole state) supersede them all; a refusal noted at any
 	// other contact supersedes only the refusal line, which no longer names the target the binding
 	// last failed on (a repeat refusal for the same target is not noted, so it keeps it). Only ever
@@ -137,17 +139,19 @@ type rebindIntent struct {
 	effort domain.EffortSupport
 	// contact is how this change came to be raised, an observation FACT captured before the fold
 	// erases the evidence rather than presentation state. [contactFirst] is the session's
-	// FIRST-CONTACT beat itself — no beat had ever landed and none had ever failed — set only by
-	// [Model.observeBinding]; [contactSettle] is a fallback settle ([Model.followFallback]), which
-	// re-binds the model the switch already announced. Either one makes [rebindNote] quiet about
-	// what the restated start-up box already shows. Only the first-contact beat's notes record how
-	// the session started, so only its routine ones join the start-up log while it is open, and
-	// every one of them is display-only, never saved to the session record — re-derived at the next
-	// launch ([destination]); a settle's notes are news about a move the session just made and are
-	// saved. A first-contact intent stashed in pendingRebind keeps this contact when it is applied
-	// after the Exchange, so its notes are display-only too. The zero value,
-	// [contactEvent], is every other door — a `/model` pick, the post-`/server` seed, every later
-	// beat — whose change is news worded in full.
+	// FIRST-CONTACT beat itself — no beat had ever landed and none had ever failed — and
+	// [contactColdRecovery] the first beat to land after a cold start's failure, both set only by
+	// [Model.foldBeat]; [contactSettle] is a fallback settle ([Model.followFallback]), which
+	// re-binds the model the switch already announced. First contact and a settle make [rebindNote]
+	// quiet about what the restated start-up box already shows; a cold recovery is worded in full,
+	// since the box said "connecting" while the server was down. The first-contact beat's and the
+	// cold recovery's notes record how the session started, so every one of them is display-only,
+	// never saved to the session record — re-derived at the next launch ([destination]) — and only
+	// first contact's routine ones join the start-up log while it is open; a settle's notes are news
+	// about a move the session just made and are saved. An intent stashed in pendingRebind keeps
+	// its contact when it is applied after the Exchange, so its notes land as they would have. The
+	// zero value, [contactEvent], is every other door — a `/model` pick, the post-`/server` seed,
+	// every beat after the session's first landing — whose change is news worded in full.
 	contact contact
 }
 
@@ -297,8 +301,13 @@ func (m Model) foldBeatMsg(msg beatMsg) (tea.Model, tea.Cmd) {
 // the fresh heartbeat state looks exactly like a launch's. The box is no longer "a few rows above"
 // but far up the scrollback, and the human explicitly asked for the move — so every post-switch
 // seed announces itself (see heartbeatState.switched).
+//
+// The FIRST LANDING after a cold start's failure ([contactColdRecovery]) is not quiet — the box it
+// restates said "connecting" while the server was down — but it is still how this launch started,
+// re-derived at the next launch against a server that is down again, so its notes, the recovery
+// note among them, are display-only (ADR 0022 addendum 0801). That too is read before the resets.
 func (m Model) foldBeat(beat heartbeat.Beat) Model {
-	firstContact := !m.hb.everOnline && m.hb.failures == 0 && !m.hb.switched
+	at := m.landingContact()
 	if !beat.Reachable {
 		return m.foldBeatFailure(beat.Failure)
 	}
@@ -315,11 +324,27 @@ func (m Model) foldBeat(beat heartbeat.Beat) Model {
 		m.reportUpstream(false, "")
 	}
 
-	m, rebound := m.observeBinding(beat, firstContact)
+	m, rebound := m.observeBinding(beat, at)
 	if crossed && !rebound {
-		m.note(kindOnline, contactEvent, onlineNote)
+		m.note(kindOnline, at, onlineNote)
 	}
 	return m
+}
+
+// landingContact is the [contact] a beat landing now is raised by, read off the evidence the
+// landing fold is about to erase: [contactFirst] when no beat has ever landed or failed,
+// [contactColdRecovery] when none has landed yet one has failed, and [contactEvent] once a beat
+// has landed or after a `/server` switch (heartbeatState.switched), whose seed is the answer to a
+// move the human asked for.
+func (m Model) landingContact() contact {
+	switch {
+	case m.hb.everOnline || m.hb.switched:
+		return contactEvent
+	case m.hb.failures == 0:
+		return contactFirst
+	default:
+		return contactColdRecovery
+	}
 }
 
 // reportUpstream publishes one liveness crossing through [Options.ReportUpstream] — the offline
@@ -353,10 +378,10 @@ func (m Model) reportUpstream(offline bool, failure string) {
 // beat names no window carries the last observed one, because a windowless beat names nothing and a
 // successful retry must not bind — and announce — an unknown window.
 //
-// firstContact is the pre-fold evidence its caller captured (see [Model.foldBeat]); it is stamped
-// into the intent rather than re-derived here, so the deferred path words itself exactly like the
-// immediate one — by construction, whenever the change is finally applied.
-func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bool) {
+// at is the contact its caller read off the pre-fold evidence ([Model.landingContact]); it is
+// stamped into the intent rather than re-derived here, so the deferred path words and places itself
+// exactly like the immediate one — by construction, whenever the change is finally applied.
+func (m Model) observeBinding(beat heartbeat.Beat, at contact) (Model, bool) {
 	if !m.appliesRebinds() {
 		return m, false // a display-frozen heartbeat: nothing to apply a change through
 	}
@@ -371,10 +396,6 @@ func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bo
 	}
 	m.hb.observedModel, m.hb.observedWindow = beat.ActiveModel, window
 	m.hb.observedDialect = beat.EffortSupport.Dialect
-	at := contactEvent
-	if firstContact {
-		at = contactFirst
-	}
 	intent := rebindIntent{
 		model:  beat.ActiveModel,
 		window: window,
@@ -455,7 +476,7 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	// The box's facts were frozen when it was seeded, so a late seed would otherwise leave a
 	// "connecting" box at the top of the scrollback until the next /clear.
 	m.restateBox()
-	quiet := intent.contact != contactEvent
+	quiet := intent.contact == contactFirst || intent.contact == contactSettle
 	if note := rebindNote(oldModel, oldWindow, m.opts.Model, m.opts.ContextWindow, quiet); note != "" {
 		m.noteBinding(kindRebindChange, intent.contact, note)
 	}
@@ -491,14 +512,15 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 }
 
 // noteBinding places one note a binding raised at contact c ([Model.note]) and, when the session's
-// first contact raised it and it took a line of its own rather than joining the start-up log
-// ([destination]), keeps it as one of the binding's standing lines
+// first contact or the first landing after a cold-start failure raised it and it took a line of its
+// own rather than joining the start-up log ([destination]), keeps it as one of the binding's standing lines
 // ([heartbeatState.firstContactLines]) for a transcript swap to re-place. The stash lives here, on
 // the binding's own path, rather than in [Model.note]: a session boundary places its notes through
 // note too, and must write only the session view a watch parks
 // (TestSessionViewHoldsEveryFieldTheBoundariesReset).
 func (m *Model) noteBinding(kind NoticeKind, c contact, text string) {
-	if c == contactFirst && destination(kindRow(kind), c, m.chrome.isLogOpen) != destLog {
+	startsTheSession := c == contactFirst || c == contactColdRecovery
+	if startsTheSession && destination(kindRow(kind), c, m.chrome.isLogOpen) != destLog {
 		m.hb.firstContactLines = append(slices.Clip(m.hb.firstContactLines), firstContactLine{kind: kind, text: text})
 	}
 	m.note(kind, c, text)
@@ -800,7 +822,11 @@ func serverSwitchNote(from string, to Options, saved bool) string {
 //   - Otherwise the crossing waits for offlineFailureThreshold consecutive idle failures.
 //
 // The crossing is noted exactly once — and published once, through [Options.ReportUpstream] —
-// every further failed beat is silent until a success crosses back (foldBeat).
+// every further failed beat is silent until a success crosses back (foldBeat). A cold start's
+// crossing — before any beat has landed, and not on a server `/server` moved to — is part of how
+// the session started ([contactFirst]): re-derived at every launch against a server that is down,
+// so it is display-only and never stashed for a transcript swap (the footer's offline marker
+// carries the state there). Every later crossing is news about the session and is saved.
 func (m Model) foldBeatFailure(failure string) Model {
 	if !m.engineHolds().beatMayCount() {
 		return m
@@ -811,7 +837,11 @@ func (m Model) foldBeatFailure(failure string) Model {
 		return m
 	}
 	m.hb.offline = true
-	m.note(kindOffline, contactEvent, offlineNote(failure))
+	at := contactEvent
+	if !m.hb.everOnline && !m.hb.switched {
+		at = contactFirst
+	}
+	m.note(kindOffline, at, offlineNote(failure))
 	m.reportUpstream(true, failure)
 	return m
 }

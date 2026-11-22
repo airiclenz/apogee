@@ -1010,8 +1010,9 @@ func (t *transcript) addWorkflowNote(text, name string, spent domain.Usage) {
 // It is for notices that are RE-DERIVED at each startup or resume rather than earned by the
 // conversation: the "resumed: <title>" line, its no-scrollback degrade variant, the
 // interrupted-mid-exchange note, the "context: …" notice naming the workspace files the session
-// loaded, and every note the session's first-contact heartbeat beat raises (the start-up chrome
-// routes those here, [destination]). Each of those is recomputed from live state every time the view is
+// loaded, every note the session's first-contact heartbeat beat raises, a cold start's
+// `server offline — …` note and every note of the first beat that lands after it, `connected: …`
+// among them (the start-up chrome routes those here, [destination]). Each of those is recomputed from live state every time the view is
 // rebuilt, so persisting one adds nothing on the way back in and accumulates a duplicate on the way
 // out — five resumes, five stored "resumed:" notes. A note that records something that actually
 // happened in the session (a cancellation, a failed save, a server switch) belongs in addNote.

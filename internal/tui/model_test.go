@@ -4530,6 +4530,71 @@ func TestFirstContactNotesStayOutOfAResumedRecord(t *testing.T) {
 	}
 }
 
+// TestColdStartOfflineStaysOutOfAResumedRecord pins that a cold start's outage is part of how the
+// session started, so it is shown but never saved: launching, resuming and launching again with the
+// server down leaves no offline note in the record and exactly one in the view, and the first beat
+// that lands afterwards says "connected:" once, on a display-only line the record never carries
+// (ADR 0022 addendum 0801).
+func TestColdStartOfflineStaysOutOfAResumedRecord(t *testing.T) {
+	t.Parallel()
+
+	const failure = "apogee: model discovery: dial tcp 127.0.0.1:1: connect: connection refused"
+	var src transcript
+	src.addUser("first question", nil)
+	src.addNote("a recorded note")
+	seed, err := encodeTranscript(&src)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	launch := func(blob []byte) Model {
+		t.Helper()
+		opts := unbound(testOpts)
+		opts.Resumed = &ResumedSession{Transcript: blob, Title: "first question"}
+		m := wireRebind(t, opts, &fakeHeartbeat{}, &fakeRebind{})
+		return foldBeatMsg(t, m, downBeat(failure))
+	}
+	saved := func(m Model) []byte {
+		t.Helper()
+		p, ok := m.snapshotPayload(domain.Session{})
+		if !ok {
+			t.Fatal("snapshotPayload failed on a resumed transcript")
+		}
+		return p.transcript
+	}
+
+	m := launch(seed)
+	blob := saved(m)
+	if strings.Contains(string(blob), "server offline") {
+		t.Errorf("first launch: the record carries the cold start's offline note: %s", blob)
+	}
+	if !strings.Contains(string(blob), "a recorded note") {
+		t.Errorf("the saved blob dropped the conversation's own note: %s", blob)
+	}
+
+	m = launch(blob)
+	if n := countNotes(m, offlineNote(failure)); n != 1 {
+		t.Errorf("relaunch: %q shown %d times, want once; notes = %q", offlineNote(failure), n, noteTexts(m))
+	}
+	blob = saved(m)
+	if strings.Contains(string(blob), "server offline") {
+		t.Errorf("relaunch: the record carries the cold start's offline note: %s", blob)
+	}
+
+	// The first landing after the outage is worded in full, on a display-only line of its own.
+	m = foldBeatMsg(t, m, upBeat("served-model", 32768))
+	const connected = "connected: served-model, context 32k"
+	if n := countNotes(m, connected); n != 1 {
+		t.Fatalf("the first landing: %q shown %d times, want once; notes = %q", connected, n, noteTexts(m))
+	}
+	if e, ok := noteEntry(m.transcript, connected); !ok || !e.ephemeral {
+		t.Errorf("the first landing's note is %+v (found %v), want an ephemeral line of its own", e, ok)
+	}
+	if got := saved(m); strings.Contains(string(got), "connected:") || strings.Contains(string(got), "server offline") {
+		t.Errorf("the record carries the cold start's notes: %s", got)
+	}
+}
+
 // TestRestoreRePlacesFirstContactLines pins that a /sessions restore, whose transcript swap drops
 // every display-only note, puts the server's standing first-contact lines back: each loud one once,
 // ephemeral, under the box and above the "resumed:" note, as the launch placed it. A routine one

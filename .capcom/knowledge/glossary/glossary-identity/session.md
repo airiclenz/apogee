@@ -28,10 +28,14 @@ interrupted-mid-exchange note), the colour-scheme warnings, the start-up confine
 routing notice, a Reaction's failure notice, Watch mode's unreadable-record note, the
 `context: …` notice and every note the session's first-contact heartbeat beat raises (an unknown
 window, a refused rebind, a roster that was not applied, a model change applied late because a
-worker held the engine; 2026-11-21); persisting any of them would append a fresh copy on every
-resume. A later beat's notes — a model change, a server move — record something the session did
-and are persisted. Watch mode rebuilds its view from the owner's record, so a watcher does not see
-the owner's first-contact notes. The
+worker held the engine; 2026-11-21), and a cold start's outage: the `server offline — …` note raised
+before any beat has landed (not after a `/server` move) and every note of the first beat that lands
+after it — `connected: …`, `server back online`, an unknown window, a refused rebind, a roster or
+effort note — each worded in full on a line of its own (2026-11-22); persisting any of them would
+append a fresh copy on every resume. A later beat's notes — a model change, a server move, an
+outage once a beat has landed or after a `/server` move — record something the session did and are
+persisted. Watch mode rebuilds its view from the owner's record, so a watcher does not see the
+owner's first-contact notes. The
 record is saved **per-Turn** (at each quiescent boundary, so a crash loses at most one Turn),
 listed and resumed from inside the TUI through the `/sessions` **browser**, and replayed on
 resume so the view repaints instead of showing a bare box over a remembering engine. A

@@ -53,7 +53,10 @@ internal/tui/model_test.go — TestRestoreRePlacesFirstContactLines; internal/tu
 
 **Commit:** `fix(tui): a later rebind refusal drops the stashed first-contact refusal`
 
-## 2. A cold-start outage and its first landing are display-only
+## 2. A cold-start outage and its first landing are display-only — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): foldBeat reads its contact through a new `Model.landingContact` helper (contactFirst / contactColdRecovery / contactEvent) rather than two inline booleans; `observeBinding` takes that contact and the `server back online` note is raised with it — same mechanism as the Approach, one derivation site.
+NOTES (2026-11-22): the mid-session guard test is named `TestOfflineMidSessionStaysInTheRecord` (heartbeat_test.go) so the item's Acceptance `-run` filter (`TestOffline`) covers it; it pins a mid-session outage's offline + change notes and a `/server` switch's cold failure staying in the record.
 
 Depends on item 1.
 

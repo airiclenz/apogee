@@ -11,14 +11,21 @@ type contact uint8
 
 const (
 	// contactEvent: raised by any other event — a session boundary's notices, a launch's
-	// colour-scheme warnings, a git read's refusal, a liveness crossing, a routing change, and a
-	// rebind that is news worded in full: a `/model` pick, the post-`/server` seed, every beat after
-	// the first. It is the zero value, so a [rebindIntent] built with no contact is one of these.
+	// colour-scheme warnings, a git read's refusal, a routing change, a liveness crossing once a
+	// beat has landed or after a `/server` switch, and a rebind that is news worded in full: a
+	// `/model` pick, the post-`/server` seed, every beat after the session's first landed one. It is
+	// the zero value, so a [rebindIntent] built with no contact is one of these.
 	contactEvent contact = iota
-	// contactFirst: raised by the session's first-contact beat (set by [Model.observeBinding] from
-	// the pre-fold evidence), which is part of how the session started — re-derived at every
-	// launch and resume, so its notes are display-only.
+	// contactFirst: raised by the session's first contact — its first beat landing clean (set by
+	// [Model.observeBinding] from the pre-fold evidence), or a cold start's first failed beat, whose
+	// offline crossing ([Model.foldBeatFailure]) is how that start went. Either is part of how the
+	// session started — re-derived at every launch and resume, so its notes are display-only.
 	contactFirst
+	// contactColdRecovery: raised by the first beat that lands after a cold start's failure — the
+	// session's first landing, re-derived at every launch whose server is down, so its notes are
+	// display-only like first contact's; yet the start-up box no longer says this on its own, so
+	// they are worded in full and keep lines of their own rather than joining the start-up log.
+	contactColdRecovery
 	// contactSettle: raised by a fallback settle ([Model.followFallback]), which re-binds the model
 	// the switch already announced — quiet like first contact, yet news about a move the session
 	// just made, not a record of the start.
@@ -40,17 +47,18 @@ const (
 // destination is where a note of the kind whose row is rule, raised by c, lands while the session
 // log is (isLogOpen) or is not open. A ROUTINE note joins the open log when it records the start:
 // a launch's or the workspace's (source boundary or ambient), or a beat's raised by the session's
-// first contact. Every other note keeps its own line — persisted only for a beat's raised by any
+// first contact. Every other note keeps its own line — persisted only for a beat's raised by a
 // later door (an event or a fallback settle), which records a move the session made, and ephemeral
 // for everything that is re-derived at the next launch or boundary and would only stack a duplicate
-// into the record: a boundary's, the workspace's, and a first-contact beat's (ADR 0022 addendum
-// 0801). A loud note therefore never joins the log.
+// into the record: a boundary's, the workspace's, a first-contact beat's, a cold start's offline
+// crossing and the first landing after it (ADR 0022 addendum 0801). A loud note therefore never
+// joins the log, and neither does a note of the first landing after a cold-start failure.
 func destination(rule noticeKindRow, c contact, isLogOpen bool) dest {
 	recordsTheStart := rule.source != sourceBeat || c == contactFirst
 	if rule.class == classRoutine && isLogOpen && recordsTheStart {
 		return destLog
 	}
-	if rule.source == sourceBeat && c != contactFirst {
+	if rule.source == sourceBeat && (c == contactEvent || c == contactSettle) {
 		return destLinePersisted
 	}
 	return destLineEphemeral
