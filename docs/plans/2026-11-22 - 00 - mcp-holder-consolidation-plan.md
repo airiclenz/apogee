@@ -41,7 +41,13 @@
 - A per-request count of queued dials (`isDialQueued` stays holder-wide).
 - The other open architecture-review issues.
 
-## 1. One OAuth binding value in mcpauth
+## 1. One OAuth binding value in mcpauth — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): `requireSecretIssuer` stays in login.go and `clientMatches`/`issuerMatches` (now `Binding` methods) with their reason constants stay in handler.go, so no code moves between files; binding.go holds the type and `Binding.validate`. The per-field docs of the two configs merged into `Binding`'s.
+
+NOTES (2026-11-22): `Binding.validate` runs first in both `LoginConfig.validate` and `NewHandler`, so the secret-without-issuer check now precedes the config's own endpoint/store/client/redirect checks; only a config with two faults at once reports a different (unchanged) sentence first.
+
+NOTES (2026-11-22): the `ServerConfig.Issuer` comment in internal/mcp/transport.go now cites `mcpauth.Binding.Issuer` in place of the two configs' fields.
 
 **What:**
 **Goal:** `mcpauth.LoginConfig` and `mcpauth.HandlerConfig` both embed one `mcpauth.Binding` value. That value carries the name, endpoint, store, endpoint client, auth client, client id, client secret and issuer. One `Binding.validate` checks the shared facts for both configs.

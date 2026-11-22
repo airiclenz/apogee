@@ -40,32 +40,10 @@ const lockSuffix = ".lock"
 // insufficientScope is the Bearer challenge error (RFC 6750 §3.1) that asks for a step-up login.
 const insufficientScope = "insufficient_scope"
 
-// HandlerConfig is everything one server's connected handler needs; the caller resolves all of
-// it, as for Login.
+// HandlerConfig is everything one server's connected handler needs: the Binding its login was
+// given. The caller resolves all of it, as for Login.
 type HandlerConfig struct {
-	// Name is the server's alias, the record's file stem (ValidateServerName).
-	Name string
-	// Endpoint is the server's vetted endpoint string, the one Login was given.
-	Endpoint string
-	// Store holds the server's record; refreshed tokens are saved back to it. A record issued to
-	// another client than ClientID names is no record at all (clientMatches): the handler never
-	// sends a token, or spends a refresh token, minted for a client the configuration dropped.
-	Store *Store
-	// EndpointClient carries a refresh to a token endpoint on the endpoint's own origin, and
-	// AuthClient one to any other origin (NewAuthClient) — the routing Login uses.
-	EndpointClient *http.Client
-	AuthClient     *http.Client
-	// ClientID is the server's configured `client-id:`, the preregistered client a login
-	// authorizes as; empty when apogee registers its own client (Dynamic Client Registration).
-	ClientID string
-	// ClientSecret is a preregistered client's secret (its `client-secret-env:` value), sent on a
-	// refresh when the record's registration carries none. It is never saved.
-	ClientSecret string
-	// Issuer, when set, is the configured issuer: a record another authorization server issued —
-	// or one that names none — is no record at all (issuerMatches), so no refresh, and no client
-	// secret, is ever sent to a token endpoint the operator did not pin. Empty means no pin, and is
-	// refused beside a ClientSecret.
-	Issuer string
+	Binding
 }
 
 // Handler is the SDK's auth.OAuthHandler for one `auth: oauth` server: it hands the transport the
@@ -87,14 +65,11 @@ type Handler struct {
 // name, a missing store or client, a client secret without an issuer, and an unreadable record are
 // plain errors.
 func NewHandler(cfg HandlerConfig) (*Handler, error) {
-	if err := ValidateServerName(cfg.Name); err != nil {
+	if err := cfg.Binding.validate(); err != nil {
 		return nil, err
 	}
 	if cfg.Store == nil || cfg.EndpointClient == nil || cfg.AuthClient == nil {
 		return nil, fmt.Errorf("mcpauth: server %q: the OAuth handler needs a store and both HTTP clients", cfg.Name)
-	}
-	if err := requireSecretIssuer(cfg.Name, cfg.ClientSecret, cfg.Issuer); err != nil {
-		return nil, err
 	}
 	record, ok, err := cfg.Store.Load(cfg.Name, cfg.Endpoint)
 	if err != nil {
@@ -103,10 +78,10 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	if !ok || record.AccessToken == "" {
 		return nil, loginRequired(cfg.Name, "no stored token for this endpoint", nil)
 	}
-	if !clientMatches(cfg, record) {
+	if !cfg.clientMatches(record) {
 		return nil, loginRequired(cfg.Name, clientChangedReason, nil)
 	}
-	if !issuerMatches(cfg, record) {
+	if !cfg.issuerMatches(record) {
 		return nil, loginRequired(cfg.Name, issuerChangedReason, nil)
 	}
 	return &Handler{cfg: cfg, record: record}, nil
@@ -115,21 +90,21 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 // clientChangedReason is the login-required reason for a record issued to another client.
 const clientChangedReason = "the stored token was issued to another client than the configured client-id"
 
-// clientMatches reports whether record may be used under cfg: always for a dynamically registered
+// clientMatches reports whether record may be used under b: always for a dynamically registered
 // client (no configured id), else only when the record was issued to the configured client — a
 // changed `client-id:` needs a new login, as a changed endpoint does.
-func clientMatches(cfg HandlerConfig, record Record) bool {
-	return cfg.ClientID == "" || record.Client.ID == cfg.ClientID
+func (b Binding) clientMatches(record Record) bool {
+	return b.ClientID == "" || record.Client.ID == b.ClientID
 }
 
 // issuerChangedReason is the login-required reason for a record of another authorization server.
 const issuerChangedReason = "the stored token was not issued by the configured issuer"
 
-// issuerMatches reports whether record may be used under cfg: always when no issuer is configured,
+// issuerMatches reports whether record may be used under b: always when no issuer is configured,
 // else only when the record names the configured issuer, compared after trimming space — a record
 // naming no issuer, saved before the pin, needs a new login too.
-func issuerMatches(cfg HandlerConfig, record Record) bool {
-	issuer := strings.TrimSpace(cfg.Issuer)
+func (b Binding) issuerMatches(record Record) bool {
+	issuer := strings.TrimSpace(b.Issuer)
 	return issuer == "" || strings.TrimSpace(record.Issuer) == issuer
 }
 
@@ -215,10 +190,10 @@ func (h *Handler) refreshLocked(ctx context.Context, rejected string) error {
 	if !ok {
 		return loginRequired(h.cfg.Name, "the stored token is gone", nil)
 	}
-	if !clientMatches(h.cfg, disk) {
+	if !h.cfg.clientMatches(disk) {
 		return loginRequired(h.cfg.Name, clientChangedReason, nil)
 	}
-	if !issuerMatches(h.cfg, disk) {
+	if !h.cfg.issuerMatches(disk) {
 		return loginRequired(h.cfg.Name, issuerChangedReason, nil)
 	}
 	if tokenValid(disk) && disk.AccessToken != rejected {

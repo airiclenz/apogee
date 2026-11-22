@@ -216,13 +216,15 @@ func loopbackClient() *http.Client {
 // loginConfig is a DCR login against f, saving into store.
 func (f *fakeOAuth) loginConfig(store *Store) LoginConfig {
 	return LoginConfig{
-		Name:           testServer,
-		Endpoint:       f.endpoint(),
-		Store:          store,
-		EndpointClient: loopbackClient(),
-		AuthClient:     loopbackClient(),
-		RedirectURL:    testRedirectURL,
-		FetchCode:      f.fetcher(""),
+		Binding: Binding{
+			Name:           testServer,
+			Endpoint:       f.endpoint(),
+			Store:          store,
+			EndpointClient: loopbackClient(),
+			AuthClient:     loopbackClient(),
+		},
+		RedirectURL: testRedirectURL,
+		FetchCode:   f.fetcher(""),
 	}
 }
 

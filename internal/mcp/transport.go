@@ -126,11 +126,10 @@ type ServerConfig struct {
 	ClientID        string
 	ClientSecretEnv string
 	// Issuer pins the authorization server: when set, a login uses that issuer only if the endpoint
-	// names it, and a stored token another issuer minted is no token at all
-	// (mcpauth.LoginConfig.Issuer, mcpauth.HandlerConfig.Issuer). Empty means no pin, which only a
-	// client without a ClientSecretEnv may have: a secret goes to a pinned issuer only. It needs Auth
-	// set to AuthOAuth and is an absolute http(s) URL with a host and no user info, query or
-	// fragment, taken as written (ValidateAuth).
+	// names it, and a stored token another issuer minted is no token at all (mcpauth.Binding.Issuer).
+	// Empty means no pin, which only a client without a ClientSecretEnv may have: a secret goes to a
+	// pinned issuer only. It needs Auth set to AuthOAuth and is an absolute http(s) URL with a host
+	// and no user info, query or fragment, taken as written (ValidateAuth).
 	Issuer string
 
 	// Project marks a server the Project config defined and the user adopted (ADR 0104), as against
@@ -687,7 +686,7 @@ func newOAuthHandler(
 	if newClient == nil {
 		newClient = mcpauth.NewAuthClient
 	}
-	return mcpauth.NewHandler(mcpauth.HandlerConfig{
+	return mcpauth.NewHandler(mcpauth.HandlerConfig{Binding: mcpauth.Binding{
 		Name:           cfg.Name,
 		Endpoint:       endpoint,
 		Store:          host.OAuthStore,
@@ -696,7 +695,7 @@ func newOAuthHandler(
 		ClientID:       cfg.ClientID,
 		ClientSecret:   secret,
 		Issuer:         cfg.Issuer,
-	})
+	}})
 }
 
 // vetEndpoint turns a configured HTTP endpoint into the two things an SDK transport needs: the

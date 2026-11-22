@@ -113,13 +113,13 @@ func (f *fakeTokenServer) storedRecord(expiry time.Time) Record {
 // newTestHandler builds a handler over store for testServer, with loopback clients.
 func newTestHandler(t *testing.T, store *Store) *Handler {
 	t.Helper()
-	h, err := NewHandler(HandlerConfig{
+	h, err := NewHandler(HandlerConfig{Binding: Binding{
 		Name:           testServer,
 		Endpoint:       handlerEndpoint,
 		Store:          store,
 		EndpointClient: loopbackClient(),
 		AuthClient:     loopbackClient(),
-	})
+	}})
 	if err != nil {
 		t.Fatalf("NewHandler error = %v", err)
 	}
@@ -427,13 +427,13 @@ func TestNewHandlerWithoutARecordNeedsALogin(t *testing.T) {
 	t.Parallel()
 	store := NewStore(t.TempDir())
 
-	_, err := NewHandler(HandlerConfig{
+	_, err := NewHandler(HandlerConfig{Binding: Binding{
 		Name:           testServer,
 		Endpoint:       handlerEndpoint,
 		Store:          store,
 		EndpointClient: loopbackClient(),
 		AuthClient:     loopbackClient(),
-	})
+	}})
 
 	assertLoginRequired(t, err)
 }
@@ -458,14 +458,14 @@ func TestNewHandlerLoadsOnlyARecordOfTheConfiguredClient(t *testing.T) {
 			record.Client.ID = "a"
 			saveRecord(t, store, testServer, handlerEndpoint, record)
 
-			h, err := NewHandler(HandlerConfig{
+			h, err := NewHandler(HandlerConfig{Binding: Binding{
 				Name:           testServer,
 				Endpoint:       handlerEndpoint,
 				Store:          store,
 				EndpointClient: loopbackClient(),
 				AuthClient:     loopbackClient(),
 				ClientID:       tt.configuredID,
-			})
+			}})
 
 			if tt.wantLogin {
 				assertLoginRequired(t, err)
@@ -494,14 +494,14 @@ func TestHandlerRefreshRefusesARecordOfAnotherClient(t *testing.T) {
 	record := tokens.storedRecord(time.Now().Add(-time.Minute))
 	record.Client.ID = "a"
 	saveRecord(t, store, testServer, handlerEndpoint, record)
-	h, err := NewHandler(HandlerConfig{
+	h, err := NewHandler(HandlerConfig{Binding: Binding{
 		Name:           testServer,
 		Endpoint:       handlerEndpoint,
 		Store:          store,
 		EndpointClient: loopbackClient(),
 		AuthClient:     loopbackClient(),
 		ClientID:       "a",
-	})
+	}})
 	if err != nil {
 		t.Fatalf("NewHandler error = %v", err)
 	}
@@ -546,14 +546,14 @@ func TestNewHandlerLoadsOnlyARecordOfTheConfiguredIssuer(t *testing.T) {
 			record.Issuer = tt.storedIssuer
 			saveRecord(t, store, testServer, handlerEndpoint, record)
 
-			h, err := NewHandler(HandlerConfig{
+			h, err := NewHandler(HandlerConfig{Binding: Binding{
 				Name:           testServer,
 				Endpoint:       handlerEndpoint,
 				Store:          store,
 				EndpointClient: loopbackClient(),
 				AuthClient:     loopbackClient(),
 				Issuer:         tt.configuredIssuer,
-			})
+			}})
 
 			if tt.wantLogin {
 				assertLoginRequired(t, err)
@@ -594,7 +594,7 @@ func TestHandlerRefreshRefusesARecordOfAnotherIssuer(t *testing.T) {
 			record.Client.TokenEndpointAuthMethod = authMethodSecretPost
 			record.Issuer = pinnedIssuer
 			saveRecord(t, store, testServer, handlerEndpoint, record)
-			h, err := NewHandler(HandlerConfig{
+			h, err := NewHandler(HandlerConfig{Binding: Binding{
 				Name:           testServer,
 				Endpoint:       handlerEndpoint,
 				Store:          store,
@@ -603,7 +603,7 @@ func TestHandlerRefreshRefusesARecordOfAnotherIssuer(t *testing.T) {
 				ClientID:       "pre-1",
 				ClientSecret:   "pre-secret",
 				Issuer:         pinnedIssuer,
-			})
+			}})
 			if err != nil {
 				t.Fatalf("NewHandler error = %v", err)
 			}
@@ -632,7 +632,7 @@ func TestNewHandlerRefusesAClientSecretWithoutAnIssuer(t *testing.T) {
 			store := NewStore(t.TempDir())
 			saveRecord(t, store, testServer, handlerEndpoint, tokens.storedRecord(time.Now().Add(-time.Minute)))
 
-			_, err := NewHandler(HandlerConfig{
+			_, err := NewHandler(HandlerConfig{Binding: Binding{
 				Name:           testServer,
 				Endpoint:       handlerEndpoint,
 				Store:          store,
@@ -640,7 +640,7 @@ func TestNewHandlerRefusesAClientSecretWithoutAnIssuer(t *testing.T) {
 				AuthClient:     loopbackClient(),
 				ClientSecret:   "secret-1",
 				Issuer:         issuer,
-			})
+			}})
 
 			want := fmt.Sprintf("mcpauth: server %q: a client secret needs a configured issuer — "+
 				"set issuer: beside the client-secret-env: key", testServer)
@@ -652,6 +652,59 @@ func TestNewHandlerRefusesAClientSecretWithoutAnIssuer(t *testing.T) {
 			}
 			if strings.Contains(err.Error(), "secret-1") {
 				t.Errorf("error = %q; want it never to carry the secret", err)
+			}
+		})
+	}
+}
+
+// TestBindingValidateRefusesMissingFacts pins the shared check Login and NewHandler both run: an
+// unsafe server name, or a client secret without a configured issuer, is refused before either
+// reads a store or sends a request; a binding with neither fault passes.
+func TestBindingValidateRefusesMissingFacts(t *testing.T) {
+	t.Parallel()
+	secretWithoutIssuer := fmt.Sprintf("mcpauth: server %q: a client secret needs a configured issuer — "+
+		"set issuer: beside the client-secret-env: key", testServer)
+	tests := []struct {
+		name    string
+		binding Binding
+		// wantErr is the sentinel the error must wrap; wantText, when set, is its exact text.
+		wantErr  error
+		wantText string
+	}{
+		{
+			name:    "an unsafe name",
+			binding: Binding{Name: "../escape", Endpoint: handlerEndpoint},
+			wantErr: ErrInvalidServerName,
+		},
+		{
+			name:     "a client secret without an issuer",
+			binding:  Binding{Name: testServer, Endpoint: handlerEndpoint, ClientSecret: "secret-1"},
+			wantText: secretWithoutIssuer,
+		},
+		{
+			name: "a client secret with an issuer",
+			binding: Binding{Name: testServer, Endpoint: handlerEndpoint, ClientSecret: "secret-1",
+				Issuer: "https://auth.example.com"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.binding.validate()
+
+			switch {
+			case tt.wantErr == nil && tt.wantText == "":
+				if err != nil {
+					t.Fatalf("validate() = %v; want nil", err)
+				}
+			case tt.wantErr != nil && !errors.Is(err, tt.wantErr):
+				t.Fatalf("validate() = %v; want it to wrap %v", err, tt.wantErr)
+			case tt.wantText != "" && (err == nil || err.Error() != tt.wantText):
+				t.Fatalf("validate() = %v; want %q", err, tt.wantText)
+			}
+			if err != nil && strings.Contains(err.Error(), "secret-1") {
+				t.Errorf("validate() = %q; want it never to carry the secret", err)
 			}
 		})
 	}
@@ -703,7 +756,7 @@ func TestHandlerRefreshAuthenticatesTheClientAsRegistered(t *testing.T) {
 			record := tokens.storedRecord(time.Now().Add(-time.Minute))
 			record.Client.TokenEndpointAuthMethod = tt.method
 			saveRecord(t, store, testServer, handlerEndpoint, record)
-			h, err := NewHandler(HandlerConfig{
+			h, err := NewHandler(HandlerConfig{Binding: Binding{
 				Name:           testServer,
 				Endpoint:       handlerEndpoint,
 				Store:          store,
@@ -711,7 +764,7 @@ func TestHandlerRefreshAuthenticatesTheClientAsRegistered(t *testing.T) {
 				AuthClient:     loopbackClient(),
 				ClientSecret:   "secret-1",
 				Issuer:         pinnedIssuer,
-			})
+			}})
 			if err != nil {
 				t.Fatalf("NewHandler error = %v", err)
 			}

@@ -86,29 +86,11 @@ const probeBody = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"prot
 // authorization server redirected back with. It owns all of the login's user interaction.
 type CodeFetcher func(ctx context.Context, authorizeURL string) (code, state string, err error)
 
-// LoginConfig is everything one server's login needs; the caller resolves all of it, so this
-// package reaches for no config, environment or ambient home of its own.
+// LoginConfig is everything one server's login needs: the Binding it shares with the connected
+// handler, plus the login's own redirect URL and code fetcher. The caller resolves all of it, so
+// this package reaches for no config, environment or ambient home of its own.
 type LoginConfig struct {
-	// Name is the server's alias, the record's file stem (ValidateServerName).
-	Name string
-	// Endpoint is the server's vetted endpoint string (the form its transport is handed). It is
-	// the RFC 8707 resource the token is bound to and what protected-resource metadata must name.
-	Endpoint string
-	// Store is where the record is read (a reusable registration) and saved.
-	Store *Store
-	// EndpointClient is the endpoint's own vetted, origin-pinned client: it carries the probe and
-	// every request to the endpoint's origin.
-	EndpointClient *http.Client
-	// AuthClient carries every request to any other origin (NewAuthClient).
-	AuthClient *http.Client
-	// ClientID names a preregistered client; empty means Dynamic Client Registration.
-	// ClientSecret is that client's secret, empty for a public client. It is never saved.
-	ClientID     string
-	ClientSecret string
-	// Issuer, when set, is the one authorization server the login may use: the endpoint must
-	// name it, else the login fails with IssuerMismatchError. Empty means no pin — the first
-	// authorization server the endpoint names is used — and is refused beside a ClientSecret.
-	Issuer string
+	Binding
 	// RedirectURL is the redirect URI the authorization server sends the code to.
 	RedirectURL string
 	// FetchCode obtains the authorization code for the authorize URL.
@@ -148,7 +130,7 @@ func Login(ctx context.Context, cfg LoginConfig) (Record, error) {
 
 // validate refuses a config missing a piece the flow cannot run without, before any request.
 func (cfg LoginConfig) validate() error {
-	if err := ValidateServerName(cfg.Name); err != nil {
+	if err := cfg.Binding.validate(); err != nil {
 		return err
 	}
 	switch {
@@ -159,7 +141,7 @@ func (cfg LoginConfig) validate() error {
 	case cfg.RedirectURL == "":
 		return fmt.Errorf("mcpauth: server %q: login needs a redirect URL", cfg.Name)
 	}
-	return requireSecretIssuer(cfg.Name, cfg.ClientSecret, cfg.Issuer)
+	return nil
 }
 
 // requireSecretIssuer refuses a client secret without a configured issuer: the secret goes only to

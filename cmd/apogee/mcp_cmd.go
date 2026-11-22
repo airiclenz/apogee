@@ -97,16 +97,18 @@ func loginMCPServer(ctx context.Context, deps mcpLoginDeps, target mcpLoginTarge
 	defer closeFetcher()
 
 	_, err = mcpauth.Login(ctx, mcpauth.LoginConfig{
-		Name:           server.Name,
-		Endpoint:       endpoint,
-		Store:          host.OAuthStore,
-		EndpointClient: endpointClient,
-		AuthClient:     deps.newAuthClient(target.guard, host.Proxy),
-		ClientID:       server.ClientID,
-		ClientSecret:   secret,
-		Issuer:         server.Issuer,
-		RedirectURL:    redirectURL,
-		FetchCode:      fetch,
+		Binding: mcpauth.Binding{
+			Name:           server.Name,
+			Endpoint:       endpoint,
+			Store:          host.OAuthStore,
+			EndpointClient: endpointClient,
+			AuthClient:     deps.newAuthClient(target.guard, host.Proxy),
+			ClientID:       server.ClientID,
+			ClientSecret:   secret,
+			Issuer:         server.Issuer,
+		},
+		RedirectURL: redirectURL,
+		FetchCode:   fetch,
 	})
 	return err
 }
