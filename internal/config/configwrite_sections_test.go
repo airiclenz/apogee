@@ -310,8 +310,8 @@ func TestSidePanelSectionsRefusedWriteSeedsNothing(t *testing.T) {
 	}
 }
 
-// A reset of `ui.side-panel.show` removes its line through the block's writer — the scalar reset
-// refuses a path three segments deep — so the key reads back at its default. Comments, order and the
+// A reset of `ui.side-panel.show` removes its line through the block's writer — the one the host
+// routes the block's keys to — so the key reads back at its default. Comments, order and the
 // other keys stay as found; a block the removal empties goes with it, and `ui:` too when the block
 // was all it held.
 func TestSidePanelSectionsBlockResetsShow(t *testing.T) {

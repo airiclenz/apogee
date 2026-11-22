@@ -117,9 +117,9 @@ func TestSettingsHostSidePanelFoldedWriteRoundTrips(t *testing.T) {
 	}
 }
 
-// The `/settings` Reset of `ui.side-panel.show` goes to the block's writer too — the scalar reset
-// refuses a path three segments deep, so the pane announced a key it then could not reset — and
-// re-takes the baseline as every landed write does. The file reads back at the default.
+// The `/settings` Reset of `ui.side-panel.show` goes to the block's writer too — before it did, the
+// pane announced a key it then could not reset — and re-takes the baseline as every landed write
+// does. The file reads back at the default.
 func TestSettingsHostResetsSidePanelShow(t *testing.T) {
 	t.Parallel()
 	c := newWatchedConfig(t, "ui:\n  spinner: glitter\n  side-panel:\n    show: \"off\"\n    sections: [usage: hidden]\n")
@@ -152,8 +152,8 @@ func TestSettingsHostResetsSidePanelShow(t *testing.T) {
 	}
 }
 
-// The `/settings` write of either `ui.side-panel` key goes to the block's writer — the scalar
-// writer refuses a path three segments deep — and re-takes the baseline as every landed write does.
+// The `/settings` write of either `ui.side-panel` key goes to the block's writer — the host routes
+// the whole block there — and re-takes the baseline as every landed write does.
 func TestSettingsHostWritesBothSidePanelSectionsBlockKeys(t *testing.T) {
 	t.Parallel()
 	c := newWatchedConfig(t, "ui:\n  side-panel:\n    show: auto\n")

@@ -34,12 +34,6 @@ import (
 // literal, so the key goes back to being described by the binary's default (and to being
 // documented by its commented example) instead of being pinned to today's spelling of it.
 
-// scalarPathDepth is how deep a scalar path may reach: a top-level key, or one key inside one
-// block (`ui.spinner`). Every registry row is within it, and a deeper path is refused rather
-// than guessed at — the two-line block this writer creates for an absent parent cannot express
-// a third level, and inventing one silently is how a config write corrupts a file.
-const scalarPathDepth = 2
-
 // SaveConfigSetting writes value as the config file's setting for the registry path key, and
 // reports nothing when the file already says exactly that (a re-set is a confirmation, not a
 // rewrite). An absent config is seeded from the embedded template first, so an edit never leaves
@@ -164,8 +158,6 @@ func writableKey(key string) (Key, error) {
 				"which /confine makes deliberately", k.Path)
 	case !k.Editable:
 		return Key{}, fmt.Errorf("apogee: %s is not a simple value; edit it in config.yaml", k.Path)
-	case len(strings.Split(k.Path, ".")) > scalarPathDepth:
-		return Key{}, fmt.Errorf("apogee: %s is nested too deeply to write in place; edit it in config.yaml", k.Path)
 	}
 	return k, nil
 }
@@ -413,6 +405,8 @@ func spliceScalarSet(data []byte, k Key, text string) ([]byte, error) {
 // spliceScalarDelete removes the key's active line, and the block line above it when that line was
 // the block's last active child — a block key left with nothing under it parses as a null value
 // rather than as an absent block, which is a different config from the one the reset asked for.
+// The removal cascades up the chain for the same reason: `ui.side-panel.show` as the only key of
+// `side-panel:` takes that block's line too, and `ui:`'s when `side-panel:` was all it held.
 // A key the file does not set returns nil bytes: there is nothing to remove.
 func spliceScalarDelete(data []byte, k Key) ([]byte, error) {
 	doc, err := Document(data)
@@ -444,8 +438,11 @@ func spliceScalarDelete(data []byte, k Key) ([]byte, error) {
 	for n := t.KeyNode.Line; n <= last; n++ {
 		drop = append(drop, n)
 	}
-	if t.ParentKey != nil && len(t.ParentBody.Content) == 2 {
-		drop = append(drop, t.ParentKey.Line)
+	// A set key sits under every block of its chain, so found is the whole chain, innermost last:
+	// each block whose one entry is what is being removed goes with it, and the first block that
+	// still holds something else stops the cascade.
+	for i := len(t.found) - 1; i >= 0 && len(t.found[i].body.Content) == 2; i-- {
+		drop = append(drop, t.found[i].key.Line)
 	}
 	return deleteLines(lines, drop...)
 }

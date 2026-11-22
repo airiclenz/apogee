@@ -22,7 +22,7 @@ import (
 // configwrite_scalar.go's scalar setting writer are: the file is the user's, so every comment, every
 // key order and every other entry comes back byte-identical.
 //
-// What is new here is the ADDRESSING, one level deeper than the scalar writer reaches: a settings
+// What is new here is the ADDRESSING, a step past what the scalar writer reaches: a settings
 // path names a key in a block, while these edits name a key in a LIST ITEM, picked out of the list
 // by its `name:`. The rest is the one write transaction (configedit.go), with two turns of it these
 // edits take that no other writer does: the read does NOT seed, because an entry has to be in the

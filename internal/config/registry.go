@@ -1241,8 +1241,8 @@ var KeyRegistry = bindRows([]Key{
 		// A word of the nested `side-panel:` block, applied by the renderer itself (settingsApplyLocal)
 		// since its whole effect is the column on THIS screen. Copied across as the file names it,
 		// ui.spinner's posture: UIPrefs.Validate judges the name at ResolveOptions. The path is three
-		// segments deep, past the scalar writer's reach (scalarPathDepth), so a write of it goes
-		// through the `side-panel:` block as a whole.
+		// segments deep, which the scalar writer reaches; the host still routes a write of it
+		// through the `side-panel:` block's own writer, with the rest of that block.
 		Path: "ui.side-panel.show", Kind: KindEnum, Default: domain.UIDefaultText(domain.UIKeySidePanelShow),
 		EnumValues: sidePanelValues,
 		Editable:   true,

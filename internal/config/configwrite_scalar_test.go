@@ -239,8 +239,8 @@ func TestSpliceScalarSettingInsertsBelowTheTemplateExample(t *testing.T) {
 // on both the seeded template and a hand-edited file — the result parsing, resolving the key to the
 // value asked for, and differing from the input at that key ALONE. It is also what pins the
 // template: a key whose commented example went missing or got duplicated would land at the end of
-// the file or refuse, and either shows up here. A key deeper than scalarPathDepth is not the scalar
-// writer's — writableKey refuses it before any splice — so the sweep leaves it to its block's writer.
+// the file or refuse, and either shows up here. Every depth the registry holds is swept, the
+// three-segment `ui.side-panel.show` and `ui.side-panel.width` among them.
 func TestSpliceScalarSettingRoundTripsEveryEditableKey(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"the seeded template", editedConfigFixture} {
@@ -251,7 +251,7 @@ func TestSpliceScalarSettingRoundTripsEveryEditableKey(t *testing.T) {
 				input = readFixture(t, name)
 			}
 			for _, k := range KeyRegistry {
-				if !k.Editable || len(strings.Split(k.Path, ".")) > scalarPathDepth {
+				if !k.Editable {
 					continue
 				}
 				t.Run(k.Path, func(t *testing.T) {
@@ -607,6 +607,30 @@ func TestConfigWriteSettingRefusals(t *testing.T) {
 			wantMsg: "not a mapping of settings",
 		},
 		{
+			name:    "a flow-style ancestor two levels up has no line to edit",
+			content: "ui: {side-panel: {show: auto}}\n",
+			path:    "ui.side-panel.show", value: "off",
+			wantMsg: "its ui: block is written in flow style",
+		},
+		{
+			name:    "a flow-style ancestor one level up has no line to edit",
+			content: "ui:\n  side-panel: {show: auto}\n",
+			path:    "ui.side-panel.show", value: "off",
+			wantMsg: "its side-panel: block is written in flow style",
+		},
+		{
+			name:    "a reset refuses a flow-style ancestor at depth three",
+			content: "ui:\n  side-panel: {width: 48}\n",
+			path:    "ui.side-panel.width", reset: true,
+			wantMsg: "its side-panel: block is written in flow style",
+		},
+		{
+			name:    "a nested block key holding something other than a block",
+			content: "ui:\n  side-panel: wide\n",
+			path:    "ui.side-panel.show", value: "off",
+			wantMsg: "its side-panel: is not a block of settings",
+		},
+		{
 			name:    "a block key holding something other than a block",
 			content: "ui: solid\n",
 			path:    "ui.spinner", value: "glitter",
@@ -859,6 +883,104 @@ func TestSpliceScalarSettingNestedBlockShapes(t *testing.T) {
 			content: "mode: auto\nui:\n  spinner: snake\n",
 			path:    "ui.spinner", reset: true,
 			want: "mode: auto\n",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			k := mustKey(tt.path)
+			var updated []byte
+			var err error
+			if tt.reset {
+				updated, err = resetScalarSetting(t, []byte(tt.content), k)
+			} else {
+				updated, err = setScalarSetting([]byte(tt.content), k, tt.value)
+			}
+			if err != nil {
+				t.Fatalf("splice %s: %v", tt.path, err)
+			}
+			if string(updated) != tt.want {
+				t.Errorf("spliced:\n%q\nwant:\n%q", updated, tt.want)
+			}
+		})
+	}
+}
+
+// A three-segment key, into each shape its chain can be in: no `ui:` at all, `ui:` without
+// `side-panel:`, a `side-panel:` with nothing under it, and a populated one. The missing blocks are
+// created around the key at the column the present block's children use, each created level one
+// indentation step under the last, and every comment and neighbour
+// stays byte-for-byte where it was. A reset that empties the chain takes each emptied block with it,
+// innermost first, and stops at the first block that still holds something.
+func TestSpliceScalarSettingThreeDeepShapes(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name    string
+		content string
+		path    string
+		value   string
+		reset   bool
+		want    string
+	}{
+		{
+			name:    "no ui block lands the whole nest below its commented example",
+			content: "mode: auto # the mode\n\n# ui:\n#   side-panel:\n#     show: auto\n\n# a closing note\nserver: box\n",
+			path:    "ui.side-panel.show", value: "auto",
+			want: "mode: auto # the mode\n\n# ui:\n#   side-panel:\n#     show: auto\n" +
+				"ui:\n  side-panel:\n    show: auto\n\n# a closing note\nserver: box\n",
+		},
+		{
+			name:    "no ui block and no example appends the whole nest at the end",
+			content: "mode: auto # the mode\n",
+			path:    "ui.side-panel.width", value: "48",
+			want: "mode: auto # the mode\n\nui:\n  side-panel:\n    width: 48\n",
+		},
+		{
+			name:    "a ui block without side-panel gets the block and the key after its children",
+			content: "ui:\n    # the spinner\n    spinner: snake # mine\nmode: auto\n",
+			path:    "ui.side-panel.show", value: "auto",
+			want: "ui:\n    # the spinner\n    spinner: snake # mine\n    side-panel:\n      show: auto\nmode: auto\n",
+		},
+		{
+			name:    "a ui block with nothing under it gets the nest as its first child",
+			content: "ui: # later\nmode: auto\n",
+			path:    "ui.side-panel.width", value: "48",
+			want: "ui: # later\n  side-panel:\n    width: 48\nmode: auto\n",
+		},
+		{
+			name:    "a side-panel block with nothing under it gets its first child",
+			content: "ui:\n  spinner: snake\n  side-panel: # the panel\nmode: auto\n",
+			path:    "ui.side-panel.show", value: "auto",
+			want: "ui:\n  spinner: snake\n  side-panel: # the panel\n    show: auto\nmode: auto\n",
+		},
+		{
+			name:    "a populated side-panel block gets the key after its children",
+			content: "ui:\n  side-panel:\n      # the sections\n      sections: [usage: pinned]\n  spinner: snake\n",
+			path:    "ui.side-panel.width", value: "48",
+			want: "ui:\n  side-panel:\n      # the sections\n      sections: [usage: pinned]\n      width: 48\n  spinner: snake\n",
+		},
+		{
+			name:    "a set key is rewritten in place, its note kept",
+			content: "ui:\n  side-panel:\n    show:   auto   # wide windows\n",
+			path:    "ui.side-panel.show", value: "off",
+			want: "ui:\n  side-panel:\n    show:   \"off\"   # wide windows\n",
+		},
+		{
+			name:    "a reset of the last key takes side-panel and then ui with it",
+			content: "mode: auto\n# the panel\nui:\n  side-panel:\n    width: 48\nserver: box\n",
+			path:    "ui.side-panel.width", reset: true,
+			want: "mode: auto\n# the panel\nserver: box\n",
+		},
+		{
+			name:    "a reset of the last key takes side-panel but leaves a ui that holds more",
+			content: "ui:\n  side-panel:\n    show: auto\n  spinner: snake\n",
+			path:    "ui.side-panel.show", reset: true,
+			want: "ui:\n  spinner: snake\n",
+		},
+		{
+			name:    "a reset leaves a side-panel that still has a key",
+			content: "ui:\n  side-panel:\n    show: auto\n    width: 48\n",
+			path:    "ui.side-panel.show", reset: true,
+			want: "ui:\n  side-panel:\n    width: 48\n",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

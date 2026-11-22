@@ -20,7 +20,9 @@ import (
 // nothing else: every function reads and behaves exactly as it did in one file.
 
 // ScalarTarget is where a key stands in the parsed document: the nodes of its active `key: value`
-// (nil when the file does not set it) and, for a nested key, its parent block.
+// (nil when the file does not set it) and, for a nested key, the blocks above it — the IMMEDIATE
+// parent in the Parent fields, which the side-panel block writer (configwrite_sections.go) builds and
+// reads, and the whole chain beside them, which is what lets one writer reach a key at any depth.
 type ScalarTarget struct {
 	Key        string     // the leaf key as the file spells it
 	Kind       Kind       // what the key holds, and with it the value shapes its line may carry
@@ -30,52 +32,63 @@ type ScalarTarget struct {
 	ParentKey  *yaml.Node // the block's key, nil when the block is absent
 	ParentBody *yaml.Node // the block's value, nil when the block is absent
 	ParentNull bool       // the block's key is there with nothing under it yet
+
+	chain   []string      // every block the key sits in, outermost first; empty for a top-level key
+	found   []scalarBlock // the leading run of chain the file holds, outermost first
+	missing []string      // the rest of chain, which an insert creates under the deepest found block
+}
+
+// scalarBlock is one block of a key's parent chain as the file holds it: the block's key and its
+// value, which is a null node while the block is written with nothing under it yet.
+type scalarBlock struct {
+	key  *yaml.Node
+	body *yaml.Node
 }
 
 // isSet reports whether the file carries an active line for the key — the difference between a
 // replace and an insert, and between a reset and a no-op.
 func (t ScalarTarget) IsSet() bool { return t.KeyNode != nil }
 
-// childIndent is the column the block's children are indented to, so an inserted child joins the
-// block the way the ones already there are written.
-func (t ScalarTarget) childIndent() int {
-	if t.ParentBody != nil && !t.ParentNull {
-		return t.ParentBody.Column - 1
-	}
-	return listIndent
-}
-
-// ScalarTargetIn locates the key in the parsed document. Shapes it refuses rather than splices:
+// ScalarTargetIn locates the key in the parsed document, walking one block per segment of its path
+// however deep that path reaches. Shapes it refuses rather than splices, at every level of the walk:
 // a top level that is not a mapping of settings, a flow-style mapping (no line to edit — the
 // flow-style list refusal spliceHostAcknowledgement makes (configwrite.go), one level down), and
-// a block key holding something other than a block. Every one of them means the text and the node tree would disagree about where the
-// key's line is.
+// a block key holding something other than a block. Every one of them means the text and the node
+// tree would disagree about where the key's line is.
+//
+// The walk stops at the first block the file does not hold, or holds with nothing under it: below
+// that there are no children to find, and the blocks from there down are the ones an insert creates.
 func ScalarTargetIn(doc *yaml.Node, k Key) (ScalarTarget, error) {
-	head, rest, nested := strings.Cut(k.Path, ".")
-	t := ScalarTarget{Key: head, Kind: k.Kind}
-	if nested {
-		t.Parent, t.Key = head, rest
+	segments := strings.Split(k.Path, ".")
+	last := len(segments) - 1
+	t := ScalarTarget{Key: segments[last], Kind: k.Kind, chain: segments[:last], missing: segments[:last]}
+	if last > 0 {
+		t.Parent = segments[last-1]
 	}
 	root, err := rootMapping(doc)
 	if root == nil || err != nil {
 		return t, err
 	}
 	scope := root
-	if t.Parent != "" {
-		key, body := mappingEntry(root, t.Parent)
+	for i, name := range t.chain {
+		key, body := mappingEntry(scope, name)
 		if key == nil {
-			return t, nil // the block is absent: the insert creates it
+			return t, nil // the block is absent: the insert creates it and every block below it
 		}
 		switch {
 		case body.Style&yaml.FlowStyle != 0:
-			return t, fmt.Errorf("its %s: block is written in flow style ({...}); edit the file by hand", t.Parent)
-		case isNullNode(body):
-			t.ParentKey, t.ParentBody, t.ParentNull = key, body, true
-			return t, nil // `ui:` with nothing under it yet: no children to find
-		case body.Kind != yaml.MappingNode:
-			return t, fmt.Errorf("its %s: is not a block of settings; edit the file by hand", t.Parent)
+			return t, fmt.Errorf("its %s: block is written in flow style ({...}); edit the file by hand", name)
+		case body.Kind != yaml.MappingNode && !isNullNode(body):
+			return t, fmt.Errorf("its %s: is not a block of settings; edit the file by hand", name)
 		}
-		t.ParentKey, t.ParentBody, scope = key, body, body
+		t.found, t.missing = append(t.found, scalarBlock{key: key, body: body}), t.chain[i+1:]
+		if i == last-1 {
+			t.ParentKey, t.ParentBody, t.ParentNull = key, body, isNullNode(body)
+		}
+		if isNullNode(body) {
+			return t, nil // `ui:` with nothing under it yet: no children to find
+		}
+		scope = body
 	}
 	t.KeyNode, t.ValueNode = mappingEntry(scope, t.Key)
 	return t, nil
@@ -249,31 +262,46 @@ func lineCount(text string) int {
 
 // scalarInsertion is the lines to insert for a key the file does not set, and the 1-based line to
 // insert them after — 0 for "append at the end", the fallback when the file documents the key
-// nowhere. The four cases, in the order they are common:
+// nowhere. Every block of the key's chain the file lacks is created around it, each one
+// indentation step under the last (nestedSetting). The four cases, in the order they are common:
 //
 //   - a top-level key: its own line, directly below its commented example (ADR 0035);
-//   - a key whose block is absent: the block line and the key under it, below the commented
-//     example block that documents them — below the WHOLE block, so the created setting sits under
-//     its documentation rather than wedged into the middle of it;
-//   - a key whose block is there and populated: joined to that block, after its last line and at
-//     the indentation its siblings use. A commented example inside the block is NOT a candidate
-//     here: the key has to land inside the mapping that is already open, and the example is only
-//     ever above or below it;
-//   - a key whose block key is there with nothing under it: the first child of that block.
+//   - a key whose outermost block is absent: the whole nest of blocks and the key under them,
+//     below the commented example block that documents the outermost one — below the WHOLE
+//     block, so the created setting sits under its documentation rather than wedged into the
+//     middle of it;
+//   - a key whose deepest present block is there and populated: the missing blocks and the key
+//     joined to that block, after its last line and at the indentation its children use. A
+//     commented example inside the block is NOT a candidate here: the key has to land inside the
+//     mapping that is already open, and the example is only ever above or below it;
+//   - a key whose deepest present block key is there with nothing under it: the first child of
+//     that block, one indentation step under the block's own key.
 func scalarInsertion(lines []string, t ScalarTarget, text string) ([]string, int, error) {
-	setting := settingLines(t, text)
-	switch {
-	case t.Parent == "":
+	setting := nestedSetting(t.missing, settingLines(t, text))
+	if len(t.chain) == 0 {
 		at, err := CommentedExampleLine(lines, t.Key)
 		return setting, at, err
-	case t.ParentBody == nil:
-		at, err := commentedExampleBlockEnd(lines, t.Parent)
-		return append([]string{t.Parent + ":"}, indentLines(listIndent, setting)...), at, err
-	case t.ParentNull:
-		return indentLines(t.childIndent(), setting), t.ParentKey.Line, nil
-	default:
-		return indentLines(t.childIndent(), setting), maxNodeLine(t.ParentBody), nil
 	}
+	if len(t.found) == 0 {
+		at, err := commentedExampleBlockEnd(lines, t.chain[0])
+		return setting, at, err
+	}
+	deepest := t.found[len(t.found)-1]
+	if isNullNode(deepest.body) {
+		return indentLines(deepest.key.Column-1+listIndent, setting), deepest.key.Line, nil
+	}
+	return indentLines(deepest.body.Column-1, setting), maxNodeLine(deepest.body), nil
+}
+
+// nestedSetting wraps a rendered setting in the blocks the file lacks, outermost first: each block's
+// own `name:` line, and everything under it one indentation step deeper — so `ui.side-panel.show`
+// into a file with no `ui:` is `ui:`, `side-panel:` under it and `show:` under that. With no
+// missing blocks it is the setting as rendered.
+func nestedSetting(missing, setting []string) []string {
+	for i := len(missing) - 1; i >= 0; i-- {
+		setting = append([]string{missing[i] + ":"}, indentLines(listIndent, setting)...)
+	}
+	return setting
 }
 
 // settingLines is the setting as the file writes it, at the key's own column: one `key: value` line for

@@ -580,9 +580,9 @@ func withBootUnreportedKeys(current, boot map[string]bool) map[string]bool {
 // that FAILED
 // changed no file and refreshes nothing.
 //
-// The keys of the `ui.side-panel:` block sit a level deeper than the scalar writer reaches, so
-// they go to the writer that owns that block (config.SaveSidePanelSetting), the same writer
-// WriteSidePanelSection persists one section's mode through.
+// The keys of the `ui.side-panel:` block go to the writer that owns that block
+// (config.SaveSidePanelSetting), the same writer WriteSidePanelSection persists one section's mode
+// through; the scalar writer reaches the block's depth too, but the host routes the block as one.
 func (h settingsHost) Write(key, value string) error {
 	save := config.SaveConfigSetting
 	if config.IsSidePanelKey(key) {

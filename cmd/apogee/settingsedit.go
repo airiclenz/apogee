@@ -575,9 +575,9 @@ func settingKeyLine(data []byte, key string) int {
 
 // nestedKeyLine is the line of the active key a path two or more blocks deep names (`ui.footer.rows`
 // is `rows:` in `footer:` in `ui:`), walking one block mapping per segment, or 0 when the document
-// does not set it. ScalarTargetIn reaches one block down, which is as deep as a key a row can write
-// sits; a key deeper than that is structured, edited only in the file, so finding its line is all
-// that is asked of it.
+// does not set it. ScalarTargetIn reaches any depth, but it refuses the shapes a write cannot
+// splice; a key two or more blocks deep may be structured (`ui.footer.rows`), edited only in the
+// file, so finding its line — whatever shape it holds — is all that is asked of this walk.
 func nestedKeyLine(doc *yaml.Node, path string) int {
 	if doc == nil || len(doc.Content) == 0 {
 		return 0

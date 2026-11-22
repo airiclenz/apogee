@@ -13,9 +13,10 @@ import (
 // The side-panel block writer
 // ----------------------------------------------------------------------------
 //
-// The `ui.side-panel:` block (ADR 0110) sits one level deeper than the scalar writer reaches
-// (scalarPathDepth): its keys are three segments long, `ui.side-panel.show`, `ui.side-panel.width`,
-// `ui.side-panel.sections` and `ui.side-panel.folded`. So this writer owns the whole block. It finds `ui:` and `side-panel:`
+// The `ui.side-panel:` block (ADR 0110) holds four keys three segments long, `ui.side-panel.show`,
+// `ui.side-panel.width`, `ui.side-panel.sections` and `ui.side-panel.folded`. This writer owns the
+// whole block — the scalar writer reaches its two scalars as well, but the two lists are merges no
+// scalar splice expresses, and the host routes the block's keys here as one. It finds `ui:` and `side-panel:`
 // in the parsed document, creates whichever of the two is absent, and splices the one line its key
 // sits on, under the contract every config writer keeps (configedit.go): comments, key order and the
 // other keys stay exactly as found, the result is re-parsed and compared before anything is written,
@@ -58,7 +59,7 @@ var sidePanelScalarLeaves = map[string]string{
 
 // IsSidePanelKey reports whether key is one of the `ui.side-panel:` block's keys, which
 // [SaveSidePanelSetting] writes and [ResetSidePanelSetting] resets rather than [SaveConfigSetting] and
-// [ResetConfigSetting]: the scalar writer refuses a path three segments deep.
+// [ResetConfigSetting]: the host routes the whole block to the writer that owns it.
 func IsSidePanelKey(key string) bool {
 	_, scalar := sidePanelScalarLeaves[key]
 	return scalar || key == domain.UIKeySidePanelSections || key == domain.UIKeySidePanelFolded
@@ -101,7 +102,7 @@ func SaveSidePanelSetting(path, key, value string) error {
 }
 
 // ResetSidePanelSetting removes one key of the `ui.side-panel:` block from the file, so the key
-// resolves from its default again — [ResetConfigSetting] for the block the scalar writer cannot reach.
+// resolves from its default again — [ResetConfigSetting]'s removal, made by the block's own writer.
 // The key's active line goes, and with it each block the removal leaves empty (`side-panel:`, then
 // `ui:`), as the scalar reset drops a block it empties; comments, order and every other key stay as
 // found. A key the file does not set is already at its default: a no-op, and nothing is written.
@@ -333,7 +334,7 @@ type sidePanelSpot struct {
 	leaf  ScalarTarget
 }
 
-// sidePanelSpotIn locates leaf in the document. Refused, as ScalarTargetIn refuses them one level up:
+// sidePanelSpotIn locates leaf in the document. Refused, as ScalarTargetIn refuses them at every level:
 // a `ui:` or `side-panel:` written in flow style, and either one holding something other than a block.
 func sidePanelSpotIn(doc *yaml.Node, leaf string, kind Kind) (sidePanelSpot, error) {
 	block, err := ScalarTargetIn(doc, Key{Path: sidePanelBlockPath})

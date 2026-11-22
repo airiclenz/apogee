@@ -89,7 +89,13 @@ Depends on item 1.
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/config/ ./internal/domain/ && test -z "$(grep -rn 'domain\.UIPrefs{' internal/config --include='*.go' --exclude='*_test.go')"`
 **Commit:** `refactor(config): derive ui registry defaults and validators from the domain table`
 
-## 3. The scalar splice reaches any registry depth
+## 3. The scalar splice reaches any registry depth — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): ScalarTarget's new chain/found/missing fields are unexported (only this package reads them); Parent/ParentKey/ParentBody/ParentNull stay the immediate parent, so the side-panel engine is untouched in code. childIndent is gone, folded into scalarInsertion's deepest-present-block rule; nestedSetting wraps the missing blocks at listIndent per level (sidePanelInsertion's spelling).
+NOTES (2026-11-22): internal/config/projectwrite.go needed no edit — the project pair goes through writableKey, so dropping the depth refusal there covers it; the file is not in FILES.
+NOTES (2026-11-22): consequential edit — internal/config/doc.go: made necessary by removing the scalar writer's depth limit (file map said the side-panel block sat "a level deeper than that writer reaches").
+NOTES (2026-11-22): consequential edit — internal/config/configwrite_keysource.go: made necessary by removing the scalar writer's depth limit (header said "one level deeper than the scalar writer reaches").
+NOTES (2026-11-22): consequential edit — cmd/apogee/wire_options.go: made necessary by removing the scalar writer's depth limit (settingsHost.Write comment said the side-panel keys sit past the scalar writer's reach).
 
 **What:**
 **Goal:** `SaveConfigSetting`/`ResetConfigSetting` (and the project pair) write and reset an Editable scalar at any registry path depth 1–3, creating absent parents and removing an emptied parent chain; `writableKey` has no depth refusal; the scalar round-trip sweep covers every Editable key including `ui.side-panel.show` and `ui.side-panel.width`.
