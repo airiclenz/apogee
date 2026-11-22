@@ -1,11 +1,13 @@
 ---
 title: A superseded first-contact refusal is re-placed after a resume or fork
-status: open
+status: done
 type: bug
 priority: 3
 labels: [tui]
 plan: 2026-11-22 - 00 - cold-start-notes-plan.md
 created: 2026-11-22T05:43:45Z
+closed: 2026-11-22T09:58:59Z
+reason: "Resolved by plan 2026-11-22 - 00 - cold-start-notes-plan item 1 (archived at 21f600bd): a later refusal for another target drops the stashed first-contact refusal; TestRestoreDropsASupersededFirstContactRefusal."
 ---
 
 Found by the startup-notes-followups run (plan 2026-11-21 - 03, deferred at closeout; code at faaeea47).

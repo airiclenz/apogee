@@ -1,11 +1,13 @@
 ---
 title: Cold-start offline notes pile up across resumes
-status: open
+status: done
 type: bug
 priority: 3
 labels: [tui]
 plan: 2026-11-22 - 00 - cold-start-notes-plan.md
 created: 2026-11-21T21:04:48Z
+closed: 2026-11-22T09:58:59Z
+reason: "Resolved by plan 2026-11-22 - 00 - cold-start-notes-plan item 2 (archived at 21f600bd): a cold-start offline note and its first landing's notes are display-only; mid-session outages still persisted; TestColdStartOfflineStaysOutOfAResumedRecord."
 ---
 
 Found while planning first-contact-notes-repeat (2026-11-21, at 38fb10b7).
