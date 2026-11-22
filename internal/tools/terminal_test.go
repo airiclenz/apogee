@@ -1160,6 +1160,58 @@ func TestSubprocessToolResultDenialStopLabel(t *testing.T) {
 	}
 }
 
+// TestSubprocessToolResultCarriesItsEnding pins that every result subprocessToolResult builds —
+// clean or failed — carries the run's domain.ProcessEnding beside its prose: the code is the one the
+// exit marker states (a killed run keeps the marker's -1), a timeout sets TimedOut, a confinement
+// denial stop sets DenialStopped, and a run apogee killed is ProcessKilled. A run reporting -1 for a
+// reason other than a kill (a drain-wedged leader) still words its -1 as the marker does.
+func TestSubprocessToolResultCarriesItsEnding(t *testing.T) {
+	t.Parallel()
+	box := domain.ConfinementBox{WorkspaceRoot: "/ws", WritablePaths: []string{"/scratch/s1"}}
+	cases := []struct {
+		name    string
+		res     subprocess.SubprocessResult
+		want    domain.ProcessEnding
+		wantErr bool
+	}{
+		{"exit 0", subprocess.SubprocessResult{CombinedOutput: "ok\n", Dir: "/ws"},
+			domain.ProcessEnding{State: domain.ProcessExited}, false},
+		{"exit 3", subprocess.SubprocessResult{CombinedOutput: "boom\n", ExitCode: 3, Dir: "/ws"},
+			domain.ProcessEnding{State: domain.ProcessExited, ExitCode: 3}, true},
+		{"timeout", subprocess.SubprocessResult{CombinedOutput: "slow\n", ExitCode: -1, TimedOut: true},
+			domain.ProcessEnding{State: domain.ProcessKilled, ExitCode: -1, TimedOut: true}, true},
+		{"denial stop", subprocess.SubprocessResult{
+			CombinedOutput: "mkdir: /tmp/srtest: Operation not permitted", ExitCode: -1,
+			Confined: true, DenialStopped: true, Box: box},
+			domain.ProcessEnding{State: domain.ProcessKilled, ExitCode: -1, DenialStopped: true}, true},
+		{"denial watch matched a run that finished cleanly", subprocess.SubprocessResult{
+			CombinedOutput: "grep found: Operation not permitted", Confined: true, DenialStopped: true, Box: box},
+			domain.ProcessEnding{State: domain.ProcessExited}, false},
+		{"drain-wedged clean leader", subprocess.SubprocessResult{CombinedOutput: "x\n", ExitCode: -1, DrainWedged: true},
+			domain.ProcessEnding{State: domain.ProcessKilled, ExitCode: -1}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			res := subprocessToolResult("c1", tc.res)
+			if res.IsError != tc.wantErr {
+				t.Errorf("IsError = %v, want %v (content = %q)", res.IsError, tc.wantErr, res.Content)
+			}
+			got, ok := res.Summary.(domain.ProcessEnding)
+			if !ok {
+				t.Fatalf("Summary = %#v, want a domain.ProcessEnding", res.Summary)
+			}
+			if got != tc.want {
+				t.Errorf("ending = %+v, want %+v", got, tc.want)
+			}
+			marker := fmt.Sprintf("\n[exit code %d]", got.ExitCode)
+			if tc.wantErr && !strings.HasSuffix(res.Content, marker) {
+				t.Errorf("content = %q, want it to end with the marker %q the ending's code matches", res.Content, marker)
+			}
+		})
+	}
+}
+
 // TestTerminalSchemaAdvertisesTheTimeoutItApplies pins the timeout_seconds figures terminal's schema
 // states to the budgets internal/subprocess actually applies: the description is rendered from
 // DefaultSubprocessTimeout and MaxSubprocessTimeout, so a changed budget moves the text with it.

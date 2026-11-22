@@ -520,7 +520,7 @@ func TestBackground_RerunFailedRerunsAScriptStageTheTallyDoesNotCount(t *testing
 	cfg.Mode = domain.ModeAuto
 	cfg.Confiner = &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}}
 	shell := &shellTool{run: func(string) domain.ToolResult {
-		return domain.ToolResult{Content: "COUNT=3\n[exit code 1]", IsError: true}
+		return domain.ToolResult{Content: "COUNT=3\n[exit code 1]", IsError: true, Summary: domain.ProcessEnding{State: domain.ProcessExited, ExitCode: 1}}
 	}}
 	_ = cfg.Tools.Register(shell)
 	a := newBackgroundParent(t, cfg, &workflowResponder{})

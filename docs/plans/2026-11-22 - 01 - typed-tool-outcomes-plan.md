@@ -113,7 +113,9 @@ internal/tui/toolpresent_test.go — TestConsoleStatusWordMustBeginItsOwnLine, T
 
 **Commit:** `refactor(tui): a process run's slot reads its ProcessEnding`
 
-## 4. One-shot runs attach their ending; a recipe reads its code off it
+## 4. One-shot runs attach their ending; a recipe reads its code off it — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): the ending's State is ProcessKilled for every -1 (signalled, timed out, denial-stopped, start failure, broken I/O copy, drain-wedged leader — per the approach's "terminal's -1 maps to ProcessKilled") and for any other failed run the time limit or denial watch stopped; ExitCode is always the marker's code. DenialStopped is set only on a failed run (the one whose prose carries the stop label), so a clean run the watch matched stays ProcessExited with no flag; TimedOut mirrors the "command timed out" line.
 
 Depends on items 2 and 3.
 

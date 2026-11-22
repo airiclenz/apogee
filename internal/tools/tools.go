@@ -60,6 +60,15 @@ func okSummary(callID, content string, summary domain.ToolSummary) domain.ToolRe
 	return domain.ToolResult{CallID: callID, Content: content, Summary: summary}
 }
 
+// errSummary builds a tool-level failure ToolResult that still carries a domain.ToolSummary: the
+// structured half of a failed result whose outcome is itself a fact a host reads — a one-shot run's
+// non-zero ending (domain.ProcessEnding, subprocessToolResult) — beside the prose the model reads.
+func errSummary(callID, content string, summary domain.ToolSummary) domain.ToolResult {
+	result := errorResult(callID, content)
+	result.Summary = summary
+	return result
+}
+
 // errorResult builds a tool-level failure ToolResult — surfaced to the model rather
 // than returned as a Go error, which is reserved for ctx cancellation (ADR 0007). It is
 // domain.ErrorResult under the package's own short name.

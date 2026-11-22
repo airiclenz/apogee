@@ -1274,3 +1274,45 @@ func TestStageSkillFileRefusesASymlinkOutOfTheSkillFolder(t *testing.T) {
 		}
 	}
 }
+
+// TestScriptOutputReadsTheProcessEnding pins that a recipe script's exit code is read off the
+// terminal result's domain.ProcessEnding, never parsed out of its prose: a marker that disagrees
+// with the ending loses, a killed or timed-out run reads the -1 it carries (so a timed-out script
+// still blocks its stage), and a failed result with no ending is a script that could not run.
+func TestScriptOutputReadsTheProcessEnding(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		result   domain.ToolResult
+		wantCode int
+		wantErr  bool
+	}{
+		{"the ending wins over the marker", domain.ToolResult{
+			Content: domain.CwdLinePrefix + "/ws\nCOUNT=3\n[exit code 9]", IsError: true,
+			Summary: domain.ProcessEnding{State: domain.ProcessExited, ExitCode: 2}}, 2, false},
+		{"a killed timed-out run reads -1", domain.ToolResult{
+			Content: "command timed out\n[exit code -1]", IsError: true,
+			Summary: domain.ProcessEnding{State: domain.ProcessKilled, ExitCode: -1, TimedOut: true}}, -1, false},
+		{"a failed result with no ending could not run", domain.ToolResult{
+			Content: "denied\n[exit code 1]", IsError: true}, 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out, err := scriptOutput(tc.result)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("scriptOutput err = %v, want error %v", err, tc.wantErr)
+			}
+			if err != nil {
+				if err.Error() != "denied" {
+					t.Errorf("could-not-run reason = %q, want the result's first line %q", err.Error(), "denied")
+				}
+				return
+			}
+			if out.ExitCode != tc.wantCode {
+				t.Errorf("ExitCode = %d, want %d", out.ExitCode, tc.wantCode)
+			}
+		})
+	}
+}

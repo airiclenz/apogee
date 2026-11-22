@@ -410,7 +410,9 @@ func looksLikeBashism(output string) bool {
 // own line ABOVE the exit-code line, for the reason failFastStoppedLine is: the exit-code line
 // is always the result's last, where the TUI's end-anchored exitCodeMarker reads it. Both are
 // rendered from the box the run was fenced by (subprocess.SubprocessResult.Box), so the model
-// reads the writable roots by path.
+// reads the writable roots by path. Every result, clean or failed, carries the run's
+// domain.ProcessEnding (processEndingOf) beside the prose, so a host — the TUI's slot, a recipe's
+// script code — reads the ending off the value rather than parsing the marker back.
 func subprocessToolResult(callID string, res subprocess.SubprocessResult) domain.ToolResult {
 	var b strings.Builder
 	if res.Dir != "" {
@@ -447,9 +449,27 @@ func subprocessToolResult(callID string, res subprocess.SubprocessResult) domain
 			b.WriteString("\n" + confinementDenialLabel(res.Box))
 		}
 		fmt.Fprintf(&b, "\n[exit code %d%s]", res.ExitCode, note)
-		return errorResult(callID, b.String())
+		return errSummary(callID, b.String(), processEndingOf(res))
 	}
-	return okResult(callID, b.String())
+	return okSummary(callID, b.String(), processEndingOf(res))
+}
+
+// processEndingOf is the domain.ProcessEnding a one-shot run's result carries: the facts
+// subprocessToolResult states in its prose, as data a host reads instead of the exit marker. The
+// code is the marker's, so a run reporting -1 — signalled, timed out, denial-stopped, a start
+// failure, a broken I/O copy or a drain-wedged leader — is ProcessKilled with -1, as is any other
+// failed run the time limit or the denial watch stopped; every other run exited on its own.
+// TimedOut is set where the prose says "command timed out"; DenialStopped only on the failed run
+// whose prose carries the stop label (confinementDenialStopLabel), since a run that finished
+// cleanly before the kill landed keeps its success result.
+func processEndingOf(res subprocess.SubprocessResult) domain.ProcessEnding {
+	failed := res.ExitCode != 0
+	denialStopped := failed && res.DenialStopped
+	state := domain.ProcessExited
+	if res.ExitCode == -1 || (failed && (res.TimedOut || denialStopped)) {
+		state = domain.ProcessKilled
+	}
+	return domain.ProcessEnding{State: state, ExitCode: res.ExitCode, TimedOut: res.TimedOut, DenialStopped: denialStopped}
 }
 
 var (

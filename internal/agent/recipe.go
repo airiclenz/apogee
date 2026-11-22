@@ -103,9 +103,6 @@ var (
 	errNoRecipes = errors.New("apogee: no recipes are configured")
 )
 
-// exitCodeMarker reads the exit code off the terminal tool's failed result: `[exit code N`.
-var exitCodeMarker = regexp.MustCompile(`\[exit code (-?\d+)`)
-
 // skillFileRef matches a `{{SKILL_DIR}}/<path>` reference in a script's command — a file the
 // command runs or reads from the skill's folder.
 var skillFileRef = regexp.MustCompile(regexp.QuoteMeta(domain.SkillDirToken) + `/([^\s'"]+)`)
@@ -642,8 +639,11 @@ func (a *Agent) runScriptCall(ctx context.Context, turn int, call domain.ToolCal
 }
 
 // scriptOutput reads a terminal result as a script's output: the text without the leading cwd
-// line, and the exit code its failure marker names (0 for a success). A failed result with no
-// marker — a denial, a command that could not parse — is a script that could not run.
+// line, and the exit code the run's domain.ProcessEnding carries (0 for a success) — the code the
+// terminal tool decided, read off the value rather than parsed back out of the prose marker. A
+// killed or timed-out run carries -1, as its marker does. A failed result with no ending — a
+// denial, a command that could not parse, a fault raised before the process started — is a script
+// that could not run.
 func scriptOutput(result domain.ToolResult) (workflow.ScriptOutput, error) {
 	stdout := result.Content
 	if rest, found := strings.CutPrefix(stdout, domain.CwdLinePrefix); found {
@@ -652,15 +652,11 @@ func scriptOutput(result domain.ToolResult) (workflow.ScriptOutput, error) {
 	if !result.IsError {
 		return workflow.ScriptOutput{Stdout: stdout}, nil
 	}
-	matches := exitCodeMarker.FindAllStringSubmatch(stdout, -1)
-	if len(matches) == 0 {
+	ending, ok := result.Summary.(domain.ProcessEnding)
+	if !ok {
 		return workflow.ScriptOutput{}, errors.New(firstLineOf(result.Content))
 	}
-	code, err := strconv.Atoi(matches[len(matches)-1][1])
-	if err != nil {
-		return workflow.ScriptOutput{}, errors.New(firstLineOf(result.Content))
-	}
-	return workflow.ScriptOutput{Stdout: stdout, ExitCode: code}, nil
+	return workflow.ScriptOutput{Stdout: stdout, ExitCode: ending.ExitCode}, nil
 }
 
 // firstLineOf is text's first line.

@@ -19,24 +19,28 @@
 // prose half, written for the MODEL, and its wording is free to change. A domain.ToolSummary
 // attached beside it (okSummary, tools.go) is the structured half, written for a HOST — the
 // TUI's tool card today, a headless or bench renderer later — carrying as data the facts the
-// tool already computed for its own header. Exactly THIRTEEN built-ins attach one: read_file
+// tool already computed for its own header. Exactly FIFTEEN built-ins attach one: read_file
 // and git_show (ReadSpan), list_dir (ListedEntries), grep (MatchedLines),
 // view_diff (DiffStat), web_search (SearchHits), git_status (ChangedFiles, the three section
 // counts its report states), web_fetch and http_request (FetchedBody, the status line and
 // whether the body hit the response cap), and the four writing tools
 // write_file, single_find_and_replace, multi_find_and_replace and edit_existing_file
-// (EditRegions, the changed regions of the write they just applied) — the
+// (EditRegions, the changed regions of the write they just applied), and the two one-shot
+// execution tools terminal and python_exec (ProcessEnding, how the run ended: the code its exit
+// marker states, and whether apogee killed it at its time limit or at the denial watch) — the
 // ones whose outcome a host would otherwise have to re-derive from the sentence (a fetch's
-// truncation is otherwise only the content's closing marker line). The rest
+// truncation is otherwise only the content's closing marker line, a run's code only its
+// `[exit code N]` line). The rest
 // deliberately do not, and that is not an omission to fill in later: quoting a fixed one-line
 // sentence (ask_user, present_document) or compressing
-// free-form output to a first line plus a count (terminal, python_exec, the other git tools,
+// free-form output to a first line plus a count (the other git tools,
 // diagnostics) is RENDERING, not scavenging — there is no re-derived fact there for a type to
 // fix. sub_agent is the one summary attached outside this package: its tool here is only the
 // recursion point's placeholder, and the engine that runs the delegation attaches its
 // DelegationOutcome (internal/agent, childEnding.summary). A summary is optional by construction, so ADR 0002's open extension point is
 // untouched (a tool that emits none renders from its prose exactly as before); it is never
-// persisted and never sent to the model; and an error result never carries one.
+// persisted and never sent to the model; and an error result carries one only from terminal and
+// python_exec (errSummary, tools.go), whose failed run's ending is the very fact a host reads.
 //
 // Phase 3 (P3.7) adds the file-editing family: single/multi find-replace, a patch-aware
 // edit_existing_file, and a pure-Go view_diff. It also added a read-and-locate open_file,
