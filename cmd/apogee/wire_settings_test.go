@@ -956,36 +956,6 @@ func TestApplyMirrorMovesOnlyTheKeysFieldOfTheBlock(t *testing.T) {
 	}
 }
 
-// settingKeysAppliedByTheRenderer are the Editable keys the TUI applies to ITSELF and never routes
-// out to the binary, because nothing behind [tui.Options.ApplySetting] would have anything to do
-// with them — their whole effect is a field on the Model. The list is hardcoded because that switch
-// is unexported in another package: internal/tui/settings.go, Model.settingsApplyLocal, is the
-// source, and a key added there belongs here too.
-var settingKeysAppliedByTheRenderer = []string{
-	"auto-title",
-	"ui.show-scrollbar",
-	"ui.spinner",
-	"ui.spinner-color",
-	"ui.glyphs",
-	"ui.stall-after",
-	"ui.color-scheme",
-	"ui.skill-suggestions",
-	"ui.task-list-open",
-	"ui.tools-open",
-	"ui.tools-fold-over",
-	"ui.tools-auto-collapse",
-	"ui.notify",
-	"ui.git-fetch",
-	"ui.pointer-shapes",
-	"ui.side-panel.show",
-	"ui.side-panel.width",
-	"ui.side-panel.sections",
-	"ui.side-panel.folded",
-	"ui.footer.rows",
-	"ui.footer.colors",
-	"cursor-shape",
-}
-
 // The settings table is kept in config.KeyRegistry order — the order the pane renders the rows in —
 // so the surface and the table can be read side by side, and a key inserted into the registry cannot
 // quietly land at the bottom of the table. A subsequence is what is asserted rather than an exact
@@ -1021,16 +991,23 @@ func TestSettingsTableIsInRegistryOrder(t *testing.T) {
 // exactly three honest homes for an editable key and this names all three, so a new key with none
 // fails here rather than shipping that row:
 //
-//	a. the renderer applies it itself (settingKeysAppliedByTheRenderer),
+//	a. the renderer applies it itself (tui.AppliedSettingKeys, read here rather than mirrored),
 //	b. the pane intercepts it before the dispatcher is ever asked (`server`, whose live apply is the
 //	   picker's own switch — ADR 0037 decision 4), or
 //	c. applySettingFor accepts it.
+//
+// Every `ui.*` row is held to the same three homes, editable or not: a hand edit to a structured
+// key reaches the live apply as a re-read of the file (applyReloaded), so a `ui.*` key with no home
+// would answer that re-read with cannotApply.
 func TestEveryEditableSettingKeyHasAnApply(t *testing.T) {
 	t.Parallel()
 	apply := applySettingFor(fakeApplier(t))
+	appliedByTheRenderer := tui.AppliedSettingKeys()
+	uiKeys := domain.AllUIKeys()
 	for _, k := range config.KeyRegistry {
-		if !k.Editable || k.Path == settingKeyServer ||
-			slices.Contains(settingKeysAppliedByTheRenderer, k.Path) {
+		reachesTheApply := k.Editable || slices.Contains(uiKeys, k.Path)
+		if !reachesTheApply || k.Path == settingKeyServer ||
+			slices.Contains(appliedByTheRenderer, k.Path) {
 			continue
 		}
 		t.Run(k.Path, func(t *testing.T) {

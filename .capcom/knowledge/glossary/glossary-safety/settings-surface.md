@@ -102,8 +102,9 @@ to `fileConfig`); (2) an active or commented line in the seeded template
 row placed where the template first spells the key (`TestRegistryFollowsTheTemplateOrder`); (3) a
 mention on `docs/manual/configuration.md` (cmd/apogee `TestManualDocumentsEverySettingsKey`); (4)
 for an `Editable` key, an apply — an entry in cmd/apogee's `settingsTable`, in registry order
-(`TestSettingsTableIsInRegistryOrder`), unless the renderer applies it itself
-(`settingKeysAppliedByTheRenderer`) or it is `server` (`TestEveryEditableSettingKeyHasAnApply`).
+(`TestSettingsTableIsInRegistryOrder`), unless the renderer applies it itself (the set
+`internal/tui` exports, `tui.AppliedSettingKeys`) or it is `server`
+(`TestEveryEditableSettingKeyHasAnApply`, which holds every `ui.*` row to the same homes).
 Both allowlists (`templateOmitsSetting`, `settingsDocumentedElsewhere`) are empty and take an entry
 only with a stated reason.
 _Avoid_: "settings menu" / "preferences dialog" (it is a pane inside the frame, not a modal

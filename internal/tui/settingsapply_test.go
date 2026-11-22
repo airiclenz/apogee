@@ -74,16 +74,18 @@ func TestSettingsApplyLocalSurvivesNoAutoTitleHook(t *testing.T) {
 // Every `ui.*` key the renderer applies lands on the Options' block through [domain.UIPrefs.Set] —
 // the one parser the config file, the registry rows and this pane share (ADR 0043) — so an apply
 // moves m.opts.UI exactly as Set would, and a value Set refuses moves nothing and is reported on the
-// row as the apply's own failure. The sweep is domain's key list, so a key added to the block fails
-// here until the pane has an arm (and a value pair) for it.
+// row as the apply's own failure. The sweep is domain's whole key list, the structured keys
+// included, so a key added to the block fails here until it has a value pair — and every key it
+// applies is one [AppliedSettingKeys] hands the binary.
 //
-// `ui.inspector` is the one key of the block left out, on purpose: settingsApplyLocal has no arm
-// for it, because the key routes OUT through [SettingsHost.Apply] (cmd/apogee/wire_settings.go,
+// `ui.inspector` is the one key of the block left out, on purpose: applyUIPref hands it back
+// unhandled, because the key routes OUT through [SettingsHost.Apply] (cmd/apogee/wire_settings.go,
 // applyMirror — the wire observer is installed while a provider client is constructed, so the
 // flip is mirrored onto the host's live Options for the next Firing to read) and the renderer's own
 // Inspector deliberately keeps the start-up state (the registry's `ui.inspector` row: "takes effect
-// at the next start"). Its Set lands in the seam only, never in m.opts.UI — which the last check
-// below pins by asking the local apply and being told the key is not its own.
+// at the next start"). Its Set lands in the seam only, never in m.opts.UI — which the last checks
+// below pin by asking the local apply and being told the key is not its own, and by finding it
+// absent from the exported set.
 func TestSettingsApplyLocalLandsEveryUIKeyThroughSet(t *testing.T) {
 	t.Parallel()
 
@@ -105,8 +107,12 @@ func TestSettingsApplyLocalLandsEveryUIKeyThroughSet(t *testing.T) {
 		domain.UIKeyNotify:            {string(domain.NotifyOSC9), "beep"},
 		domain.UIKeyGitFetch:          {settingTrue, "maybe"},
 		domain.UIKeyPointerShapes:     {settingTrue, "maybe"},
+		domain.UIKeyFooterRows:        {"[[host, model, effort, mode], [workdir, git, spend]]", "[[host, nope]]"},
+		domain.UIKeyFooterColors:      {"{model: success, branch: warning}", "{nope: success}"},
 		domain.UIKeySidePanelShow:     {string(domain.SidePanelShowOff), "wide"},
 		domain.UIKeySidePanelWidth:    {"48", "23"},
+		domain.UIKeySidePanelSections: {"[usage: pinned, tasks: hidden]", "[usage: nope]"},
+		domain.UIKeySidePanelFolded:   {"[usage, mcp]", "[nope]"},
 	}
 	model := func(t *testing.T, resolves bool) Model {
 		t.Helper()
@@ -118,8 +124,9 @@ func TestSettingsApplyLocalLandsEveryUIKeyThroughSet(t *testing.T) {
 		opts.Schemes = schemes
 		return newTestModelEng(t, &fakeEngine{}, opts)
 	}
+	exported := AppliedSettingKeys()
 
-	for _, key := range domain.UIKeys() {
+	for _, key := range domain.AllUIKeys() {
 		if key == domain.UIKeyInspector {
 			continue
 		}
@@ -131,6 +138,9 @@ func TestSettingsApplyLocalLandsEveryUIKeyThroughSet(t *testing.T) {
 		t.Run(key, func(t *testing.T) {
 			t.Parallel()
 
+			if !slices.Contains(exported, key) {
+				t.Errorf("AppliedSettingKeys() = %v; want it to name %s, a key the renderer applies", exported, key)
+			}
 			m := model(t, true)
 			before := m.opts.UI
 			want := before
@@ -163,6 +173,33 @@ func TestSettingsApplyLocalLandsEveryUIKeyThroughSet(t *testing.T) {
 
 	if _, _, _, handled, _ := (model(t, true)).settingsApplyLocal(domain.UIKeyInspector, settingTrue); handled {
 		t.Error("settingsApplyLocal handled ui.inspector; the key is the seam's, not the renderer's")
+	}
+	if slices.Contains(exported, domain.UIKeyInspector) {
+		t.Errorf("AppliedSettingKeys() = %v names ui.inspector; the key is the seam's, not the renderer's", exported)
+	}
+}
+
+// TestSettingsApplyLocalHandlesEveryAppliedKey: every key [AppliedSettingKeys] hands the binary is
+// one the local apply takes — the binary's guard skips its dispatcher for exactly these keys, so a
+// key exported but not handled here would be applied by neither. The `ui.*` keys are swept with a
+// value pair above; this pins the two renderer-owned keys outside the block, each with `""`, the
+// value a reset of either key lands.
+func TestSettingsApplyLocalHandlesEveryAppliedKey(t *testing.T) {
+	t.Parallel()
+	for _, key := range AppliedSettingKeys() {
+		if slices.Contains(domain.AllUIKeys(), key) {
+			continue
+		}
+		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+			m := newTestModelEng(t, &fakeEngine{}, testOpts)
+
+			_, _, _, handled, err := m.settingsApplyLocal(key, "")
+
+			if err != nil || !handled {
+				t.Errorf("settingsApplyLocal(%q, \"\") = handled %v, err %v; an exported key must be applied here", key, handled, err)
+			}
+		})
 	}
 }
 

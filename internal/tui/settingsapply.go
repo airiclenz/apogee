@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -475,21 +474,11 @@ func (m Model) autoBlastRadiusNote(pending settingEdit) string {
 // field on this Model — and reports whether the key was one of them. They are named rather than
 // derived because what makes a key local is that nothing behind [SettingsHost.Apply] would have
 // anything to do with it: routing them out to the binary and back would only give the pane a longer
-// way to reach its own state.
+// way to reach its own state. The set it handles is [AppliedSettingKeys].
 //
-// Every `ui.*` arm is the same two moves: the value lands on the Options' block through
-// [domain.UIPrefs.Set] — the one parser the config file, the registry rows and this pane share
-// (ADR 0043), so a spelling the file accepts is the spelling the pane accepts, and a refusal is
-// domain's own sentence — and then the widget that paints from it is told. The parse is domain's,
-// which is why a value the block does not know comes back as an apply error rather than being
-// silently ignored: the binary validates before it writes, so this cannot happen through the pane,
-// but the pane is not the only thing that can put a value in the file, and a spinner style this
-// build has no animation for is worth a sentence on the row. A refused Set has touched nothing.
-//
-// Three of these keys have more to say than "done": the note is the row's own sentence about the apply
-// (empty for a key that simply took effect), and the Cmd is what the apply needs the program to do
-// next. The colour scheme uses both; `ui.git-fetch` uses the Cmd alone — the first fetch of the chain
-// it arms — and so does `ui.pointer-shapes`, for the capability query it sends when switched on.
+// The two renderer-owned keys outside the `ui:` block are applied here; every `ui.*` key goes
+// through the one module that applies a UI pref on screen (applyUIPref, uiprefapply.go), which
+// hands any other key back unhandled for the binary's dispatcher.
 func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, bool, error) {
 	switch path {
 	case settingKeyAutoTitle:
@@ -501,163 +490,7 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		if m.opts.OnAutoTitle != nil {
 			m.opts.OnAutoTitle(m.opts.AutoTitle)
 		}
-	case domain.UIKeyShowScrollbar:
-		// The bar's gutter column is transcript width — and, while a draft overflows, prompt box
-		// width (inputInnerWidth) — which is why the option is in the frame key (paintcache.go): the
-		// repaint tail lays out again from it rather than leaving the column to the next resize.
-		if err := m.opts.UI.Set(path, value); err != nil {
-			return m, "", nil, true, err
-		}
-	case domain.UIKeyFooterRows:
-		// The footer's row count is frame height (footerRows), so the transcript gives up or takes
-		// back a row per footer row. Landing the value is the whole apply: the transcript widget's
-		// height no longer matches the rows left for it, and Update's tail lays the frame out again
-		// on that ground (freshenTranscriptClamp; doc.go, "an arm mutates") — this arm reads no
-		// geometry after the write. No pane edits the key — it is structured, edited in the file — so
-		// the edit that reaches here is a re-read of a hand-edited file (applyReloaded, from the
-		// editor-return and file-watch folds), applied live rather than refused at the binary's
-		// dispatcher.
-		if err := m.opts.UI.Set(path, value); err != nil {
-			return m, "", nil, true, err
-		}
-	case domain.UIKeyFooterColors:
-		// The overrides are resolved where the footer is painted, in the scheme the screen is drawn in
-		// (footerOverride), so landing the value is the whole apply: no scheme is resolved or rebuilt,
-		// nothing is laid out again — a colour moves no cell — and the next frame paints the footer in
-		// the roles the file names. Like the rows, no pane edits the key, so what reaches here is a
-		// re-read of a hand-edited file (applyReloaded), applied live rather than refused at the
-		// binary's dispatcher.
-		if err := m.opts.UI.Set(path, value); err != nil {
-			return m, "", nil, true, err
-		}
-	case domain.UIKeySidePanelShow, domain.UIKeySidePanelWidth, domain.UIKeySidePanelSections,
-		domain.UIKeySidePanelFolded:
-		// The side panel paints from the block (ADR 0110), so landing the value is the whole apply:
-		// the next frame reads the mode, the width, the section list and the folds off the Options.
-		// The show mode and the width reach here from their /settings rows; the section list and the
-		// fold list, structured and edited in the file, as a re-read of a hand-edited file
-		// (applyReloaded) — either way applied live rather than refused at the binary's dispatcher,
-		// which has no seam for a screen-only key.
-		if err := m.opts.UI.Set(path, value); err != nil {
-			return m, "", nil, true, err
-		}
-	case domain.UIKeySpinner:
-		if err := m.opts.UI.Set(path, value); err != nil {
-			return m, "", nil, true, err
-		}
-		// The option is the one record of what is selected and the spinner paints from it
-		// (spinnerAnim), so this write is the whole apply. The frame counter is left where it is —
-		// every style's glyph indexes it modulo its own frame count — so a style swapped mid-run
-		// continues the animation instead of restarting it.
-	case domain.UIKeySpinnerColor:
-		if err := m.opts.UI.Set(path, value); err != nil {
-			return m, "", nil, true, err
-		}
-	case domain.UIKeyGlyphs:
-		if err := m.opts.UI.Set(path, value); err != nil {
-			return m, "", nil, true, err
-		}
-		// Every memoised block paint holds the outgoing set's marks and its key does not name the
-		// set (paintcache.go), so the cache is cleared as a scheme switch clears it; the set is in the
-		// frame key, so the repaint tail lays the transcript out again in the new marks.
-		m.th.glyphs = glyphsFor(m.opts.UI.Glyphs)
-		m.transcript.paints.clear()
-	case domain.UIKeySkillSuggestions:
-		// Nothing is laid out again and nothing is recomputed here: the band is derived from the
-		// draft where the frame is built, so the very next render already answers the new value —
-		// and an edit made from the /settings pane happens with no draft on screen anyway.
-		if err := m.opts.UI.Set(path, value); err != nil {
-			return m, "", nil, true, err
-		}
-	case domain.UIKeyTaskListOpen:
-		// The value lands on every task-list card at once: this is the same sweep a click on a
-		// card takes (toggleTaskListFold), which is what makes a `/settings` edit and a hand-edited
-		// file apply live — and a resumed session, whose cards were seeded from the file, paint
-		// per the file. The sweep bumps the transcript's generation, so the repaint tail lays out
-		// again for the cards' moved height.
-		if err := m.opts.UI.Set(path, value); err != nil {
-			return m, "", nil, true, err
-		}
-		m.transcript.setTaskListOpen(m.opts.UI.TaskListOpen)
-	case domain.UIKeyToolsOpen:
-		// The same shape of apply as the task list — the value lands on every large Tools umbrella
-		// at once through the one setter a header toggle takes (toggleToolsFold), so a `/settings`
-		// edit and a hand-edited file fold or open them live. The setter touches the transcript, so
-		// the repaint tail draws each umbrella afresh for its moved height.
-		if err := m.opts.UI.Set(path, value); err != nil {
-			return m, "", nil, true, err
-		}
-		m.transcript.setToolsOpen(m.opts.UI.ToolsOpen)
-	case domain.UIKeyToolsFoldOver:
-		if err := m.opts.UI.Set(path, value); err != nil {
-			return m, "", nil, true, err
-		}
-		// Which umbrellas are large is a paint fact, so the setter touches the transcript: an
-		// umbrella the new threshold moves across the line gains or loses its glyph on the next frame.
-		m.transcript.setToolsFoldOver(m.opts.UI.ToolsFoldOver)
-	case domain.UIKeyToolsAutoCollapse:
-		// The switch is a paint input (blockFoldBy), so the setter touches the transcript on a
-		// move: a `/settings` edit or a hand-edited file folds every settled, untouched tool block —
-		// umbrella (a group of one included), Sub-agent or Skill group — or gives it back its own
-		// fold, on the next frame.
-		if err := m.opts.UI.Set(path, value); err != nil {
-			return m, "", nil, true, err
-		}
-		m.transcript.setToolsAutoCollapse(m.opts.UI.ToolsAutoCollapse)
-	case domain.UIKeyPointerShapes:
-		// The flag is half of the pointer-shape gate (pointerprobe.go); the terminal's answer is the
-		// other half. Switched on in a session that never asked, the query goes out now; one that
-		// already asked keeps its answer and sends nothing (ADR 0106 §3). Switched off, the shape the
-		// hover left in force is reset, so the terminal is not left showing a pointer nothing keeps
-		// up to date any more. Either way View reads the gate on the next frame, so the mouse mode
-		// follows the flag with no apply of its own.
-		if err := m.opts.UI.Set(path, value); err != nil {
-			return m, "", nil, true, err
-		}
-		if m.opts.UI.PointerShapes {
-			var query tea.Cmd
-			m, query = m.askPointerShapes()
-			return m, "", query, true, nil
-		}
-		var written bool
-		if m, written = m.forgetPointerShape(); written {
-			return m, "", tea.Raw(ansi.SetPointerShape("")), true, nil
-		}
-	case domain.UIKeyNotify:
-		// The mode is read where a prompt opens, so this write is the whole apply: the next prompt
-		// signals (or stays silent) in the new mode, and nothing on the screen moves.
-		if err := m.opts.UI.Set(path, value); err != nil {
-			return m, "", nil, true, err
-		}
-	case domain.UIKeyGitFetch:
-		// The flag is read where the footer's git fetch chain decides whether to run (gitstatus.go).
-		// Switched on, the chain is armed here — its first fetch runs now — when the workspace has an
-		// upstream and no chain runs; switched off, the running chain retires at its next step, and
-		// a fetch already in flight finishes. Nothing on the screen moves.
-		if err := m.opts.UI.Set(path, value); err != nil {
-			return m, "", nil, true, err
-		}
-		fetch := m.armGitFetch()
-		return m, "", fetch, true, nil
-	case domain.UIKeyStallAfter:
-		// Nothing is scheduled and nothing is laid out again: the threshold is read where the status
-		// line is painted, and the spinner already repaints it every frame while a turn runs.
-		if err := m.opts.UI.Set(path, value); err != nil {
-			return m, "", nil, true, err
-		}
-	case domain.UIKeyColorScheme:
-		// The screen first, the block second: applyColorScheme is what resolves the name and draws
-		// in it, and a Set BEFORE it would leave UI.ColorScheme naming a palette the screen is not
-		// drawn in when the resolve fails — the ADR 0031 Driver degrade with no resolver wired —
-		// which is what currentSchemeName (colorscheme.go) would then report as in force.
-		note, cmd, err := m.applyColorScheme(value)
-		if err != nil {
-			return m, note, cmd, true, err
-		}
-		if err := m.opts.UI.Set(path, value); err != nil {
-			return m, note, cmd, true, err
-		}
-		return m, note, cmd, true, nil
+		return m, "", nil, true, nil
 	case settingKeyCursorShape:
 		shape, err := ParseCursorShape(value)
 		if err != nil {
@@ -667,10 +500,9 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		// terminal cursor is drawn from, which is the whole of what the shape changes.
 		m.opts.CursorShape = shape
 		steadyCursor(&m.input, shape)
-	default:
-		return m, "", nil, false, nil
+		return m, "", nil, true, nil
 	}
-	return m, "", nil, true, nil
+	return m.applyUIPref(path, value)
 }
 
 // applyColorScheme puts a named colour scheme into effect on THIS screen — the live half of ADR
@@ -774,7 +606,7 @@ const taskListNotSavedNote = "not saved: "
 // ([transcript.setTaskListOpen]), which puts every task-list card on screen into the new state and
 // seeds every card added after it. It is the gesture's writer of both: a toggle on a card comes
 // through here, and an apply of `ui.task-list-open` lands the Option through [domain.UIPrefs.Set]
-// and then makes the same transcript sweep (settingsApplyLocal) — neither touches a card by hand.
+// and then makes the same transcript sweep (tellTaskListOpen) — neither touches a card by hand.
 // It is a pointer method because its caller holds the Model it is already returning.
 func (m *Model) setTaskListOpen(open bool) {
 	m.opts.UI.TaskListOpen = open
@@ -823,7 +655,7 @@ const toolsOpenSource = "tools-open"
 // ([transcript.setToolsOpen]), which every large umbrella on screen answers to on the next frame.
 // It is the gesture's writer of both — a toggle on a header comes through here, while an apply of
 // `ui.tools-open` lands the Option through [domain.UIPrefs.Set] and then moves the same transcript
-// field (settingsApplyLocal) — and a pointer method for setTaskListOpen's reason.
+// field (tellToolsOpen) — and a pointer method for setTaskListOpen's reason.
 func (m *Model) setToolsOpen(open bool) {
 	m.opts.UI.ToolsOpen = open
 	m.transcript.setToolsOpen(open)

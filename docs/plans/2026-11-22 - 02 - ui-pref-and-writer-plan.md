@@ -256,7 +256,10 @@ Depends on items 1 and 8.
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/domain/ ./internal/config/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'Panel' ./internal/tui/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'Setting|SidePanel|ExternalEdit' ./cmd/apogee/ && test -z "$(grep -rnE 'SidePanelWidth *[!=]= 0([^0-9]|$)' --include='*.go' .)"`
 **Commit:** `refactor(domain): model the side-panel width as stated or unset`
 
-## 10. Applying a UI pref on screen is one tui module
+## 10. Applying a UI pref on screen is one tui module — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): consequential edit — internal/tui/paintcache.go: made necessary by moving the `ui.glyphs` arm into the tellGlyphs follow-up row (comment named "the ui.glyphs arm" of settingsApplyLocal)
+NOTES (2026-11-22): settingsApplyLocal keeps auto-title and cursor-shape in settingsapply.go and delegates every other key to applyUIPref (uiprefapply.go); follow-up rows are a map of uiPrefWidget{beforeSet, tell} with color-scheme the one beforeSet row; added TestSettingsApplyLocalHandlesEveryAppliedKey pinning that the two non-ui exported keys are handled locally; the cmd test selects `ui.*` rows by domain.AllUIKeys() rather than a "ui." prefix string
 
 Depends on item 1.
 

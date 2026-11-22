@@ -164,7 +164,7 @@ type paintKey struct {
 	// rebuilds every style at once (ADR 0040) and a `ui.glyphs` switch swaps every drawn mark
 	// (theme.glyphs) — the "theme changes" cases this comment used to say did not exist — and the
 	// alternative it named is the one taken for both: the switch CLEARS the cache outright
-	// (settingsApplyLocal — applyColorScheme, and the ui.glyphs arm) rather than growing this key
+	// (applyUIPref — applyColorScheme, and tellGlyphs) rather than growing this key
 	// into a full theme identity. That keeps a steady-state repaint comparing four scalars and a
 	// string, and it is sound for the same reason transcript.reset's clear is: after it, nothing
 	// memoised in the previous palette or the previous marks remains to be found.

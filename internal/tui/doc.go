@@ -1105,7 +1105,9 @@
 // value into an effect (the renderer-owned keys applied in-package because there is no engine on the
 // other side of them, every other key out through the binary's dispatcher, which owns the schema —
 // ADR 0037 decision 2), and the session's edit journal the row's edit marker and the value an edit
-// starts from are both read off; and
+// starts from are both read off; uiprefapply.go the one module that applies a `ui.*` key on this
+// screen — the value landed through domain.UIPrefs.Set, a follow-up row only for a key a widget must
+// be told — and the exported set of keys the renderer applies itself (AppliedSettingKeys); and
 // usage.go the /usage report — one row per agent of what this session has SPENT, read off the
 // per-agent totals the folds already keep (the Model's for the main agent, each run head's for a
 // delegate) rather than summed here, and the lightest pane in the frame: no filter, no selection,
