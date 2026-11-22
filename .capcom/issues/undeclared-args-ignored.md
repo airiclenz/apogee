@@ -4,6 +4,7 @@ status: open
 type: task
 priority: 3
 labels: [tool-surface]
+plan: 2026-11-22 - 00 - undeclared-args-note-plan
 created: 2026-11-21T12:44:48Z
 ---
 
