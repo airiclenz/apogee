@@ -1317,7 +1317,7 @@ func (m Model) setPanelWidth(width int) Model {
 		return m
 	}
 	value := strconv.Itoa(width)
-	if err := m.opts.Settings.Write(domain.UIKeySidePanelWidth, value); err != nil {
+	if _, err := m.opts.Settings.Write(domain.UIKeySidePanelWidth, value); err != nil {
 		m.transcript.addError(sidePanelWidthSource, taskListNotSavedNote+err.Error(), runRef{})
 		return m
 	}
@@ -1746,7 +1746,7 @@ func (m Model) setPanelShow(show domain.SidePanelShow) Model {
 	if m.opts.Settings == nil {
 		return m
 	}
-	if err := m.opts.Settings.Write(domain.UIKeySidePanelShow, string(show)); err != nil {
+	if _, err := m.opts.Settings.Write(domain.UIKeySidePanelShow, string(show)); err != nil {
 		m.transcript.addError(sidePanelShowSource, taskListNotSavedNote+err.Error(), runRef{})
 		return m
 	}

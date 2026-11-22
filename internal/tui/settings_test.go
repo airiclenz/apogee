@@ -681,11 +681,13 @@ func (h fakeSettingsHost) Rows() []SettingRow {
 	return h.rows()
 }
 
-func (h fakeSettingsHost) Write(path, value string) error {
+// Write answers the value it was handed as the landed text — the fake keeps no file to re-resolve,
+// so a write the seam accepts lands exactly as spelled.
+func (h fakeSettingsHost) Write(path, value string) (string, error) {
 	if h.write == nil {
-		return errors.New(noSettingsWriterNote)
+		return "", errors.New(noSettingsWriterNote)
 	}
-	return h.write(path, value)
+	return value, h.write(path, value)
 }
 
 func (h fakeSettingsHost) Reset(path string) error {

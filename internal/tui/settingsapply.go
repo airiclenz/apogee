@@ -186,7 +186,7 @@ func (m Model) settingsPersist(row SettingRow, value string) (Model, tea.Cmd, bo
 	if settingsTargetable(row) {
 		return m.settingsAskTarget(row, settingsPendingSave{value: value}), nil, false
 	}
-	if err := m.opts.Settings.Write(row.Path, value); err != nil {
+	if _, err := m.opts.Settings.Write(row.Path, value); err != nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: err.Error()}
 		return m, nil, false
 	}
@@ -807,7 +807,7 @@ func (m Model) toggleTaskListFold() Model {
 	if m.opts.UI.TaskListOpen {
 		value = settingTrue
 	}
-	if err := m.opts.Settings.Write(domain.UIKeyTaskListOpen, value); err != nil {
+	if _, err := m.opts.Settings.Write(domain.UIKeyTaskListOpen, value); err != nil {
 		m.transcript.addError(taskListOpenSource, taskListNotSavedNote+err.Error(), runRef{})
 		return m
 	}
@@ -847,7 +847,7 @@ func (m Model) toggleToolsFold() Model {
 	if m.opts.UI.ToolsOpen {
 		value = settingTrue
 	}
-	if err := m.opts.Settings.Write(domain.UIKeyToolsOpen, value); err != nil {
+	if _, err := m.opts.Settings.Write(domain.UIKeyToolsOpen, value); err != nil {
 		m.transcript.addError(toolsOpenSource, taskListNotSavedNote+err.Error(), runRef{})
 		return m
 	}

@@ -158,7 +158,7 @@ Also: for a merge-hook key the pre-open check validates only the delta (today's 
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/config/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSettingsHost' ./cmd/apogee/`
 **Commit:** `refactor(config): merge panel section and fold edits in the generic writer`
 
-## 6. SettingsHost.Write returns the landed value
+## 6. SettingsHost.Write returns the landed value — ✅ DONE (2026-11-22)
 
 Depends on item 5.
 

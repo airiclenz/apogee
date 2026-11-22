@@ -159,10 +159,10 @@ func TestSettingsHostWritesBothSidePanelSectionsBlockKeys(t *testing.T) {
 	c := newWatchedConfig(t, "ui:\n  side-panel:\n    show: auto\n")
 	h := settingsHost{configPath: c.path, edits: c.edits}
 
-	if err := h.Write(domain.UIKeySidePanelShow, "off"); err != nil {
+	if _, err := h.Write(domain.UIKeySidePanelShow, "off"); err != nil {
 		t.Fatalf("Write show: %v", err)
 	}
-	if err := h.Write(domain.UIKeySidePanelSections, "[usage: hidden]"); err != nil {
+	if _, err := h.Write(domain.UIKeySidePanelSections, "[usage: hidden]"); err != nil {
 		t.Fatalf("Write sections: %v", err)
 	}
 
@@ -181,5 +181,29 @@ func TestSettingsHostWritesBothSidePanelSectionsBlockKeys(t *testing.T) {
 	}
 	if len(applied) != 0 {
 		t.Errorf("the watcher reported %+v for apogee's own writes; it would apply twice", applied)
+	}
+}
+
+// A scalar write through the host answers landed — the key's canonical text as the file now resolves
+// it, not the spelling handed over — so a caller holds what the next start will read.
+func TestSettingsHostWriteAnswersTheLandedValue(t *testing.T) {
+	t.Parallel()
+	c := newWatchedConfig(t, "auto-title: true\n")
+	h := settingsHost{configPath: c.path, edits: c.edits}
+
+	landed, err := h.Write("auto-title", " 0 ")
+
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if landed != "false" {
+		t.Errorf("landed = %q, want the canonical %q", landed, "false")
+	}
+	data, err := os.ReadFile(c.path)
+	if err != nil {
+		t.Fatalf("read the config back: %v", err)
+	}
+	if want := "auto-title: false\n"; string(data) != want {
+		t.Errorf("config =\n%s\nwant\n%s", data, want)
 	}
 }

@@ -1013,7 +1013,7 @@ func TestSettingsHostRowsMarkFollowsAGlobalSaveAndReset(t *testing.T) {
 		t.Fatalf("bypass mark at launch = %q, want %q", got, tui.SettingFromDefault)
 	}
 
-	if err := h.Write("bypass", "true"); err != nil {
+	if _, err := h.Write("bypass", "true"); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 	if got := settingsMarkOf(t, h, "bypass"); got != tui.SettingFromGlobal {
@@ -1071,7 +1071,7 @@ func TestSettingsHostRowsKeepABootOverrideMarkAfterASave(t *testing.T) {
 	h, _ := layeredSettingsHost(t, "", "")
 	h.opts.Overrides = map[string]config.Source{"bypass": config.SourceEnv}
 
-	if err := h.Write("bypass", "true"); err != nil {
+	if _, err := h.Write("bypass", "true"); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 

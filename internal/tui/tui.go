@@ -271,7 +271,11 @@ type SettingsHost interface {
 	// pane shows it on the row and treats the key as unchanged — so a read-only config home
 	// surfaces as a refusal rather than as an edit that silently did not happen, and a host that
 	// cannot write at all says so through the same answer.
-	Write(path, value string) error
+	//
+	// A landed write answers landed: the key's canonical text as the file now resolves it — also
+	// when the file already said it and nothing was written — so a caller can hold the value the
+	// next start will read rather than the spelling it handed over. A refused write answers "".
+	Write(path, value string) (landed string, err error)
 
 	// Reset returns one config key to its default by REMOVING the file's line for it (ADR 0035)
 	// rather than writing today's spelling of the default into the file, so the key goes back to

@@ -227,7 +227,7 @@ func TestRunRootWiresTheConfigWatch(t *testing.T) {
 	}
 
 	// The pane's own write applies the key itself, so the baseline must move with it.
-	if err := rec.opts.Settings.Write("auto-title", "false"); err != nil {
+	if _, err := rec.opts.Settings.Write("auto-title", "false"); err != nil {
 		t.Fatalf("Settings.Write: %v", err)
 	}
 	reload, err := rec.opts.Config.ReloadConfig()

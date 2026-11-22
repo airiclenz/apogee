@@ -570,8 +570,9 @@ func withBootUnreportedKeys(current, boot map[string]bool) map[string]bool {
 
 // Write persists one key per deliberate edit, spliced into the config file (ADR 0035). The registry
 // decides what may be written and the splice writer owns the file (internal/config/configwrite.go) —
-// the renderer hands over a path and the value as the file spells it, and learns only whether it
-// landed.
+// the renderer hands over a path and the value as the file spells it, and learns whether it landed
+// and, when it did, the key's canonical text as the file now resolves it (SaveConfigSetting's
+// landed).
 //
 // Every landed write re-takes the external edit's baseline (ADR 0041 decision 8). The pane applies
 // the key it just persisted in the same keypress, and the watcher is looking at the very file this
@@ -583,19 +584,20 @@ func withBootUnreportedKeys(current, boot map[string]bool) map[string]bool {
 // The keys of the `ui.side-panel:` block go to the writer that owns that block
 // (config.SaveSidePanelSetting), the same writer WriteSidePanelSection persists one section's mode
 // through; the scalar writer reaches the block's depth too, but the host routes the block as one.
-func (h settingsHost) Write(key, value string) error {
-	save := func(path, key, value string) error {
-		_, err := config.SaveConfigSetting(path, key, value)
-		return err
-	}
+// That writer answers no landed text, so a side-panel key answers the value it wrote.
+func (h settingsHost) Write(key, value string) (string, error) {
+	save := config.SaveConfigSetting
 	if config.IsSidePanelKey(key) {
-		save = config.SaveSidePanelSetting
+		save = func(path, key, value string) (string, error) {
+			return value, config.SaveSidePanelSetting(path, key, value)
+		}
 	}
-	if err := save(h.configPath, key, value); err != nil {
-		return err
+	landed, err := save(h.configPath, key, value)
+	if err != nil {
+		return "", err
 	}
 	h.edits.refresh()
-	return nil
+	return landed, nil
 }
 
 // WriteSidePanelSection persists one side-panel section's mode — a pin, unpin or hide (ADR 0110) —

@@ -61,7 +61,7 @@ func (m Model) switchColorScheme(name string) (tea.Model, tea.Cmd) {
 		m.transcript.addError(colorSchemeSource, noSettingsWriterNote, runRef{})
 		return m, nil
 	}
-	if err := m.opts.Settings.Write(domain.UIKeyColorScheme, name); err != nil {
+	if _, err := m.opts.Settings.Write(domain.UIKeyColorScheme, name); err != nil {
 		m.transcript.addError(colorSchemeSource, err.Error(), runRef{})
 		return m, nil
 	}
