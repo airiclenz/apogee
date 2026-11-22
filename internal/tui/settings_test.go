@@ -3102,9 +3102,9 @@ func TestSettingsPaneEmptyValueFromTheEditorIsNotApplied(t *testing.T) {
 }
 
 // A `ui.side-panel.width` returned to its default — a /settings reset, straight or through the
-// save-target question, or a re-read that found its line gone — lands the unset width (0), which the
-// layout paints at the default, never the default's number, a width somebody chose; the row still
-// shows the default it went back to.
+// save-target question, or a re-read that found its line gone — lands the unset width, which the
+// layout paints at the default, never a stated default, a width somebody chose; the row still shows
+// the default it went back to.
 func TestSettingsPaneResetOfTheSidePanelWidthLandsTheUnsetWidth(t *testing.T) {
 	t.Parallel()
 	widthRow := func(projectCapable bool) SettingRow {
@@ -3130,7 +3130,7 @@ func TestSettingsPaneResetOfTheSidePanelWidthLandsTheUnsetWidth(t *testing.T) {
 				return SettingOutcome{Value: row.Default, Source: SettingFromDefault}
 			}}
 			m, _ := settingsEditModel(t, []SettingRow{row}, log)
-			m.opts.UI.SidePanelWidth = 48
+			m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(48)
 
 			for _, key := range tc.keys {
 				m = step(t, m, key)
@@ -3139,8 +3139,8 @@ func TestSettingsPaneResetOfTheSidePanelWidthLandsTheUnsetWidth(t *testing.T) {
 			if len(log.resets)+len(log.targeted) != 1 {
 				t.Fatalf("resets %+v, targeted %+v; want the one reset", log.resets, log.targeted)
 			}
-			if m.opts.UI.SidePanelWidth != 0 || m.configuredPanelWidth() != domain.DefaultSidePanelWidth {
-				t.Errorf("stored %d, resolved %d; want 0, the unset width, resolved to %d",
+			if m.opts.UI.SidePanelWidth.IsStated() || m.configuredPanelWidth() != domain.DefaultSidePanelWidth {
+				t.Errorf("stored %+v, resolved %d; want the unset width, resolved to %d",
 					m.opts.UI.SidePanelWidth, m.configuredPanelWidth(), domain.DefaultSidePanelWidth)
 			}
 			if got := m.settingsValueCell(row); got != wantCell {
@@ -3157,12 +3157,12 @@ func TestSettingsPaneResetOfTheSidePanelWidthLandsTheUnsetWidth(t *testing.T) {
 			Path: domain.UIKeySidePanelWidth, Value: row.Default, Reset: true,
 		}}}
 		m := externalEditModel(t, rows, &settingsWriteLog{}, edit)
-		m.opts.UI.SidePanelWidth = 48
+		m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(48)
 
 		m = step(t, m, settingsEditedMsg{path: "servers"})
 
-		if m.opts.UI.SidePanelWidth != 0 {
-			t.Errorf("stored %d, want 0, the unset width", m.opts.UI.SidePanelWidth)
+		if m.opts.UI.SidePanelWidth.IsStated() {
+			t.Errorf("stored %+v, want the unset width", m.opts.UI.SidePanelWidth)
 		}
 		if got := m.settingsValueCell(row); got != wantCell {
 			t.Errorf("value cell = %q, want %q", got, wantCell)
@@ -3180,11 +3180,13 @@ func TestSettingsPaneReReadMovesTheSidePanelWidthUnderAnUnmovedRow(t *testing.T)
 	def := strconv.Itoa(domain.DefaultSidePanelWidth)
 	for _, tc := range []struct {
 		name           string
-		stored, landed int
+		stored, landed domain.SidePanelWidth
 		reset, isSet   bool
 	}{
-		{"the stated default deleted", domain.DefaultSidePanelWidth, 0, true, false},
-		{"the default stated over the unset width", 0, domain.DefaultSidePanelWidth, false, true},
+		{"the stated default deleted", domain.StatedSidePanelWidth(domain.DefaultSidePanelWidth),
+			domain.SidePanelWidth{}, true, false},
+		{"the default stated over the unset width", domain.SidePanelWidth{},
+			domain.StatedSidePanelWidth(domain.DefaultSidePanelWidth), false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -3207,7 +3209,7 @@ func TestSettingsPaneReReadMovesTheSidePanelWidthUnderAnUnmovedRow(t *testing.T)
 			m = step(t, m, settingsEditedMsg{path: "servers"})
 
 			if m.opts.UI.SidePanelWidth != tc.landed {
-				t.Errorf("stored %d, want %d", m.opts.UI.SidePanelWidth, tc.landed)
+				t.Errorf("stored %+v, want %+v", m.opts.UI.SidePanelWidth, tc.landed)
 			}
 			want := m.clampPanelWidth(domain.DefaultSidePanelWidth, tc.isSet)
 			if got := m.panelWidth(); got != want {

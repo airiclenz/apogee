@@ -288,8 +288,8 @@ func TestExternalEditReloadCarriesProseForATextKey(t *testing.T) {
 }
 
 // A key deleted from the file is reported as the reset it amounts to, carrying the default its row
-// reads — and for `ui.side-panel.width` the re-read resolves the unset width (0), not the default's
-// number, so the pane lands the width nobody chose. A key the file still states is no reset.
+// reads — and for `ui.side-panel.width` the re-read resolves the unset width, not a stated default,
+// so the pane lands the width nobody chose. A key the file still states is no reset.
 func TestExternalEditReloadReportsADeletedSidePanelWidthAsAReset(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -313,8 +313,8 @@ func TestExternalEditReloadReportsADeletedSidePanelWidthAsAReset(t *testing.T) {
 	if a := got["mode"]; a.Value != "auto" || a.Reset {
 		t.Errorf("reload reported %+v for mode, want auto and no reset: the file still states it", a)
 	}
-	if width := e.baseline.opts.UI.SidePanelWidth; width != 0 {
-		t.Errorf("the re-read resolved ui.side-panel.width %d, want 0, the unset width", width)
+	if width := e.baseline.opts.UI.SidePanelWidth; width.IsStated() {
+		t.Errorf("the re-read resolved ui.side-panel.width %+v, want the unset width", width)
 	}
 }
 
@@ -333,12 +333,13 @@ func TestExternalEditReloadReportsASidePanelWidthWhoseRowDidNotMove(t *testing.T
 		name          string
 		before, after string
 		want          tui.AppliedSetting
-		resolved      int
+		resolved      domain.SidePanelWidth
 	}{
 		{"the stated default deleted", stated, unstated,
-			tui.AppliedSetting{Path: domain.UIKeySidePanelWidth, Value: value, Reset: true}, 0},
+			tui.AppliedSetting{Path: domain.UIKeySidePanelWidth, Value: value, Reset: true}, domain.SidePanelWidth{}},
 		{"the default stated over the unset width", unstated, stated,
-			tui.AppliedSetting{Path: domain.UIKeySidePanelWidth, Value: value}, domain.DefaultSidePanelWidth},
+			tui.AppliedSetting{Path: domain.UIKeySidePanelWidth, Value: value},
+			domain.StatedSidePanelWidth(domain.DefaultSidePanelWidth)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -356,7 +357,7 @@ func TestExternalEditReloadReportsASidePanelWidthWhoseRowDidNotMove(t *testing.T
 				t.Errorf("reload reported %+v, want exactly %+v", reload.Applied, want)
 			}
 			if width := e.baseline.opts.UI.SidePanelWidth; width != tc.resolved {
-				t.Errorf("the re-read resolved ui.side-panel.width %d, want %d", width, tc.resolved)
+				t.Errorf("the re-read resolved ui.side-panel.width %+v, want %+v", width, tc.resolved)
 			}
 		})
 	}

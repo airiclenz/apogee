@@ -6626,18 +6626,18 @@ func TestApplyConfigUISidePanelLoadsFromTheGlobalFile(t *testing.T) {
 }
 
 // TestApplyConfigUISidePanelWidthLoadsFromTheGlobalFile: `ui.side-panel.width` lands the columns the
-// file states, and a file that states none — no block, a block without the key — resolves to 0, the
+// file states, and a file that states none — no block, a block without the key — resolves to the
 // unset width, leaving every other key of the block alone; the key's row still reads that as 44.
 func TestApplyConfigUISidePanelWidthLoadsFromTheGlobalFile(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name, yaml string
-		width      int
+		width      domain.SidePanelWidth
 	}{
-		{"a stated width", "ui:\n  side-panel:\n    width: 48\n", 48},
-		{"the floor", "ui:\n  side-panel:\n    width: 24\n", 24},
-		{"no width key", "ui:\n  side-panel:\n    show: auto\n", 0},
-		{"no side-panel block", "mode: auto\n", 0},
+		{"a stated width", "ui:\n  side-panel:\n    width: 48\n", domain.StatedSidePanelWidth(48)},
+		{"the floor", "ui:\n  side-panel:\n    width: 24\n", domain.StatedSidePanelWidth(24)},
+		{"no width key", "ui:\n  side-panel:\n    show: auto\n", domain.SidePanelWidth{}},
+		{"no side-panel block", "mode: auto\n", domain.SidePanelWidth{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -6653,10 +6653,7 @@ func TestApplyConfigUISidePanelWidthLoadsFromTheGlobalFile(t *testing.T) {
 			if opts.UI != want {
 				t.Errorf("opts.ui = %+v; want %+v", opts.UI, want)
 			}
-			row := strconv.Itoa(tt.width)
-			if tt.width == 0 {
-				row = strconv.Itoa(domain.DefaultSidePanelWidth)
-			}
+			row := strconv.Itoa(tt.width.Resolve())
 			if got := mustKey(domain.UIKeySidePanelWidth).Read(opts); got != row {
 				t.Errorf("the %s row reads %q; want %q", domain.UIKeySidePanelWidth, got, row)
 			}

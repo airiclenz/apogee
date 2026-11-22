@@ -243,12 +243,13 @@ func uiStallAfter() scalarField[time.Duration] {
 // `width: 10`) is refused at the load in that parser's sentence, never carried to the screen. The
 // file's whole number is spelled back as text for the parse (countText).
 //
-// A key the file leaves out resolves to 0, the unset width (zeroWhenUnstated), rather than to the
-// row's Default: the layout tells a width nobody chose from one somebody did. The row still reads
-// it as the width the panel is drawn at — sidePanelWidthText spells 0 as the default.
-func uiSidePanelWidth() scalarField[int] {
-	f := uiField(domain.UIKeySidePanelWidth, domain.ParseSidePanelWidth, sidePanelWidthText,
-		func(u *domain.UIPrefs) *int { return &u.SidePanelWidth }, nil).zeroWhenUnstated()
+// A key the file leaves out resolves to the unset width (zeroWhenUnstated: the zero
+// domain.SidePanelWidth), rather than to the row's Default: the layout tells a width nobody chose
+// from one somebody did. The row still reads it as the width the panel is drawn at —
+// domain.SidePanelWidth.Text spells the unset width as the default.
+func uiSidePanelWidth() scalarField[domain.SidePanelWidth] {
+	f := uiField(domain.UIKeySidePanelWidth, domain.ParseSidePanelWidth, domain.SidePanelWidth.Text,
+		func(u *domain.UIPrefs) *domain.SidePanelWidth { return &u.SidePanelWidth }, nil).zeroWhenUnstated()
 	f.file = nil
 	f.fileText = func(fc fileConfig) *string {
 		if fc.UI == nil || fc.UI.SidePanel == nil {
@@ -258,15 +259,6 @@ func uiSidePanelWidth() scalarField[int] {
 	}
 	f.fileLand = land(domain.ParseSidePanelWidth, f.at)
 	return f
-}
-
-// sidePanelWidthText spells a resolved `ui.side-panel.width`: the unset width (0) as
-// domain.DefaultSidePanelWidth, the width it is drawn at, and a stated width as written.
-func sidePanelWidthText(width int) string {
-	if width == 0 {
-		width = domain.DefaultSidePanelWidth
-	}
-	return strconv.Itoa(width)
 }
 
 // presentField is the descriptor of a key of the `present:` block. Its Set re-runs the block's

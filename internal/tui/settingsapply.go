@@ -441,7 +441,7 @@ func (m Model) settingsApplyLive(edit settingEdit) (Model, string, tea.Cmd, erro
 
 // settingsApplyValue is the text an edit lands: its value — except a `ui.side-panel.width` that went
 // back to its default, by a reset or by a re-read that found its line gone (unstated), which lands
-// `""`, the unset width (domain.UIPrefs.SidePanelWidth 0) the layout resolves to the default. The
+// `""`, the unset width (the zero domain.SidePanelWidth) the layout resolves to the default. The
 // default's own number would land a width somebody chose; the journal keeps it, since it is what the
 // row shows.
 func settingsApplyValue(edit settingEdit) string {

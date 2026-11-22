@@ -19,13 +19,14 @@ import (
 const overlayHeader = "Changed files"
 
 // overlayModel builds a ready model under show at width × 30 with `ui.side-panel.width` set to
-// panelWidth (0 leaves it unset, the default), its panel on a clock fixed at panelNow and events
+// panelWidth (the zero value leaves it unset, the default), its panel on a clock fixed at panelNow and events
 // folded through the view's own Event fold — navModel's fixture at a window the caller picks, where
 // the column may be hidden under its gate.
 func overlayModel(
 	t *testing.T,
 	show domain.SidePanelShow,
-	width, panelWidth int,
+	width int,
+	panelWidth domain.SidePanelWidth,
 	events ...domain.Event,
 ) Model {
 	t.Helper()
@@ -80,7 +81,7 @@ func assertOverlayPainted(t *testing.T, m Model) int {
 // entered in the transcript and moved into the panel by →, the overlay asserted painted.
 func overlaidModel(t *testing.T) Model {
 	t.Helper()
-	m := overlayModel(t, domain.SidePanelShowAuto, 100, 0, panelStopEvents(t)...)
+	m := overlayModel(t, domain.SidePanelShowAuto, 100, domain.SidePanelWidth{}, panelStopEvents(t)...)
 	m = step(t, step(t, m, keyAltUp()), keyRight())
 	assertOverlayPainted(t, m)
 	return m
@@ -96,12 +97,12 @@ func TestOverlayOpensOnRightAtNarrowWidth(t *testing.T) {
 		name       string
 		show       domain.SidePanelShow
 		width      int
-		panelWidth int
+		panelWidth domain.SidePanelWidth
 		want       int
 	}{
-		{"auto at 100 columns", domain.SidePanelShowAuto, 100, 0, domain.DefaultSidePanelWidth},
-		{"on at 100 columns", domain.SidePanelShowOn, 100, 0, domain.DefaultSidePanelWidth},
-		{"wider than the window: clamped to it", domain.SidePanelShowAuto, 40, 60, 40},
+		{"auto at 100 columns", domain.SidePanelShowAuto, 100, domain.SidePanelWidth{}, domain.DefaultSidePanelWidth},
+		{"on at 100 columns", domain.SidePanelShowOn, 100, domain.SidePanelWidth{}, domain.DefaultSidePanelWidth},
+		{"wider than the window: clamped to it", domain.SidePanelShowAuto, 40, domain.StatedSidePanelWidth(60), 40},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -131,7 +132,7 @@ func TestOverlayOpensOnRightAtNarrowWidth(t *testing.T) {
 // re-wraps nothing — the transcript's wrapped lines and its viewport's width are what they were.
 func TestOverlayLeavesTranscriptLinesByteIdentical(t *testing.T) {
 	t.Parallel()
-	m := overlayModel(t, domain.SidePanelShowAuto, 100, 0, panelStopEvents(t)...)
+	m := overlayModel(t, domain.SidePanelShowAuto, 100, domain.SidePanelWidth{}, panelStopEvents(t)...)
 	m = step(t, m, keyAltUp())
 	lines, width := slices.Clone(m.lines), m.viewport.Width()
 
@@ -155,12 +156,13 @@ func TestOverlayLeavesTranscriptLinesByteIdentical(t *testing.T) {
 func TestOverlayLeavesBlankColumnBesideTranscript(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name              string
-		width, panelWidth int
-		wantSeparator     int
+		name          string
+		width         int
+		panelWidth    domain.SidePanelWidth
+		wantSeparator int
 	}{
-		{"hung left of the overlay", 100, 0, 100 - domain.DefaultSidePanelWidth},
-		{"out of an overlay clamped to the window", 40, 60, 1},
+		{"hung left of the overlay", 100, domain.SidePanelWidth{}, 100 - domain.DefaultSidePanelWidth},
+		{"out of an overlay clamped to the window", 40, domain.StatedSidePanelWidth(60), 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -209,8 +211,8 @@ func TestOverlayHasNoGrip(t *testing.T) {
 	if isDragging {
 		t.Error("a press on the overlay's separator armed a drag")
 	}
-	if got := m.panelPaintWidth(); got != width || m.opts.UI.SidePanelWidth != 0 {
-		t.Errorf("the drag left the overlay %d wide and the setting %d; want %d and unset",
+	if got := m.panelPaintWidth(); got != width || m.opts.UI.SidePanelWidth.IsStated() {
+		t.Errorf("the drag left the overlay %d wide and the setting %+v; want %d and unset",
 			got, m.opts.UI.SidePanelWidth, width)
 	}
 }
@@ -219,7 +221,7 @@ func TestOverlayHasNoGrip(t *testing.T) {
 // cursor on its transcript row and leaves the screen unchanged.
 func TestOverlayOffDoesNothing(t *testing.T) {
 	t.Parallel()
-	m := overlayModel(t, domain.SidePanelShowOff, 100, 0, panelStopEvents(t)...)
+	m := overlayModel(t, domain.SidePanelShowOff, 100, domain.SidePanelWidth{}, panelStopEvents(t)...)
 	m = step(t, m, keyAltUp())
 	line := transcriptCursorLine(t, m)
 	before := m.View().Content
@@ -290,7 +292,7 @@ func TestOverlayStopsMatchClickTargets(t *testing.T) {
 // not enter navigation mode in the hidden panel — they stay no-ops and paint nothing.
 func TestOverlayNotOpenedByAltArrows(t *testing.T) {
 	t.Parallel()
-	m := overlayModel(t, domain.SidePanelShowAuto, 80, 0, taskList(0, "one", "two"), panelUsageReading(panelUsed))
+	m := overlayModel(t, domain.SidePanelShowAuto, 80, domain.SidePanelWidth{}, taskList(0, "one", "two"), panelUsageReading(panelUsed))
 	if stops := cursorStops(m.lineTargets, m.pads); len(stops) != 0 {
 		t.Fatalf("setup: the transcript offers stops %v; want none", stops)
 	}
@@ -333,7 +335,7 @@ func TestOverlayClosesOnLeftEscAndOutsideClick(t *testing.T) {
 
 	t.Run("←", func(t *testing.T) {
 		t.Parallel()
-		m := overlayModel(t, domain.SidePanelShowAuto, 100, 0, panelStopEvents(t)...)
+		m := overlayModel(t, domain.SidePanelShowAuto, 100, domain.SidePanelWidth{}, panelStopEvents(t)...)
 		m = step(t, m, keyAltUp())
 		line := transcriptCursorLine(t, m)
 		m = step(t, m, keyRight())
@@ -348,7 +350,7 @@ func TestOverlayClosesOnLeftEscAndOutsideClick(t *testing.T) {
 	})
 	t.Run("← with no transcript stop", func(t *testing.T) {
 		t.Parallel()
-		m := overlayModel(t, domain.SidePanelShowAuto, 100, 0, taskList(0, "one", "two"), panelUsageReading(panelUsed))
+		m := overlayModel(t, domain.SidePanelShowAuto, 100, domain.SidePanelWidth{}, taskList(0, "one", "two"), panelUsageReading(panelUsed))
 		if stops := cursorStops(m.lineTargets, m.pads); len(stops) != 0 {
 			t.Fatalf("setup: the transcript offers stops %v; want none", stops)
 		}

@@ -98,23 +98,15 @@ var uiKeyTable = []uiKeyDef{
 	{
 		path: UIKeySidePanelWidth, listed: true,
 		land: func(u *UIPrefs, text string) error {
-			if text == "" {
-				u.SidePanelWidth = 0 // the unset width, never the default's number
-				return nil
-			}
-			width, err := ParseSidePanelWidth(text)
+			width, err := ParseSidePanelWidth(text) // `""` lands the unset width, never the default's number
 			if err != nil {
 				return err
 			}
 			u.SidePanelWidth = width
 			return nil
 		},
-		format: func(u UIPrefs) string {
-			if u.SidePanelWidth == 0 {
-				return strconv.Itoa(DefaultSidePanelWidth) // the width the unset field is drawn at
-			}
-			return strconv.Itoa(u.SidePanelWidth)
-		},
+		// The unset width reads as the width it is drawn at.
+		format:      func(u UIPrefs) string { return u.SidePanelWidth.Text() },
 		defaultText: strconv.Itoa(DefaultSidePanelWidth),
 		validate:    func(u UIPrefs) error { return validSidePanelWidth(u.SidePanelWidth) },
 	},

@@ -129,7 +129,7 @@ var uiKeyCases = map[string]uiKeyCase{
 	UIKeySidePanelWidth: {
 		value: "48",
 		read:  func(u UIPrefs) any { return u.SidePanelWidth },
-		want:  48,
+		want:  StatedSidePanelWidth(48),
 		bad: map[string]string{
 			"wide": `apogee: invalid ui.side-panel.width "wide": want a number of columns, 24 or more`,
 			"23":   `apogee: invalid ui.side-panel.width 23: want 24 columns or more`,
@@ -577,7 +577,7 @@ func TestDefaultUIPrefsPinsTheShippedValues(t *testing.T) {
 		FooterRows:        "[[host, model, effort, mode], [workdir, git, spend]]",
 		FooterColors:      FooterColors{},
 		SidePanelShow:     SidePanelShowAuto,
-		SidePanelWidth:    0,
+		SidePanelWidth:    SidePanelWidth{},
 		SidePanelSections: "[sub-agents: auto, tasks: auto, changed-files: auto, usage: auto, mcp: auto]",
 		SidePanelFolded:   "",
 	}

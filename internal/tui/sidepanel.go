@@ -165,14 +165,11 @@ func (m Model) panelOverlayGapHung() bool {
 	return m.panelOverlaid() && m.width-m.panelPaintWidth() >= 1
 }
 
-// configuredPanelWidth is `ui.side-panel.width` as every reader of it takes it: the unset width (0 —
-// a config with no key, a reset, a zero UIPrefs) resolves to [domain.DefaultSidePanelWidth] here and
-// nowhere else.
+// configuredPanelWidth is `ui.side-panel.width` as every reader of it takes it: the unset width (a
+// config with no key, a reset, a zero UIPrefs) resolved to [domain.DefaultSidePanelWidth] by
+// [domain.SidePanelWidth.Resolve].
 func (m Model) configuredPanelWidth() int {
-	if m.opts.UI.SidePanelWidth == 0 {
-		return domain.DefaultSidePanelWidth
-	}
-	return m.opts.UI.SidePanelWidth
+	return m.opts.UI.SidePanelWidth.Resolve()
 }
 
 // panelWidth is the column's painted width, its separator included, while it shows
@@ -185,8 +182,7 @@ func (m Model) panelWidth() int {
 	if !m.panelShown() {
 		return 0
 	}
-	isSet := m.opts.UI.SidePanelWidth != 0
-	return m.clampPanelWidth(m.configuredPanelWidth(), isSet)
+	return m.clampPanelWidth(m.configuredPanelWidth(), m.opts.UI.SidePanelWidth.IsStated())
 }
 
 // clampPanelWidth is width held to the column's limits in this window (adr-0110-amend-1108 (a)):
@@ -1208,7 +1204,7 @@ type panelDrag struct {
 	// startStored is `ui.side-panel.width` as it stood at the press, put back by a drag that ends at
 	// startWidth or is abandoned, so a stored width the window clamps is never rewritten by a drag
 	// that changed nothing.
-	startStored int
+	startStored domain.SidePanelWidth
 	// moved is true once a motion of this drag has moved the separator, even back where it began:
 	// such a drag was a resize, never the first press of a double-click.
 	moved bool
@@ -1266,7 +1262,7 @@ func (m Model) startPanelDrag(grab int, at time.Time) Model {
 func (m Model) dragPanelSeparator(x int) Model {
 	width := m.clampPanelWidth(m.width-(x-m.panelDrag.grabOffset), true)
 	if width != m.panelWidth() {
-		m.opts.UI.SidePanelWidth = width
+		m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(width)
 		m.panelDrag.moved = true
 	}
 	return m
@@ -1312,7 +1308,7 @@ func (m *Model) abandonHiddenPanelDrag() {
 // (recordSettingEdit), a failed one speaks as one transcript error naming the key and the width
 // stands for the session, and a nil seam changes the session alone (ADR 0031).
 func (m Model) setPanelWidth(width int) Model {
-	m.opts.UI.SidePanelWidth = width
+	m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(width)
 	if m.opts.Settings == nil {
 		return m
 	}
@@ -1329,11 +1325,11 @@ func (m Model) setPanelWidth(width int) Model {
 // the key's line rather than writing the default into it (ADR 0035), with setPanelWidth's contract
 // otherwise: the column moves first, a landed reset is journalled as the reset it is, a failed one
 // speaks as one transcript error naming the key and the default stands for the session, and a nil
-// seam changes the session alone (ADR 0031). The session lands the unset width (0), which
-// [Model.configuredPanelWidth] resolves to the default, never the default's number: a reset width is
-// one nobody chose.
+// seam changes the session alone (ADR 0031). The session lands the unset width, which
+// [Model.configuredPanelWidth] resolves to the default, never a stated default: a reset width is one
+// nobody chose. The journal keeps the default's number, the text the width's row reads.
 func (m Model) resetPanelWidth() Model {
-	m.opts.UI.SidePanelWidth = 0
+	m.opts.UI.SidePanelWidth = domain.SidePanelWidth{}
 	if m.opts.Settings == nil {
 		return m
 	}
@@ -1341,7 +1337,7 @@ func (m Model) resetPanelWidth() Model {
 		m.transcript.addError(sidePanelWidthSource, taskListNotSavedNote+err.Error(), runRef{})
 		return m
 	}
-	value := strconv.Itoa(domain.DefaultSidePanelWidth)
+	value := m.opts.UI.SidePanelWidth.Text()
 	return m.recordSettingEdit(settingEdit{path: domain.UIKeySidePanelWidth, value: value, reset: true})
 }
 
@@ -1712,7 +1708,7 @@ func parsePanelWidth(args []string) (panelArgs, error) {
 	if err != nil {
 		return panelArgs{}, fmt.Errorf("%w. %s", err, panelUsage)
 	}
-	return panelArgs{action: panelSetWidth, width: width}, nil
+	return panelArgs{action: panelSetWidth, width: width.Resolve()}, nil
 }
 
 // runPanelCommand routes a parsed /panel line: set the show mode, one section's mode or the width,

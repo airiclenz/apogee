@@ -1918,8 +1918,8 @@ func TestSaveConfigSettingWritesAndResetsSidePanelWidth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFileConfig: %v", err)
 	}
-	if opts.UI.SidePanelWidth != 40 || opts.UI.SidePanelShow != domain.SidePanelShowOn {
-		t.Errorf("read back width %d show %q; want 40 and on", opts.UI.SidePanelWidth, opts.UI.SidePanelShow)
+	if opts.UI.SidePanelWidth != domain.StatedSidePanelWidth(40) || opts.UI.SidePanelShow != domain.SidePanelShowOn {
+		t.Errorf("read back width %+v show %q; want a stated 40 and on", opts.UI.SidePanelWidth, opts.UI.SidePanelShow)
 	}
 
 	if err := ResetConfigSetting(path, "ui.side-panel.width"); err != nil {
@@ -1933,7 +1933,7 @@ func TestSaveConfigSettingWritesAndResetsSidePanelWidth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFileConfig: %v", err)
 	}
-	if opts.UI.SidePanelWidth != 0 {
-		t.Errorf("width reads back %d after reset, want 0, the unset width", opts.UI.SidePanelWidth)
+	if opts.UI.SidePanelWidth.IsStated() {
+		t.Errorf("width reads back %+v after reset, want the unset width", opts.UI.SidePanelWidth)
 	}
 }

@@ -92,7 +92,8 @@ func fabricatedSettings() config.Options {
 			ColorScheme: "dark", StallAfter: 2 * time.Minute, Inspector: true, SkillSuggestions: false,
 			TaskListOpen: false, ToolsOpen: true, ToolsFoldOver: 3, ToolsAutoCollapse: false, Notify: domain.NotifyBoth,
 			GitFetch: false, PointerShapes: true, FooterRows: "[[host, model, effort, mode], [workdir, git, spend]]",
-			FooterColors: fixtureFooterColors(), SidePanelShow: domain.SidePanelShowOn, SidePanelWidth: 48,
+			FooterColors: fixtureFooterColors(), SidePanelShow: domain.SidePanelShowOn,
+			SidePanelWidth:    domain.StatedSidePanelWidth(48),
 			SidePanelSections: "[usage: pinned, tasks: hidden, sub-agents: auto, changed-files: auto]",
 			SidePanelFolded:   "[usage, mcp]"},
 		// The retention keys stay unset; the two watch keys are set, so their rows report a value.

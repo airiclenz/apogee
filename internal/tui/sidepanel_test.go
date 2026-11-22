@@ -151,28 +151,28 @@ func TestSidePanelPaintedWidth(t *testing.T) {
 	cases := []struct {
 		name   string
 		show   domain.SidePanelShow
-		stored int
+		stored domain.SidePanelWidth
 		window int
 		want   int
 		// isDefaults seeds the UI block from domain.DefaultUIPrefs() rather than storing a width by
 		// hand, so the unset width under test is the one a config with no key resolves to.
 		isDefaults bool
 	}{
-		{name: "unset paints the default", show: domain.SidePanelShowAuto, stored: 0, window: 200, want: domain.DefaultSidePanelWidth},
-		{name: "unset docks clamped at the gate", show: domain.SidePanelShowAuto, stored: 0, window: 137, want: sidePanelGateWidth},
+		{name: "unset paints the default", show: domain.SidePanelShowAuto, window: 200, want: domain.DefaultSidePanelWidth},
+		{name: "unset docks clamped at the gate", show: domain.SidePanelShowAuto, window: 137, want: sidePanelGateWidth},
 		{name: "defaults dock clamped at the gate", show: domain.DefaultSidePanelShow, window: 137, want: sidePanelGateWidth, isDefaults: true},
-		{name: "stated fits", show: domain.SidePanelShowAuto, stored: 60, window: 200, want: 60},
-		{name: "minimum fits", show: domain.SidePanelShowOn, stored: 24, window: 117, want: 24},
-		{name: "auto stated fits beside the transcript minimum", show: domain.SidePanelShowAuto, stored: 60, window: 140, want: 60},
-		{name: "on stated fits beside the transcript minimum", show: domain.SidePanelShowOn, stored: 60, window: 130, want: 60},
-		{name: "auto transcript minimum caps", show: domain.SidePanelShowAuto, stored: 100, window: 140, want: 79},
-		{name: "on transcript minimum caps", show: domain.SidePanelShowOn, stored: 100, window: 130, want: 69},
-		{name: "a width wider than the window caps", show: domain.SidePanelShowAuto, stored: 300, window: 200, want: 139},
-		{name: "below the minimum floors", show: domain.SidePanelShowAuto, stored: 10, window: 140, want: 24},
-		{name: "auto gate ignores a narrow width", show: domain.SidePanelShowAuto, stored: 24, window: 136, want: 0},
-		{name: "on gate ignores a narrow width", show: domain.SidePanelShowOn, stored: 24, window: 116, want: 0},
-		{name: "auto gate ignores a wide width", show: domain.SidePanelShowAuto, stored: 60, window: 137, want: 60},
-		{name: "off never paints", show: domain.SidePanelShowOff, stored: 60, window: 200, want: 0},
+		{name: "stated fits", show: domain.SidePanelShowAuto, stored: domain.StatedSidePanelWidth(60), window: 200, want: 60},
+		{name: "minimum fits", show: domain.SidePanelShowOn, stored: domain.StatedSidePanelWidth(24), window: 117, want: 24},
+		{name: "auto stated fits beside the transcript minimum", show: domain.SidePanelShowAuto, stored: domain.StatedSidePanelWidth(60), window: 140, want: 60},
+		{name: "on stated fits beside the transcript minimum", show: domain.SidePanelShowOn, stored: domain.StatedSidePanelWidth(60), window: 130, want: 60},
+		{name: "auto transcript minimum caps", show: domain.SidePanelShowAuto, stored: domain.StatedSidePanelWidth(100), window: 140, want: 79},
+		{name: "on transcript minimum caps", show: domain.SidePanelShowOn, stored: domain.StatedSidePanelWidth(100), window: 130, want: 69},
+		{name: "a width wider than the window caps", show: domain.SidePanelShowAuto, stored: domain.StatedSidePanelWidth(300), window: 200, want: 139},
+		{name: "below the minimum floors", show: domain.SidePanelShowAuto, stored: domain.StatedSidePanelWidth(10), window: 140, want: 24},
+		{name: "auto gate ignores a narrow width", show: domain.SidePanelShowAuto, stored: domain.StatedSidePanelWidth(24), window: 136, want: 0},
+		{name: "on gate ignores a narrow width", show: domain.SidePanelShowOn, stored: domain.StatedSidePanelWidth(24), window: 116, want: 0},
+		{name: "auto gate ignores a wide width", show: domain.SidePanelShowAuto, stored: domain.StatedSidePanelWidth(60), window: 137, want: 60},
+		{name: "off never paints", show: domain.SidePanelShowOff, stored: domain.StatedSidePanelWidth(60), window: 200, want: 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -199,7 +199,7 @@ func TestSidePanelPaintedWidth(t *testing.T) {
 				t.Errorf("viewport width = %d, want %d", got, want)
 			}
 			if m.opts.UI.SidePanelWidth != tc.stored {
-				t.Errorf("the clamp rewrote ui.side-panel.width to %d, was %d", m.opts.UI.SidePanelWidth, tc.stored)
+				t.Errorf("the clamp rewrote ui.side-panel.width to %+v, was %+v", m.opts.UI.SidePanelWidth, tc.stored)
 			}
 		})
 	}
@@ -214,7 +214,7 @@ func TestSidePanelSeparatorAtANonDefaultWidth(t *testing.T) {
 	const width = 200
 	opts := testOpts
 	opts.UI.SidePanelShow = domain.SidePanelShowAuto
-	opts.UI.SidePanelWidth = 60
+	opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(60)
 	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
 	m = step(t, m, tea.WindowSizeMsg{Width: width, Height: 30})
 	slot := m.slotWidth()
@@ -250,7 +250,7 @@ func TestSidePanelDockedAtTheTranscriptMinimumFitsTheFrame(t *testing.T) {
 	)
 	m := panelModel(t, domain.DefaultSidePanelSections, 30,
 		panelToolPair(domain.EventBase{}, "c1", "read_file", `{"path":"internal/tui/model.go"}`, "")...)
-	m.opts.UI.SidePanelWidth = window - sidePanelTranscriptLeast - scrollbarWidth
+	m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(window - sidePanelTranscriptLeast - scrollbarWidth)
 	m = step(t, m, tea.WindowSizeMsg{Width: window, Height: 30})
 	m = typeText(t, m, draft)
 	if got := m.slotWidth(); got != sidePanelTranscriptLeast+scrollbarWidth {
@@ -289,7 +289,7 @@ func TestSidePanelNarrowestColumnPaintsLongRows(t *testing.T) {
 		landedEdit(delegationBase("r1"), "internal/a/very/deep/path/to/a/file.go", 1200, 3400),
 	)
 	m = openViewOf(t, m, delegationBase("r1"))
-	m.opts.UI.SidePanelWidth = domain.MinSidePanelWidth
+	m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(domain.MinSidePanelWidth)
 	m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
 	if got := m.panelWidth(); got != domain.MinSidePanelWidth {
 		t.Fatalf("setup: panelWidth() = %d, want %d", got, domain.MinSidePanelWidth)
@@ -358,7 +358,7 @@ func TestSubAgentRowAlignsPastAnHour(t *testing.T) {
 				panelDelegationCall(t, "r2", "beta"),
 				delegationPhase("r2", domain.SubAgentStarted, 38*time.Second),
 			)
-			m.opts.UI.SidePanelWidth = width
+			m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(width)
 			m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
 
 			long := factColumns(t, panelText(t, m), "1h02m")
@@ -388,7 +388,7 @@ func TestSubAgentRowFactsPaintWholeAtTheMinimumWidth(t *testing.T) {
 			t.Parallel()
 			m := panelModel(t, domain.DefaultSidePanelSections, 30)
 			m.opts.UI.Spinner = style
-			m.opts.UI.SidePanelWidth = domain.MinSidePanelWidth
+			m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(domain.MinSidePanelWidth)
 			m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
 			row := sidepanel.SubAgentRow{Name: "alpha", Phase: sidepanel.PhaseRunning, Elapsed: 38 * time.Second,
 				Fill: sidepanel.Fill{Used: 62, Window: 100}}
@@ -449,7 +449,7 @@ func TestSidePanelPinCellIsNoGrip(t *testing.T) {
 				t.Parallel()
 				m := panelModel(t, "[tasks: auto]", 30, taskList(0, "one"))
 				m.opts.UI.Spinner = style
-				m.opts.UI.SidePanelWidth = width
+				m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(width)
 				m = step(t, m, tea.WindowSizeMsg{Width: 200, Height: 30}).withFrameSpans()
 				pin, y := m.panelPinX(), panelRowY(t, m, "Tasks")
 
@@ -885,7 +885,7 @@ func TestSidePanelUsageBarPaintsNoBackground(t *testing.T) {
 func TestSidePanelUsageFillRowKeepsFiguresOnANarrowColumn(t *testing.T) {
 	t.Parallel()
 	m := panelModel(t, domain.DefaultSidePanelSections, 30, panelUsageReading(panelUsed))
-	m.opts.UI.SidePanelWidth = domain.MinSidePanelWidth
+	m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(domain.MinSidePanelWidth)
 	if room := m.panelTextRoom(m.panelBodyLead("", ""), ""); room >= len("20k/32k 62% ")+gaugeWidth {
 		t.Fatalf("setup: the narrowest column leaves %d cells, room for the whole bar", room)
 	}
@@ -2773,7 +2773,7 @@ func subAgentsHeaderModel(t *testing.T, s scheme.Scheme, width int) Model {
 	opts.ColorScheme = s
 	opts.UI.SidePanelShow = domain.SidePanelShowAuto
 	opts.UI.SidePanelSections = domain.DefaultSidePanelSections
-	opts.UI.SidePanelWidth = width
+	opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(width)
 	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
 	m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
 	m.panel = sidepanel.New(func() time.Time { return panelNow })
@@ -3165,7 +3165,7 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 		m = clickCell(t, m, sep, separatorRow)
 
 		if len(spy.writes) != 0 || m.opts.UI.SidePanelWidth != stored || m.panelDrag.active {
-			t.Errorf("writes %v, stored %d, drag %+v; want none, %d, ended", spy.writes, m.opts.UI.SidePanelWidth, m.panelDrag, stored)
+			t.Errorf("writes %v, stored %+v, drag %+v; want none, %+v, ended", spy.writes, m.opts.UI.SidePanelWidth, m.panelDrag, stored)
 		}
 	})
 
@@ -3180,7 +3180,7 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 		m = step(t, m, leftRelease(sep, separatorRow))
 
 		if len(spy.writes) != 0 || m.opts.UI.SidePanelWidth != stored {
-			t.Errorf("writes %v, stored %d; want none and %d", spy.writes, m.opts.UI.SidePanelWidth, stored)
+			t.Errorf("writes %v, stored %+v; want none and %+v", spy.writes, m.opts.UI.SidePanelWidth, stored)
 		}
 	})
 
@@ -3188,7 +3188,7 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 		t.Parallel()
 		opts := testOpts
 		opts.UI.SidePanelShow = domain.SidePanelShowAuto
-		opts.UI.SidePanelWidth = 100
+		opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(100)
 		spy := &settingsSpy{}
 		opts.Settings = spy.host(nil)
 		m := newModel(context.Background(), &fakeEngine{}, opts, nil)
@@ -3204,8 +3204,8 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 		m = step(t, m, leftDrag(sep, separatorRow))
 		m = step(t, m, leftRelease(sep, separatorRow))
 
-		if len(spy.writes) != 0 || m.opts.UI.SidePanelWidth != 100 {
-			t.Errorf("writes %v, stored %d; want none and the stored 100 the window clamps to %d",
+		if len(spy.writes) != 0 || m.opts.UI.SidePanelWidth != domain.StatedSidePanelWidth(100) {
+			t.Errorf("writes %v, stored %+v; want none and the stored 100 the window clamps to %d",
 				spy.writes, m.opts.UI.SidePanelWidth, m.panelWidth())
 		}
 	})
@@ -3240,7 +3240,7 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 		m = step(t, m, tea.WindowSizeMsg{Width: 200, Height: 30})
 
 		if len(spy.writes) != 0 || m.opts.UI.SidePanelWidth != stored || m.panelWidth() != domain.DefaultSidePanelWidth {
-			t.Errorf("writes %v, stored %d, panel %d; want none, the press-time %d, and the default width back",
+			t.Errorf("writes %v, stored %+v, panel %d; want none, the press-time %+v, and the default width back",
 				spy.writes, m.opts.UI.SidePanelWidth, m.panelWidth(), stored)
 		}
 	})
@@ -3351,9 +3351,47 @@ func TestSidePanelSeparatorDoubleClickResetsWhileWatching(t *testing.T) {
 	if want := []string{domain.UIKeySidePanelWidth}; !slices.Equal(*resets, want) || len(spy.writes) != 0 {
 		t.Errorf("resets %v, writes %v; want %v and no write", *resets, spy.writes, want)
 	}
-	if m.panelWidth() != domain.DefaultSidePanelWidth || m.opts.UI.SidePanelWidth != 0 {
-		t.Errorf("panel %d, stored %d; want the default %d and the unset width 0",
+	if m.panelWidth() != domain.DefaultSidePanelWidth || m.opts.UI.SidePanelWidth.IsStated() {
+		t.Errorf("panel %d, stored %+v; want the default %d and the unset width",
 			m.panelWidth(), m.opts.UI.SidePanelWidth, domain.DefaultSidePanelWidth)
+	}
+}
+
+// TestSidePanelDragFromUnsetThenResetJournalsTheDefault pins the width's two states end to end: a
+// drag off the unset width stores the dragged width as stated and journals it, and a reset after it
+// stores the unset width again — never a stated default — while the key's journal entry carries the
+// default's number, "44", marked as the reset it is.
+func TestSidePanelDragFromUnsetThenResetJournalsTheDefault(t *testing.T) {
+	t.Parallel()
+	m, spy, sep := separatorDragModel(t, nil)
+	if m.opts.UI.SidePanelWidth.IsStated() {
+		t.Fatalf("setup: the model starts at a stated width %+v, want the unset one", m.opts.UI.SidePanelWidth)
+	}
+
+	m = step(t, m, leftClick(sep, separatorRow))
+	m = step(t, m, leftDrag(sep-14, separatorRow))
+	m = step(t, m, leftRelease(sep-14, separatorRow))
+
+	if m.opts.UI.SidePanelWidth != domain.StatedSidePanelWidth(draggedPanelWidth) {
+		t.Errorf("the drag stored %+v, want a stated %d", m.opts.UI.SidePanelWidth, draggedPanelWidth)
+	}
+	dragged := []settingEdit{{path: domain.UIKeySidePanelWidth, value: strconv.Itoa(draggedPanelWidth)}}
+	if !slices.Equal(m.settingEdits, dragged) {
+		t.Errorf("journal after the drag %+v, want %+v", m.settingEdits, dragged)
+	}
+
+	m = sendLine(t, m, "/panel width "+panelWidthReset)
+
+	if m.opts.UI.SidePanelWidth != (domain.SidePanelWidth{}) || m.panelWidth() != domain.DefaultSidePanelWidth {
+		t.Errorf("the reset stored %+v painting %d, want the unset width painting %d",
+			m.opts.UI.SidePanelWidth, m.panelWidth(), domain.DefaultSidePanelWidth)
+	}
+	if want := []string{domain.UIKeySidePanelWidth}; !slices.Equal(spy.resets, want) {
+		t.Errorf("resets %v, want %v", spy.resets, want)
+	}
+	reset := []settingEdit{{path: domain.UIKeySidePanelWidth, value: "44", reset: true}}
+	if !slices.Equal(m.settingEdits, reset) {
+		t.Errorf("journal after the reset %+v, want %+v", m.settingEdits, reset)
 	}
 }
 
@@ -3373,7 +3411,7 @@ func doubleClickModel(t *testing.T, failure error) (Model, *settingsSpy, *[]stri
 	m.opts.Settings = host
 	clock := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
 	m.now = func() time.Time { return clock }
-	m.opts.UI.SidePanelWidth = 50
+	m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(50)
 	m = step(t, m, tea.WindowSizeMsg{Width: 200, Height: 30})
 	return m, spy, &resets, &clock
 }
@@ -3385,7 +3423,7 @@ func pressSeparator(t *testing.T, m Model, x int) Model {
 }
 
 // TestSidePanelSeparatorDoubleClick pins adr-0110-amend-1108 (b)'s reset: two presses on the grip
-// within 500 ms return `ui.side-panel.width` to its unset width (0, painted at the default 44)
+// within 500 ms return `ui.side-panel.width` to its unset width (painted at the default 44)
 // through the settings host's Reset and start no drag; presses further apart, or a press right after a drag that moved the separator, are drags.
 func TestSidePanelSeparatorDoubleClick(t *testing.T) {
 	t.Parallel()
@@ -3411,8 +3449,8 @@ func TestSidePanelSeparatorDoubleClick(t *testing.T) {
 			t.Errorf("panel %d, slot %d; want %d and %d", m.panelWidth(), m.slotWidth(),
 				domain.DefaultSidePanelWidth, sep+50-domain.DefaultSidePanelWidth)
 		}
-		if m.opts.UI.SidePanelWidth != 0 {
-			t.Errorf("the reset stored ui.side-panel.width %d, want 0, the unset width", m.opts.UI.SidePanelWidth)
+		if m.opts.UI.SidePanelWidth.IsStated() {
+			t.Errorf("the reset stored ui.side-panel.width %+v, want the unset width", m.opts.UI.SidePanelWidth)
 		}
 		if m.viewport.Width() != m.slotWidth()-scrollbarWidth {
 			t.Errorf("viewport width %d, want %d — the transcript did not re-wrap at the reset width",
@@ -3577,7 +3615,7 @@ func TestSidePanelCommandDrivesTheSettings(t *testing.T) {
 		t.Run("/panel width "+form, func(t *testing.T) {
 			t.Parallel()
 			m := sidePanelModel(t, domain.SidePanelShowOn, true, 140)
-			m.opts.UI.SidePanelWidth = panelCommandWidth
+			m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(panelCommandWidth)
 			spy := &settingsSpy{}
 			m.opts.Settings = spy.host(nil)
 			line, want := panelWidthLine(t, form)
@@ -3594,8 +3632,8 @@ func TestSidePanelCommandDrivesTheSettings(t *testing.T) {
 			if len(m.settingEdits) != 1 || m.settingEdits[0] != wantEdit {
 				t.Errorf("journal %+v, want %+v", m.settingEdits, wantEdit)
 			}
-			if want.resets != nil && m.opts.UI.SidePanelWidth != 0 {
-				t.Errorf("the reset stored ui.side-panel.width %d, want 0, the unset width", m.opts.UI.SidePanelWidth)
+			if want.resets != nil && m.opts.UI.SidePanelWidth.IsStated() {
+				t.Errorf("the reset stored ui.side-panel.width %+v, want the unset width", m.opts.UI.SidePanelWidth)
 			}
 			if !noteHolding(m, "side panel: on — ") {
 				t.Errorf("no report of the settings in force:\n%s", plain(m.View()))
@@ -3922,7 +3960,7 @@ func TestSidePanelCommandIsRefusedWhileWatching(t *testing.T) {
 		t.Run(line, func(t *testing.T) {
 			t.Parallel()
 			m := enterWatchOn(t, watchEngine(), newWatchFixture(t, "watched", nil, 0))
-			m.opts.UI.SidePanelWidth = panelCommandWidth
+			m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(panelCommandWidth)
 			before := m.opts.UI
 
 			m = sendLine(t, m, line)
@@ -3944,7 +3982,7 @@ func TestSidePanelWidthCommandAppliesWhileWatching(t *testing.T) {
 			t.Parallel()
 			m := enterWatchOn(t, watchEngine(), newWatchFixture(t, "watched", nil, 0))
 			m.opts.UI.SidePanelShow = domain.SidePanelShowOn
-			m.opts.UI.SidePanelWidth = panelCommandWidth
+			m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(panelCommandWidth)
 			spy := &settingsSpy{}
 			m.opts.Settings = spy.host(nil)
 			m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})

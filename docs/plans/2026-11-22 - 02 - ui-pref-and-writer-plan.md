@@ -228,7 +228,15 @@ Also: before deleting, move every symbol of `configwrite_sections.go` / `configw
 **Acceptance:** `go build ./... && GOOS=windows go vet ./internal/config/ && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/config/`
 **Commit:** `refactor(config): retire the side-panel splice engine`
 
-## 9. The side-panel width is a stated-or-unset value
+## 9. The side-panel width is a stated-or-unset value — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): domain.SidePanelWidth is struct{columns int; stated bool} (zero value = unset) with StatedSidePanelWidth, IsStated, Resolve and Text; the formatter is named Text, not String, so %+v in test failures still shows stated-ness rather than printing an unset width as "44".
+NOTES (2026-11-22): ParseSidePanelWidth now returns a SidePanelWidth and reads trimmed "" as the unset width (it returned the int 44 before), so the domain table's land is the parser alone; Validate now refuses a stated 0 like any stated width below 24 (the unset width is the zero value, not 0). File, journal and apply spellings are unchanged: reset journals "44", applies "".
+NOTES (2026-11-22): keyfield.go's sidePanelWidthText is gone (domain.SidePanelWidth.Text replaces it); zeroWhenUnstated is kept — its zero value is now the unset width by the type. tui's configuredPanelWidth delegates to Resolve and panelWidth to IsStated; clampPanelWidth keeps its (int, isSet) signature and the layout floors.
+NOTES (2026-11-22): consequential edit — internal/domain/uiprefs.go: made necessary by retyping UIPrefs.SidePanelWidth (the field and its doc comment live there).
+NOTES (2026-11-22): consequential edit — internal/config/config.go: made necessary by retyping the width; uiSidePanelConfig.Width's comment named "the unset width (0)".
+NOTES (2026-11-22): the domain stated-vs-unset test landed as TestSidePanelWidthTellsUnsetFromAStatedDefault in internal/domain/sidepanelprefs_test.go (beside the width's other tests) rather than uiprefs_test.go; the tui drag-from-unset-then-reset test is TestSidePanelDragFromUnsetThenResetJournalsTheDefault in internal/tui/sidepanel_test.go — the journal keeps one entry per key, so it asserts the stated drag entry, then the reset entry "44" that replaces it.
+NOTES (2026-11-22): tests outside the Acceptance -run filters that the retype touched were run too: tui -run 'Overlay|Setting|SubAgentsHeader|Width|TestSubAgentRowAlignsPastAnHour|Header' passed.
 
 Depends on items 1 and 8.
 

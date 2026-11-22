@@ -161,50 +161,53 @@ func TestSidePanelShowZeroValidatesAndBadIsRefusedNamingTheKey(t *testing.T) {
 	}
 }
 
-// TestSidePanelWidthValidateAndSetJudgeTheStatedWidth: the default block carries the unset width
-// (0), and Set's `""` lands it — never the default's number, which would read as a width somebody
-// chose — while the parser still reads `""` as the default 44; a zero field validates, while Set — a
-// stated value — refuses 0 as it refuses any width below 24; 24 and up land as written; and the
-// parser refuses text that is no number.
+// TestSidePanelWidthValidateAndSetJudgeTheStatedWidth: the default block carries the unset width,
+// and Set's `""` lands it — never the default's number, which would read as a width somebody chose —
+// as the parser reads `""`; the unset width validates, while a stated width below 24 is refused by
+// Validate and Set alike, 0 included; 24 and up land as written; and the parser refuses text that is
+// no number.
 func TestSidePanelWidthValidateAndSetJudgeTheStatedWidth(t *testing.T) {
 	t.Parallel()
 
-	if got := DefaultUIPrefs().SidePanelWidth; got != 0 {
-		t.Errorf("DefaultUIPrefs().SidePanelWidth = %d; want 0, the unset width", got)
+	if got := DefaultUIPrefs().SidePanelWidth; got.IsStated() {
+		t.Errorf("DefaultUIPrefs().SidePanelWidth = %+v; want the unset width", got)
 	}
 	stated := DefaultUIPrefs()
-	stated.SidePanelWidth = 48
+	stated.SidePanelWidth = StatedSidePanelWidth(48)
 	for _, text := range []string{"", "  "} {
 		unset := stated
-		if err := unset.Set(UIKeySidePanelWidth, text); err != nil || unset.SidePanelWidth != 0 {
-			t.Errorf(`Set(ui.side-panel.width, %q) = %v, landing %d; want 0, the unset width`, text, err, unset.SidePanelWidth)
+		if err := unset.Set(UIKeySidePanelWidth, text); err != nil || unset.SidePanelWidth != (SidePanelWidth{}) {
+			t.Errorf(`Set(ui.side-panel.width, %q) = %v, landing %+v; want the unset width`, text, err, unset.SidePanelWidth)
 		}
 	}
-	if got, err := ParseSidePanelWidth("  "); err != nil || got != DefaultSidePanelWidth {
-		t.Errorf(`ParseSidePanelWidth("  ") = %d, %v; want the default`, got, err)
+	if got, err := ParseSidePanelWidth("  "); err != nil || got != (SidePanelWidth{}) {
+		t.Errorf(`ParseSidePanelWidth("  ") = %+v, %v; want the unset width`, got, err)
+	}
+	if err := DefaultUIPrefs().Validate(); err != nil {
+		t.Errorf("Validate() with the unset width = %v; want validates", err)
 	}
 	for _, tt := range []struct {
 		width               int
 		validates, setLands bool
 	}{
-		{width: 0, validates: true, setLands: false},
+		{width: 0, validates: false, setLands: false},
 		{width: 23, validates: false, setLands: false},
 		{width: 24, validates: true, setLands: true},
 		{width: 36, validates: true, setLands: true},
 		{width: 200, validates: true, setLands: true},
 	} {
 		u := DefaultUIPrefs()
-		u.SidePanelWidth = tt.width
+		u.SidePanelWidth = StatedSidePanelWidth(tt.width)
 		if err := u.Validate(); (err == nil) != tt.validates {
-			t.Errorf("Validate() with SidePanelWidth %d = %v; want validates %t", tt.width, err, tt.validates)
+			t.Errorf("Validate() with a stated width %d = %v; want validates %t", tt.width, err, tt.validates)
 		}
 		set := DefaultUIPrefs()
 		err := set.Set(UIKeySidePanelWidth, strconv.Itoa(tt.width))
 		if (err == nil) != tt.setLands {
 			t.Errorf("Set(%d) = %v; want lands %t", tt.width, err, tt.setLands)
 		}
-		if tt.setLands && set.SidePanelWidth != tt.width {
-			t.Errorf("Set(%d) landed %d", tt.width, set.SidePanelWidth)
+		if tt.setLands && set.SidePanelWidth != StatedSidePanelWidth(tt.width) {
+			t.Errorf("Set(%d) landed %+v", tt.width, set.SidePanelWidth)
 		}
 		if !tt.setLands && err != nil && !strings.HasPrefix(err.Error(), "apogee: invalid ui.side-panel.width ") {
 			t.Errorf("Set(%d) = %q; want refused naming ui.side-panel.width", tt.width, err)
@@ -214,6 +217,29 @@ func TestSidePanelWidthValidateAndSetJudgeTheStatedWidth(t *testing.T) {
 		if _, err := ParseSidePanelWidth(text); err == nil {
 			t.Errorf("ParseSidePanelWidth(%q) accepted; want refused", text)
 		}
+	}
+}
+
+// TestSidePanelWidthTellsUnsetFromAStatedDefault: the unset width and a stated 44 are two values
+// that `==` tells apart, only the stated one is stated, and both resolve — and read — as 44, the
+// width each is drawn at.
+func TestSidePanelWidthTellsUnsetFromAStatedDefault(t *testing.T) {
+	t.Parallel()
+
+	unset, statedDefault := SidePanelWidth{}, StatedSidePanelWidth(DefaultSidePanelWidth)
+	if unset == statedDefault {
+		t.Errorf("the unset width == a stated %d; want them told apart", DefaultSidePanelWidth)
+	}
+	if unset.IsStated() || !statedDefault.IsStated() {
+		t.Errorf("IsStated: unset %t, stated %t; want false and true", unset.IsStated(), statedDefault.IsStated())
+	}
+	for _, w := range []SidePanelWidth{unset, statedDefault} {
+		if w.Resolve() != DefaultSidePanelWidth || w.Text() != "44" {
+			t.Errorf("%+v resolves to %d, reads %q; want 44 both", w, w.Resolve(), w.Text())
+		}
+	}
+	if got := StatedSidePanelWidth(60); got.Resolve() != 60 || got != StatedSidePanelWidth(60) {
+		t.Errorf("a stated 60 resolves to %d; want 60, equal to another stated 60", got.Resolve())
 	}
 }
 

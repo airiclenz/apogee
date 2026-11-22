@@ -142,12 +142,13 @@ type UIPrefs struct {
 	// the model.
 	SidePanelShow SidePanelShow
 	// SidePanelWidth is `ui.side-panel.width`: the side panel's width in columns while it is drawn
-	// (ADR 0110, amended 2026-11-08). 0 is the unset width — no key, a `""`, a reset — carried as
-	// itself from config to renderer, so the layout can tell a width nobody chose from one somebody
-	// did; every reader that paints, clamps or shows it resolves 0 to [DefaultSidePanelWidth]. A
-	// stated width below [MinSidePanelWidth] is refused by [UIPrefs.Validate] naming the key; how
-	// wide the window lets the panel be is the layout's clamp, never a rewrite of this value.
-	SidePanelWidth int
+	// (ADR 0110, amended 2026-11-08). Its zero value is the unset width — no key, a `""`, a reset —
+	// carried as itself from config to renderer, so the layout can tell a width nobody chose from
+	// one somebody did; every reader that paints, clamps or shows it reads [SidePanelWidth.Resolve],
+	// which resolves the unset width to [DefaultSidePanelWidth]. A stated width below
+	// [MinSidePanelWidth] is refused by [UIPrefs.Validate] naming the key; how wide the window lets
+	// the panel be is the layout's clamp, never a rewrite of this value.
+	SidePanelWidth SidePanelWidth
 	// SidePanelSections is `ui.side-panel.sections`: each panel section with its mode, in display
 	// order, carried in its one canonical spelling so the block stays comparable with `==`, and
 	// read into entries through [ParseSidePanelSections]. Default every section auto; `""` reads

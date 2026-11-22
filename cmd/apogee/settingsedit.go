@@ -384,10 +384,11 @@ func settingChanged(k config.Key, before, after fileProjection, i int) bool {
 }
 
 // sidePanelWidthMoved reports whether a re-read moved `ui.side-panel.width` between the unset width
-// (0) and a stated one. Its row spells the unset width as the default it is drawn at, so a deleted
-// `width: 44` and a newly stated one read "44" on both sides of the diff — yet the layout clamps a set
-// width to the transcript minimum and an unset one to the show mode's gate floor, and a session left
-// holding the old one docks the column at the wrong width until a restart.
+// and a stated one (domain.SidePanelWidth tells them apart under `==`). Its row spells the unset
+// width as the default it is drawn at, so a deleted `width: 44` and a newly stated one read "44" on
+// both sides of the diff — yet the layout clamps a set width to the transcript minimum and an unset
+// one to the show mode's gate floor, and a session left holding the old one docks the column at the
+// wrong width until a restart.
 func sidePanelWidthMoved(before, after config.Options) bool {
 	return before.UI.SidePanelWidth != after.UI.SidePanelWidth
 }

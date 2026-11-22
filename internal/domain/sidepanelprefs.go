@@ -51,40 +51,72 @@ func ParseSidePanelShow(s string) (SidePanelShow, error) {
 }
 
 // DefaultSidePanelWidth is the side panel's width in columns for a config that names no
-// `ui.side-panel.width:`, and what a zero [UIPrefs.SidePanelWidth] resolves to.
+// `ui.side-panel.width:`, and what the unset [SidePanelWidth] resolves to.
 const DefaultSidePanelWidth = 44
 
 // MinSidePanelWidth is the narrowest `ui.side-panel.width` a config may state: below it a section's
 // header and its rows no longer fit beside their marks.
 const MinSidePanelWidth = 24
 
+// SidePanelWidth is `ui.side-panel.width` as the block carries it: a width somebody stated, in
+// columns, or the unset width nobody chose — no key, a `""`, a reset. The two stay apart from
+// config to renderer because the layout clamps them differently, while both are drawn at
+// [SidePanelWidth.Resolve]'s width. The zero value is the unset width, and the type is comparable
+// with `==`, so [UIPrefs] stays comparable and an unset width never equals a stated default.
+type SidePanelWidth struct {
+	columns int
+	stated  bool
+}
+
+// StatedSidePanelWidth is the width columns somebody stated. It judges nothing: a width below
+// [MinSidePanelWidth] is [UIPrefs.Validate]'s and [ParseSidePanelWidth]'s to refuse.
+func StatedSidePanelWidth(columns int) SidePanelWidth {
+	return SidePanelWidth{columns: columns, stated: true}
+}
+
+// IsStated reports whether somebody stated the width, as opposed to the unset width.
+func (w SidePanelWidth) IsStated() bool { return w.stated }
+
+// Resolve is the width in columns the panel is drawn at before the layout's clamp: a stated width
+// as stated, the unset one as [DefaultSidePanelWidth].
+func (w SidePanelWidth) Resolve() int {
+	if !w.stated {
+		return DefaultSidePanelWidth
+	}
+	return w.columns
+}
+
+// Text spells the width as the key's row reads it: the resolved number of columns, so the unset
+// width and a stated default both read "44".
+func (w SidePanelWidth) Text() string { return strconv.Itoa(w.Resolve()) }
+
 // ParseSidePanelWidth reads a `ui.side-panel.width:` value: a number of columns, at least
-// [MinSidePanelWidth], or — trimmed — the empty value, which is the key's way of saying "the
-// default". Text that is no number, and a width below the minimum (0 included: a stated width is
-// a width, and the "unset" a zero field carries is a block's, never a value's), are refused in the
-// sentences every surface that reads the key refuses them in.
-func ParseSidePanelWidth(text string) (int, error) {
+// [MinSidePanelWidth], as a stated width, or — trimmed — the empty value, which is the key's way of
+// saying "the default" and reads as the unset width. Text that is no number, and a width below the
+// minimum (0 included: a stated width is a width), are refused in the sentences every surface that
+// reads the key refuses them in.
+func ParseSidePanelWidth(text string) (SidePanelWidth, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return DefaultSidePanelWidth, nil
+		return SidePanelWidth{}, nil
 	}
 	width, err := strconv.Atoi(text)
 	if err != nil {
-		return 0, fmt.Errorf("apogee: invalid ui.side-panel.width %q: want a number of columns, %d or more",
+		return SidePanelWidth{}, fmt.Errorf("apogee: invalid ui.side-panel.width %q: want a number of columns, %d or more",
 			text, MinSidePanelWidth)
 	}
 	if width < MinSidePanelWidth {
-		return 0, sidePanelTooNarrow(width)
+		return SidePanelWidth{}, sidePanelTooNarrow(width)
 	}
-	return width, nil
+	return StatedSidePanelWidth(width), nil
 }
 
-// validSidePanelWidth is [UIPrefs.Validate]'s judgement on the width: 0 is the unset field, which
-// resolves to [DefaultSidePanelWidth], so only a stated width below the minimum is refused — in
-// the parser's sentence.
-func validSidePanelWidth(width int) error {
-	if width != 0 && width < MinSidePanelWidth {
-		return sidePanelTooNarrow(width)
+// validSidePanelWidth is [UIPrefs.Validate]'s judgement on the width: the unset width resolves to
+// [DefaultSidePanelWidth], so only a stated width below the minimum is refused — in the parser's
+// sentence.
+func validSidePanelWidth(width SidePanelWidth) error {
+	if width.stated && width.columns < MinSidePanelWidth {
+		return sidePanelTooNarrow(width.columns)
 	}
 	return nil
 }
