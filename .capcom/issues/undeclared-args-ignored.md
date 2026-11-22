@@ -1,11 +1,13 @@
 ---
 title: A tool call's undeclared arguments are silently dropped
-status: open
+status: done
 type: task
 priority: 3
 labels: [tool-surface]
 plan: 2026-11-22 - 00 - undeclared-args-note-plan
 created: 2026-11-21T12:44:48Z
+closed: 2026-11-22T18:24:34Z
+reason: "Resolved by plan 2026-11-22 - 00 - undeclared-args-note-plan (archived at 3d4011eb): built-in tool results now name ignored argument keys and the declared ones; declared-only calls unchanged; covered by TestNoteIgnoredArguments."
 ---
 
 Found by docs/reviews/archived/session-mining-2026-09-14.md (§2); re-verified 2026-11-21 at 43ece2f2.
