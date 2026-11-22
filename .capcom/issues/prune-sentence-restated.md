@@ -1,11 +1,13 @@
 ---
 title: "The prune note is worded at three sites instead of on the event (architecture review 2026-10-14 #16)"
-status: open
+status: done
 type: task
 priority: 4
 labels: [driver-parity]
 plan: 2026-11-22 - 01 - typed-tool-outcomes-plan.md
 created: 2026-11-21T12:44:48Z
+closed: 2026-11-22T13:16:58Z
+reason: "Resolved by typed-tool-outcomes-plan (2026-11-22 - 01) item 1: PruneEvent.Notice() worded once and pinned by a domain test; headless, run fold and TUI print it. Plan archived at 962d6e5d."
 ---
 
 Found by docs/reviews/archived/architecture-review-2026-10-14.html (#16 leftover); re-verified 2026-11-21 at 43ece2f2.
