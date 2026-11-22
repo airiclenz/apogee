@@ -1,11 +1,13 @@
 ---
 title: First-contact beat notes pile up across resumes
-status: open
+status: done
 type: bug
 priority: 3
 labels: [tui]
 plan: 2026-11-21 - 03 - startup-notes-followups-plan.md
 created: 2026-11-21T19:28:55Z
+closed: 2026-11-22T05:58:50Z
+reason: "Resolved by plan '2026-11-21 - 03 - startup-notes-followups-plan' item 2 (archived at 7b909423): first-contact beat notes are ephemeral, kept out of the record and forks; event beat notes still persist; TestFirstContactNotesStayOutOfAResumedRecord drives launch-resume-launch. Stale stash edge tracked in first-contact-lines-stale."
 ---
 
 Found while planning startup-notice-class-scattered / startup-note-routing-scattered (2026-11-21, at ec353573).
