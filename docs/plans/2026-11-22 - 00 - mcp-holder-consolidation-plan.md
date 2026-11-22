@@ -111,7 +111,7 @@ internal/mcp/transport_test.go — TestConnect_OAuthServerRefusals; cmd/apogee/m
 
 **Commit:** `refactor(mcp): one OAuth binding is assembled for login and connect`
 
-## 3. ADR 0095 amendment and the design doc for the OAuth binding
+## 3. ADR 0095 amendment and the design doc for the OAuth binding — ✅ DONE (2026-11-22)
 
 Depends on item 2.
 

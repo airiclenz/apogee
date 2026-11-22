@@ -175,10 +175,22 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   `headers-env:` beside it. The `client-secret-env:` name
   joins the secret-env scrub with the `headers-env:` names (`config.MCPHeaderEnvNames`). The
   token store is `internal/mcpauth`: one 0600 JSON record per server at
-  `<home>/mcp-auth/<name>.json` (directory 0700, atomic replace), keyed by the server name and the
-  normalised endpoint, so a record minted for another endpoint loads as a miss.
-  `buildStreamableTransport` sets an `mcpauth.Handler` as the SDK transport's `OAuthHandler`
-  over the same `vetEndpoint` client, so the **bearer is set only on requests that already passed
+  `<home>/mcp-auth/<name>.json` (directory 0700, atomic replace), its stem the server name. A
+  loaded record is used only when it matches the configuration that minted it (2026-11-22,
+  `adr-0095-amend-1122`): the server name and the normalised endpoint, so a record minted for
+  another endpoint loads as a miss; with `client-id:` set, the record's client id too
+  (`mcpauth`'s `clientMatches`), so a record issued to another client is `ErrLoginRequired` and a
+  refresh never pairs a stored client id with a new secret; and with `issuer:` set, the issuer it
+  names (`issuerMatches`, below). The OAuth facts are assembled in one place,
+  `mcp.OAuthBinding` (`internal/mcp`): it vets the endpoint and builds one `mcpauth.Binding` —
+  the token store (a host with none is refused), the endpoint and its pinned client, the
+  authorization-server client (`Host.NewOAuthClient`, else `mcpauth.NewAuthClient`), the client
+  id, the issuer, and the client secret read from `client-secret-env:` on every call, never at
+  load (an unset variable is refused as `mcp: server %q: client-secret-env: the environment
+  variable %s is not set`). `apogee mcp login` calls it; a connect reaches the same assembly
+  through `buildStreamableTransport`, which vets the endpoint once (its guarded client pins DNS),
+  builds the binding over that `vetEndpoint` client and sets an `mcpauth.Handler` over it as the
+  SDK transport's `OAuthHandler`, so the **bearer is set only on requests that already passed
   `OriginPinTransport`** and reaches the configured endpoint's origin and nowhere else. The
   **authorization server is untrusted** — the MCP server names it; an operator's `issuer:`
   (2026-11-11) only narrows which named one apogee accepts, never adds one the endpoint did not
