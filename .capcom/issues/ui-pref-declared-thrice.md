@@ -3,6 +3,7 @@ title: "A UI pref is declared once, in domain (architecture review 2026-11-10 #8
 status: open
 type: task
 priority: 3
+plan: 2026-11-22 - 02 - ui-pref-and-writer-plan.md
 created: 2026-11-10T19:36:32Z
 ---
 

@@ -3,6 +3,7 @@ title: "The config writer reaches any registry path (architecture review 2026-11
 status: open
 type: task
 priority: 3
+plan: 2026-11-22 - 02 - ui-pref-and-writer-plan.md
 created: 2026-11-10T19:36:32Z
 ---
 

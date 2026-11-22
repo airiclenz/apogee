@@ -4,6 +4,7 @@ status: open
 type: task
 priority: 3
 labels: [tui, test-gap]
+plan: 2026-11-22 - 02 - ui-pref-and-writer-plan.md
 created: 2026-11-10T19:36:32Z
 ---
 
