@@ -1084,7 +1084,8 @@ func (a *Agent) delegate(
 	// the call with the not-started result (runDelegation, ADR 0088 D2).
 	if ctx.Err() != nil {
 		giveBack()
-		return errorToolResult(call.ID, cancelledQueuedDelegationContent), unstartedCancelled()
+		unstarted := unstartedCancelled()
+		return unstarted.unstartedResult(call.ID), unstarted
 	}
 	sub, err := a.newChildAgentOn(seat, call.ID, runID, task, delegationName(args.Name))
 	if err != nil {
@@ -1254,8 +1255,9 @@ func (a *Agent) delegate(
 	}
 	if outcome == dispatchCancelled {
 		// A run cancelled with neither stop behind it: the call is answered with the not-started
-		// result, as a call the cancel reached before its child was built is (delegationResult).
-		result = errorToolResult(call.ID, cancelledQueuedDelegationContent)
+		// result and its typed outcome, as a call the cancel reached before its child was built is
+		// (delegationResult).
+		result = unstartedCancelled().unstartedResult(call.ID)
 	}
 	return result, delegateEnding(result, outcome, b.hasStarted, stopped, res)
 }

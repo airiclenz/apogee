@@ -165,10 +165,11 @@ func (b *childBracket) mintRunID() string {
 
 // neverStarted settles a delegation whose child never started with unstarted, one of the
 // unstarted endings (unstartedSkipped, unstartedPastCeiling, unstartedCancelled,
-// unstartedStopped): a lone finished phase carrying the ending's result — no started phase, since
-// nothing ran — then the row. It returns that result for the caller to commit.
+// unstartedStopped): a lone finished phase carrying the ending's result (unstartedResult: its
+// content and its typed outcome) — no started phase, since nothing ran — then the row. It returns
+// that result for the caller to commit.
 func (b *childBracket) neverStarted(unstarted childEnding) domain.ToolResult {
-	result := errorToolResult(b.call.ID, unstarted.content)
+	result := unstarted.unstartedResult(b.call.ID)
 	b.emitFinished(result)
 	b.bookRow(unstarted, result.Content)
 	return result

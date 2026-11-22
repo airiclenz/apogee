@@ -247,7 +247,9 @@ const (
 // model. It rides every result the engine renders for a run it started — the success, the
 // capped and stopped partials, and the faulted error alike — so a host reads the ending off
 // the value instead of parsing it back out of those lines. A result for a delegation that never
-// ran (a refusal, a stop that reached it while still queued) carries none.
+// started — pre-empted, refused past the fan-out ceiling, or cancelled or stopped while still
+// queued — carries one too, with Unstarted naming why. A sub_agent call refused before any
+// delegation existed (bad arguments, the depth bound) carries none.
 //
 // At most one of Bound, IsStoppedByUser and HasNoReport is set, in that order of precedence
 // as the engine decides it: the human's stop outranks a bound, and only a run that reached

@@ -14,7 +14,8 @@ import (
 // (unstartedSkipped, unstartedPastCeiling, unstartedCancelled, unstartedStopped). Every word a
 // delegation's ending is spelled in elsewhere is a projection of it: the ledger row's outcome and
 // cause (ledgerRecord), the workflow Ending (workflowEnding), why mail left in the child's mailbox
-// never landed (undelivered) and the typed half of the rendered result (summary).
+// never landed (undelivered), the typed half of the rendered result (summary) and the result an
+// unstarted ending answers its call with (unstartedResult).
 //
 // It is a return value, never a field on Agent (ADR 0083 part 3): the path that decided it hands
 // it on to each reader.
@@ -28,6 +29,9 @@ type childEnding struct {
 	// account of a child that never ran — and "" for every other ending, whose result is rendered
 	// from the run (or the refusal) by its own path.
 	content string
+	// unstarted is why an unstarted ending's child never ran — the typed outcome its result carries
+	// (unstartedResult) — and domain.DelegationRan for every other ending, a refusal included.
+	unstarted domain.DelegationUnstarted
 }
 
 // runEnding is the ONE run switch both delegation paths read a finished child's Run through — the
@@ -76,26 +80,26 @@ func refusedEnding() childEnding {
 // unstartedSkipped is a delegation a queued user message pre-empted before its child started
 // (preemptDelegation).
 func unstartedSkipped() childEnding {
-	return childEnding{kind: delegationSkipped, content: skippedDelegationContent}
+	return childEnding{kind: delegationSkipped, content: skippedDelegationContent, unstarted: domain.DelegationSkipped}
 }
 
 // unstartedPastCeiling is a delegation refused past the reply's fan-out ceiling (refusePastCeiling).
 // Its result is rendered per call — the reply's size, the rounds and width that set the ceiling and
 // whether fan_out is on the roster (fanOutCeilingResult) — so the ending carries the rendered one.
 func unstartedPastCeiling(result domain.ToolResult) childEnding {
-	return childEnding{kind: delegationRefused, content: result.Content}
+	return childEnding{kind: delegationRefused, content: result.Content, unstarted: domain.DelegationRefused}
 }
 
 // unstartedCancelled is a delegation the cancel of the whole Turn reached before its child started
 // (settleCancelledDelegation).
 func unstartedCancelled() childEnding {
-	return childEnding{kind: delegationCancelled, content: cancelledQueuedDelegationContent}
+	return childEnding{kind: delegationCancelled, content: cancelledQueuedDelegationContent, unstarted: domain.DelegationCancelled}
 }
 
 // unstartedStopped is a pooled delegation the human stopped before a worker took it
 // (stopQueuedDelegation).
 func unstartedStopped() childEnding {
-	return childEnding{kind: delegationStopped, content: stoppedQueuedDelegationContent}
+	return childEnding{kind: delegationStopped, content: stoppedQueuedDelegationContent, unstarted: domain.DelegationStoppedQueued}
 }
 
 // ledgerRecord completes row — the delegation's spawn index, call, label and output target, which
@@ -151,10 +155,11 @@ func (e childEnding) undelivered() domain.UndeliveredReason {
 // hit, and report the result's content with the absolute cap applied and no body note appended
 // yet — the child's closing text, which the no-report reading judges. A stop outranks a bound, and
 // only a completed run can have no report; a fault carries the steered count alone. An ending that
-// never ran has no summary: the zero value.
+// never ran carries why it never ran alone (unstarted) — DelegationRan, the zero value, for a
+// refusal, whose result is rendered by its own path and carries no summary.
 func (e childEnding) summary(steered int, bound domain.DelegationBound, report string) domain.DelegationOutcome {
 	if !e.hasStarted {
-		return domain.DelegationOutcome{}
+		return domain.DelegationOutcome{Unstarted: e.unstarted}
 	}
 	summary := domain.DelegationOutcome{SteeredMessages: steered}
 	switch e.kind {
@@ -166,4 +171,13 @@ func (e childEnding) summary(steered int, bound domain.DelegationBound, report s
 		summary.HasNoReport = strings.TrimSpace(report) == noReportMarker || floor.IsNonReport(report)
 	}
 	return summary
+}
+
+// unstartedResult is the whole tool result an unstarted ending answers call callID with: its content,
+// error-shaped, carrying its typed outcome (summary) — why the child never ran — so a host reads
+// the ending off the value, never back out of the content.
+func (e childEnding) unstartedResult(callID string) domain.ToolResult {
+	result := errorToolResult(callID, e.content)
+	result.Summary = e.summary(0, domain.DelegationUnbounded, "")
+	return result
 }

@@ -282,7 +282,9 @@ func TestChildBracket_NeverStartedBooksOneRowAndALoneFinish(t *testing.T) {
 
 			result := host.openBracket(1, bracketCall(), bracketRequest(), &runID, &host.delegations).neverStarted(tt.unstarted)
 
-			if want := errorToolResult(bracketCallID, tt.unstarted.content); result != want {
+			want := errorToolResult(bracketCallID, tt.unstarted.content)
+			want.Summary = domain.DelegationOutcome{Unstarted: tt.unstarted.unstarted}
+			if result != want {
 				t.Errorf("neverStarted = %+v, want %+v", result, want)
 			}
 			phases := bracketPhases(sink)
@@ -293,6 +295,48 @@ func TestChildBracket_NeverStartedBooksOneRowAndALoneFinish(t *testing.T) {
 				t.Errorf("run id = %q, want none minted for a delegation that never started", runID)
 			}
 			assertOneRow(t, host, tt.wantOutcome, tt.wantCause)
+		})
+	}
+}
+
+// TestNeverStartedResultCarriesItsUnstartedOutcome pins that every result a never-started
+// delegation answers its call with carries the typed outcome naming why its child never ran — the
+// one a host reads the ending off — on the result and on the lone finished phase alike, while its
+// content stays the ending's own text.
+func TestNeverStartedResultCarriesItsUnstartedOutcome(t *testing.T) {
+	t.Parallel()
+
+	ceiling := fanOutCeilingResult(bracketCallID, 5, 1, 2, false)
+	tests := []struct {
+		name          string
+		unstarted     childEnding
+		wantUnstarted domain.DelegationUnstarted
+	}{
+		{name: "pre-empted by a queued message", unstarted: unstartedSkipped(), wantUnstarted: domain.DelegationSkipped},
+		{name: "refused past the fan-out ceiling", unstarted: unstartedPastCeiling(ceiling), wantUnstarted: domain.DelegationRefused},
+		{name: "reached by the turn's cancel", unstarted: unstartedCancelled(), wantUnstarted: domain.DelegationCancelled},
+		{name: "stopped while queued", unstarted: unstartedStopped(), wantUnstarted: domain.DelegationStoppedQueued},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			host := newBracketHost(t, sink)
+			var runID string
+
+			result := host.openBracket(1, bracketCall(), bracketRequest(), &runID, &host.delegations).neverStarted(tt.unstarted)
+
+			want := domain.DelegationOutcome{Unstarted: tt.wantUnstarted}
+			if got, ok := result.Summary.(domain.DelegationOutcome); !ok || got != want {
+				t.Errorf("result summary = %#v, want %#v", result.Summary, want)
+			}
+			if result.Content != tt.unstarted.content || !result.IsError {
+				t.Errorf("result = %+v, want the error-shaped %q", result, tt.unstarted.content)
+			}
+			phases := bracketPhases(sink)
+			if len(phases) != 1 || phases[0].Result.Summary != result.Summary {
+				t.Errorf("phases = %+v, want one finished phase carrying the outcome", phases)
+			}
 		})
 	}
 }

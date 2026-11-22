@@ -5482,6 +5482,9 @@ func TestRunDelegation_ACallTheCancelReachedBeforeItsChildIsNeverStarted(t *test
 	if !slot.result.IsError || slot.result.Content != cancelledQueuedDelegationContent {
 		t.Errorf("slot result = %+v, want the error-shaped %q", slot.result, cancelledQueuedDelegationContent)
 	}
+	if want := (domain.DelegationOutcome{Unstarted: domain.DelegationCancelled}); slot.result.Summary != want {
+		t.Errorf("slot result summary = %#v, want %#v", slot.result.Summary, want)
+	}
 	phases := phasesFor(sink.events, "c1")
 	if n := len(phases); n == 0 || phases[n-1].Phase != domain.SubAgentFinished ||
 		phases[n-1].Result.Content != cancelledQueuedDelegationContent {

@@ -1187,7 +1187,8 @@ func delegationSteeredCell(steered int) string {
 // under the unstarted head (unstartedDelegationPrefix) every never-ran kind shares. Both are spelled
 // again here as the bound head is: the engine formats them deliberately. The stopped head is read
 // only for a result carrying no typed outcome (proseDelegationOutcome); the queued stop's text is
-// the one reading of its kind, because a delegation that never ran has no outcome to carry.
+// read the same way, for a result carrying no outcome (proseFailedDelegationOutcome) — the engine
+// attaches the unstarted one to every result for a delegation that never ran.
 //
 // Two more never-ran kinds are the human's act rather than the child's failure, and are spelled
 // again here for the same reason: delegationCancelledQueuedContent is the whole result of a
@@ -1310,7 +1311,7 @@ func delegationChildText(body string) string {
 // delegationOutcomeOf is how a delegation ended: the typed domain.DelegationOutcome the engine
 // attaches to every result it renders for a run, or — for a result carrying none — the same facts
 // read back off its prose (proseDelegationOutcome). The prose readings stay as that fallback: a
-// delegation that never ran carries no outcome, and neither does a result a reaction re-summarised.
+// result a reaction re-summarised carries no outcome, and neither does an older producer's line.
 func delegationOutcomeOf(res domain.ToolResult) domain.DelegationOutcome {
 	if outcome, ok := res.Summary.(domain.DelegationOutcome); ok {
 		return outcome

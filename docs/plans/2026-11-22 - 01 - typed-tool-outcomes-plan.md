@@ -192,7 +192,11 @@ internal/tui/toolpresent_test.go — TestCollapsedRunDemotionKeepsTheLineAndNoBo
 
 **Commit:** `refactor(tui): a delegation's verdict stays typed on its summary`
 
-## 7. A never-started delegation carries its typed outcome
+## 7. A never-started delegation carries its typed outcome — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): childEnding gains an `unstarted domain.DelegationUnstarted` field set by the four unstarted* constructors (kind alone cannot tell unstartedPastCeiling from refusedEnding); `summary` returns `{Unstarted: e.unstarted}` for an ending that never ran, and a new `unstartedResult(callID)` builds the error-shaped result with that summary — used by `neverStarted` and both `subagent.go` cancel returns.
+NOTES (2026-11-22): the `subagent.go` dispatchCancelled return (`delegationResult`'s `delegationCancelled` case) is documented there as unreachable from runSubAgent, so it carries the outcome without a test of its own; the before-the-child-exists return is pinned by a one-line summary assertion added to `TestRunDelegation_ACallTheCancelReachedBeforeItsChildIsNeverStarted` in internal/agent/subagent_test.go (not on the item's Files list).
+NOTES (2026-11-22): consequential edit — internal/tui/toolregistry.go: made necessary by the engine now attaching an outcome to every never-started result (two comments said a never-ran delegation carries no outcome; comment text only).
 
 Depends on items 2 and 6.
 

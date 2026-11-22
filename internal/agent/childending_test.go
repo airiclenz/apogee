@@ -165,6 +165,7 @@ func TestChildEnding_ProjectsTodaysWords(t *testing.T) {
 			wantEnding:    workflow.EndFaulted,
 			wantReason:    domain.UndeliveredRefused,
 			wantContent:   childEndingSkippedContent,
+			wantSummary:   domain.DelegationOutcome{Unstarted: domain.DelegationSkipped},
 		},
 		{
 			name:          "a delegation refused past the fan-out ceiling",
@@ -175,6 +176,7 @@ func TestChildEnding_ProjectsTodaysWords(t *testing.T) {
 			wantEnding:    workflow.EndFaulted,
 			wantReason:    domain.UndeliveredRefused,
 			wantContent:   childEndingCeilingContent,
+			wantSummary:   domain.DelegationOutcome{Unstarted: domain.DelegationRefused},
 		},
 		{
 			name:          "a delegation the Turn's cancel reached before it started",
@@ -184,6 +186,7 @@ func TestChildEnding_ProjectsTodaysWords(t *testing.T) {
 			wantEnding:    workflow.EndStopped,
 			wantReason:    domain.UndeliveredRefused,
 			wantContent:   childEndingCancelledContent,
+			wantSummary:   domain.DelegationOutcome{Unstarted: domain.DelegationCancelled},
 		},
 		{
 			name:          "a queued delegation the human stopped",
@@ -193,6 +196,7 @@ func TestChildEnding_ProjectsTodaysWords(t *testing.T) {
 			wantEnding:    workflow.EndStopped,
 			wantReason:    domain.UndeliveredRefused,
 			wantContent:   childEndingStoppedContent,
+			wantSummary:   domain.DelegationOutcome{Unstarted: domain.DelegationStoppedQueued},
 		},
 	}
 	for _, tt := range tests {
