@@ -43,7 +43,9 @@
 // DelegationOutcome (internal/agent, childEnding.summary). A summary is optional by construction, so ADR 0002's open extension point is
 // untouched (a tool that emits none renders from its prose exactly as before); it is never
 // persisted and never sent to the model; and an error result carries one only from terminal and
-// python_exec (errSummary, tools.go), whose failed run's ending is the very fact a host reads.
+// python_exec (errSummary, tools.go), whose failed run's ending is the very fact a host reads,
+// and from a sub_agent delegation that faulted or never started (internal/agent, childEnding),
+// whose DelegationOutcome is likewise that fact — a fault's steered count, or why it never ran.
 //
 // Phase 3 (P3.7) adds the file-editing family: single/multi find-replace, a patch-aware
 // edit_existing_file, and a pure-Go view_diff. It also added a read-and-locate open_file,
