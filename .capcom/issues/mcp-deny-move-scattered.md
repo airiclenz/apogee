@@ -1,10 +1,12 @@
 ---
 title: "A url-safety move is one call on the MCP holder (architecture review 2026-11-10 #4)"
-status: open
+status: done
 type: task
 priority: 3
 plan: 2026-11-22 - 00 - mcp-holder-consolidation-plan.md
 created: 2026-11-10T19:37:32Z
+closed: 2026-11-22T16:10:52Z
+reason: url-safety move is a two-phase deny/request on the liveMCP holder, one denied representation (item 7); resolved by docs/plans/archived/2026-11-22 - 00 - mcp-holder-consolidation-plan.md (archived at ca1b67ea)
 ---
 
 Found by docs/reviews/architecture-review-2026-11-10.html, verified 2026-11-10 at a5c4f2db. Verified VALID: admission is decided in six places (`denyMCP`'s two `mcp.Admit` partitions in cmd/apogee/wire_settings.go, plus `requestServerLocked`, `canRedialDroppedLocked`, `dropDenied` and `foldLocked` in cmd/apogee/wire_mcp.go). A denied server is stored two ways: `retire` deletes its state, while the request path and the commit-time deny keep it as `isAdmitted=false`. settingsApplier sequences retire → dropDenied → swap → request itself. Commits 5ff32123, 90379b24, 53ba5ea7 and df5e9257 all touched this deny path on one day.

@@ -1,10 +1,12 @@
 ---
 title: "Startup is the MCP holder's first request (architecture review 2026-11-10 #7)"
-status: open
+status: done
 type: task
 priority: 3
 plan: 2026-11-22 - 00 - mcp-holder-consolidation-plan.md
 created: 2026-11-10T19:37:32Z
+closed: 2026-11-22T16:10:52Z
+reason: Startup is the holder's first request; skipped server is an ordinary failed server, ADR 0109 recorded (items 8-9); resolved by docs/plans/archived/2026-11-22 - 00 - mcp-holder-consolidation-plan.md (archived at ca1b67ea)
 ---
 
 Found by docs/reviews/architecture-review-2026-11-10.html, verified 2026-11-10 at a5c4f2db. Verified VALID: the startup connect (`connectMCPServers`, cmd/apogee/mcp_cmd.go) dials outside the holder; callers must run `newLiveMCP` then `emitThrough(sink, skipped)` before any request (cmd/apogee/wire_live.go); the holder carries a seed-only `skipped` list outside `servers` with its own removal branch in `request` (cmd/apogee/wire_mcp.go).
