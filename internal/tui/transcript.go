@@ -1486,7 +1486,7 @@ func (t *transcript) apply(e domain.Event) {
 	case domain.ErrorEvent:
 		t.addError(e.Source, e.Err, runOf(e.EventBase))
 	case domain.PruneEvent:
-		t.addPrune(e.Results, e.Tokens, runOf(e.EventBase))
+		t.addPrune(e, runOf(e.EventBase))
 	case domain.RefClippedEvent:
 		t.addRefClipped(e, runOf(e.EventBase))
 	case domain.MalformedChunksEvent:
@@ -3051,17 +3051,17 @@ func (t *transcript) addError(source, msg string, run runRef) {
 }
 
 // addPrune appends the host note for one pruning pass — the engine dropped results tool calls
-// had already returned, freeing about tokens of window (domain.PruneEvent). Both numbers are
-// rendered verbatim: the engine counted them, and a Driver that recomputed either from the
-// other would be holding a chars-per-token ratio of its own.
+// had already returned, freeing about e.Tokens of window (domain.PruneEvent). The sentence is the
+// event's own (Notice), and both numbers are rendered verbatim: the engine counted them, and a
+// Driver that recomputed either from the other would be holding a chars-per-token ratio of its own.
 //
 // It is placed at the run that emitted it, exactly as addError is and unlike addNote (which
 // takes no run at all), so a delegate's prune lands inside the delegate's own block rather than
 // interrupting the parent's conversation with a child's housekeeping.
-func (t *transcript) addPrune(results, tokens int, run runRef) {
+func (t *transcript) addPrune(e domain.PruneEvent, run runRef) {
 	t.place(inRun(entry{
 		kind: entryNote,
-		text: fmt.Sprintf("pruned %d tool results (~%d tokens)", results, tokens),
+		text: e.Notice(),
 	}, run))
 }
 

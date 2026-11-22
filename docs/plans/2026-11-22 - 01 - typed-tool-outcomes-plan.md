@@ -42,7 +42,7 @@
 - Queued / running delegation state: stays derived at paint time from the entry's phase.
 - Any change to verdict wording, glyphs or colours.
 
-## 1. The prune note is worded on its event
+## 1. The prune note is worded on its event — ✅ DONE (2026-11-22)
 
 **What:**
 **Goal:** `domain.PruneEvent` has a value-receiver `Notice()` returning `pruned %d tool results (~%d tokens)`, pinned by a domain test; headless narration, the run record fold and the TUI each print `Notice()` and no other site formats that sentence.

@@ -172,6 +172,29 @@ func TestNoticeDurationDropsATrailingZeroUnit(t *testing.T) {
 	}
 }
 
+// TestPruneEventNoticeNamesResultsAndTokens pins the one sentence every Driver shows for a pruning
+// pass: the results it replaced and the tokens it freed, both verbatim from the event, so no surface
+// spells the pass its own way.
+func TestPruneEventNoticeNamesResultsAndTokens(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		results int
+		tokens  int
+		want    string
+	}{
+		{results: 3, tokens: 1200, want: "pruned 3 tool results (~1200 tokens)"},
+		{results: 12, tokens: 98000, want: "pruned 12 tool results (~98000 tokens)"},
+	}
+	for _, tc := range cases {
+		got := PruneEvent{Results: tc.results, Tokens: tc.tokens}.Notice()
+
+		if got != tc.want {
+			t.Errorf("Notice() for Results %d, Tokens %d = %q, want %q", tc.results, tc.tokens, got, tc.want)
+		}
+	}
+}
+
 // TestMalformedChunksEventNoticeNamesTheCount pins the one sentence every Driver shows for a
 // successful reply that dropped undecodable stream chunks: the count, and the singular noun for a
 // single chunk, so no surface spells the drop its own way.

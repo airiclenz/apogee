@@ -96,11 +96,10 @@ func (f *transcriptFold) fold(e domain.Event) {
 		f.appendText(session.EntryKindError, ev.Source+": "+ev.Err, ev.EventBase)
 	case domain.PruneEvent:
 		// A note, not an error: the engine dropped tool results it had already acted on, which is
-		// housekeeping the reader of the record is owed a line about. Worded exactly as the TUI
-		// words it (transcript.addPrune) and rendered verbatim from the event, so neither Driver
-		// holds a chars-per-token ratio of its own.
-		f.appendText(session.EntryKindNote,
-			fmt.Sprintf("pruned %d tool results (~%d tokens)", ev.Results, ev.Tokens), ev.EventBase)
+		// housekeeping the reader of the record is owed a line about. The event words the sentence
+		// itself (PruneEvent.Notice) from the counts it carries, so every Driver reads alike and
+		// none holds a chars-per-token ratio of its own.
+		f.appendText(session.EntryKindNote, ev.Notice(), ev.EventBase)
 	case domain.RefClippedEvent:
 		// A note for the same reason: a reference that entered clipped is a message that went
 		// ahead, and the reader is told what the model was and was not shown. The event words

@@ -282,7 +282,7 @@ func (s *narrationSink) Emit(e domain.Event) {
 func (s *narrationSink) narrate(e domain.Event) {
 	switch ev := e.(type) {
 	case domain.PruneEvent:
-		_, _ = fmt.Fprintf(s.out, "pruned %d tool results (~%d tokens)\n", ev.Results, ev.Tokens)
+		_, _ = fmt.Fprintln(s.out, ev.Notice())
 	case domain.MalformedChunksEvent:
 		_, _ = fmt.Fprintln(s.out, ev.Notice())
 	case domain.RefClippedEvent:

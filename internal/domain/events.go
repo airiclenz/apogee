@@ -529,7 +529,8 @@ const ApproverErrorPrefix = "approver: "
 // Results is how many tool results the pass replaced; Tokens is the engine's estimate of what
 // that freed, on the same terms the window budget is measured in. Both are reported as the
 // engine counted them — a Driver renders them verbatim and derives nothing from them, so no
-// surface has to hold a chars-per-token ratio of its own to say what happened.
+// surface has to hold a chars-per-token ratio of its own to say what happened. Notice renders
+// the one sentence every Driver shows, so no surface holds its own spelling of the pass.
 //
 // It carries EventBase like every variant, so a prune inside a delegated run reaches the
 // parent's observer at the child's Depth and spawning CallID and is rendered inside that
@@ -538,6 +539,12 @@ type PruneEvent struct {
 	EventBase
 	Results int
 	Tokens  int
+}
+
+// Notice is the human-facing sentence for one pruning pass: how many tool results it replaced and
+// about how many tokens that freed, both as the engine counted them.
+func (e PruneEvent) Notice() string {
+	return fmt.Sprintf("pruned %d tool results (~%d tokens)", e.Results, e.Tokens)
 }
 
 // RefClippedEvent reports that a reference the user attached to a message — an `@file` or an
