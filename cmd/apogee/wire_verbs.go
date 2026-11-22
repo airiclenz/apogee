@@ -207,7 +207,7 @@ func (w *rootWiring) recordServerChoice(name string) (bool, error) {
 	if !configuredServer(w.live.serverList(), name) {
 		return false, nil
 	}
-	if err := config.SaveConfigSetting(filepath.Join(w.roots.config, "config.yaml"), "server", name); err != nil {
+	if _, err := config.SaveConfigSetting(filepath.Join(w.roots.config, "config.yaml"), "server", name); err != nil {
 		return false, err
 	}
 	return true, nil

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // ----------------------------------------------------------------------------
@@ -572,7 +574,10 @@ func TestConcurrentSaveConfigSettingLandsEveryKey(t *testing.T) {
 		var wg sync.WaitGroup
 		errs := make(chan error, len(settings))
 		for key, value := range settings {
-			wg.Go(func() { errs <- SaveConfigSetting(path, key, value) })
+			wg.Go(func() {
+				_, err := SaveConfigSetting(path, key, value)
+				errs <- err
+			})
 		}
 		wg.Wait()
 		close(errs)
@@ -588,6 +593,50 @@ func TestConcurrentSaveConfigSettingLandsEveryKey(t *testing.T) {
 			if err != nil || !isSet || got != want {
 				t.Errorf("round %d: %s reads %q (set %v, err %v), want %q; file:\n%s",
 					round, key, got, isSet, err, want, written)
+			}
+		}
+	}
+}
+
+// Gestures racing one another on the same list each merge into what the file holds under the lock,
+// never into a reading taken before it: every section folded at once ends up folded, and every pin
+// lands beside the others in a partial list kept partial.
+func TestConcurrentMergeDeltasLandEverySection(t *testing.T) {
+	t.Parallel()
+	sections := domain.SidePanelSectionNames()
+	const rounds = 3
+
+	for round := range rounds {
+		path := writeTestConfig(t, "ui:\n  side-panel:\n    sections: [tasks: auto, usage: auto]\n")
+		var wg sync.WaitGroup
+		errs := make(chan error, 2*len(sections))
+		for _, section := range sections {
+			wg.Go(func() {
+				_, err := SaveConfigSetting(path, domain.UIKeySidePanelFolded, string(section)+": folded")
+				errs <- err
+			})
+		}
+		for _, section := range []domain.SidePanelSection{domain.SidePanelTasks, domain.SidePanelUsage} {
+			wg.Go(func() {
+				_, err := SaveConfigSetting(path, domain.UIKeySidePanelSections, string(section)+": pinned")
+				errs <- err
+			})
+		}
+		wg.Wait()
+		close(errs)
+
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("round %d: a concurrent merge failed: %v", round, err)
+			}
+		}
+		written := readTestConfig(t, path)
+		for _, want := range []string{
+			"    sections: [tasks: pinned, usage: pinned]\n",
+			"    folded: [sub-agents, tasks, changed-files, usage, mcp]\n",
+		} {
+			if !strings.Contains(written, want) {
+				t.Errorf("round %d: no line reads %q; file:\n%s", round, want, written)
 			}
 		}
 	}

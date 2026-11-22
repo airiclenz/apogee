@@ -35,16 +35,59 @@ import (
 // documented by its commented example) instead of being pinned to today's spelling of it.
 
 // SaveConfigSetting writes value as the config file's setting for the registry path key, and
-// reports nothing when the file already says exactly that (a re-set is a confirmation, not a
+// writes nothing when the file already says exactly that (a re-set is a confirmation, not a
 // rewrite). An absent config is seeded from the embedded template first, so an edit never leaves
 // a bare fragment where a documented file belongs, and the write is atomic and mode-preserving —
 // the acknowledgement writer's contract (configwrite.go), unchanged.
-func SaveConfigSetting(path, key, value string) error {
+//
+// It answers landed, the key's canonical text as the file now resolves it — also when nothing was
+// written. For a key with a merge hook (Key.merge: `ui.side-panel.sections`, `ui.side-panel.folded`)
+// value is not the whole value but one gesture's delta — `<section>: <mode>`, or `<section>: folded`
+// and `<section>: open` — merged against the file's own list under the edit lock (saveMerged); a
+// whole list is refused, naming the delta's form.
+func SaveConfigSetting(path, key, value string) (string, error) {
 	k, err := writableKey(key)
 	if err != nil {
-		return err
+		return "", err
+	}
+	if k.merge != nil {
+		return saveMerged(path, k, value)
 	}
 	return saveScalar(path, k, value)
+}
+
+// saveMerged is SaveConfigSetting's write of a key with a merge hook. The delta is judged alone
+// first — the merge against a config that writes no list reads nothing of the file, so what it
+// refuses is the delta's own fault — and a refused delta touches nothing, not even the seeding read.
+// The merge then runs again inside the transaction against the file as it stands under the lock, so
+// a second gesture merges into what the first wrote rather than over it; its text is spliced onto the
+// key's line like any scalar (spliceScalarSet) and verified by the key's read-back hook.
+func saveMerged(path string, k Key, delta string) (string, error) {
+	if _, _, err := k.merge(fileConfig{}, delta); err != nil {
+		return "", err
+	}
+	var text, landed string
+	splice := func(before fileConfig, data []byte) ([]byte, error) {
+		var err error
+		if text, landed, err = k.merge(before, delta); err != nil {
+			return nil, err
+		}
+		updated, err := spliceScalarSet(data, k, text)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Equal(updated, data) {
+			return nil, nil // the file already spells the line this way
+		}
+		return updated, nil
+	}
+	verify := func(before, after fileConfig, updated []byte) error {
+		return verifyScalarEdit(before, after, updated, k, text, true)
+	}
+	if err := edit(path, splice, verify); err != nil {
+		return "", err
+	}
+	return landed, nil
 }
 
 // subAgentsServerPath is the registry path of the key below, named here because two spellings of one
@@ -68,22 +111,28 @@ func SaveSubAgentsServer(path, name string) error {
 	if !ok {
 		return fmt.Errorf("apogee: %q is not a setting apogee knows", subAgentsServerPath)
 	}
-	return saveScalar(path, k, name)
+	_, err := saveScalar(path, k, name)
+	return err
 }
 
 // saveScalar is the write both of those share: the key's own admission test, then the splice and the
 // gate it must pass. It takes a resolved [Key] rather than a path because WHICH keys a surface may
 // write is that surface's question — the settings pane asks writableKey, and the one verb that
-// records a non-editable key asks nothing — while how a scalar reaches the file is one answer.
-func saveScalar(path string, k Key, value string) error {
+// records a non-editable key asks nothing — while how a scalar reaches the file is one answer. It
+// answers the value as the file now spells it (renderSettingValue's read-back half).
+func saveScalar(path string, k Key, value string) (string, error) {
 	if err := validateSettingValue(k, value); err != nil {
-		return err
+		return "", err
 	}
 	splice, verify, err := scalarSetEdit(k, value)
 	if err != nil {
-		return fmt.Errorf("apogee: update config %q: %w", path, err)
+		return "", fmt.Errorf("apogee: update config %q: %w", path, err)
 	}
-	return edit(path, splice, verify)
+	if err := edit(path, splice, verify); err != nil {
+		return "", err
+	}
+	_, landed, err := renderSettingValue(k, value)
+	return landed, err
 }
 
 // ResetSubAgentsServer removes the config file's `sub-agents-server:` line, so the next session

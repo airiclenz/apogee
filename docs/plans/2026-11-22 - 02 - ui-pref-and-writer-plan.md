@@ -134,7 +134,11 @@ Also: the render hook is consulted inside `renderSettingValue` — the one place
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/config/`
 **Commit:** `feat(config): write gesture-owned structured keys through the scalar splice`
 
-## 5. Sections and folded merge inside the generic writer
+## 5. Sections and folded merge inside the generic writer — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): the merge hook's signature is `merge func(before fileConfig, delta string) (text, landed string, err error)` rather than the approach's `(value string, err error)`: folded's landed (`""` for nothing folded) differs from the text the file carries (`[]`), so the hook answers both; the pre-open delta check is that same hook run against an empty fileConfig (reads nothing of the file, so only the delta can fail), not a second parse.
+NOTES (2026-11-22): the delta spellings (`folded`/`open` and the two refusal forms) are constants in internal/config/registry.go beside the hooks; item 7's tui gestures cannot import config, so that item spells the delta on its own side or moves the words to domain.
+NOTES (2026-11-22): the ported "a list one entry per line" refusal now reads "one entry per line" (the scalar splice's wording) where the old engine said "one item per line"; settingsHost.Write still routes the side-panel block to SaveSidePanelSetting and discards SaveConfigSetting's landed through a small closure, both left to items 6–7.
 
 Depends on item 4.
 

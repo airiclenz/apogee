@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -162,7 +163,8 @@ func (c KeyClass) String() string {
 // (writableKey): a key is written by the setting writer when it is Editable or gesture-written,
 // and the pane still edits only the Editable ones. The footer's structured keys carry neither —
 // they are edited in the file. A gesture-written key whose kind no plain render holds (a
-// structured list) carries the writer's two hooks beside it, render and readBack.
+// structured list) carries the writer's hooks beside it, render and readBack, and merge where the
+// gesture changes one part of the value rather than the whole.
 //
 // Validate is the key's own admission test, run on a value a SURFACE offers before it is
 // written (SaveConfigSetting) — the check the kind alone cannot make: a URL that has no host,
@@ -295,6 +297,14 @@ type Key struct {
 	// existing parser and speller rather than adding a parse of their own. Nil for every other row.
 	render   func(value string) (string, error)
 	readBack func(fc fileConfig) (string, bool)
+	// merge is the setting writer's third hook for such a key, for the gesture that changes one
+	// part of the value rather than the whole of it (the side panel's pin, hide and fold): it takes
+	// the config as the file holds it under the edit lock and the gesture's delta, and answers the
+	// text the key's line will carry and landed — the key's canonical text as the file then
+	// resolves it. A key with a merge hook is written by delta alone (SaveConfigSetting): its value
+	// is merged against the file's own list, never handed over whole, so a hand-kept partial list
+	// stays partial and two gestures racing each other both land. Nil for every other row.
+	merge func(before fileConfig, delta string) (text, landed string, err error)
 }
 
 // The closed vocabularies of the three enum keys, in the order their parse sites list them.
@@ -1293,7 +1303,8 @@ var KeyRegistry = bindRows([]Key{
 		// An ordered list of section/mode pairs, so structured — global-only by the zero class, like
 		// every `ui:` key — and gesture-written: the panel's pin, unpin and hide persist it, so no
 		// row edits it but the setting writer admits it (Gesture), rendering and reading it back
-		// through the key's own speller (render, readBack). Its Read is the canonical spelling, every
+		// through the key's own speller (render, readBack); a gesture sends one section's change,
+		// merged into the file's own list (merge). Its Read is the canonical spelling, every
 		// section named, a text domain.ParseSidePanelSections reads back (UIPrefs.Set lands it), so a
 		// live re-read lands through the parse the file does. No Default: the default lives in
 		// domain.DefaultUIPrefs and the starter template. Judged by fileSidePanelSections at the load.
@@ -1305,11 +1316,12 @@ var KeyRegistry = bindRows([]Key{
 		fromFile:  fileSidePanelSections,
 		render:    renderSidePanelSections,
 		readBack:  readBackSidePanelSections,
+		merge:     mergeSidePanelSections,
 	},
 	{
 		// A list of section names, so structured — ui.side-panel.sections' posture, global-only by the
 		// same zero class — and written by the panel's own fold toggle (SaveSidePanelFold) rather than
-		// a row, so gesture-written as sections is (Gesture, render, readBack). Its Read is the
+		// a row, so gesture-written as sections is (Gesture, render, readBack, merge). Its Read is the
 		// canonical spelling, a text domain.ParseSidePanelFolded reads back
 		// (UIPrefs.Set lands it); the zero value folds nothing and reads `[]`, a list row's empty
 		// spelling. No Default: nothing folded is domain.UIPrefs' zero value and the starter
@@ -1322,6 +1334,7 @@ var KeyRegistry = bindRows([]Key{
 		fromFile:  fileSidePanelFolded,
 		render:    renderSidePanelFolded,
 		readBack:  readBackSidePanelFolded,
+		merge:     mergeSidePanelFolded,
 	},
 	{
 		// A list of lists, so structured — sessions.watch-homes' shape: no one-line row holds it,
@@ -1939,6 +1952,92 @@ func readBackSidePanelFolded(fc fileConfig) (string, bool) {
 		return "", false
 	}
 	return sidePanelFoldedText(domain.SpellSidePanelFolded(written)), true
+}
+
+// The deltas a side-panel gesture writes through the merge hooks below: one section's change, as
+// `<section>: <state>` — for `ui.side-panel.sections` the state is the section's mode, and for
+// `ui.side-panel.folded` it is sidePanelFoldedState or sidePanelOpenState.
+const (
+	sidePanelFoldedState = "folded"
+	sidePanelOpenState   = "open"
+	// sidePanelSectionsDeltaForm and sidePanelFoldedDeltaForm are the deltas' spellings as a
+	// refusal names them.
+	sidePanelSectionsDeltaForm = `"<section>: <mode>"`
+	sidePanelFoldedDeltaForm   = `"<section>: ` + sidePanelFoldedState + `" or "<section>: ` + sidePanelOpenState + `"`
+)
+
+// splitSidePanelDelta cuts a side-panel gesture's delta into its section and its state, refusing —
+// naming the delta's form — anything that is not one `section: state` pair: a whole bracketed list,
+// several entries, or a pair with no section or no colon. Neither half is judged here.
+func splitSidePanelDelta(key, form, delta string) (string, string, error) {
+	text := strings.TrimSpace(delta)
+	section, state, ok := strings.Cut(text, ":")
+	section, state = strings.TrimSpace(section), strings.TrimSpace(state)
+	if !ok || section == "" || strings.ContainsAny(text, "[]{},") {
+		return "", "", fmt.Errorf("apogee: %s is written one section at a time, as %s, not %q", key, form, delta)
+	}
+	return section, state, nil
+}
+
+// mergeSidePanelSections is `ui.side-panel.sections`' merge hook — what a pin, unpin or hide
+// persists. The delta `<section>: <mode>` is judged as the one-entry list the load would read
+// (domain.ParseSidePanelSections), then set in the file's own list (withSectionMode): the entries the
+// file writes keep their order and their modes, and a section the file does not name brings in the
+// whole list as the session resolves it. The text is that list as it will be written; landed is the
+// list it resolves to, every section named. A list in the file that no longer parses is refused.
+func mergeSidePanelSections(before fileConfig, delta string) (string, string, error) {
+	section, mode, err := splitSidePanelDelta(domain.UIKeySidePanelSections, sidePanelSectionsDeltaForm, delta)
+	if err != nil {
+		return "", "", err
+	}
+	asked := domain.SidePanelEntry{Section: domain.SidePanelSection(section), Mode: domain.SidePanelMode(mode)}
+	if _, err := domain.ParseSidePanelSections(string(domain.SpellSidePanelSections(
+		[]domain.SidePanelEntry{asked}))); err != nil {
+		return "", "", err
+	}
+	entries, err := withSectionMode(writtenSidePanelSections(before), asked.Section, asked.Mode)
+	if err != nil {
+		return "", "", err
+	}
+	text := domain.SpellSidePanelSections(entries)
+	resolved, err := domain.ParseSidePanelSections(string(text))
+	if err != nil {
+		return "", "", err
+	}
+	return string(text), string(domain.SpellSidePanelSections(resolved)), nil
+}
+
+// mergeSidePanelFolded is `ui.side-panel.folded`' merge hook — what a section's fold toggle
+// persists. The delta `<section>: folded` or `<section>: open` names a section the load would read
+// (domain.ParseSidePanelFolded); the file's other folded sections stay folded, and the named one is
+// added or dropped. The text is the list in its canonical spelling, `[]` for nothing folded
+// (sidePanelFoldedText); landed is that list as the session holds it, `""` for nothing folded. A
+// list in the file that no longer parses is refused.
+func mergeSidePanelFolded(before fileConfig, delta string) (string, string, error) {
+	name, state, err := splitSidePanelDelta(domain.UIKeySidePanelFolded, sidePanelFoldedDeltaForm, delta)
+	if err != nil {
+		return "", "", err
+	}
+	if state != sidePanelFoldedState && state != sidePanelOpenState {
+		return "", "", fmt.Errorf("apogee: %s is written one section at a time, as %s, not %q",
+			domain.UIKeySidePanelFolded, sidePanelFoldedDeltaForm, delta)
+	}
+	section := domain.SidePanelSection(name)
+	if _, err := domain.ParseSidePanelFolded(string(domain.SpellSidePanelFolded(
+		[]domain.SidePanelSection{section}))); err != nil {
+		return "", "", err
+	}
+	kept := slices.DeleteFunc(slices.Clone(writtenSidePanelFolded(before)),
+		func(s domain.SidePanelSection) bool { return s == section })
+	if state == sidePanelFoldedState {
+		kept = append(kept, section)
+	}
+	folded, err := domain.ParseSidePanelFolded(string(domain.SpellSidePanelFolded(kept)))
+	if err != nil {
+		return "", "", err
+	}
+	landed := domain.SpellSidePanelFolded(folded)
+	return sidePanelFoldedText(landed), string(landed), nil
 }
 
 // validateSessionsMaxAge refuses a `sessions.max-age:` that is not a length of time to keep a

@@ -179,7 +179,7 @@ func TestWatchedConfigReportsNothingForApogeesOwnWrite(t *testing.T) {
 	t.Parallel()
 	c := newWatchedConfig(t, "auto-title: true\n")
 
-	if err := config.SaveConfigSetting(c.path, "auto-title", "false"); err != nil {
+	if _, err := config.SaveConfigSetting(c.path, "auto-title", "false"); err != nil {
 		t.Fatalf("SaveConfigSetting: %v", err)
 	}
 	c.edits.refresh() // what tui.SettingsHost.Write does the moment the write lands

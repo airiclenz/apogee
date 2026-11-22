@@ -584,7 +584,10 @@ func withBootUnreportedKeys(current, boot map[string]bool) map[string]bool {
 // (config.SaveSidePanelSetting), the same writer WriteSidePanelSection persists one section's mode
 // through; the scalar writer reaches the block's depth too, but the host routes the block as one.
 func (h settingsHost) Write(key, value string) error {
-	save := config.SaveConfigSetting
+	save := func(path, key, value string) error {
+		_, err := config.SaveConfigSetting(path, key, value)
+		return err
+	}
 	if config.IsSidePanelKey(key) {
 		save = config.SaveSidePanelSetting
 	}
@@ -651,7 +654,7 @@ func (h settingsHost) SaveTo(target tui.SettingTarget, key, value string) (tui.S
 	case tui.SettingTargetGlobal:
 		err = h.notHeldByProject(key)
 		if err == nil {
-			err = config.SaveConfigSetting(h.configPath, key, value)
+			_, err = config.SaveConfigSetting(h.configPath, key, value)
 		}
 	case tui.SettingTargetProject:
 		err = h.inProject(func() error { return config.SaveProjectSetting(h.projectRoot, h.workspacesDir, key, value) })

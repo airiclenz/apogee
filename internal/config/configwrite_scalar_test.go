@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -785,7 +786,7 @@ func TestConfigWriteSettingRefusals(t *testing.T) {
 			if tt.reset {
 				err = ResetConfigSetting(path, tt.path)
 			} else {
-				err = SaveConfigSetting(path, tt.path, tt.value)
+				_, err = SaveConfigSetting(path, tt.path, tt.value)
 			}
 			if err == nil {
 				t.Fatalf("want an error, got a written file:\n%s", readTestConfig(t, path))
@@ -810,7 +811,7 @@ func TestConfigWriteSettingRefusals(t *testing.T) {
 func TestConfigWriteSettingSeedsAnAbsentConfig(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := SaveConfigSetting(path, "ui.spinner", "glitter"); err != nil {
+	if _, err := SaveConfigSetting(path, "ui.spinner", "glitter"); err != nil {
 		t.Fatalf("save into an absent config: %v", err)
 	}
 	written := readTestConfig(t, path)
@@ -863,7 +864,7 @@ func TestConfigWriteSettingWritesNothingWhenTheFileAlreadyAgrees(t *testing.T) {
 			if tt.reset {
 				err = ResetConfigSetting(path, tt.path)
 			} else {
-				err = SaveConfigSetting(path, tt.path, tt.value)
+				_, err = SaveConfigSetting(path, tt.path, tt.value)
 			}
 			if err != nil {
 				t.Fatalf("write %s: %v", tt.path, err)
@@ -1124,7 +1125,7 @@ func TestConfigWriteSubAgentsServerWritesTheNonEditableKey(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 
-	if err := SaveConfigSetting(path, "sub-agents-server", "my-box"); err == nil {
+	if _, err := SaveConfigSetting(path, "sub-agents-server", "my-box"); err == nil {
 		t.Error("SaveConfigSetting wrote a non-editable key; the settings surface must refuse it")
 	}
 	if err := SaveSubAgentsServer(path, "my-box"); err != nil {
@@ -1308,6 +1309,20 @@ func TestSpliceScalarSettingWritesGestureKeys(t *testing.T) {
 			wantLine: "    sections: [mcp: hidden, sub-agents: auto, tasks: auto, changed-files: auto, usage: auto]  # mine",
 		},
 		{
+			name:    "a whole sections list lands beside the block's other key, every section named",
+			content: "ui:\n  side-panel:\n    show: auto\n",
+			key:     "ui.side-panel.sections", value: "[usage: pinned]",
+			want:     "[usage: pinned, sub-agents: auto, tasks: auto, changed-files: auto, mcp: auto]",
+			wantLine: "    sections: [usage: pinned, sub-agents: auto, tasks: auto, changed-files: auto, mcp: auto]",
+		},
+		{
+			name:    "a whole folded list lands beside the block's other key, a repeated name collapsed",
+			content: "ui:\n  side-panel:\n    show: auto\n",
+			key:     "ui.side-panel.folded", value: "[mcp, tasks, mcp]",
+			want:     "[tasks, mcp]",
+			wantLine: "    folded: [tasks, mcp]",
+		},
+		{
 			name:    "folded into a bare file creates its blocks, in canonical order",
 			content: "mode: auto\n",
 			key:     "ui.side-panel.folded", value: "[mcp, usage, mcp]",
@@ -1383,9 +1398,369 @@ func TestSpliceScalarSettingRefusesGestureKeyShapes(t *testing.T) {
 		t.Errorf("error = %v, led twice", err)
 	}
 
+	if err := validateSettingValue(mustKey("ui.side-panel.folded"), "[lsp]"); err == nil ||
+		!strings.Contains(err.Error(), `unknown section "lsp"`) {
+		t.Errorf("a folded list naming no section: err = %v, want a refusal naming it", err)
+	}
+
 	const blockList = "ui:\n  side-panel:\n    sections:\n      - mcp: pinned\n"
 	if _, err := gestureSetOnDisk(t, blockList, k.Path, "[mcp: hidden]"); err == nil ||
 		!strings.Contains(err.Error(), "one entry per line") {
 		t.Errorf("a list written one entry per line: err = %v, want a refusal naming the layout", err)
+	}
+}
+
+// A pin, unpin or hide is one section's change, merged into the file's own list under the edit lock:
+// the entries the file writes keep their order, their modes and the line's note, a partial list stays
+// partial, and a section the list does not name brings in the whole list as the session resolves it
+// — so the sections keep the order they show in. A file with no list gets the default with the one
+// mode changed, in whatever of the blocks the file already has. landed is the list the file then
+// resolves to, every section named.
+func TestSaveConfigSettingMergesASectionModeDelta(t *testing.T) {
+	t.Parallel()
+	const resolvedDefault = "[sub-agents: auto, tasks: auto, changed-files: auto, usage: hidden, mcp: auto]"
+	for _, tt := range []struct {
+		name, content, delta string
+		want                 string // the whole file after the write
+		wantLanded           string
+	}{
+		{
+			name: "a named section's mode changes in place, comments, order and other keys kept",
+			content: "# my config\nmodel: qwen\nui:\n  spinner: glitter    # the sparkly one\n  side-panel:\n" +
+				"    show: on\n    # the order I like\n" +
+				"    sections: [tasks: pinned, usage: auto, sub-agents: hidden]  # mine\n  notify: bell\n",
+			delta: "usage: hidden",
+			want: "# my config\nmodel: qwen\nui:\n  spinner: glitter    # the sparkly one\n  side-panel:\n" +
+				"    show: on\n    # the order I like\n" +
+				"    sections: [tasks: pinned, usage: hidden, sub-agents: hidden]  # mine\n  notify: bell\n",
+			wantLanded: "[tasks: pinned, usage: hidden, sub-agents: hidden, changed-files: auto, mcp: auto]",
+		},
+		{
+			name:       "an unnamed section brings in the resolved list, its display order kept",
+			content:    "ui:\n  side-panel:\n    sections: [tasks: pinned]\n",
+			delta:      "usage: hidden",
+			want:       "ui:\n  side-panel:\n    sections: [tasks: pinned, sub-agents: auto, changed-files: auto, usage: hidden, mcp: auto]\n",
+			wantLanded: "[tasks: pinned, sub-agents: auto, changed-files: auto, usage: hidden, mcp: auto]",
+		},
+		{
+			name:       "a reordered list keeps its order",
+			content:    "ui:\n  side-panel:\n    sections: [mcp: auto, usage: pinned, tasks: auto, sub-agents: auto, changed-files: auto]\n",
+			delta:      "tasks: hidden",
+			want:       "ui:\n  side-panel:\n    sections: [mcp: auto, usage: pinned, tasks: hidden, sub-agents: auto, changed-files: auto]\n",
+			wantLanded: "[mcp: auto, usage: pinned, tasks: hidden, sub-agents: auto, changed-files: auto]",
+		},
+		{
+			name:       "no ui block",
+			content:    "model: qwen\n",
+			delta:      "usage: hidden",
+			want:       "model: qwen\n\nui:\n  side-panel:\n    sections: " + resolvedDefault + "\n",
+			wantLanded: resolvedDefault,
+		},
+		{
+			name:       "a ui block with keys",
+			content:    "ui:\n    spinner: snake\nmodel: qwen\n",
+			delta:      "usage: hidden",
+			want:       "ui:\n    spinner: snake\n    side-panel:\n      sections: " + resolvedDefault + "\nmodel: qwen\n",
+			wantLanded: resolvedDefault,
+		},
+		{
+			name:       "an empty ui block",
+			content:    "ui:\nmodel: qwen\n",
+			delta:      "usage: hidden",
+			want:       "ui:\n  side-panel:\n    sections: " + resolvedDefault + "\nmodel: qwen\n",
+			wantLanded: resolvedDefault,
+		},
+		{
+			name:       "an empty side-panel block",
+			content:    "ui:\n  side-panel:\n  spinner: snake\n",
+			delta:      " usage :  hidden ",
+			want:       "ui:\n  side-panel:\n    sections: " + resolvedDefault + "\n  spinner: snake\n",
+			wantLanded: resolvedDefault,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := writeTestConfig(t, tt.content)
+
+			landed, err := SaveConfigSetting(path, "ui.side-panel.sections", tt.delta)
+
+			if err != nil {
+				t.Fatalf("SaveConfigSetting: %v", err)
+			}
+			if got := readTestConfig(t, path); got != tt.want {
+				t.Errorf("config =\n%s\nwant\n%s", got, tt.want)
+			}
+			if landed != tt.wantLanded {
+				t.Errorf("landed = %q, want %q", landed, tt.wantLanded)
+			}
+		})
+	}
+}
+
+// A config with no list — here the seeded template itself, written for an absent file — gets the
+// default list with the one mode changed, inserted as one line of the `side-panel:` block it joins.
+func TestSaveConfigSettingSectionDeltaCreatesTheMissingListFromTheDefault(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	template, err := ReadConfigForWrite(path)
+	if err != nil {
+		t.Fatalf("seed the template: %v", err)
+	}
+
+	if _, err := SaveConfigSetting(path, "ui.side-panel.sections", "tasks: pinned"); err != nil {
+		t.Fatalf("SaveConfigSetting: %v", err)
+	}
+
+	at, added := splicedInsertion(t, string(template), readTestConfig(t, path))
+	want := "    sections: [sub-agents: auto, tasks: pinned, changed-files: auto, usage: auto, mcp: auto]"
+	if len(added) != 1 || added[0] != want {
+		t.Fatalf("inserted %q at line %d, want the one line %q", added, at, want)
+	}
+	if above := SplitConfigLines(template)[at-2]; !strings.HasPrefix(strings.TrimSpace(above), "show:") {
+		t.Errorf("the list landed under %q, want it in the side-panel block after show:", above)
+	}
+}
+
+// A delta the file already says is a confirmation: the file is not rewritten — for a mode the list
+// already gives the section, and for a fold the list already holds — and landed is still the list
+// the file resolves to.
+func TestSaveConfigSettingMergeReSetWritesNothing(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name, content, key, delta, wantLanded string
+	}{
+		{
+			name:    "a section's mode the list already gives",
+			content: "ui:\n  side-panel:\n    sections: [tasks: pinned, usage: auto]\n",
+			key:     "ui.side-panel.sections", delta: "tasks: pinned",
+			wantLanded: "[tasks: pinned, usage: auto, sub-agents: auto, changed-files: auto, mcp: auto]",
+		},
+		{
+			name:    "a fold the list already holds",
+			content: "ui:\n  side-panel:\n    folded: [usage, mcp]\n",
+			key:     "ui.side-panel.folded", delta: "mcp: folded",
+			wantLanded: "[usage, mcp]",
+		},
+		{
+			name:    "an open over a list that folds nothing",
+			content: "ui:\n  side-panel:\n    folded: []\n",
+			key:     "ui.side-panel.folded", delta: "mcp: open",
+			wantLanded: "",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := writeTestConfig(t, tt.content)
+			stale := time.Unix(1, 0)
+			if err := os.Chtimes(path, stale, stale); err != nil {
+				t.Fatalf("age the file: %v", err)
+			}
+
+			landed, err := SaveConfigSetting(path, tt.key, tt.delta)
+
+			if err != nil {
+				t.Fatalf("SaveConfigSetting: %v", err)
+			}
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatalf("stat: %v", err)
+			}
+			if !info.ModTime().Equal(stale) || readTestConfig(t, path) != tt.content {
+				t.Error("a re-set of what the file already says rewrote the file")
+			}
+			if landed != tt.wantLanded {
+				t.Errorf("landed = %q, want %q", landed, tt.wantLanded)
+			}
+		})
+	}
+}
+
+// A fold toggle is one section's change too: the file's other folded sections stay folded, the line
+// lands in its canonical spelling beside the block's other keys, comments and other keys carried
+// over, landed is the list the file now holds, and a reload reads that list back. Opening the last
+// folded section leaves `[]` in the file, which reloads — and lands — as the zero value.
+func TestSaveConfigSettingMergesAFoldDelta(t *testing.T) {
+	t.Parallel()
+	path := writeTestConfig(t, "# my config\n"+
+		"ui:\n"+
+		"  side-panel:\n"+
+		"    show: on   # wide screen\n"+
+		"    sections: [tasks: pinned]\n"+
+		"  notify: bell\n")
+
+	if _, err := SaveConfigSetting(path, "ui.side-panel.folded", "mcp: folded"); err != nil {
+		t.Fatalf("fold mcp: %v", err)
+	}
+	landed, err := SaveConfigSetting(path, "ui.side-panel.folded", "usage: folded")
+
+	if err != nil {
+		t.Fatalf("fold usage: %v", err)
+	}
+	if want := "[usage, mcp]"; landed != want {
+		t.Errorf("landed = %q, want %q", landed, want)
+	}
+	want := "# my config\n" +
+		"ui:\n" +
+		"  side-panel:\n" +
+		"    show: on   # wide screen\n" +
+		"    sections: [tasks: pinned]\n" +
+		"    folded: [usage, mcp]\n" +
+		"  notify: bell\n"
+	if got := readTestConfig(t, path); got != want {
+		t.Errorf("config =\n%s\nwant\n%s", got, want)
+	}
+	opts, err := LoadFileConfig(path, os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if string(opts.UI.SidePanelFolded) != landed {
+		t.Errorf("folded reads back %q, want the landed %q", opts.UI.SidePanelFolded, landed)
+	}
+
+	for _, delta := range []string{"mcp: open", "usage: open"} {
+		if landed, err = SaveConfigSetting(path, "ui.side-panel.folded", delta); err != nil {
+			t.Fatalf("%s: %v", delta, err)
+		}
+	}
+
+	if landed != "" {
+		t.Errorf("landed = %q after opening every section, want the zero value", landed)
+	}
+	if got := readTestConfig(t, path); !strings.Contains(got, "    folded: []\n") {
+		t.Errorf("config does not carry the empty list:\n%s", got)
+	}
+	if opts, err = LoadFileConfig(path, os.ReadFile, noNotify); err != nil || opts.UI.SidePanelFolded != "" {
+		t.Errorf("reload = %q, %v; want the zero value", opts.UI.SidePanelFolded, err)
+	}
+}
+
+// What a merge-hook key will not take, refused with the file left as it was: a value that is not one
+// section's delta — a whole bracketed list among them, refused naming the delta's form — a section or
+// mode this build does not know, a list the file writes one entry per line, a block in flow style,
+// and a list in the file that no longer parses.
+func TestSaveConfigSettingMergeRefusals(t *testing.T) {
+	t.Parallel()
+	const sections, folded = "ui.side-panel.sections", "ui.side-panel.folded"
+	for _, tt := range []struct {
+		name, content, key, delta, reason string
+	}{
+		{
+			name:    "a whole sections list",
+			content: "model: qwen\n", key: sections, delta: "[usage: pinned]",
+			reason: `ui.side-panel.sections is written one section at a time, as "<section>: <mode>"`,
+		},
+		{
+			name:    "two sections at once",
+			content: "model: qwen\n", key: sections, delta: "usage: pinned, tasks: hidden",
+			reason: `as "<section>: <mode>"`,
+		},
+		{
+			name:    "a section with no mode",
+			content: "model: qwen\n", key: sections, delta: "usage",
+			reason: `as "<section>: <mode>"`,
+		},
+		{
+			name:    "a whole folded list",
+			content: "model: qwen\n", key: folded, delta: "[usage, mcp]",
+			reason: `ui.side-panel.folded is written one section at a time, as "<section>: folded" or "<section>: open"`,
+		},
+		{
+			name:    "a fold state that is neither folded nor open",
+			content: "model: qwen\n", key: folded, delta: "usage: shut",
+			reason: `as "<section>: folded" or "<section>: open"`,
+		},
+		{
+			name:    "a fold delta naming no section",
+			content: "model: qwen\n", key: folded, delta: ": folded",
+			reason: `as "<section>: folded" or "<section>: open"`,
+		},
+		{
+			name:    "an unknown section",
+			content: "model: qwen\n", key: sections, delta: "lsp: hidden",
+			reason: "unknown section",
+		},
+		{
+			name:    "an unknown mode",
+			content: "model: qwen\n", key: sections, delta: "tasks: folded",
+			reason: "unknown mode",
+		},
+		{
+			name:    "an unknown section to fold",
+			content: "model: qwen\n", key: folded, delta: "lsp: folded",
+			reason: "unknown section",
+		},
+		{
+			name:    "a list one entry per line",
+			content: "ui:\n  side-panel:\n    sections:\n      - tasks: pinned\n", key: sections, delta: "tasks: hidden",
+			reason: "one entry per line",
+		},
+		{
+			name:    "a side-panel block in flow style",
+			content: "ui:\n  side-panel: {show: auto}\n", key: sections, delta: "tasks: hidden",
+			reason: "flow style",
+		},
+		{
+			name:    "a sections list in the file that no longer parses",
+			content: "ui:\n  side-panel:\n    sections: [tasks: pinned, tasks: auto]\n", key: sections, delta: "usage: hidden",
+			reason: "named twice",
+		},
+		{
+			name:    "a folded list in the file that no longer parses",
+			content: "ui:\n  side-panel:\n    folded: [lsp]\n", key: folded, delta: "usage: folded",
+			reason: "unknown section",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := writeTestConfig(t, tt.content)
+
+			landed, err := SaveConfigSetting(path, tt.key, tt.delta)
+
+			if err == nil || !strings.Contains(err.Error(), tt.reason) {
+				t.Fatalf("err = %v, want a refusal naming %q", err, tt.reason)
+			}
+			if landed != "" {
+				t.Errorf("a refused write landed %q", landed)
+			}
+			if got := readTestConfig(t, path); got != tt.content {
+				t.Errorf("a refused write changed the file:\n%s", got)
+			}
+		})
+	}
+}
+
+// A refused delta never seeds the template: it is judged before the file is opened, so an absent
+// config stays absent.
+func TestSaveConfigSettingRefusedDeltaSeedsNothing(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct{ key, delta string }{
+		{"ui.side-panel.sections", "lsp: pinned"},
+		{"ui.side-panel.sections", "[tasks: pinned]"},
+		{"ui.side-panel.folded", "lsp: folded"},
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if _, err := SaveConfigSetting(path, tt.key, tt.delta); err == nil {
+			t.Fatalf("%s %q was accepted", tt.key, tt.delta)
+		}
+		if _, statErr := os.Stat(path); !errors.Is(statErr, fs.ErrNotExist) {
+			t.Errorf("%s %q: a refused write created the config (stat: %v)", tt.key, tt.delta, statErr)
+		}
+	}
+}
+
+// landed for a scalar key is the value as the file now spells it — trimmed and canonical — not the
+// keystrokes the caller handed over.
+func TestSaveConfigSettingAnswersTheScalarAsTheFileSpellsIt(t *testing.T) {
+	t.Parallel()
+	path := writeTestConfig(t, "mode: auto\n")
+	for _, tt := range []struct{ key, value, want string }{
+		{"ui.spinner", "  glitter ", "glitter"},
+		{"context-files.names", "AGENTS.md, CLAUDE.md,", "[AGENTS.md, CLAUDE.md]"},
+		{"auto-compact", "TRUE", "true"},
+	} {
+		landed, err := SaveConfigSetting(path, tt.key, tt.value)
+		if err != nil || landed != tt.want {
+			t.Errorf("SaveConfigSetting(%s, %q) = %q, %v; want %q", tt.key, tt.value, landed, err, tt.want)
+		}
 	}
 }

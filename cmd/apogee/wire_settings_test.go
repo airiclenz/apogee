@@ -3959,7 +3959,7 @@ func TestSeededPromptPersistsThroughTheSettingsWrite(t *testing.T) {
 
 	home := t.TempDir()
 	path := filepath.Join(home, "config.yaml")
-	if err := config.SaveConfigSetting(path, "system-prompt-text", config.DefaultSystemPrompt()); err != nil {
+	if _, err := config.SaveConfigSetting(path, "system-prompt-text", config.DefaultSystemPrompt()); err != nil {
 		t.Fatalf("save the seeded prompt: %v", err)
 	}
 
