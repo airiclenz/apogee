@@ -4,6 +4,7 @@ status: open
 type: task
 priority: 3
 labels: [tui]
+plan: 2026-11-22 - 00 - mcp-holder-consolidation-plan.md
 created: 2026-11-10T19:37:32Z
 ---
 

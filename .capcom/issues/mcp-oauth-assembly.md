@@ -3,6 +3,7 @@ title: "MCP OAuth binding is one value (architecture review 2026-10-14 #17)"
 status: open
 type: task
 priority: 3
+plan: 2026-11-22 - 00 - mcp-holder-consolidation-plan.md
 created: 2026-11-05T19:56:22Z
 ---
 

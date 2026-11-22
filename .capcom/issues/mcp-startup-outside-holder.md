@@ -3,6 +3,7 @@ title: "Startup is the MCP holder's first request (architecture review 2026-11-1
 status: open
 type: task
 priority: 3
+plan: 2026-11-22 - 00 - mcp-holder-consolidation-plan.md
 created: 2026-11-10T19:37:32Z
 ---
 

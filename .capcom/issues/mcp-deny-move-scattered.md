@@ -3,6 +3,7 @@ title: "A url-safety move is one call on the MCP holder (architecture review 202
 status: open
 type: task
 priority: 3
+plan: 2026-11-22 - 00 - mcp-holder-consolidation-plan.md
 created: 2026-11-10T19:37:32Z
 ---
 
