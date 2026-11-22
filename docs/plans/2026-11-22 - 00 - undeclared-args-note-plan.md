@@ -34,7 +34,10 @@
 - Refusing, retrying or correcting a call with extra keys; nested (non-top-level) keys.
 - Any change to `internal/floor` (the repair guard) or the Floor-guard count.
 
-## 1. Name a call's ignored arguments in internal/tools
+## 1. Name a call's ignored arguments in internal/tools — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): consequential edit — internal/tools/doc.go: made necessary by the new internal/tools/ignoredargs.go (the package file map, enforced by TestDocMapNamesEveryFile)
+NOTES (2026-11-22): test table also carries a "not a JSON object" row (`[1]`, unchanged), which the Goal names but the Tests list did not
 
 **What:**
 **Goal:** `internal/tools` exports one function that, given a tool, its call and the result `Execute` returned, returns the result with a final `note:` line naming every top-level argument key the tool's schema does not declare — and returns the result unchanged (same struct value) when there is none, when the arguments are not a JSON object, or when the tool did not opt in. Every tool embedding `toolSpec` opts in; `finish` opts out.

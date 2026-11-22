@@ -433,6 +433,11 @@
 // of an error string, this one keeps an `api-key-env:` value out of any text apogee passes on — and it
 // registers nothing, so a caller outside this package (a sync Reaction's stdout) reaches it as a
 // plain function.
+// ignoredargs.go is NoteIgnoredArguments, the one line a built-in's result gains when its call
+// carried a top-level argument key the schema does not declare — the key decodeArgs' stdlib
+// unmarshal drops without a word — naming the ignored keys and the declared ones. Its opt-in is
+// the unexported undeclaredArgumentsNoter every toolSpec carries and finish declines, so an MCP
+// or host tool never matches. It reads a result Execute already returned and refuses nothing.
 //
 // And doc.go this map.
 package tools

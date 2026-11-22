@@ -77,6 +77,11 @@ func NewFinish(spec workflow.ReceiptSpec, accept func(workflow.Receipt) bool) *F
 // engine state, nothing the host owns.
 func (f *Finish) ReadOnly() bool { return true }
 
+// ignoresUndeclaredArguments opts finish out of NoteIgnoredArguments, shadowing toolSpec's true:
+// finish checks the receipt's fields against the stage's spec and refuses an undeclared one
+// itself, so a note naming it as ignored would contradict that refusal.
+func (f *Finish) ignoresUndeclaredArguments() bool { return false }
+
 // Execute checks the call's receipt against the stage's spec. A malformed one is an error result
 // listing each problem and its fix; a well-formed one is handed to accept. Only ctx cancellation
 // is a Go error.

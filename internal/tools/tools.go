@@ -101,6 +101,12 @@ func decodeArgs(raw json.RawMessage, dst any) error {
 	return json.Unmarshal(raw, dst)
 }
 
+// ignoresUndeclaredArguments opts every built-in embedding toolSpec into NoteIgnoredArguments
+// (undeclaredArgumentsNoter): its arguments decode through decodeArgs above, whose stdlib unmarshal
+// drops an undeclared top-level key without a word, so the result has to say so instead. A tool
+// that refuses such a key itself shadows this with false.
+func (toolSpec) ignoresUndeclaredArguments() bool { return true }
+
 // CanonicalArgs re-encodes a tool call's raw arguments in the one spelling every reader of
 // those bytes can agree on: object keys folded and sorted, a duplicated key collapsed to the
 // occurrence that WINS (the last — decodeArgs above is stdlib JSON, and so is every guard reading

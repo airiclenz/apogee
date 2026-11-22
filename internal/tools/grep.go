@@ -56,8 +56,8 @@ const maxGrepMatches = 1000
 
 // grepCapNudge closes the header once the match cap bit: the model is told HOW to get under
 // it rather than left to page through a capped total. It names the arguments grep honours
-// today — naming one it silently ignores (decodeArgs drops unknown fields) would announce a
-// knob that does nothing.
+// today — naming one grep does not declare would announce a knob that does nothing (a call
+// passing it still runs, and its result names the key back as ignored: NoteIgnoredArguments).
 const grepCapNudge = " — narrow with include, exclude or path"
 
 // grepIncludeSlashHint refuses an include glob carrying a slash. include globs are matched against
