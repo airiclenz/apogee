@@ -91,6 +91,26 @@ existing tool, not roster slots, so method lesson 2 applies (a model that does n
 nothing it had); they are toggleable surface under the standing directive — `grep` itself sits
 behind `tools.disabled` — and are pruned on bench evidence like every other addition.
 
+**Ignored-arguments note added 2026-11-22 (plan `2026-11-22 - 00`, issue `undeclared-args-ignored`):**
+every native tool decodes its arguments with a plain `json.Unmarshal`, so a key its schema does not
+declare was dropped without a word — session 6e088546 passed an invented `line:` to `read_file` 31
+times, and every call came back as an unranged read reported as success. A built-in called with an
+undeclared top-level key now still runs, and its result ends with one line naming the ignored
+key(s) and the declared ones: `note: ignored unknown argument "line" — read_file takes path,
+start_line, end_line, max_lines, locate` (a tool with no parameters reads `— <tool> takes no
+arguments`); the engine appends it once on the leaf tool path, so the session record carries it
+too. A call with only declared keys gets a byte-identical result. Its class is a **structural
+tool-result fact**, ratified by the owner: on for every model, on under Bypass, no config key — not
+an eighth Floor guard (it refuses, retries and corrects nothing) and not a Reaction (it fires at no
+Moment). [ADR 0071](../../.capcom/knowledge/decisions/adr-0071.md) Decision 1(c) is why it may ship
+on: it cannot regress the bare loop, since a declared-only call is unchanged and an extra-key call
+still runs in the same Turn, gaining one true line where the bare loop reports a false success; a
+refusal instead would cost a Turn on harmless extras some models emit. Scope: tools built in
+`internal/tools` only — MCP server tools (their servers validate their own schemas) and
+host-registered tools are untouched, `finish` opts out (it refuses undeclared receipt fields
+itself), and `sub_agent` and `fan_out` never reach the leaf path, so their extras stay silent. Like
+every addition it is pruned on bench evidence.
+
 **Denied, with reasons** (do not re-file as gaps):
 
 - `database_query` — [ADR 0031](../../.capcom/knowledge/decisions/adr-0031.md):

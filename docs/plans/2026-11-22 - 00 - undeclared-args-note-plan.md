@@ -73,7 +73,7 @@ internal/agent/extrareadroots_test.go — TestMissingMountRootAnswersNotFound; i
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestIgnoredArgumentNote|TestDeclaredArgumentsResultUnchanged' ./internal/agent/`
 **Commit:** `feat(agent): append the ignored-arguments note on the leaf tool path`
 
-## 3. Record the change in the tool-surface findings
+## 3. Record the change in the tool-surface findings — ✅ DONE (2026-11-22)
 
 **What:** Depends on item 2.
 **Goal:** `docs/design/tool-surface-findings.md` carries a dated bold-lead record of the ignored-arguments note: what was added, the session evidence (session 6e088546: `read_file` called with an invented `line:` 31 times, every call an unranged read), its class (structural tool-result fact, on under Bypass, no key — the ratified call and its ADR 0071 1(c) reasoning), its scope (built-ins only; MCP, host tools, `finish`, `sub_agent`, `fan_out` excluded) and that, like every addition, it is pruned on bench evidence.
