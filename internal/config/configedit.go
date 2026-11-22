@@ -186,6 +186,18 @@ func scalarChangedOnlyAt(updated []byte, path, want string, set bool) (bool, err
 	return isSet && got == want, nil
 }
 
+// readBackChangedOnlyAt is scalarChangedOnlyAt for a key read back through its row's own hook
+// (Key.readBack) rather than by dotted path — a gesture-written structured key, whose list of maps
+// scalarAtPath reports as not set. It reads the edited config as the load parses it, so the value
+// the gate compares is the one the next start resolves from.
+func readBackChangedOnlyAt(after fileConfig, read func(fileConfig) (string, bool), want string, set bool) bool {
+	got, isSet := read(after)
+	if !set {
+		return !isSet
+	}
+	return isSet && got == want
+}
+
 // scalarAtPath reads the value a config file actually holds at a dotted path, the way any YAML
 // reader sees it — the round-trip half of the verification. A path that is absent, or that runs
 // through a value which is not a block, reports not-set.

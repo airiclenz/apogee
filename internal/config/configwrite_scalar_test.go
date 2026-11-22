@@ -690,6 +690,34 @@ func TestConfigWriteSettingRefusals(t *testing.T) {
 			path:    "servers", value: "nope",
 			wantMsg: "not a simple value",
 		},
+		// The footer's structured keys are edited in the file: neither Editable nor gesture-written
+		// (Key.Gesture), so the writer admits neither.
+		{
+			name:    "the footer's rows are edited in the file",
+			content: "mode: auto\n",
+			path:    "ui.footer.rows", value: "[[host, model]]",
+			wantMsg: "ui.footer.rows is not a simple value; edit it in config.yaml",
+		},
+		{
+			name:    "the footer's colours are edited in the file",
+			content: "mode: auto\n",
+			path:    "ui.footer.colors", value: "{model: success}",
+			wantMsg: "ui.footer.colors is not a simple value; edit it in config.yaml",
+		},
+		// A gesture writes the side panel's two lists, and no surface resets either: the refusal is
+		// the one the writer made before a gesture could write them.
+		{
+			name:    "the side panel's sections are not reset",
+			content: "ui:\n  side-panel:\n    sections: [mcp: pinned]\n",
+			path:    "ui.side-panel.sections", reset: true,
+			wantMsg: "apogee: ui.side-panel.sections is not a simple value; edit it in config.yaml",
+		},
+		{
+			name:    "the side panel's folded sections are not reset",
+			content: "ui:\n  side-panel:\n    folded: [usage]\n",
+			path:    "ui.side-panel.folded", reset: true,
+			wantMsg: "apogee: ui.side-panel.folded is not a simple value; edit it in config.yaml",
+		},
 		{
 			name:    "the confinement acknowledgement stays with /confine",
 			content: "mode: auto\n",
@@ -1232,5 +1260,132 @@ ui:
 	}
 	if again := readTestConfig(t, path); again != cleared {
 		t.Errorf("the second clear rewrote the file:\n%s\nwant:\n%s", again, cleared)
+	}
+}
+
+// gestureSetOnDisk writes value as key through the setting writer's own internals — the row's render
+// (renderSettingValue) and the splice-and-gate pair (scalarSetEdit) under the whole transaction
+// (edit) — into a config holding content, and returns the file as written. It is the whole-value
+// write a gesture-written key admits; which value a gesture hands the public writer is not asked here.
+func gestureSetOnDisk(t *testing.T, content, key, value string) (string, error) {
+	t.Helper()
+	path := writeTestConfig(t, content)
+	splice, verify, err := scalarSetEdit(mustKey(key), value)
+	if err != nil {
+		return "", err
+	}
+	if err := edit(path, splice, verify); err != nil {
+		return "", err
+	}
+	return readTestConfig(t, path), nil
+}
+
+// The side panel's two lists are gesture-written structured keys: the writer admits them
+// (writableKey), renders each value through the key's own parser and speller into one canonical flow
+// line, splices that line wherever the scalar splice puts any key — rewriting one already there,
+// keeping its note, or creating the blocks a bare file lacks — and verifies the result by the key's
+// read-back hook, since a dotted-path read sees a list of maps as nothing. What lands is what the
+// next start resolves: the row's own file projection reads it back as the canonical text.
+func TestSpliceScalarSettingWritesGestureKeys(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name, content, key, value string
+		want                      string // the canonical text the key's line carries
+		wantLine                  string // the whole line it lands on
+	}{
+		{
+			name:    "sections into the template's side-panel block",
+			content: string(defaultConfigYAML),
+			key:     "ui.side-panel.sections", value: "[tasks: pinned, usage: hidden]",
+			want:     "[tasks: pinned, usage: hidden, sub-agents: auto, changed-files: auto, mcp: auto]",
+			wantLine: "    sections: [tasks: pinned, usage: hidden, sub-agents: auto, changed-files: auto, mcp: auto]",
+		},
+		{
+			name:    "sections over a line already there keep its note",
+			content: "ui:\n  side-panel:\n    sections: [mcp: pinned]  # mine\n",
+			key:     "ui.side-panel.sections", value: "[mcp: hidden]",
+			want:     "[mcp: hidden, sub-agents: auto, tasks: auto, changed-files: auto, usage: auto]",
+			wantLine: "    sections: [mcp: hidden, sub-agents: auto, tasks: auto, changed-files: auto, usage: auto]  # mine",
+		},
+		{
+			name:    "folded into a bare file creates its blocks, in canonical order",
+			content: "mode: auto\n",
+			key:     "ui.side-panel.folded", value: "[mcp, usage, mcp]",
+			want:     "[usage, mcp]",
+			wantLine: "    folded: [usage, mcp]",
+		},
+		{
+			name:    "folded to nothing is the empty list",
+			content: "ui:\n  side-panel:\n    folded: [usage]\n",
+			key:     "ui.side-panel.folded", value: "[]",
+			want:     "[]",
+			wantLine: "    folded: []",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			k := mustKey(tt.key)
+			if _, err := writableKey(tt.key); err != nil {
+				t.Fatalf("the writer refuses the gesture-written key: %v", err)
+			}
+			text, want, err := renderSettingValue(k, tt.value)
+			if err != nil || text != tt.want || want != tt.want {
+				t.Fatalf("render %q = (%q, %q, %v), want %q for both", tt.value, text, want, err, tt.want)
+			}
+
+			written, err := gestureSetOnDisk(t, tt.content, tt.key, tt.value)
+			if err != nil {
+				t.Fatalf("write %s: %v", tt.key, err)
+			}
+			if !slices.Contains(SplitConfigLines([]byte(written)), tt.wantLine) {
+				t.Errorf("no line reads %q:\n%s", tt.wantLine, written)
+			}
+			assertOnlyKeyChanged(t, tt.content, written, tt.key)
+			assertCommentsSurvive(t, tt.content, written)
+
+			var fc fileConfig
+			if err := yaml.Unmarshal([]byte(written), &fc); err != nil {
+				t.Fatalf("the written file does not parse: %v", err)
+			}
+			if got, ok := k.readBack(fc); !ok || got != tt.want {
+				t.Errorf("read back %q (set=%v), want %q", got, ok, tt.want)
+			}
+			var o Options
+			if err := k.fromFile(&o, fc); err != nil || k.Read(o) != tt.want {
+				t.Errorf("the next start resolves %q (err=%v), want %q", k.Read(o), err, tt.want)
+			}
+
+			// A re-set of what the file now says is a confirmation: nothing to write.
+			splice, verify, err := scalarSetEdit(k, tt.value)
+			if err != nil {
+				t.Fatalf("state the re-set: %v", err)
+			}
+			if again, err := verifiedEdit([]byte(written), splice, verify); err != nil || again != nil {
+				t.Errorf("a re-set rewrote the file (err=%v):\n%s", err, again)
+			}
+		})
+	}
+}
+
+// What a gesture-written key will not take: a value its own parser refuses — refused before the file
+// is opened, in the load's own sentence and led once — and a list the file writes one entry per line,
+// which the writer will not fold into one (valueFitsOneLine).
+func TestSpliceScalarSettingRefusesGestureKeyShapes(t *testing.T) {
+	t.Parallel()
+	k := mustKey("ui.side-panel.sections")
+	err := validateSettingValue(k, "[nope: pinned]")
+	switch {
+	case err == nil:
+		t.Fatal("a section that is no section was admitted")
+	case !strings.HasPrefix(err.Error(), "apogee: invalid ui.side-panel.sections"):
+		t.Errorf("error = %v, want the load's own sentence", err)
+	case strings.Contains(err.Error(), "apogee: apogee:"):
+		t.Errorf("error = %v, led twice", err)
+	}
+
+	const blockList = "ui:\n  side-panel:\n    sections:\n      - mcp: pinned\n"
+	if _, err := gestureSetOnDisk(t, blockList, k.Path, "[mcp: hidden]"); err == nil ||
+		!strings.Contains(err.Error(), "one entry per line") {
+		t.Errorf("a list written one entry per line: err = %v, want a refusal naming the layout", err)
 	}
 }

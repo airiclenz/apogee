@@ -97,12 +97,25 @@ func ScalarTargetIn(doc *yaml.Node, k Key) (ScalarTarget, error) {
 // valueFitsOneLine reports whether the target's EXISTING value is one this writer may rewrite in
 // place: a value that begins and ends on the key's own line, so replacing that line leaves nothing of
 // it behind. What counts as one differs by kind and by nothing else — a plain scalar for every kind
-// but the list, and for a list a FLOW sequence ([...]) that also opens and closes there.
+// but the list and the structured kind, for a list a FLOW sequence ([...]) that also opens and closes
+// there, and for a structured key (one a gesture writes, Key.Gesture) a flow sequence or a flow map
+// ({...}) that does.
 //
 // A block sequence is refused rather than folded into one line: the file is the user's, and turning
 // four lines of theirs into one is a rewrite they did not ask for. It is the same refusal the flow-
 // style mapping gets one level up, in the other direction.
 func (t ScalarTarget) valueFitsOneLine(line int) error {
+	if t.Kind == KindStructured {
+		switch {
+		case t.ValueNode.Kind != yaml.SequenceNode && t.ValueNode.Kind != yaml.MappingNode:
+			return fmt.Errorf("its %s: holds a single value, not a list or a map; edit the file by hand", t.Key)
+		case t.ValueNode.Style&yaml.FlowStyle == 0:
+			return fmt.Errorf("its %s: value is written one entry per line; edit the file by hand", t.Key)
+		case t.ValueNode.Line != line || maxNodeLine(t.ValueNode) != line:
+			return fmt.Errorf("its %s: value does not sit on the same line as its key; edit the file by hand", t.Key)
+		}
+		return nil
+	}
 	if t.Kind == KindStringList {
 		switch {
 		case t.ValueNode.Kind != yaml.SequenceNode:

@@ -156,6 +156,14 @@ func (c KeyClass) String() string {
 // secret is a `servers:` entry's api-key, nested inside a structured block). Desc is the
 // one-line description a surface shows, condensed from the template's own comments.
 //
+// Gesture marks a key a GESTURE writes rather than a settings row — the side panel's pin, hide
+// and fold toggles, which persist `ui.side-panel.sections` and `ui.side-panel.folded`. It is the
+// second half of who may write a key, beside Editable and read by the same one admission test
+// (writableKey): a key is written by the setting writer when it is Editable or gesture-written,
+// and the pane still edits only the Editable ones. The footer's structured keys carry neither —
+// they are edited in the file. A gesture-written key whose kind no plain render holds (a
+// structured list) carries the writer's two hooks beside it, render and readBack.
+//
 // Validate is the key's own admission test, run on a value a SURFACE offers before it is
 // written (SaveConfigSetting) — the check the kind alone cannot make: a URL that has no host,
 // a port outside 0-65535, a launcher path written as a URL. It is nil for the keys whose kind
@@ -249,6 +257,7 @@ type Key struct {
 	Class       KeyClass
 	Interlocked bool
 	Editable    bool
+	Gesture     bool
 	Masked      bool
 	Validate    func(value string) error
 	Desc        string
@@ -277,6 +286,15 @@ type Key struct {
 	// to the global file outright. A nil projection IS that fence — the pass skips the row.
 	fromEnv  func(o *Options, text string) error
 	fromFlag func(o *Options, flags Options)
+	// render and readBack are the setting writer's two hooks for a gesture-written key whose value
+	// no plain kind renders (Gesture, KindStructured): render turns a value spelled as the file
+	// spells it into the one-line text the file will carry, refusing one the key's own parser
+	// refuses, and readBack reads the key back out of a parsed config in that same spelling,
+	// reporting whether the file states it at all — the read the writer's gate verifies against
+	// where a dotted-path read sees a list of maps as nothing (scalarAtPath). Both reuse the key's
+	// existing parser and speller rather than adding a parse of their own. Nil for every other row.
+	render   func(value string) (string, error)
+	readBack func(fc fileConfig) (string, bool)
 }
 
 // The closed vocabularies of the three enum keys, in the order their parse sites list them.
@@ -1272,31 +1290,38 @@ var KeyRegistry = bindRows([]Key{
 		field:    uiSidePanelWidth(),
 	},
 	{
-		// An ordered list of section/mode pairs, so structured and edited in the file — ui.footer.rows'
-		// posture, global-only by the same zero class. Its Read is the canonical spelling, every
+		// An ordered list of section/mode pairs, so structured — global-only by the zero class, like
+		// every `ui:` key — and gesture-written: the panel's pin, unpin and hide persist it, so no
+		// row edits it but the setting writer admits it (Gesture), rendering and reading it back
+		// through the key's own speller (render, readBack). Its Read is the canonical spelling, every
 		// section named, a text domain.ParseSidePanelSections reads back (UIPrefs.Set lands it), so a
 		// live re-read lands through the parse the file does. No Default: the default lives in
 		// domain.DefaultUIPrefs and the starter template. Judged by fileSidePanelSections at the load.
-		Path: "ui.side-panel.sections", Kind: KindStructured,
+		Path: "ui.side-panel.sections", Kind: KindStructured, Gesture: true,
 		Desc: "The side panel's sections in display order, each pinned, auto or hidden: " +
 			"sub-agents, tasks, changed-files, usage, mcp.",
 		Read:      func(o Options) string { return string(o.UI.SidePanelSections) },
 		Structure: func(o Options) any { return o.UI.SidePanelSections },
 		fromFile:  fileSidePanelSections,
+		render:    renderSidePanelSections,
+		readBack:  readBackSidePanelSections,
 	},
 	{
 		// A list of section names, so structured — ui.side-panel.sections' posture, global-only by the
 		// same zero class — and written by the panel's own fold toggle (SaveSidePanelFold) rather than
-		// a row. Its Read is the canonical spelling, a text domain.ParseSidePanelFolded reads back
+		// a row, so gesture-written as sections is (Gesture, render, readBack). Its Read is the
+		// canonical spelling, a text domain.ParseSidePanelFolded reads back
 		// (UIPrefs.Set lands it); the zero value folds nothing and reads `[]`, a list row's empty
 		// spelling. No Default: nothing folded is domain.UIPrefs' zero value and the starter
 		// template's commented line. Judged by fileSidePanelFolded at the load.
-		Path: "ui.side-panel.folded", Kind: KindStructured,
+		Path: "ui.side-panel.folded", Kind: KindStructured, Gesture: true,
 		Desc: "The side panel's folded sections, their bodies hidden under the header; " +
 			"a section's fold toggle writes it.",
 		Read:      func(o Options) string { return sidePanelFoldedText(o.UI.SidePanelFolded) },
 		Structure: func(o Options) any { return o.UI.SidePanelFolded },
 		fromFile:  fileSidePanelFolded,
+		render:    renderSidePanelFolded,
+		readBack:  readBackSidePanelFolded,
 	},
 	{
 		// A list of lists, so structured — sessions.watch-homes' shape: no one-line row holds it,
@@ -1871,6 +1896,49 @@ func validatePresentPort(value string) error {
 // the table's call, not this hook's.
 func uiKeyValidator(key string) func(string) error {
 	return func(value string) error { return domain.ValidateUIKey(key, value) }
+}
+
+// renderSidePanelSections is `ui.side-panel.sections`' render hook: the value read by the parser the
+// load reads the key with (domain.ParseSidePanelSections), spelled back as the whole list it
+// resolves to, every section named — the canonical one-line text the file carries and the row reads.
+func renderSidePanelSections(value string) (string, error) {
+	entries, err := domain.ParseSidePanelSections(value)
+	if err != nil {
+		return "", err
+	}
+	return string(domain.SpellSidePanelSections(entries)), nil
+}
+
+// readBackSidePanelSections is the key's read-back hook: the entries a parsed config writes, spelled
+// as written (writtenSidePanelSections), and whether it names a list at all.
+func readBackSidePanelSections(fc fileConfig) (string, bool) {
+	written := writtenSidePanelSections(fc)
+	if written == nil {
+		return "", false
+	}
+	return string(domain.SpellSidePanelSections(written)), true
+}
+
+// renderSidePanelFolded is `ui.side-panel.folded`' render hook: the value read by the key's own
+// parser (domain.ParseSidePanelFolded) and spelled in its canonical text, `[]` for nothing folded
+// (sidePanelFoldedText).
+func renderSidePanelFolded(value string) (string, error) {
+	folded, err := domain.ParseSidePanelFolded(value)
+	if err != nil {
+		return "", err
+	}
+	return sidePanelFoldedText(domain.SpellSidePanelFolded(folded)), nil
+}
+
+// readBackSidePanelFolded is the key's read-back hook: the names a parsed config writes, spelled as
+// written (writtenSidePanelFolded) — `[]` for a list that names none — and whether it names a list
+// at all.
+func readBackSidePanelFolded(fc fileConfig) (string, bool) {
+	written := writtenSidePanelFolded(fc)
+	if written == nil {
+		return "", false
+	}
+	return sidePanelFoldedText(domain.SpellSidePanelFolded(written)), true
 }
 
 // validateSessionsMaxAge refuses a `sessions.max-age:` that is not a length of time to keep a

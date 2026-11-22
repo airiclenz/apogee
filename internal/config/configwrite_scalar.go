@@ -108,10 +108,17 @@ func ResetSubAgentsServer(path string) error {
 // ResetConfigSetting removes the config file's active line for the registry path key, so the key
 // resolves from its default again. A key the file does not set is already at its default: that is
 // a no-op, not an error, and nothing is written.
+//
+// A gesture-written structured key (Key.Gesture) is refused here as it was before a gesture could
+// write it: its default is a whole list the load resolves, not a line a removal hands back, and no
+// surface resets it.
 func ResetConfigSetting(path, key string) error {
 	k, err := writableKey(key)
 	if err != nil {
 		return err
+	}
+	if k.Kind == KindStructured {
+		return fmt.Errorf("apogee: %s is not a simple value; edit it in config.yaml", k.Path)
 	}
 	splice, verify := scalarResetEdit(k)
 	return edit(path, splice, verify)
@@ -131,7 +138,10 @@ func ResetConfigSetting(path, key string) error {
 // trusted its caller would be one refactor away from splicing a value nothing checked.
 func validateSettingValue(k Key, value string) error {
 	_, want, err := renderSettingValue(k, value)
-	if err != nil {
+	switch {
+	case err != nil && k.render != nil:
+		return err // the key's own parser, which already speaks the load's led sentence
+	case err != nil:
 		return fmt.Errorf("apogee: %w", err)
 	}
 	if k.Validate == nil {
@@ -144,8 +154,9 @@ func validateSettingValue(k Key, value string) error {
 }
 
 // writableKey resolves a registry path to the row that describes it, and refuses a key no surface
-// may write. Editability is the registry's call, single-homed there: this writer asks rather than
-// keeping a second list of what is safe to touch.
+// may write. Who may write a key is the registry's call, single-homed there: a key is written when
+// its row is Editable (a settings row writes it) or gesture-written (Key.Gesture — a panel gesture
+// writes it), and this writer asks rather than keeping a second list of what is safe to touch.
 func writableKey(key string) (Key, error) {
 	k, ok := LookupKey(key)
 	if !ok {
@@ -156,7 +167,7 @@ func writableKey(key string) (Key, error) {
 		return Key{}, fmt.Errorf(
 			"apogee: %s is not written from the settings surface: it is the confinement acknowledgement, "+
 				"which /confine makes deliberately", k.Path)
-	case !k.Editable:
+	case !k.Editable && !k.Gesture:
 		return Key{}, fmt.Errorf("apogee: %s is not a simple value; edit it in config.yaml", k.Path)
 	}
 	return k, nil
@@ -224,7 +235,18 @@ func scalarResetEdit(k Key) (editSplice, editVerify) {
 // is unambiguous stays bare, which is how the template writes them too. Surrounding whitespace is
 // trimmed: a plain scalar cannot carry it, so keeping it would only make the round-trip check
 // below refuse an edit the user meant.
+//
+// A row's own render hook comes first (Key.render): a gesture-written structured key renders
+// through its parser and speller into one flow line, the text and the value read back alike, so it
+// never falls through to the kinds below and their "not a simple value".
 func renderSettingValue(k Key, value string) (string, string, error) {
+	if k.render != nil {
+		text, err := k.render(value)
+		if err != nil {
+			return "", "", err
+		}
+		return text, text, nil
+	}
 	v := strings.TrimSpace(value)
 	switch k.Kind {
 	case KindBool:
@@ -451,8 +473,17 @@ func spliceScalarDelete(data []byte, k Key) ([]byte, error) {
 // must resolve the target path to exactly what the edit intended (or to nothing, for a reset), and
 // must agree with the config it started from on every other setting — so a file shape the line
 // arithmetic mis-reads surfaces as a refusal rather than as a quietly mangled config.
+//
+// A key with a read-back hook (Key.readBack) is read back through it rather than by dotted path: a
+// list of maps is a value scalarAtPath reports as not set at all.
 func verifyScalarEdit(before, after fileConfig, updated []byte, k Key, want string, set bool) error {
-	placed, err := scalarChangedOnlyAt(updated, k.Path, want, set)
+	var placed bool
+	var err error
+	if k.readBack != nil {
+		placed = readBackChangedOnlyAt(after, k.readBack, want, set)
+	} else {
+		placed, err = scalarChangedOnlyAt(updated, k.Path, want, set)
+	}
 	switch {
 	case err != nil:
 		return fmt.Errorf("the edited file would not parse: %w", err)

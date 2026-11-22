@@ -112,7 +112,10 @@ NOTES (2026-11-22): consequential edit — cmd/apogee/wire_options.go: made nece
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/config/ && test -z "$(grep -rn 'scalarPathDepth\|three segments deep\|one block down\|nested too deeply' --include='*.go' internal/config cmd/apogee)"`
 **Commit:** `refactor(config): splice a scalar setting at any registry depth`
 
-## 4. The writer admits gesture-written structured keys
+## 4. The writer admits gesture-written structured keys — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): validateSettingValue returns a render hook's refusal unwrapped (the domain parsers already lead with "apogee: invalid ui.side-panel.…"), so a refused sections/folded value is not led twice; every other kind keeps the "apogee: %w" wrap.
+NOTES (2026-11-22): the four hook functions (renderSidePanelSections/Folded, readBackSidePanelSections/Folded) live in registry.go beside uiKeyValidator, reusing domain.Parse*/Spell*, sidePanelFoldedText and writtenSidePanel* — no new parsing.
 
 Depends on item 3.
 
