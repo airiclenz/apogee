@@ -4,6 +4,7 @@ status: open
 type: task
 priority: 4
 labels: [driver-parity]
+plan: 2026-11-22 - 01 - typed-tool-outcomes-plan.md
 created: 2026-11-21T12:44:48Z
 ---
 

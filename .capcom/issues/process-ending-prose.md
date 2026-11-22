@@ -3,6 +3,7 @@ title: "A process run's ending travels typed (architecture review 2026-10-14 #7)
 status: open
 type: task
 priority: 3
+plan: 2026-11-22 - 01 - typed-tool-outcomes-plan.md
 created: 2026-11-05T19:56:22Z
 ---
 
