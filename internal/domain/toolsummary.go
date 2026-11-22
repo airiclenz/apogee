@@ -40,7 +40,7 @@ package domain
 // decodes only to paint a live session.
 
 // ToolSummary is the sealed sum type of the structured outcomes a tool may report
-// alongside its prose Content. The variants are the nine below; the marker method is
+// alongside its prose Content. The variants are the ten below; the marker method is
 // unexported, so no package outside internal/* can add one.
 type ToolSummary interface {
 	isToolSummary() // sealing marker; carries no data
@@ -172,6 +172,43 @@ type FetchedBody struct {
 
 func (FetchedBody) isToolSummary() {}
 
+// ProcessState is where a process a tool ran stood when its result was written.
+type ProcessState int
+
+const (
+	// ProcessRunning is a process still running when the result was written: a console the call
+	// opened or read that has not exited.
+	ProcessRunning ProcessState = iota
+	// ProcessExited is a process that exited on its own, with the code ExitCode carries.
+	ProcessExited
+	// ProcessKilled is a process apogee killed — at its time limit, at the denial watch, at a
+	// console's teardown — rather than one that exited on its own.
+	ProcessKilled
+)
+
+// ProcessEnding is a subprocess or console tool's outcome: where its process stood when the result
+// was written and how it ended, as the facts the tool already decided when it wrote the result's
+// exit marker for the model. A host reads the ending off the value instead of parsing that marker
+// back out of the prose.
+//
+// ExitCode is the code the prose marker writes, for every State that writes one: a killed or
+// timed-out run keeps the -1 its marker states, so a host reading the value sees exactly the code
+// the model was told. It is 0 on a running process, whose marker states none.
+type ProcessEnding struct {
+	// State is where the process stood when the result was written.
+	State ProcessState
+	// ExitCode is the code the result's exit marker writes; 0 when it writes none.
+	ExitCode int
+	// TimedOut is a run stopped at its time limit.
+	TimedOut bool
+	// DenialStopped is a run the confinement's kill-on-denial watch stopped: its output reported
+	// a sandbox denial as it streamed, and apogee killed the process group rather than let the
+	// rest of it run.
+	DenialStopped bool
+}
+
+func (ProcessEnding) isToolSummary() {}
+
 // DelegationBound names the engine bound a delegation was stopped at, when one was. The zero
 // value is DelegationUnbounded: the run ended some other way — on its own boundary, at the
 // human's stop, or on a fault.
@@ -186,6 +223,23 @@ const (
 	DelegationTokenBudget
 	// DelegationTimeLimit is a delegation stopped at its time limit.
 	DelegationTimeLimit
+)
+
+// DelegationUnstarted names why a delegation never started, when it did not. The zero value is
+// DelegationRan: the delegated run started, and the outcome's other fields say how it ended.
+type DelegationUnstarted int
+
+const (
+	// DelegationRan is a delegation that started.
+	DelegationRan DelegationUnstarted = iota
+	// DelegationSkipped is a delegation pre-empted before it started.
+	DelegationSkipped
+	// DelegationRefused is a delegation refused for being past the fan-out ceiling.
+	DelegationRefused
+	// DelegationCancelled is a delegation the turn's cancel reached while it was still queued.
+	DelegationCancelled
+	// DelegationStoppedQueued is a delegation the human stopped while it was still queued.
+	DelegationStoppedQueued
 )
 
 // DelegationOutcome is sub_agent's outcome: how the delegated run ended, as the facts the
@@ -210,6 +264,10 @@ type DelegationOutcome struct {
 	// SteeredMessages counts the messages the human sent into the run while it ran; 0 when
 	// it was not steered.
 	SteeredMessages int
+	// Unstarted is why the delegation never started; DelegationRan for one that did. When it is
+	// set, Bound, IsStoppedByUser, HasNoReport and SteeredMessages are all zero: a run that never
+	// started was neither bounded, stopped, reportless nor steered.
+	Unstarted DelegationUnstarted
 }
 
 func (DelegationOutcome) isToolSummary() {}

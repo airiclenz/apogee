@@ -64,7 +64,9 @@ internal/domain/events_test.go — TestMalformedChunksEventNoticeNamesTheCount; 
 
 **Commit:** `refactor(domain): the prune note is worded on PruneEvent`
 
-## 2. ProcessEnding and an unstarted delegation are domain values on the wire
+## 2. ProcessEnding and an unstarted delegation are domain values on the wire — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): the root facade also re-exports the new enum constants (`DelegationRan` … `DelegationStoppedQueued`, `ProcessRunning`/`ProcessExited`/`ProcessKilled`) beside the existing `DelegationUnbounded` block, and `example_test.go` compiles them, so an embedder can name the values it switches on; an unknown `state` name decodes to `ProcessRunning` (the zero), an unknown `unstarted` name to `DelegationRan`.
 
 **What:** Recast at the regression check (2026-11-22).
 **Goal:** `domain.ProcessEnding` is a sealed ToolSummary variant `{State ProcessState; ExitCode int; TimedOut, DenialStopped bool}` with `ProcessState` = `ProcessRunning`, `ProcessExited`, `ProcessKilled` (ExitCode carries the code the prose marker writes for every State that writes one — a killed or timed-out terminal run keeps its `-1`). `domain.DelegationOutcome` gains `Unstarted DelegationUnstarted` — zero `DelegationRan`, then `DelegationSkipped` (pre-empted), `DelegationRefused` (past the fan-out ceiling), `DelegationCancelled` (turn cancel while queued), `DelegationStoppedQueued` (human stop while queued); when set, Bound, IsStoppedByUser, HasNoReport and SteeredMessages are zero. Both round-trip through `internal/eventjson` (`process_ending` kind: `state`, `code`, `timed_out`, `denial_stopped`; `delegation_outcome` gains `unstarted`, always written) and are documented in `docs/manual/headless.md`; the root facade aliases the new types. No producer sets them yet.

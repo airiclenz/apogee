@@ -200,8 +200,16 @@ func roundTripSummaries() []domain.ToolSummary {
 		domain.DelegationOutcome{Bound: domain.DelegationStepCap},
 		domain.DelegationOutcome{Bound: domain.DelegationTokenBudget},
 		domain.DelegationOutcome{Bound: domain.DelegationTimeLimit, SteeredMessages: 1},
+		domain.DelegationOutcome{Unstarted: domain.DelegationSkipped},
+		domain.DelegationOutcome{Unstarted: domain.DelegationRefused},
+		domain.DelegationOutcome{Unstarted: domain.DelegationCancelled},
+		domain.DelegationOutcome{Unstarted: domain.DelegationStoppedQueued},
 		domain.FetchedBody{Status: "200 OK", Truncated: true},
 		domain.FetchedBody{Status: "404 Not Found"},
+		domain.ProcessEnding{State: domain.ProcessRunning},
+		domain.ProcessEnding{State: domain.ProcessExited, ExitCode: 2},
+		domain.ProcessEnding{State: domain.ProcessKilled, ExitCode: -1, TimedOut: true},
+		domain.ProcessEnding{State: domain.ProcessKilled, ExitCode: -1, DenialStopped: true},
 	}
 }
 
@@ -544,6 +552,46 @@ func TestDecodeCoversEveryToolSummaryVariant(t *testing.T) {
 		if !covered[kind] {
 			t.Errorf("the round trip has no %q summary fixture", kind)
 		}
+	}
+}
+
+// TestDecodeReadsAnAbsentUnstartedAsRan pins the additive `unstarted` member of a
+// delegation_outcome summary: a line from a producer that predates it carries no such key, and a
+// run that started writes it as "". Both decode to DelegationRan, the rest of the outcome intact.
+func TestDecodeReadsAnAbsentUnstartedAsRan(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "absent key",
+			raw: `{"kind":"delegation_outcome","bound":"","stopped_by_user":false,"has_no_report":true,` +
+				`"steered_messages":3}`,
+		},
+		{
+			name: "empty name",
+			raw: `{"kind":"delegation_outcome","bound":"","stopped_by_user":false,"has_no_report":true,` +
+				`"steered_messages":3,"unstarted":""}`,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			raw := json.RawMessage(c.raw)
+			got, err := toolSummaryFrom(&raw)
+
+			if err != nil {
+				t.Fatalf("toolSummaryFrom returned %v, want no error", err)
+			}
+			want := domain.DelegationOutcome{HasNoReport: true, SteeredMessages: 3, Unstarted: domain.DelegationRan}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("toolSummaryFrom(%s) = %#v, want %#v", c.raw, got, want)
+			}
+		})
 	}
 }
 

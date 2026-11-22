@@ -220,7 +220,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantBase: domain.EventBase{Depth: 1, Turn: 6, CallID: "call-9"},
 			wantData: `{"phase":"finished","result":{"call_id":"call-9","content":"stopped","is_error":true,` +
 				`"summary":{"kind":"delegation_outcome","bound":"","stopped_by_user":true,"has_no_report":false,` +
-				`"steered_messages":1}},"cancelled":false,"step_cap":0,"cap_requested":0,"at":null}`,
+				`"steered_messages":1,"unstarted":""}},"cancelled":false,"step_cap":0,"cap_requested":0,"at":null}`,
 		},
 		{
 			name: "workflow_phase started",
@@ -862,13 +862,25 @@ func TestEncodeToolSummaryMirror(t *testing.T) {
 			name:    "delegation_outcome at a bound",
 			summary: domain.DelegationOutcome{Bound: domain.DelegationTokenBudget},
 			wantSummary: `{"kind":"delegation_outcome","bound":"token_budget","stopped_by_user":false,` +
-				`"has_no_report":false,"steered_messages":0}`,
+				`"has_no_report":false,"steered_messages":0,"unstarted":""}`,
 		},
 		{
 			name:    "delegation_outcome with no report",
 			summary: domain.DelegationOutcome{HasNoReport: true, SteeredMessages: 2},
 			wantSummary: `{"kind":"delegation_outcome","bound":"","stopped_by_user":false,` +
-				`"has_no_report":true,"steered_messages":2}`,
+				`"has_no_report":true,"steered_messages":2,"unstarted":""}`,
+		},
+		{
+			name:    "delegation_outcome never started",
+			summary: domain.DelegationOutcome{Unstarted: domain.DelegationStoppedQueued},
+			wantSummary: `{"kind":"delegation_outcome","bound":"","stopped_by_user":false,` +
+				`"has_no_report":false,"steered_messages":0,"unstarted":"stopped_queued"}`,
+		},
+		{
+			name:    "delegation_outcome refused",
+			summary: domain.DelegationOutcome{Unstarted: domain.DelegationRefused},
+			wantSummary: `{"kind":"delegation_outcome","bound":"","stopped_by_user":false,` +
+				`"has_no_report":false,"steered_messages":0,"unstarted":"refused"}`,
 		},
 		{
 			name:        "fetched_body truncated",
@@ -879,6 +891,28 @@ func TestEncodeToolSummaryMirror(t *testing.T) {
 			name:        "fetched_body whole",
 			summary:     domain.FetchedBody{Status: "404 Not Found"},
 			wantSummary: `{"kind":"fetched_body","status":"404 Not Found","truncated":false}`,
+		},
+		{
+			name:        "process_ending running",
+			summary:     domain.ProcessEnding{State: domain.ProcessRunning},
+			wantSummary: `{"kind":"process_ending","state":"running","code":0,"timed_out":false,"denial_stopped":false}`,
+		},
+		{
+			name:        "process_ending exited",
+			summary:     domain.ProcessEnding{State: domain.ProcessExited, ExitCode: 2},
+			wantSummary: `{"kind":"process_ending","state":"exited","code":2,"timed_out":false,"denial_stopped":false}`,
+		},
+		{
+			name:    "process_ending killed at the time limit",
+			summary: domain.ProcessEnding{State: domain.ProcessKilled, ExitCode: -1, TimedOut: true},
+			wantSummary: `{"kind":"process_ending","state":"killed","code":-1,"timed_out":true,` +
+				`"denial_stopped":false}`,
+		},
+		{
+			name:    "process_ending stopped by the denial watch",
+			summary: domain.ProcessEnding{State: domain.ProcessKilled, ExitCode: -1, DenialStopped: true},
+			wantSummary: `{"kind":"process_ending","state":"killed","code":-1,"timed_out":false,` +
+				`"denial_stopped":true}`,
 		},
 	}
 

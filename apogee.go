@@ -819,11 +819,37 @@ type DelegationOutcome = domain.DelegationOutcome
 // DelegationBound names the engine bound a delegation was stopped at, if any.
 type DelegationBound = domain.DelegationBound
 
+// DelegationUnstarted names why a delegation never started; DelegationRan for one that did.
+type DelegationUnstarted = domain.DelegationUnstarted
+
+// ProcessEnding is a subprocess or console tool's summary: where its process stood when the
+// result was written, the exit code its marker states, and whether it was stopped at its time
+// limit or by the kill-on-denial watch.
+type ProcessEnding = domain.ProcessEnding
+
+// ProcessState is where a tool's process stood when its result was written: running, exited or
+// killed.
+type ProcessState = domain.ProcessState
+
 const (
 	DelegationUnbounded   = domain.DelegationUnbounded
 	DelegationStepCap     = domain.DelegationStepCap
 	DelegationTokenBudget = domain.DelegationTokenBudget
 	DelegationTimeLimit   = domain.DelegationTimeLimit
+)
+
+const (
+	DelegationRan           = domain.DelegationRan
+	DelegationSkipped       = domain.DelegationSkipped
+	DelegationRefused       = domain.DelegationRefused
+	DelegationCancelled     = domain.DelegationCancelled
+	DelegationStoppedQueued = domain.DelegationStoppedQueued
+)
+
+const (
+	ProcessRunning = domain.ProcessRunning
+	ProcessExited  = domain.ProcessExited
+	ProcessKilled  = domain.ProcessKilled
 )
 
 // ToolRegistry is the injectable set of available tools.

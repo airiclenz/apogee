@@ -350,7 +350,8 @@ embedder's own tool. Like every enum here, `kind` is an open set.
 | `edit_regions` | the writing tools | `regions`, in file order: each with `before_start` and `after_start` (1-based, leading context included) and the `leading`, `removed`, `inserted` and `trailing` lines |
 | `search_hits` | `web_search` | `count` of results |
 | `fetched_body` | `web_fetch`, `http_request` | `status`, the status text the result's first line names (`200 OK`); `truncated`, whether the body hit the response cap |
-| `delegation_outcome` | `sub_agent` | `bound` (`step_cap`, `token_budget`, `time_limit`, or `""` when no bound stopped the run), `stopped_by_user`, `has_no_report` and `steered_messages` |
+| `delegation_outcome` | `sub_agent` | `bound` (`step_cap`, `token_budget`, `time_limit`, or `""` when no bound stopped the run), `stopped_by_user`, `has_no_report` and `steered_messages`; `unstarted`, why the delegation never started — `skipped` (pre-empted), `refused` (past the fan-out ceiling), `cancelled` (the turn's cancel reached it while queued) or `stopped_queued` (stopped while queued) — and `""` for a run that started, when the four before it say how it ended (a line from an older apogee may lack the key; read it as `""`) |
+| `process_ending` | the subprocess and console tools | `state` (`running`, `exited` or `killed`); `code`, the exit code the result's exit marker states (`-1` for a killed or timed-out run, `0` when it states none); `timed_out`, a run stopped at its time limit; `denial_stopped`, a run the kill-on-denial watch stopped |
 
 ### `--seams` — the seam closures, on request
 

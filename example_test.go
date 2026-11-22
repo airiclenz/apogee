@@ -117,6 +117,9 @@ var (
 	_ apogee.FetchedBody
 	_ apogee.DelegationOutcome
 	_ apogee.DelegationBound
+	_ apogee.DelegationUnstarted
+	_ apogee.ProcessEnding
+	_ apogee.ProcessState
 	_ apogee.ToolRegistry
 	_ apogee.ExternalEffects
 	_ apogee.Role
@@ -218,6 +221,16 @@ var (
 	_ = apogee.DelegationStepCap
 	_ = apogee.DelegationTokenBudget
 	_ = apogee.DelegationTimeLimit
+
+	_ = apogee.DelegationRan
+	_ = apogee.DelegationSkipped
+	_ = apogee.DelegationRefused
+	_ = apogee.DelegationCancelled
+	_ = apogee.DelegationStoppedQueued
+
+	_ = apogee.ProcessRunning
+	_ = apogee.ProcessExited
+	_ = apogee.ProcessKilled
 
 	_ = apogee.StatusTurnComplete
 	_ = apogee.StatusExchangeComplete

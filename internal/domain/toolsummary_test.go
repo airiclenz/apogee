@@ -17,6 +17,7 @@ var (
 	_ ToolSummary = SearchHits{}
 	_ ToolSummary = EditRegions{}
 	_ ToolSummary = FetchedBody{}
+	_ ToolSummary = ProcessEnding{}
 )
 
 func TestToolSummaryVariantsAreSealed(t *testing.T) {
@@ -35,9 +36,10 @@ func TestToolSummaryVariantsAreSealed(t *testing.T) {
 		EditRegions{},
 		DelegationOutcome{},
 		FetchedBody{},
+		ProcessEnding{},
 	}
 
-	const want = 9
+	const want = 10
 	if len(variants) != want {
 		t.Fatalf("ToolSummary variants = %d, want %d", len(variants), want)
 	}

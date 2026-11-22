@@ -526,11 +526,16 @@ var summaryDecoders = map[string]summaryDecoder{
 	summaryDelegationOutcome: summaryWith(func(s delegationOutcomeSummary) domain.ToolSummary {
 		return domain.DelegationOutcome{
 			Bound: delegationBoundNamed(s.Bound), IsStoppedByUser: s.StoppedByUser, HasNoReport: s.HasNoReport,
-			SteeredMessages: s.SteeredMessages,
+			SteeredMessages: s.SteeredMessages, Unstarted: delegationUnstartedNamed(s.Unstarted),
 		}
 	}),
 	summaryFetchedBody: summaryWith(func(s fetchedBodySummary) domain.ToolSummary {
 		return domain.FetchedBody{Status: s.Status, Truncated: s.Truncated}
+	}),
+	summaryProcessEnding: summaryWith(func(s processEndingSummary) domain.ToolSummary {
+		return domain.ProcessEnding{
+			State: processStateNamed(s.State), ExitCode: s.Code, TimedOut: s.TimedOut, DenialStopped: s.DenialStopped,
+		}
 	}),
 }
 
@@ -584,6 +589,28 @@ func delegationBoundNamed(name string) domain.DelegationBound {
 		}
 	}
 	return domain.DelegationUnbounded
+}
+
+// delegationUnstartedNamed returns the reason a wire name spells, DelegationRan for "" — and for an
+// absent key, which an older producer's line lacks — and for a name this build does not know.
+func delegationUnstartedNamed(name string) domain.DelegationUnstarted {
+	for reason, spelled := range delegationUnstartedNames {
+		if spelled == name {
+			return reason
+		}
+	}
+	return domain.DelegationRan
+}
+
+// processStateNamed returns the state a wire name spells, ProcessRunning — the zero state — for a
+// name this build does not know.
+func processStateNamed(name string) domain.ProcessState {
+	for state, spelled := range processStateNames {
+		if spelled == name {
+			return state
+		}
+	}
+	return domain.ProcessRunning
 }
 
 // approvalRequestFrom rebuilds a domain.ApprovalRequest from its wire mirror.

@@ -802,6 +802,7 @@ const (
 	summarySearchHits        = "search_hits"
 	summaryDelegationOutcome = "delegation_outcome"
 	summaryFetchedBody       = "fetched_body"
+	summaryProcessEnding     = "process_ending"
 )
 
 // readSpanSummary mirrors domain.ReadSpan: the 1-based inclusive span returned, the file's total
@@ -881,6 +882,7 @@ type delegationOutcomeSummary struct {
 	StoppedByUser   bool   `json:"stopped_by_user"`
 	HasNoReport     bool   `json:"has_no_report"`
 	SteeredMessages int    `json:"steered_messages"`
+	Unstarted       string `json:"unstarted"`
 }
 
 // delegationBoundNames spells each domain.DelegationBound on the wire. DelegationUnbounded is
@@ -889,6 +891,32 @@ var delegationBoundNames = map[domain.DelegationBound]string{
 	domain.DelegationStepCap:     "step_cap",
 	domain.DelegationTokenBudget: "token_budget",
 	domain.DelegationTimeLimit:   "time_limit",
+}
+
+// delegationUnstartedNames spells each domain.DelegationUnstarted on the wire. DelegationRan is
+// absent, so a run that started writes "" — always written, like `bound` (ADR 0075 decision 3).
+var delegationUnstartedNames = map[domain.DelegationUnstarted]string{
+	domain.DelegationSkipped:       "skipped",
+	domain.DelegationRefused:       "refused",
+	domain.DelegationCancelled:     "cancelled",
+	domain.DelegationStoppedQueued: "stopped_queued",
+}
+
+// processEndingSummary mirrors domain.ProcessEnding. State is where the process stood as a name
+// (processStateNames), Code the code the result's exit marker writes.
+type processEndingSummary struct {
+	Kind          string `json:"kind"`
+	State         string `json:"state"`
+	Code          int    `json:"code"`
+	TimedOut      bool   `json:"timed_out"`
+	DenialStopped bool   `json:"denial_stopped"`
+}
+
+// processStateNames spells each domain.ProcessState on the wire; every state has a name.
+var processStateNames = map[domain.ProcessState]string{
+	domain.ProcessRunning: "running",
+	domain.ProcessExited:  "exited",
+	domain.ProcessKilled:  "killed",
 }
 
 // approvalRequest mirrors domain.ApprovalRequest — every disclosure the gate carries, so a reader
@@ -996,9 +1024,15 @@ func toolSummaryOf(summary domain.ToolSummary) any {
 		return delegationOutcomeSummary{
 			Kind: summaryDelegationOutcome, Bound: delegationBoundNames[s.Bound],
 			StoppedByUser: s.IsStoppedByUser, HasNoReport: s.HasNoReport, SteeredMessages: s.SteeredMessages,
+			Unstarted: delegationUnstartedNames[s.Unstarted],
 		}
 	case domain.FetchedBody:
 		return fetchedBodySummary{Kind: summaryFetchedBody, Status: s.Status, Truncated: s.Truncated}
+	case domain.ProcessEnding:
+		return processEndingSummary{
+			Kind: summaryProcessEnding, State: processStateNames[s.State], Code: s.ExitCode,
+			TimedOut: s.TimedOut, DenialStopped: s.DenialStopped,
+		}
 	default:
 		return nil
 	}
