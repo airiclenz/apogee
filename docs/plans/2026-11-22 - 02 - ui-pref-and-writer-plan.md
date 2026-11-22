@@ -44,7 +44,11 @@
 - 9: guard folded
 - 10: guard folded
 
-## 1. Declare every ui.* key once, in a domain table
+## 1. Declare every ui.* key once, in a domain table — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): Validate now runs the per-key refusals in template (table) order — spinner, glyphs, stall-after, tools-fold-over, notify, side-panel show/width/sections/folded, footer rows — so a block with two bad fields reports a different first refusal than before; each single refusal's sentence is unchanged.
+NOTES (2026-11-22): a row's format func spells the field as the registry row reads it today (width 0 → "44", folded "" → "[]", stall-after via Duration.String); DefaultUIPrefs is built by landing each row's "" and panics if a row's "" ever fails to land (an invariant pinned by TestDefaultUIPrefsPinsTheShippedValues).
+NOTES (2026-11-22): reworded the "seventeen keys" comment on TestUIKeysAreTheTemplateOrderAndEveryKeyHasACase (test body unchanged) per the no-key-count-prose rule.
 
 **What:**
 **Goal:** `internal/domain` holds one ordered table covering all 21 `ui.*` keys; `UIPrefs.Set`, `UIKeys()` (the 17 template-list keys, order unchanged), a new `AllUIKeys()` (all 21), `DefaultUIPrefs()` and `UIPrefs.Validate()` derive from it; a new `ValidateUIKey(key, text string) error` checks one key without relying on any other field's zero value.

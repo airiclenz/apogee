@@ -139,8 +139,8 @@ var uiKeyCases = map[string]uiKeyCase{
 }
 
 // TestUIKeysAreTheTemplateOrderAndEveryKeyHasACase pins the sweep the other tests run on: the
-// seventeen keys in the order the starter template presents them, each with a case above, and a slice
-// a caller cannot reorder under this package.
+// template-list keys in the order the starter template presents them, each with a case above, and a
+// slice a caller cannot reorder under this package.
 func TestUIKeysAreTheTemplateOrderAndEveryKeyHasACase(t *testing.T) {
 	t.Parallel()
 
@@ -549,5 +549,210 @@ func TestUIPrefsSetRefusesEveryBadFooterColors(t *testing.T) {
 				t.Errorf("a refused Set moved the block to %+v", u)
 			}
 		})
+	}
+}
+
+// TestDefaultUIPrefsPinsTheShippedValues: the defaults the key table builds by landing every key's
+// `""` are exactly the values the block has always shipped with, spelled out by hand here so a row
+// whose `""` rule drifts is caught rather than silently redefining the default.
+func TestDefaultUIPrefsPinsTheShippedValues(t *testing.T) {
+	t.Parallel()
+
+	want := UIPrefs{
+		Spinner:           SpinnerSnake,
+		SpinnerColor:      true,
+		ShowScrollbar:     true,
+		ColorScheme:       "dark",
+		StallAfter:        120 * time.Second,
+		Inspector:         false,
+		SkillSuggestions:  true,
+		TaskListOpen:      true,
+		ToolsOpen:         false,
+		ToolsFoldOver:     5,
+		ToolsAutoCollapse: true,
+		Glyphs:            GlyphsUnicode,
+		Notify:            NotifyBell,
+		GitFetch:          true,
+		PointerShapes:     false,
+		FooterRows:        "[[host, model, effort, mode], [workdir, git, spend]]",
+		FooterColors:      FooterColors{},
+		SidePanelShow:     SidePanelShowAuto,
+		SidePanelWidth:    0,
+		SidePanelSections: "[sub-agents: auto, tasks: auto, changed-files: auto, usage: auto, mcp: auto]",
+		SidePanelFolded:   "",
+	}
+	if got := DefaultUIPrefs(); got != want {
+		t.Errorf("DefaultUIPrefs() = %+v; want %+v", got, want)
+	}
+}
+
+// TestAllUIKeysNamesEveryKeyOnce: every UIKey* constant is one of AllUIKeys() exactly once, the
+// template-list keys keep their order within it, and the handed-out slice is the caller's own.
+func TestAllUIKeysNamesEveryKeyOnce(t *testing.T) {
+	t.Parallel()
+
+	consts := []string{
+		UIKeySpinner, UIKeySpinnerColor, UIKeyGlyphs, UIKeyShowScrollbar, UIKeyColorScheme,
+		UIKeyStallAfter, UIKeyInspector, UIKeySkillSuggestions, UIKeyTaskListOpen, UIKeyToolsOpen,
+		UIKeyToolsFoldOver, UIKeyToolsAutoCollapse, UIKeyNotify, UIKeyGitFetch, UIKeyPointerShapes,
+		UIKeyFooterRows, UIKeyFooterColors, UIKeySidePanelShow, UIKeySidePanelWidth,
+		UIKeySidePanelSections, UIKeySidePanelFolded,
+	}
+	all := AllUIKeys()
+	for _, key := range consts {
+		if n := countOf(all, key); n != 1 {
+			t.Errorf("%s appears %d times in AllUIKeys(); want once", key, n)
+		}
+	}
+	if len(all) != len(consts) {
+		t.Errorf("AllUIKeys() has %d keys; want the %d UIKey* constants: %v", len(all), len(consts), all)
+	}
+
+	var listed []string
+	for _, key := range all {
+		if slices.Contains(UIKeys(), key) {
+			listed = append(listed, key)
+		}
+	}
+	if !slices.Equal(listed, UIKeys()) {
+		t.Errorf("the template-list keys in AllUIKeys() run %v; want UIKeys()' order %v", listed, UIKeys())
+	}
+
+	handed := AllUIKeys()
+	handed[0] = "ui.nothing"
+	if got := AllUIKeys()[0]; got != UIKeySpinner {
+		t.Errorf("reordering the handed-out slice changed AllUIKeys()[0] to %q", got)
+	}
+}
+
+func countOf(keys []string, key string) int {
+	n := 0
+	for _, k := range keys {
+		if k == key {
+			n++
+		}
+	}
+	return n
+}
+
+// TestUIKeyTableDefaultTextIsTheDocumentedText: a row's default text is the registry row's
+// documented text, never a formatting of DefaultUIPrefs() — the threshold reads `120s` (not
+// `2m0s`), the width `44` (not the unset 0), and the structured keys carry none.
+func TestUIKeyTableDefaultTextIsTheDocumentedText(t *testing.T) {
+	t.Parallel()
+
+	for key, want := range map[string]string{
+		UIKeyStallAfter:        "120s",
+		UIKeySidePanelWidth:    "44",
+		UIKeyFooterRows:        "",
+		UIKeyFooterColors:      "",
+		UIKeySidePanelSections: "",
+		UIKeySidePanelFolded:   "",
+	} {
+		def, ok := uiKeyDefOf(key)
+		if !ok {
+			t.Fatalf("no table row for %s", key)
+		}
+		if def.defaultText != want {
+			t.Errorf("%s default text = %q; want %q", key, def.defaultText, want)
+		}
+	}
+}
+
+// TestValidateUIKeyJudgesEachEnumKeyAlone: every name an enum key's vocabulary offers is accepted
+// and an unknown one is refused in the key's sentence; a key the block does not carry is refused.
+func TestValidateUIKeyJudgesEachEnumKeyAlone(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		key  string
+		good []string
+		bad  string
+		want string
+	}{
+		{UIKeySpinner, names(SpinnerStyleNames()), "twirl", `apogee: invalid ui.spinner: unknown spinner style "twirl"`},
+		{UIKeyGlyphs, names(GlyphSetNames()), "ascii", `apogee: invalid ui.glyphs: unknown glyph set "ascii"`},
+		{UIKeyNotify, names(NotifyModeNames()), "beep", `apogee: invalid ui.notify: unknown notify mode "beep"`},
+		{UIKeySidePanelShow, names(SidePanelShowNames()), "always", `apogee: invalid ui.side-panel.show: unknown side-panel mode "always"`},
+	} {
+		for _, value := range append(tt.good, "", "  ") {
+			if err := ValidateUIKey(tt.key, value); err != nil {
+				t.Errorf("ValidateUIKey(%s, %q) = %v; want accepted", tt.key, value, err)
+			}
+		}
+		err := ValidateUIKey(tt.key, tt.bad)
+		if err == nil || !strings.HasPrefix(err.Error(), tt.want) {
+			t.Errorf("ValidateUIKey(%s, %q) = %v; want it to start with %q", tt.key, tt.bad, err, tt.want)
+		}
+	}
+	if err := ValidateUIKey("ui.nothing", "true"); err == nil ||
+		!strings.Contains(err.Error(), `unknown ui key "ui.nothing"`) {
+		t.Errorf("ValidateUIKey(ui.nothing) = %v; want the unknown-key refusal", err)
+	}
+	if err := ValidateUIKey(UIKeySidePanelWidth, "10"); err == nil ||
+		!strings.HasPrefix(err.Error(), "apogee: invalid ui.side-panel.width 10") {
+		t.Errorf("ValidateUIKey(width, 10) = %v; want the too-narrow refusal", err)
+	}
+}
+
+func names[S ~string](vocabulary []S) []string {
+	out := make([]string, 0, len(vocabulary))
+	for _, name := range vocabulary {
+		out = append(out, string(name))
+	}
+	return out
+}
+
+// TestUIPrefsSetRoundTripsEveryKeysDocumentedValues: for every key of the block, each documented
+// value lands, and the row's spelling of what landed lands the same field again.
+func TestUIPrefsSetRoundTripsEveryKeysDocumentedValues(t *testing.T) {
+	t.Parallel()
+
+	documented := map[string][]string{
+		UIKeySpinner:           names(SpinnerStyleNames()),
+		UIKeySpinnerColor:      {"true", "false"},
+		UIKeyGlyphs:            names(GlyphSetNames()),
+		UIKeyShowScrollbar:     {"true", "false"},
+		UIKeyColorScheme:       {"dark", "light", "my-own"},
+		UIKeyStallAfter:        {"0", "90s", "2m", "120s"},
+		UIKeyInspector:         {"true", "false"},
+		UIKeySkillSuggestions:  {"true", "false"},
+		UIKeyTaskListOpen:      {"true", "false"},
+		UIKeyToolsOpen:         {"true", "false"},
+		UIKeyToolsFoldOver:     {"0", "5", "12"},
+		UIKeyToolsAutoCollapse: {"true", "false"},
+		UIKeyNotify:            names(NotifyModeNames()),
+		UIKeyGitFetch:          {"true", "false"},
+		UIKeyPointerShapes:     {"true", "false"},
+		UIKeyFooterRows:        {"[[host, model, effort, mode], [workdir, git, spend]]", "[[mode, git]]"},
+		UIKeyFooterColors:      {"{}", "{model: success, branch: warning}"},
+		UIKeySidePanelShow:     names(SidePanelShowNames()),
+		UIKeySidePanelWidth:    {"24", "44", "60"},
+		UIKeySidePanelSections: {"[tasks: pinned, usage: hidden]"},
+		UIKeySidePanelFolded:   {"[]", "[usage, mcp]"},
+	}
+	for _, key := range AllUIKeys() {
+		values, ok := documented[key]
+		if !ok {
+			t.Errorf("no documented values for %s", key)
+			continue
+		}
+		def, _ := uiKeyDefOf(key)
+		for _, value := range values {
+			landed := DefaultUIPrefs()
+			if err := landed.Set(key, value); err != nil {
+				t.Errorf("Set(%s, %q): %v", key, value, err)
+				continue
+			}
+			spelled := def.format(landed)
+			again := DefaultUIPrefs()
+			if err := again.Set(key, spelled); err != nil {
+				t.Errorf("Set(%s, %q) — the spelling of %q — refused: %v", key, spelled, value, err)
+				continue
+			}
+			if again != landed {
+				t.Errorf("Set(%s, %q) landed %+v; its spelling %q landed %+v", key, value, landed, spelled, again)
+			}
+		}
 	}
 }

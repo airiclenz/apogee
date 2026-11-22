@@ -614,20 +614,17 @@ const (
 	UIKeySidePanelFolded = "ui.side-panel.folded"
 )
 
-// uiKeys is the block's keys in the order the starter template presents them, declared once so a
-// caller sweeping the block reads it in the order the user edits it.
-var uiKeys = []string{
-	UIKeySpinner, UIKeySpinnerColor, UIKeyGlyphs, UIKeyShowScrollbar, UIKeyColorScheme,
-	UIKeyStallAfter, UIKeyInspector, UIKeySkillSuggestions, UIKeyTaskListOpen, UIKeyToolsOpen,
-	UIKeyToolsFoldOver, UIKeyToolsAutoCollapse, UIKeyPointerShapes, UIKeyNotify, UIKeyGitFetch,
-	UIKeySidePanelShow, UIKeySidePanelWidth,
-}
-
-// UIKeys returns the `ui:` block's keys in template order. It hands back a fresh slice on every
-// call, as [SpinnerStyleNames] does, so a caller cannot reorder the one this package reads.
+// UIKeys returns the `ui:` block's template-list keys — the ones a settings row edits, the
+// structured keys left out — in the order the starter template presents them, so a caller sweeping
+// the block reads it in the order the user edits it. It hands back a fresh slice on every call, as
+// [SpinnerStyleNames] does, so a caller cannot reorder the one this package reads.
 func UIKeys() []string {
-	keys := make([]string, len(uiKeys))
-	copy(keys, uiKeys)
+	keys := make([]string, 0, len(uiKeyTable))
+	for _, def := range uiKeyTable {
+		if def.listed {
+			keys = append(keys, def.path)
+		}
+	}
 	return keys
 }
 
@@ -640,25 +637,16 @@ func UIKeys() []string {
 // periodic git fetch on, the footer laid out on two rows, the upstream above the workspace, and the
 // side panel drawn at its unset width (0, which every reader resolves to 44 columns) where the window
 // has room for it, every section in auto and none folded.
-// Every `""` handed to [UIPrefs.Set] lands the field this value carries for that key.
+// It is built by landing every key's `""` in turn, so what [UIPrefs.Set] lands for a `""` and what
+// this value carries for that key are one rule, by construction.
 func DefaultUIPrefs() UIPrefs {
-	return UIPrefs{
-		Spinner:           DefaultSpinnerStyle,
-		SpinnerColor:      true,
-		ShowScrollbar:     true,
-		ColorScheme:       DefaultColorSchemeName,
-		StallAfter:        DefaultStallAfter,
-		SkillSuggestions:  true,
-		TaskListOpen:      true,
-		ToolsFoldOver:     DefaultToolsFoldOver,
-		ToolsAutoCollapse: true,
-		Glyphs:            DefaultGlyphSet,
-		Notify:            DefaultNotifyMode,
-		GitFetch:          true,
-		FooterRows:        DefaultFooterRows,
-		SidePanelShow:     DefaultSidePanelShow,
-		SidePanelSections: DefaultSidePanelSections,
+	var u UIPrefs
+	for _, def := range uiKeyTable {
+		if err := def.land(&u, ""); err != nil {
+			panic(fmt.Sprintf("domain: the default of %s does not land: %v", def.path, err))
+		}
 	}
+	return u
 }
 
 // ParseStallAfter reads a `ui.stall-after:` value: a length of time as time.ParseDuration spells
@@ -702,177 +690,50 @@ func ParseToolsFoldOver(text string) (int, error) {
 	return n, nil
 }
 
-// Validate rejects a block naming a spinner style this build has no animation for, a StallAfter
-// below zero, a ToolsFoldOver below zero, a glyph set this build does not know, a notify mode it
-// does not know, footer rows [ParseFooterRows] refuses, a side-panel show mode it does not know, a
-// side-panel width stated below [MinSidePanelWidth], side-panel sections [ParseSidePanelSections]
-// refuses, or folded sections [ParseSidePanelFolded] refuses — the same ten refusals the parsers make (a zero width is the unset field, not a refusal),
-// so a block assembled field by field is judged as one read through
-// [UIPrefs.Set] would be. Catching them here makes a typo a startup error that names the key; left
-// to the renderer they would silently resolve to some other style, the shipped threshold or the
-// unicode glyphs, and the user would be left wondering why their setting did nothing.
+// Validate rejects a block naming a spinner style this build has no animation for, a glyph set it
+// does not know, a StallAfter below zero, a ToolsFoldOver below zero, a notify mode it does not
+// know, a side-panel show mode it does not know, a side-panel width stated below
+// [MinSidePanelWidth], side-panel sections [ParseSidePanelSections] refuses, folded sections
+// [ParseSidePanelFolded] refuses, or footer rows [ParseFooterRows] refuses — each key's own refusal
+// from the key table, in template order, in the sentence its parser makes (a zero width is the
+// unset field, not a refusal, and every other zero field is valid too), so a block assembled field
+// by field is judged as one read through [UIPrefs.Set] would be. Catching them here makes a typo a
+// startup error that names the key; left to the renderer they would silently resolve to some other
+// style, the shipped threshold or the unicode glyphs, and the user would be left wondering why
+// their setting did nothing.
 func (u UIPrefs) Validate() error {
-	if _, err := ParseSpinnerStyle(string(u.Spinner)); err != nil {
-		return fmt.Errorf("apogee: invalid ui.spinner: %w", err)
+	for _, def := range uiKeyTable {
+		if def.validate == nil {
+			continue
+		}
+		if err := def.validate(u); err != nil {
+			return err
+		}
 	}
-	if err := validStallAfter(u.StallAfter); err != nil {
-		return err
-	}
-	if _, err := ParseGlyphSet(string(u.Glyphs)); err != nil {
-		return fmt.Errorf("apogee: invalid ui.glyphs: %w", err)
-	}
-	if _, err := ParseNotifyMode(string(u.Notify)); err != nil {
-		return fmt.Errorf("apogee: invalid ui.notify: %w", err)
-	}
-	if _, err := ParseFooterRows(string(u.FooterRows)); err != nil {
-		return err
-	}
-	if _, err := ParseSidePanelShow(string(u.SidePanelShow)); err != nil {
-		return fmt.Errorf("apogee: invalid ui.side-panel.show: %w", err)
-	}
-	if err := validSidePanelWidth(u.SidePanelWidth); err != nil {
-		return err
-	}
-	if _, err := ParseSidePanelSections(string(u.SidePanelSections)); err != nil {
-		return err
-	}
-	if _, err := ParseSidePanelFolded(string(u.SidePanelFolded)); err != nil {
-		return err
-	}
-	return validToolsFoldOver(u.ToolsFoldOver)
+	return nil
 }
 
 // Set lands one key's value, spelled as the config file spells it, onto the block: the text is
 // trimmed, `""` lands that key's default (what a fresh start resolves from a file that does not
-// carry the key), and the value is parsed per key — the spinner through [ParseSpinnerStyle], the
-// glyph set through [ParseGlyphSet], the notify mode through [ParseNotifyMode], the footer rows
-// through [ParseFooterRows] (landing their canonical spelling), the footer colours through
-// [ParseFooterColors], the side-panel show mode through [ParseSidePanelShow], the side-panel width
-// through [ParseSidePanelWidth], the side-panel sections through [ParseSidePanelSections] (landing their canonical spelling, every section
-// named), the folded sections through [ParseSidePanelFolded] (landing their canonical spelling), the bools through strconv.ParseBool, the threshold and the count through their parsers, the scheme
+// carry the key), and the value is parsed by the key's own row of the key table — a name through
+// its vocabulary's parser, a bool through strconv.ParseBool, the threshold and the counts through
+// their parsers, a structured key through its parser landing its canonical spelling, the scheme
 // name as it is. The edit runs on a COPY, [UIPrefs.Validate] judges the copy, and only a copy it
 // accepts is written back: a Set that fails has touched nothing. A key this block does not carry
 // is refused.
 func (u *UIPrefs) Set(key, value string) error {
-	value = strings.TrimSpace(value)
+	def, ok := uiKeyDefOf(key)
+	if !ok {
+		return unknownUIKey(key)
+	}
 	edited := *u
-	if err := edited.land(key, value); err != nil {
+	if err := def.land(&edited, strings.TrimSpace(value)); err != nil {
 		return err
 	}
 	if err := edited.Validate(); err != nil {
 		return err
 	}
 	*u = edited
-	return nil
-}
-
-// land writes one key's parsed value onto the receiver, `""` landing the key's default. It is
-// Set's edit without Set's guard, so it only ever runs on the copy Set holds.
-func (u *UIPrefs) land(key, value string) error {
-	defaults := DefaultUIPrefs()
-	switch key {
-	case UIKeySpinner:
-		style, err := ParseSpinnerStyle(value)
-		if err != nil {
-			return fmt.Errorf("apogee: invalid ui.spinner: %w", err)
-		}
-		u.Spinner = style
-	case UIKeySpinnerColor:
-		return landBool(&u.SpinnerColor, key, value, defaults.SpinnerColor)
-	case UIKeyGlyphs:
-		set, err := ParseGlyphSet(value)
-		if err != nil {
-			return fmt.Errorf("apogee: invalid ui.glyphs: %w", err)
-		}
-		u.Glyphs = set
-	case UIKeyShowScrollbar:
-		return landBool(&u.ShowScrollbar, key, value, defaults.ShowScrollbar)
-	case UIKeyColorScheme:
-		u.ColorScheme = value
-		if value == "" {
-			u.ColorScheme = defaults.ColorScheme
-		}
-	case UIKeyStallAfter:
-		after, err := ParseStallAfter(value)
-		if err != nil {
-			return err
-		}
-		u.StallAfter = after
-	case UIKeyInspector:
-		return landBool(&u.Inspector, key, value, defaults.Inspector)
-	case UIKeySkillSuggestions:
-		return landBool(&u.SkillSuggestions, key, value, defaults.SkillSuggestions)
-	case UIKeyTaskListOpen:
-		return landBool(&u.TaskListOpen, key, value, defaults.TaskListOpen)
-	case UIKeyToolsOpen:
-		return landBool(&u.ToolsOpen, key, value, defaults.ToolsOpen)
-	case UIKeyToolsFoldOver:
-		n, err := ParseToolsFoldOver(value)
-		if err != nil {
-			return err
-		}
-		u.ToolsFoldOver = n
-	case UIKeyToolsAutoCollapse:
-		return landBool(&u.ToolsAutoCollapse, key, value, defaults.ToolsAutoCollapse)
-	case UIKeyNotify:
-		// `""` lands the shipped default, the contract every key keeps here — not the off that
-		// ParseNotifyMode reads the zero value as.
-		if value == "" {
-			u.Notify = defaults.Notify
-			return nil
-		}
-		mode, err := ParseNotifyMode(value)
-		if err != nil {
-			return fmt.Errorf("apogee: invalid ui.notify: %w", err)
-		}
-		u.Notify = mode
-	case UIKeyGitFetch:
-		return landBool(&u.GitFetch, key, value, defaults.GitFetch)
-	case UIKeyPointerShapes:
-		return landBool(&u.PointerShapes, key, value, defaults.PointerShapes)
-	case UIKeyFooterRows:
-		rows, err := ParseFooterRows(value)
-		if err != nil {
-			return err
-		}
-		u.FooterRows = SpellFooterRows(rows)
-	case UIKeyFooterColors:
-		colors, err := ParseFooterColors(value)
-		if err != nil {
-			return err
-		}
-		u.FooterColors = colors
-	case UIKeySidePanelShow:
-		show, err := ParseSidePanelShow(value)
-		if err != nil {
-			return fmt.Errorf("apogee: invalid ui.side-panel.show: %w", err)
-		}
-		u.SidePanelShow = show
-	case UIKeySidePanelWidth:
-		if value == "" {
-			u.SidePanelWidth = defaults.SidePanelWidth // the unset width, never the default's number
-			return nil
-		}
-		width, err := ParseSidePanelWidth(value)
-		if err != nil {
-			return err
-		}
-		u.SidePanelWidth = width
-	case UIKeySidePanelSections:
-		entries, err := ParseSidePanelSections(value)
-		if err != nil {
-			return err
-		}
-		u.SidePanelSections = SpellSidePanelSections(entries)
-	case UIKeySidePanelFolded:
-		folded, err := ParseSidePanelFolded(value)
-		if err != nil {
-			return err
-		}
-		u.SidePanelFolded = SpellSidePanelFolded(folded)
-	default:
-		return fmt.Errorf("apogee: unknown ui key %q", key)
-	}
 	return nil
 }
 
