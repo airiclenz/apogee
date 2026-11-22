@@ -82,11 +82,11 @@ func TestWriteConfigAtomicallySavesASidePanelSettingThroughAJunction(t *testing.
 	t.Parallel()
 	path, target := junctionConfigOrSkip(t, "ui:\n  side-panel:\n    show: auto\n")
 
-	if err := SaveSidePanelSetting(path, domain.UIKeySidePanelShow, "off"); err != nil {
-		t.Fatalf("SaveSidePanelSetting under a junction: %v", err)
+	if _, err := SaveConfigSetting(path, domain.UIKeySidePanelShow, "off"); err != nil {
+		t.Fatalf("SaveConfigSetting under a junction: %v", err)
 	}
 
-	if got := readSectionsConfig(t, target); !strings.Contains(got, "show: \"off\"") {
+	if got := readTestConfig(t, target); !strings.Contains(got, "show: \"off\"") {
 		t.Errorf("config =\n%s\nwant it to set show: \"off\"", got)
 	}
 	assertStillAJunction(t, path)

@@ -20,18 +20,13 @@ import (
 // nothing else: every function reads and behaves exactly as it did in one file.
 
 // ScalarTarget is where a key stands in the parsed document: the nodes of its active `key: value`
-// (nil when the file does not set it) and, for a nested key, the blocks above it — the IMMEDIATE
-// parent in the Parent fields, which the side-panel block writer (configwrite_sections.go) builds and
-// reads, and the whole chain beside them, which is what lets one writer reach a key at any depth.
+// (nil when the file does not set it) and, for a nested key, the whole chain of blocks above it,
+// which is what lets one writer reach a key at any depth.
 type ScalarTarget struct {
-	Key        string     // the leaf key as the file spells it
-	Kind       Kind       // what the key holds, and with it the value shapes its line may carry
-	Parent     string     // the block the key sits in, empty for a top-level key
-	KeyNode    *yaml.Node // the leaf key, nil when the key has no active line
-	ValueNode  *yaml.Node // its value, nil with keyNode
-	ParentKey  *yaml.Node // the block's key, nil when the block is absent
-	ParentBody *yaml.Node // the block's value, nil when the block is absent
-	ParentNull bool       // the block's key is there with nothing under it yet
+	Key       string     // the leaf key as the file spells it
+	Kind      Kind       // what the key holds, and with it the value shapes its line may carry
+	KeyNode   *yaml.Node // the leaf key, nil when the key has no active line
+	ValueNode *yaml.Node // its value, nil with keyNode
 
 	chain   []string      // every block the key sits in, outermost first; empty for a top-level key
 	found   []scalarBlock // the leading run of chain the file holds, outermost first
@@ -62,9 +57,6 @@ func ScalarTargetIn(doc *yaml.Node, k Key) (ScalarTarget, error) {
 	segments := strings.Split(k.Path, ".")
 	last := len(segments) - 1
 	t := ScalarTarget{Key: segments[last], Kind: k.Kind, chain: segments[:last], missing: segments[:last]}
-	if last > 0 {
-		t.Parent = segments[last-1]
-	}
 	root, err := rootMapping(doc)
 	if root == nil || err != nil {
 		return t, err
@@ -82,9 +74,6 @@ func ScalarTargetIn(doc *yaml.Node, k Key) (ScalarTarget, error) {
 			return t, fmt.Errorf("its %s: is not a block of settings; edit the file by hand", name)
 		}
 		t.found, t.missing = append(t.found, scalarBlock{key: key, body: body}), t.chain[i+1:]
-		if i == last-1 {
-			t.ParentKey, t.ParentBody, t.ParentNull = key, body, isNullNode(body)
-		}
 		if isNullNode(body) {
 			return t, nil // `ui:` with nothing under it yet: no children to find
 		}

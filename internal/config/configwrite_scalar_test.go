@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // The hand-edited config every golden case starts from: comments, a commented example above each
@@ -1762,5 +1764,176 @@ func TestSaveConfigSettingAnswersTheScalarAsTheFileSpellsIt(t *testing.T) {
 		if err != nil || landed != tt.want {
 			t.Errorf("SaveConfigSetting(%s, %q) = %q, %v; want %q", tt.key, tt.value, landed, err, tt.want)
 		}
+	}
+}
+
+// `ui.side-panel.show` lands through the setting writer like any nested enum — rewritten in place
+// with its note kept, or inserted beside the block's list where the file does not set it — and a
+// mode it cannot hold is refused before the file is opened, so an absent config stays absent.
+func TestSaveConfigSettingWritesSidePanelShow(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name, content, want string
+	}{
+		{
+			name:    "rewritten in place",
+			content: "ui:\n  side-panel:\n    show: auto           # by width\n",
+			want:    "ui:\n  side-panel:\n    show: \"off\"           # by width\n",
+		},
+		{
+			name:    "inserted beside the list",
+			content: "ui:\n  side-panel:\n    sections: [tasks: pinned]\n",
+			want:    "ui:\n  side-panel:\n    sections: [tasks: pinned]\n    show: \"off\"\n",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := writeTestConfig(t, tt.content)
+
+			if _, err := SaveConfigSetting(path, "ui.side-panel.show", "off"); err != nil {
+				t.Fatalf("SaveConfigSetting: %v", err)
+			}
+
+			if got := readTestConfig(t, path); got != tt.want {
+				t.Errorf("config =\n%s\nwant\n%s", got, tt.want)
+			}
+		})
+	}
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if _, err := SaveConfigSetting(path, "ui.side-panel.show", "sometimes"); err == nil {
+		t.Fatal("an unknown show mode was accepted")
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Errorf("a refused write created the config (stat: %v)", statErr)
+	}
+}
+
+// A reset of `ui.side-panel.show` removes its line, so the key reads back at its default. Comments,
+// order and the other keys stay as found; a block the removal empties goes with it, and `ui:` too
+// when the block was all it held.
+func TestResetConfigSettingRemovesSidePanelShow(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name, content, want string
+	}{
+		{
+			name: "beside the list",
+			content: "# mine\nui:\n  spinner: glitter\n  side-panel:\n    show: \"off\"   # by hand\n" +
+				"    # the order I like\n    sections: [tasks: pinned]\n  notify: bell\n",
+			want: "# mine\nui:\n  spinner: glitter\n  side-panel:\n" +
+				"    # the order I like\n    sections: [tasks: pinned]\n  notify: bell\n",
+		},
+		{
+			name:    "the block's only key",
+			content: "ui:\n  spinner: glitter\n  side-panel:\n    show: on\ncurrency: EUR\n",
+			want:    "ui:\n  spinner: glitter\ncurrency: EUR\n",
+		},
+		{
+			name:    "ui's only block",
+			content: "currency: EUR\nui:\n  side-panel:\n    show: on\n",
+			want:    "currency: EUR\n",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := writeTestConfig(t, tt.content)
+
+			if err := ResetConfigSetting(path, "ui.side-panel.show"); err != nil {
+				t.Fatalf("ResetConfigSetting: %v", err)
+			}
+
+			if got := readTestConfig(t, path); got != tt.want {
+				t.Errorf("config =\n%s\nwant\n%s", got, tt.want)
+			}
+			opts, err := LoadFileConfig(path, os.ReadFile, noNotify)
+			if err != nil {
+				t.Fatalf("LoadFileConfig: %v", err)
+			}
+			if opts.UI.SidePanelShow != domain.DefaultSidePanelShow {
+				t.Errorf("show reads back %q, want the default %q", opts.UI.SidePanelShow, domain.DefaultSidePanelShow)
+			}
+		})
+	}
+}
+
+// A reset of a side-panel key the file does not set is already at its default: the file is not
+// rewritten. The two gesture-written lists, which no surface resets, are refused with the file
+// untouched.
+func TestResetConfigSettingSidePanelNoOpAndRefusals(t *testing.T) {
+	t.Parallel()
+	const body = "ui:\n  side-panel:\n    sections: [tasks: pinned]\n"
+	path := writeTestConfig(t, body)
+	stale := time.Unix(1, 0)
+	if err := os.Chtimes(path, stale, stale); err != nil {
+		t.Fatalf("age the file: %v", err)
+	}
+
+	if err := ResetConfigSetting(path, "ui.side-panel.show"); err != nil {
+		t.Fatalf("ResetConfigSetting of an unset key: %v", err)
+	}
+	for _, key := range []string{"ui.side-panel.sections", "ui.side-panel.folded"} {
+		if err := ResetConfigSetting(path, key); err == nil {
+			t.Errorf("ResetConfigSetting(%q) succeeded; want a refusal", key)
+		}
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if !info.ModTime().Equal(stale) || readTestConfig(t, path) != body {
+		t.Error("a no-op or refused reset rewrote the file")
+	}
+}
+
+// `ui.side-panel.width` lands beside the block's other keys and resets back off the file, `show` and
+// `sections` kept as found both ways; a width below 24 is refused before the file is opened, and the
+// file is left as it was.
+func TestSaveConfigSettingWritesAndResetsSidePanelWidth(t *testing.T) {
+	t.Parallel()
+	const body = "ui:\n  side-panel:\n    show: on             # by hand\n" +
+		"    sections: [tasks: pinned]\n"
+	path := writeTestConfig(t, body)
+
+	if _, err := SaveConfigSetting(path, "ui.side-panel.width", "23"); err == nil {
+		t.Error("SaveConfigSetting(width 23) succeeded; want a refusal")
+	}
+	if got := readTestConfig(t, path); got != body {
+		t.Fatalf("a refused width rewrote the file:\n%s", got)
+	}
+	if _, err := SaveConfigSetting(path, "ui.side-panel.width", "48"); err != nil {
+		t.Fatalf("SaveConfigSetting(width 48): %v", err)
+	}
+	if got, want := readTestConfig(t, path), body+"    width: 48\n"; got != want {
+		t.Errorf("config after save =\n%s\nwant\n%s", got, want)
+	}
+	if _, err := SaveConfigSetting(path, "ui.side-panel.width", "40"); err != nil {
+		t.Fatalf("SaveConfigSetting(width 40): %v", err)
+	}
+	if got, want := readTestConfig(t, path), body+"    width: 40\n"; got != want {
+		t.Errorf("config after a rewrite in place =\n%s\nwant\n%s", got, want)
+	}
+	opts, err := LoadFileConfig(path, os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("LoadFileConfig: %v", err)
+	}
+	if opts.UI.SidePanelWidth != 40 || opts.UI.SidePanelShow != domain.SidePanelShowOn {
+		t.Errorf("read back width %d show %q; want 40 and on", opts.UI.SidePanelWidth, opts.UI.SidePanelShow)
+	}
+
+	if err := ResetConfigSetting(path, "ui.side-panel.width"); err != nil {
+		t.Fatalf("ResetConfigSetting(width): %v", err)
+	}
+
+	if got := readTestConfig(t, path); got != body {
+		t.Errorf("config after reset =\n%s\nwant\n%s", got, body)
+	}
+	opts, err = LoadFileConfig(path, os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("LoadFileConfig: %v", err)
+	}
+	if opts.UI.SidePanelWidth != 0 {
+		t.Errorf("width reads back %d after reset, want 0, the unset width", opts.UI.SidePanelWidth)
 	}
 }

@@ -204,7 +204,12 @@ Also: `TestSettingsHostWritesBothSidePanelSectionsBlockKeys` (wire_options_test.
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'Panel|NavMode|Settings' ./internal/tui/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSettingsHost' ./cmd/apogee/`
 **Commit:** `refactor(tui): pin and fold gestures write through the settings host Write`
 
-## 8. Retire the side-panel splice engine
+## 8. Retire the side-panel splice engine — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): moved sidePanelFoldedText, withSectionMode, writtenSidePanelSections and writtenSidePanelFolded into registry.go beside the merge hooks that use them; readSectionsConfig replaced by the surviving readTestConfig in configsplice_windows_test.go (now SaveConfigSetting).
+NOTES (2026-11-22): ported the show write/refused-seed, show reset, reset no-op/refusals and width write+reset cases to SaveConfigSetting/ResetConfigSetting in configwrite_scalar_test.go; every other case was already covered by item 4/5's tests. The reset-refusal case for "ui.spinner" (a key outside the block) was dropped: the generic writer rightly resets it.
+NOTES (2026-11-22): consequential edit — internal/config/configwrite_scalarsplice.go: made necessary by deleting configwrite_sections.go; its ScalarTarget comment named that writer, and the Parent/ParentKey/ParentBody/ParentNull fields it alone read were now write-only dead state, so they were removed with it (no other reader in the repo).
+NOTES (2026-11-22): wire_options.go / wire_options_test.go and the configwrite_scalar_test.go comment needed no edit — the prose grep found nothing there (items 3/7 had rewritten them); registry.go's width-row comment "the same block writer" became "the same setting writer".
 
 Depends on item 7.
 

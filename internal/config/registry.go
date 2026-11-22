@@ -1288,7 +1288,7 @@ var KeyRegistry = bindRows([]Key{
 	},
 	{
 		// A count of the nested `side-panel:` block, applied by the renderer itself (settingsApplyLocal)
-		// as ui.side-panel.show is, and written through the same block writer. The floor is the whole
+		// as ui.side-panel.show is, and written through the same setting writer. The floor is the whole
 		// contract — ui.tools-fold-over's shape with a floor of 24 — and the window's own limit is the
 		// layout's clamp, never a rewrite of the value. A pointer on disk: a stated `0` is refused at
 		// the load by domain.ParseSidePanelWidth rather than read as an absent key. An absent key
@@ -1952,6 +1952,52 @@ func readBackSidePanelFolded(fc fileConfig) (string, bool) {
 		return "", false
 	}
 	return sidePanelFoldedText(domain.SpellSidePanelFolded(written)), true
+}
+
+// writtenSidePanelSections is the `ui.side-panel.sections` entries a parsed config writes, as
+// written, or nil when it names no list.
+func writtenSidePanelSections(fc fileConfig) []domain.SidePanelEntry {
+	if fc.UI == nil || fc.UI.SidePanel == nil {
+		return nil
+	}
+	return fc.UI.SidePanel.Sections
+}
+
+// writtenSidePanelFolded is the `ui.side-panel.folded` names a parsed config writes, as written, or
+// nil when it names no list.
+func writtenSidePanelFolded(fc fileConfig) []domain.SidePanelSection {
+	if fc.UI == nil || fc.UI.SidePanel == nil {
+		return nil
+	}
+	return fc.UI.SidePanel.Folded
+}
+
+// sidePanelFoldedText is the `ui.side-panel.folded` line's value for a list in its canonical
+// spelling: the list itself, or `[]` for the zero value, which folds nothing — a text the key
+// reads back as the zero value, and the one the registry row reads.
+func sidePanelFoldedText(folded domain.SidePanelFolded) string {
+	if folded == "" {
+		return "[]"
+	}
+	return string(folded)
+}
+
+// withSectionMode is the file's written entries with section's mode set to mode: changed in place
+// where the list names the section, and otherwise the whole resolved list with that one mode
+// changed. written is never modified.
+func withSectionMode(written []domain.SidePanelEntry, section domain.SidePanelSection,
+	mode domain.SidePanelMode) ([]domain.SidePanelEntry, error) {
+	named := func(e domain.SidePanelEntry) bool { return e.Section == section }
+	next := slices.Clone(written)
+	if !slices.ContainsFunc(next, named) {
+		resolved, err := domain.ParseSidePanelSections(string(domain.SpellSidePanelSections(written)))
+		if err != nil {
+			return nil, err
+		}
+		next = resolved
+	}
+	next[slices.IndexFunc(next, named)].Mode = mode
+	return next, nil
 }
 
 // The deltas a side-panel gesture writes through the merge hooks below: one section's change, as
