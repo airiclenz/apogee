@@ -12,6 +12,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.35.8] — 2026-11-22
+
 - Internal: every screen gesture that saves a `ui.*` setting (task-list and Tools folds, side-panel pin, fold, width drag and reset, `/panel on|off|auto`) now writes it back through one shared path in the TUI; the "not saved" notice and the `/settings` edit marker read exactly as before.
 - A built-in tool called with an argument it does not declare still runs, and its result now ends with a line naming the ignored argument and the ones it takes (`note: ignored unknown argument "line" — read_file takes path, start_line, end_line, max_lines, locate`); it was silently dropped before (`undeclared-args-ignored`).
 - `apogee mcp login` and an MCP connect now assemble an `auth: oauth` server's OAuth facts in one place (`internal/mcp`), so login refuses an unset `client-secret-env:` variable in connect's own sentence: `mcp: server "<name>": client-secret-env: the environment variable <VAR> is not set`.
