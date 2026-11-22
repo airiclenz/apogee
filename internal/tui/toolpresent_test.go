@@ -1169,10 +1169,10 @@ func TestPromotionCarriesBothReadingsOfTheOutcome(t *testing.T) {
 //
 // The verdicts have to survive the swap, which is what the first two cases are about: the composed
 // line is not the bare word succeededSummary reads, so the green a finished run is painted in comes
-// from [toolView.runVerdict] itself — and only from the delegation vocabulary, so a run stopped at
-// its step cap keeps the ordinary marker tone.
+// from [toolView.runVerdict] itself — and only from the done verdict, so a run stopped at its step
+// cap keeps the ordinary marker tone.
 //
-// The third case is the gate: the same view with no verdict word on it is an ordinary promotion and
+// The third case is the gate: the same view with no verdict on it is an ordinary promotion and
 // takes the ordinary demotion, line into the body and all.
 func TestCollapsedRunDemotionKeepsTheLineAndNoBody(t *testing.T) {
 	t.Parallel()
@@ -1181,12 +1181,11 @@ func TestCollapsedRunDemotionKeepsTheLineAndNoBody(t *testing.T) {
 		doneLine   = "1 tool call · 36k/1.3M · done"
 		cappedLine = "1 tool call · 36k/1.3M · capped at its step cap"
 		quotedGist = "1 tool call · 36k/1.3M · <sentence>"
-		cappedWord = "capped at its step cap"
 	)
 
 	for _, tc := range []struct {
 		name       string
-		runVerdict string
+		runVerdict delegationVerdict
 		stat       string
 
 		wantSummary   string
@@ -1194,11 +1193,11 @@ func TestCollapsedRunDemotionKeepsTheLineAndNoBody(t *testing.T) {
 		wantBody      []string
 	}{{
 		name:       "a finished run keeps its composed line and the green it was shown in",
-		runVerdict: delegationDoneVerdict, stat: doneLine,
+		runVerdict: delegationVerdictDone, stat: doneLine,
 		wantSummary: doneLine, wantSucceeded: true,
 	}, {
 		name:       "a capped run keeps its line and earns no verdict",
-		runVerdict: cappedWord, stat: cappedLine,
+		runVerdict: delegationVerdictCapped, stat: cappedLine,
 		wantSummary: cappedLine,
 	}, {
 		name:        "without the verdict word it is an ordinary promotion",
@@ -1226,7 +1225,7 @@ func TestCollapsedRunDemotionKeepsTheLineAndNoBody(t *testing.T) {
 				t.Error("the composed line took the slot as quoted text; it is the block's own wording")
 			}
 			if got.Summary.succeeded != tc.wantSucceeded {
-				t.Errorf("demoted succeeded = %v, want %v (runVerdict %q)",
+				t.Errorf("demoted succeeded = %v, want %v (runVerdict %d)",
 					got.Summary.succeeded, tc.wantSucceeded, tc.runVerdict)
 			}
 			if got.Summary.failed {
@@ -3685,10 +3684,9 @@ func TestSanitizeLeavesTheResultsOwnRegionsAlone(t *testing.T) {
 // carries display text is either stripped or listed here, so the next one added cannot slip past
 // the seam by nobody noticing.
 var sanitizeExemptToolViewMembers = map[string]string{
-	"name":       "the registry lookup key, never rendered — Label carries the displayed copy of it, and Label is stripped",
-	"argStat":    "a value the presenter COMPOSES out of its own counts (a diffstat, a plural), never a producer's text; it reaches the screen through Summary, which is stripped",
-	"args":       "the parsed request, display state's raw material and never painted: every line built from it is a body line, and the seam strips those",
-	"runVerdict": "a paint-time word the ENGINE spelled for a collapsed run (done, capped at its step cap), never wire or producer text; it decides a demotion and never reaches the screen itself",
+	"name":    "the registry lookup key, never rendered — Label carries the displayed copy of it, and Label is stripped",
+	"argStat": "a value the presenter COMPOSES out of its own counts (a diffstat, a plural), never a producer's text; it reaches the screen through Summary, which is stripped",
+	"args":    "the parsed request, display state's raw material and never painted: every line built from it is a body line, and the seam strips those",
 }
 
 // TestToolViewSanitizeReachesEveryStringMember is the structural guard on the tool card's escape

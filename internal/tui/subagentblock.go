@@ -643,29 +643,18 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 // on purpose (subAgentSummary), but its TEXT opens with a count of the work, so words read out of
 // it would answer "not a failure" for every failed delegation there is.
 //
-// A run that came back WITHOUT A REPORT has not earned the ✓ either (endedWithoutReportSummary):
-// the child reached its boundary, but what it handed back was narration of a next step, a paste or
-// the no-report marker, and a ✓ beside that is the row calling a delegation done that did not do
-// what it was sent for. It is not a failure — the row stays out of the red, in the marker tone the
-// step cap's verdict reads in — so it is read from the head's verdict WORD (subAgentVerdictWord)
-// rather than from a field. A run the human STOPPED (stoppedSummary, ADR 0086 D4) is withheld the ✓
-// on the same reading and for the same reason: it came back, but not because it was done.
+// A run that came back WITHOUT A REPORT has not earned the ✓ either: the child reached its
+// boundary, but what it handed back was narration of a next step, a paste or the no-report marker,
+// and a ✓ beside that is the row calling a delegation done that did not do what it was sent for. A
+// run the human STOPPED (ADR 0086 D4) is withheld the ✓ for the same reason — it came back, but not
+// because it was done — and so are a run the record caught open and a delegation that never
+// started. None of those is necessarily a failure, so they are read from the head's typed verdict
+// ([delegationVerdict.withholdsCheck]) rather than from the red field, and never from the slot's
+// words. The failed field is still read beside it: a Workflow item's head is worded by its receipt
+// (workflowItemSummary), which settles that field and no delegation verdict.
 func subAgentFinished(head paintInput) bool {
-	verdict := subAgentVerdictWord(head)
 	return subAgentReported(head) && !head.tool.Summary.failed &&
-		!endedWithoutReportSummary(verdict) && !stoppedSummary(verdict)
-}
-
-// subAgentVerdictWord is the engine's verdict on a finished delegation as the head carries it,
-// wherever it rides: the slot's own text when the presenter WORDED the slot (typedSummary live,
-// namedSummary on replay), else the typed stat standing behind a report line the presenter
-// promoted into the slot (applyStat). The head's own view is read, never the composed row
-// (collapsedSubAgentView), for the reason subAgentFinished gives.
-func subAgentVerdictWord(head paintInput) string {
-	if !head.tool.Summary.quoted {
-		return head.tool.Summary.Text
-	}
-	return head.tool.stat.spell()
+		!head.tool.Summary.verdict.withholdsCheck()
 }
 
 // subAgentReported is the display's question "is this delegation over?", and the two answers that
@@ -702,7 +691,7 @@ const scheduledSummary = "queued"
 // say so forever. A delegation a queued user message PRE-EMPTED is the same shape one producer
 // over — its finished phase arrives without a started one, carrying the error-shaped skip result
 // (childBracket.neverStarted, ADR 0025) — so the row reads that result's neutral verdict, `not started · your
-// message` (delegationNeverStartedVerdict), and opens onto the
+// message` (delegationOutcomeVerdict), and opens onto the
 // skip's own words exactly as a refusal does. The third is its being FRAMED (subAgentFramed) — a run standing behind it, or a
 // reader having opened it. That one is the answer for a producer that emits no phases at all: a
 // hand-built test transcript, a record replayed from a session written before the phase existed. A
@@ -859,9 +848,8 @@ func collapsedSubAgentView(head paintInput, span []paintInput) toolView {
 	view.Details = toolBody{} // the zero body: no lines, and so nothing to lay out beneath
 	view.stat = statValue{}
 	if !head.tool.stat.blank() {
-		verdict := head.tool.stat.spell()
-		view.runVerdict = verdict
-		view.stat = plainStat(subAgentSummaryLine(head, span, verdict))
+		view.runVerdict = head.tool.Summary.verdict
+		view.stat = plainStat(subAgentSummaryLine(head, span, head.tool.stat.spell()))
 	}
 	return view
 }
@@ -921,6 +909,9 @@ func subAgentSummary(head paintInput, span []paintInput) branchSummary {
 	// finished. One field answers for the collapsed row and the head alike, so a finished run reads
 	// green in both readings of it.
 	summary.succeeded = head.tool.Summary.succeeded
+	// And the typed verdict both are read from, so the composed row answers every reader the head
+	// does ([branchSummary.verdict]).
+	summary.verdict = head.tool.Summary.verdict
 	return summary
 }
 

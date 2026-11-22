@@ -388,11 +388,12 @@ func succeededSummary(text string) bool {
 // domain.DelegationOutcome.HasNoReport). It is succeededSummary's sibling and matches the same way, on the
 // WHOLE phrase, so a report line that merely mentions the words is not this verdict.
 //
-// It is read by one seam alone, subAgentFinished, which withholds the done ✓ from such a run. It
-// sets no field on the summary: the verdict is neither a failure nor a success, so it takes no red
-// and no green and reads in the ordinary marker tone `capped at its step cap` does — and the text
-// it is read from is recovered on the replay path as it is on the live one (fromWireToolView
-// restores the slot's words), so a record needs no field of its own for it.
+// It is read by one seam alone, the replay reader (replayedDelegationVerdict), which recovers the
+// typed no-report verdict a live head carries ([branchSummary.verdict]) from the slot's words the
+// record keeps, so a record needs no field of its own for it. The verdict sets neither painted
+// field: it is neither a failure nor a success, so it takes no red and no green and reads in the
+// ordinary marker tone `capped at its step cap` does, and subAgentFinished withholds the done ✓ from
+// such a run.
 func endedWithoutReportSummary(text string) bool {
 	if text == delegationNoReportVerdict {
 		return true
@@ -402,11 +403,13 @@ func endedWithoutReportSummary(text string) bool {
 
 // stoppedSummary reads a WORDING for the verdict a delegation the HUMAN stopped wears — `stopped by
 // you`, alone or with the steering cell (delegationOutcomeVerdict, domain.DelegationOutcome.IsStoppedByUser; ADR 0086 D4) —
-// matched like endedWithoutReportSummary, on the WHOLE phrase. Its one reader is subAgentFinished,
-// which withholds the done ✓: a stopped run did not do what it was sent for. It sets no field, so it
-// reads in the step cap's ordinary marker tone — neither the red of a failure nor the green of done
-// — and a queued stop, whose result is error-shaped, is worded here too rather than red
-// (toolView.absorbFailure), because the human's stop is not the child's failure. A delegation a
+// matched like endedWithoutReportSummary, on the WHOLE phrase. Its one reader is the replay reader
+// (replayedDelegationVerdict), which recovers the typed stopped verdict from the record's words;
+// subAgentFinished withholds the done ✓ from that verdict: a stopped run did not do what it was
+// sent for. The verdict sets no painted field, so it reads in the step cap's ordinary marker tone —
+// neither the red of a failure nor the green of done — and a queued stop, whose result is
+// error-shaped, is worded so too rather than red (toolView.absorbFailure), because the human's stop
+// is not the child's failure. A delegation a
 // queued message pre-empted (`not started · your message`, delegationPreemptedVerdict) reads the same
 // way for the same reason: it never ran, by the human's act, and is neither done nor failed.
 func stoppedSummary(text string) bool {

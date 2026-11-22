@@ -1196,7 +1196,7 @@ func delegationSteeredCell(steered int) string {
 // queued stop — and delegationPreemptedContent is the whole result of one a queued user message
 // pre-empted (internal/agent's skippedDelegationContent, ADR 0025), worded
 // delegationPreemptedVerdict. Both stay error-shaped on the wire for the model; only the row's
-// verdict is neutral (delegationNeverStartedVerdict).
+// verdict is neutral (proseFailedDelegationOutcome, absorbFailure).
 const (
 	delegationStoppedHead          = "[stopped by the user — engine summary follows]"
 	delegationStoppedQueuedContent = "sub-agent not started: the user stopped it before it started; " +
@@ -1219,21 +1219,43 @@ func delegationStoppedByUser(body string) bool {
 		whole == delegationCancelledQueuedContent
 }
 
-// delegationNeverStartedVerdict words the slot of an error-shaped delegation result the HUMAN's act
-// settled before its child ran: `stopped by you` for a queued stop or a turn cancel
-// (delegationStoppedByUser), `not started · your message` for a pre-emption by a queued message
-// (delegationPreemptedContent). ok is false for every other result — a fan-out ceiling refusal, a
-// depth-bound refusal, a child's own failure — which keeps the failure's `error`. It is matched on
-// the WHOLE content, so a failure that merely quotes the words is still a failure.
-func delegationNeverStartedVerdict(content string) (verdict string, ok bool) {
-	body, _ := readDelegationSteering(content)
-	switch {
-	case delegationStoppedByUser(body):
-		return delegationStoppedVerdict, true
-	case strings.TrimSpace(body) == delegationPreemptedContent:
-		return delegationPreemptedVerdict, true
+// failedDelegationOutcome is how an ERROR-SHAPED delegation result ended: the typed outcome the
+// engine attached, or — for a result carrying none — the facts read back off its prose
+// (proseFailedDelegationOutcome). It is the failure layer's twin of delegationOutcomeOf, kept apart
+// because an error-shaped result's prose says different things: never a bound or a missing report,
+// only whether the human's act settled it, or whether it never started at all.
+func failedDelegationOutcome(res domain.ToolResult) domain.DelegationOutcome {
+	if outcome, ok := res.Summary.(domain.DelegationOutcome); ok {
+		return outcome
 	}
-	return "", false
+	return proseFailedDelegationOutcome(res.Content)
+}
+
+// proseFailedDelegationOutcome reads an error-shaped delegation result the engine attached no
+// outcome to: the human's act that settled it before its child ran — a queued stop
+// (delegationStoppedQueuedContent), a turn cancel that caught it queued
+// (delegationCancelledQueuedContent), a pre-emption by a queued message (delegationPreemptedContent)
+// — the human's stop of a started run (delegationStoppedHead), or, for any other result under the
+// unstarted head (unstartedDelegationPrefix), the fan-out ceiling's refusal. Everything else is a
+// child's own failure, the zero outcome. The human's acts are matched on the WHOLE content, so a
+// failure that merely quotes the words is still a failure.
+func proseFailedDelegationOutcome(content string) domain.DelegationOutcome {
+	body, _ := readDelegationSteering(content)
+	whole := strings.TrimSpace(body)
+	head, _, _ := strings.Cut(body, "\n")
+	switch {
+	case whole == delegationStoppedQueuedContent:
+		return domain.DelegationOutcome{Unstarted: domain.DelegationStoppedQueued}
+	case whole == delegationCancelledQueuedContent:
+		return domain.DelegationOutcome{Unstarted: domain.DelegationCancelled}
+	case whole == delegationPreemptedContent:
+		return domain.DelegationOutcome{Unstarted: domain.DelegationSkipped}
+	case head == delegationStoppedHead:
+		return domain.DelegationOutcome{IsStoppedByUser: true}
+	case strings.HasPrefix(whole, unstartedDelegationPrefix):
+		return domain.DelegationOutcome{Unstarted: domain.DelegationRefused}
+	}
+	return domain.DelegationOutcome{}
 }
 
 // delegationNoReportMarker is the whole of the result a child gets back to its parent when its
@@ -1341,18 +1363,27 @@ func delegationOutcomeDetail(outcome domain.DelegationOutcome, content string) t
 	return outputDetail(content)
 }
 
-// delegationVerdict is delegationOutcomeVerdict for a result known only by its prose.
-func delegationVerdict(content string) string {
-	return delegationOutcomeVerdict(proseDelegationOutcome(content))
-}
-
 // delegationOutcomeVerdict words a finished delegation's slot from how it ended: whether it was
 // stopped by the human (which outranks a bound), capped at a bound, came back with nothing to
 // report, and whether it was steered. Since a run's block collapsed to a single row
 // (collapsedSubAgentView) the slot is the ONE place in the parent's conversation any of that can be
 // read — the reader who has to know is reading that row and nothing else. The plain outcome is
 // the ordinary `done`.
+//
+// A delegation that never started is worded by why it did not (domain.DelegationUnstarted), and
+// carries no steering: a run the human pre-empted with a queued message reads
+// delegationPreemptedVerdict, one a queued stop or a turn cancel caught reads `stopped by you` like a
+// started stop, and one the fan-out ceiling refused reads the failure's bare erroredSummary — the
+// word absorbFailure gives it.
 func delegationOutcomeVerdict(outcome domain.DelegationOutcome) string {
+	switch outcome.Unstarted {
+	case domain.DelegationSkipped:
+		return delegationPreemptedVerdict
+	case domain.DelegationCancelled, domain.DelegationStoppedQueued:
+		return delegationStoppedVerdict
+	case domain.DelegationRefused:
+		return erroredSummary
+	}
 	verdict := delegationDoneVerdict
 	switch {
 	case outcome.IsStoppedByUser:
@@ -1366,6 +1397,114 @@ func delegationOutcomeVerdict(outcome domain.DelegationOutcome) string {
 		verdict += " · " + delegationSteeredCell(outcome.SteeredMessages)
 	}
 	return verdict
+}
+
+// delegationVerdict is how a delegation came out, as the row paints it: the one reading every seam
+// that has to know asks ([branchSummary.verdict]) — the slot's colour (summaryStyle, through the
+// failed and succeeded fields it sets), the done ✓ (subAgentFinished), the Esc stop hint's
+// never-started count (entry.neverStarted) and a collapsed run's demotion (toolView.demoted) — so
+// none of them reads the slot's words back. It is settled once, where a sub_agent head's result is
+// absorbed (toolView.settleDelegationVerdict, toolView.absorbFailure), and on replay from the
+// record's words (replayedDelegationVerdict). It is TUI-private and never on the wire: the record
+// keeps the rendered words (ADR 0083 §1), and replay reads the verdict back off them.
+//
+// The zero value is no verdict at all — a call still in flight, a card that heads no run, or a
+// replayed slot whose words name none — and it withholds nothing: a reported head with no verdict
+// keeps its ✓.
+type delegationVerdict uint8
+
+const (
+	// delegationVerdictNone is no verdict: the zero value.
+	delegationVerdictNone delegationVerdict = iota
+	// delegationVerdictDone is a run that reached its own boundary and reported.
+	delegationVerdictDone
+	// delegationVerdictNoReport is a run that reached its boundary with nothing to report.
+	delegationVerdictNoReport
+	// delegationVerdictStopped is a started run the human stopped.
+	delegationVerdictStopped
+	// delegationVerdictCapped is a run the engine stopped at one of its bounds.
+	delegationVerdictCapped
+	// delegationVerdictFailed is a started run that failed: its result was an error.
+	delegationVerdictFailed
+	// delegationVerdictInterrupted is a run the record caught still open (closeInterruptedCalls).
+	delegationVerdictInterrupted
+	// delegationVerdictPreempted is a delegation a queued user message pre-empted before it started.
+	delegationVerdictPreempted
+	// delegationVerdictRefused is a delegation refused past the fan-out ceiling before it started.
+	delegationVerdictRefused
+	// delegationVerdictCancelledQueued is a delegation a turn cancel caught while it still queued.
+	delegationVerdictCancelledQueued
+	// delegationVerdictStoppedQueued is a delegation the human stopped while it still queued.
+	delegationVerdictStoppedQueued
+)
+
+// delegationVerdictOf is the verdict for how a delegation ended and whether its result was an error.
+// Never having started outranks everything, and the human's stop outranks the error status — a
+// stopped run is not the child's failure — which outranks a bound and a missing report, the order
+// the engine decides them in (domain.DelegationOutcome).
+func delegationVerdictOf(outcome domain.DelegationOutcome, isError bool) delegationVerdict {
+	switch outcome.Unstarted {
+	case domain.DelegationSkipped:
+		return delegationVerdictPreempted
+	case domain.DelegationRefused:
+		return delegationVerdictRefused
+	case domain.DelegationCancelled:
+		return delegationVerdictCancelledQueued
+	case domain.DelegationStoppedQueued:
+		return delegationVerdictStoppedQueued
+	}
+	switch {
+	case outcome.IsStoppedByUser:
+		return delegationVerdictStopped
+	case isError:
+		return delegationVerdictFailed
+	case outcome.Bound != domain.DelegationUnbounded:
+		return delegationVerdictCapped
+	case outcome.HasNoReport:
+		return delegationVerdictNoReport
+	}
+	return delegationVerdictDone
+}
+
+// neverStarted reports whether the verdict is one of a delegation that never started.
+func (v delegationVerdict) neverStarted() bool {
+	switch v {
+	case delegationVerdictPreempted, delegationVerdictRefused,
+		delegationVerdictCancelledQueued, delegationVerdictStoppedQueued:
+		return true
+	}
+	return false
+}
+
+// humanSettled reports whether the verdict is the HUMAN's act rather than the run's own ending — a
+// stop, before or after the child started, or a pre-emption. Its result may be error-shaped for
+// the model, but its slot takes the verdict's words in the ordinary marker tone, never the red
+// (absorbFailure).
+func (v delegationVerdict) humanSettled() bool {
+	switch v {
+	case delegationVerdictStopped, delegationVerdictPreempted,
+		delegationVerdictCancelledQueued, delegationVerdictStoppedQueued:
+		return true
+	}
+	return false
+}
+
+// failure reports whether the verdict paints the slot red: a run that failed, one the record caught
+// open, and a refusal — the child's or the engine's ending, never the human's act.
+func (v delegationVerdict) failure() bool {
+	return v == delegationVerdictFailed || v == delegationVerdictInterrupted ||
+		v == delegationVerdictRefused
+}
+
+// withholdsCheck reports whether a reported delegation with this verdict goes without the done ✓
+// (subAgentFinished): it failed, came back without a report, was stopped, was caught open, or never
+// started. A capped run and the zero verdict keep it.
+func (v delegationVerdict) withholdsCheck() bool {
+	switch v {
+	case delegationVerdictNone, delegationVerdictDone, delegationVerdictCapped:
+		return false
+	}
+	return true
 }
 
 // delegationStat words a sub-agent's slot with that verdict. A delegation that FAILED comes back as

@@ -120,7 +120,8 @@ type branchSummary struct {
 	// summaryStyle, and the composed delegation row that carries a head's verdict onto words of its
 	// own (subAgentSummary). A quoted line never carries it, exactly as it never carries a failure:
 	// a promoted output line reading "done" is the TOOL's word about itself (F-29). Where both
-	// verdicts stand, failure wins.
+	// verdicts stand, failure wins. On a sub_agent head both fields are settled from the head's typed
+	// delegation verdict instead of from words ([branchSummary.withVerdict]).
 	succeeded bool
 
 	// stat is the ARITHMETIC the text spells out, for the summaries a presenter worded from a fact
@@ -133,6 +134,29 @@ type branchSummary struct {
 	// display seams: only a phrase with no arithmetic can name a path or carry an ESC byte, and such
 	// a phrase reaches the slot as text with no value beside it.
 	stat statValue
+
+	// verdict is how a DELEGATION came out ([delegationVerdict]), on a sub_agent head's summary
+	// alone and the zero value everywhere else. It is the reading the delegation's other marks are
+	// taken from — failed and succeeded above (withVerdict), the done ✓ (subAgentFinished), the
+	// never-started count (entry.neverStarted) — so none of them reads the slot's words back. It
+	// rides a QUOTED summary too, where the slot holds the child's report and the verdict's words
+	// stand in the stat behind it: the verdict is carried there, and only the painted fields stay
+	// off (F-29).
+	verdict delegationVerdict
+}
+
+// withVerdict settles a delegation's verdict onto the summary, and the painted fields from it: the
+// red for a failure, the green for done. A QUOTED summary carries the verdict and neither colour —
+// the slot holds the child's report, and a quoted line never carries a verdict of the block's own
+// (F-29); its green comes back only where the demotion swaps the engine's words in
+// (toolView.demoted).
+func (s branchSummary) withVerdict(v delegationVerdict) branchSummary {
+	s.verdict = v
+	if !s.quoted {
+		s.failed = v.failure()
+		s.succeeded = v == delegationVerdictDone
+	}
+	return s
 }
 
 // The wordings that mark an outcome as a FAILURE, whatever produced it: the bare word an unhooked
@@ -609,23 +633,22 @@ type toolView struct {
 	// bool, and a replayed record re-derives the mark from the entry it decoded.
 	finished bool
 
-	// runVerdict is the ENGINE's verdict word for a COLLAPSED RUN whose row a painter composed —
-	// `done`, `capped at its step cap` (head.tool.stat.spell(), delegationStat) — and "" on every
-	// view that is not a collapsed run's reading. There is no bool beside it: this member is the whole
-	// gate. Where it is set, the promote-guard's refusal swaps the GIST out of the composed line for
+	// runVerdict is the head's verdict for a COLLAPSED RUN whose row a painter composed — done,
+	// capped ([branchSummary.verdict], the reading delegationStat worded the stat from) — and the
+	// zero verdict on every view that is not a collapsed run's reading. There is no bool beside it:
+	// this member is the whole gate. Where it is set, the promote-guard's refusal swaps the GIST out of the composed line for
 	// the engine's verdict and nothing lands in a body (demoted), which is what keeps a run's row
 	// openable only into its run view (ADR 0063).
 	//
 	// It is a PAINT-TIME reading like finished above it, and never a presented fact: only the painter
 	// composing a collapsed run's line sets it (collapsedSubAgentView), and a view the painter did not
 	// compose that way — an unframed delegation's (unframedSubAgentView), a hand-built one — carries
-	// "" and takes the ordinary demotion with its body line.
+	// the zero verdict and takes the ordinary demotion with its body line.
 	//
 	// It is deliberately not on the wire: toWireToolView/fromWireToolView do not name it and
 	// session.ToolView stays untouched, a replayed record composing the line afresh from the span it
-	// decoded. It is not display text either — the word is one the ENGINE spelled, never text a user
-	// or a model wrote — so the escape seam need not reach it (sanitizeExemptToolViewMembers).
-	runVerdict string
+	// decoded. It is not display text either — a typed value, never text a user or a model wrote.
+	runVerdict delegationVerdict
 
 	// solo marks a call that must never be folded into a grouped block, however well it matches its
 	// neighbours (groupable, render.go). Grouping's own rule is about the SHAPE of a call — a target
@@ -1157,17 +1180,18 @@ func (tv toolView) promotable() bool {
 //
 // The verdicts are carried over the swap rather than re-derived, because the composed line is no
 // longer the bare verdict word typedSummary would recognise: the failure the head's own summary
-// worded stands, and the success green a finished run is painted in is read from the verdict word
-// itself (succeededSummary) — `done` is the ENGINE's reading of a run it drove to its boundary and
-// the one verdict apogee paints green (ratified call 3 of docs/plans/archived/"2026-08-31 - 05").
+// worded stands, and the success green a finished run is painted in is read from the run's typed
+// verdict — `done` is the ENGINE's reading of a run it drove to its boundary and the one verdict
+// apogee paints green (ratified call 3 of docs/plans/archived/"2026-08-31 - 05").
 func (tv toolView) demoted() toolView {
 	if !tv.promotable() {
 		return tv
 	}
-	if tv.runVerdict != "" {
+	if tv.runVerdict != delegationVerdictNone {
 		summary := typedSummary(tv.stat)
 		summary.failed = tv.Summary.failed
-		summary.succeeded = tv.Summary.succeeded || succeededSummary(tv.runVerdict)
+		summary.succeeded = tv.Summary.succeeded || tv.runVerdict == delegationVerdictDone
+		summary.verdict = tv.runVerdict
 		tv.Summary = summary
 		tv.stat = statValue{}
 		return tv
@@ -1362,6 +1386,11 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 	} else if known && p.stat != nil {
 		tv.applyStat(p.stat(result))
 	}
+	// A delegation's verdict is settled after the stat hook, which words the slot with a fresh
+	// summary (applyStat) that would drop a verdict set before it.
+	if tv.headsRun() {
+		tv.Summary = tv.Summary.withVerdict(delegationVerdictOf(delegationOutcomeOf(result), false))
+	}
 	// The header's count is read off the result's lines rather than the result, so the decoder can
 	// word it again off the same rows once they come back from the record (toolPresenter.count).
 	if known && p.count != nil {
@@ -1406,20 +1435,36 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 // read_file failing on an in-workspace path carries that path absolute beneath a branch whose slot
 // now names nothing at all.
 //
-// The error-shaped results that are not failures are a delegation the human's act settled before it
-// started (delegationNeverStartedVerdict): stopped while it queued (delegationStoppedQueuedContent,
-// ADR 0086 D4), caught queued by a turn cancel, or pre-empted by a queued message (ADR 0025). Its
-// slot takes `stopped by you` or `not started · your message` in the ordinary marker tone
-// (stoppedSummary) rather than the red, and its text lays out as the same failure body, so the head
-// line entry.neverStarted reads stays where it looks.
+// A sub_agent head settles its delegation's verdict here as well (delegationVerdictOf, read off the
+// typed outcome or the error-shaped prose, failedDelegationOutcome). The error-shaped results that
+// are not failures are the human's act ([delegationVerdict.humanSettled]): a delegation stopped
+// while it queued (delegationStoppedQueuedContent, ADR 0086 D4), caught queued by a turn cancel, or
+// pre-empted by a queued message (ADR 0025). Its slot takes `stopped by you` or `not started · your
+// message` (delegationOutcomeVerdict) in the ordinary marker tone rather than the red, and its text
+// lays out as the same failure body. A delegation refused past the fan-out ceiling never started
+// either, and is a failure all the same: it keeps the red `error`.
 func (tv *toolView) absorbFailure(result domain.ToolResult) {
-	content := result.Content
-	tv.denied = deniedContent(content)
-	if verdict, ok := delegationNeverStartedVerdict(content); tv.headsRun() && ok {
-		tv.Summary = namedSummary(detailLine{Text: verdict})
-		tv.Details = tv.Details.with(failureBody(content))
+	tv.denied = deniedContent(result.Content)
+	if !tv.headsRun() {
+		tv.wordFailure(result)
 		return
 	}
+	outcome := failedDelegationOutcome(result)
+	verdict := delegationVerdictOf(outcome, true)
+	if verdict.humanSettled() {
+		words := detailLine{Text: delegationOutcomeVerdict(outcome)}
+		tv.Summary = branchSummary{detailLine: words}.withVerdict(verdict)
+		tv.Details = tv.Details.with(failureBody(result.Content))
+		return
+	}
+	tv.wordFailure(result)
+	tv.Summary = tv.Summary.withVerdict(verdict)
+}
+
+// wordFailure is absorbFailure's wording of a failure: the slot a tool's failure hook words, or the
+// bare erroredSummary, over the message the tool wrote.
+func (tv *toolView) wordFailure(result domain.ToolResult) {
+	content := result.Content
 	if p, known := tv.presenter(); known && p.failure != nil {
 		if word, output, ok := p.failure(result); ok {
 			tv.Summary = namedSummary(detailLine{Text: errorSummaryPrefix + word})

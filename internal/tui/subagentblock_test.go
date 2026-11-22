@@ -2026,8 +2026,8 @@ func TestResultEnvelopeIsReadOffTheEnginesOwnLinesOnly(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := delegationVerdict(tc.content); got != delegationDoneVerdict {
-				t.Errorf("delegationVerdict = %q, want %q", got, delegationDoneVerdict)
+			if got := proseVerdictWords(tc.content); got != delegationDoneVerdict {
+				t.Errorf("proseVerdictWords = %q, want %q", got, delegationDoneVerdict)
 			}
 		})
 	}

@@ -2308,6 +2308,44 @@ func TestTranscriptCodecReplaysAFinishedDelegationGreen(t *testing.T) {
 	}
 }
 
+// TestTranscriptCodecReadsAQuotedDelegationVerdictOffItsStat pins the replay reader of a sub_agent
+// head's typed verdict (replayedDelegationSummary): where the record's slot holds a QUOTED one-line
+// report, the verdict is read off the stat stored behind it — the very `done` delegationStat worded
+// there live — and never off the report; where the slot is unquoted, it is read off the slot's own
+// text.
+func TestTranscriptCodecReadsAQuotedDelegationVerdictOffItsStat(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		summary session.BranchSummary
+		stat    string
+		want    delegationVerdict
+	}{
+		{"a quoted report over a recorded done stat reads done",
+			session.BranchSummary{DetailLine: session.DetailLine{Text: "ended without a report"}, Quoted: true},
+			delegationDoneVerdict, delegationVerdictDone},
+		{"a quoted report over a recorded capped stat reads capped",
+			session.BranchSummary{DetailLine: session.DetailLine{Text: "done"}, Quoted: true},
+			delegationCappedVerdict, delegationVerdictCapped},
+		{"an unquoted slot reads its own text",
+			session.BranchSummary{DetailLine: session.DetailLine{Text: delegationNoReportVerdict}},
+			delegationDoneVerdict, delegationVerdictNoReport},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			w := &session.ToolView{Name: subAgentToolName, Summary: tc.summary, Stat: tc.stat}
+
+			tv := fromWireToolView(w, true)
+
+			if tv.Summary.verdict != tc.want {
+				t.Errorf("replayed verdict = %d, want %d", tv.Summary.verdict, tc.want)
+			}
+		})
+	}
+}
+
 // TestTranscriptCodecReplaysANoReportDelegationWithoutACheck is the replay half of the no-report
 // verdict (plan "2026-09-24 - 01", item 6): the verdict is recovered from the slot's words the record
 // keeps (fromWireToolView restores them), with no field of its own on the wire, so a delegation that

@@ -264,12 +264,12 @@ func TestDelegationBoundHeadReadsEveryBoundsHead(t *testing.T) {
 			if !delegationBoundHead.MatchString(tc.head) {
 				t.Errorf("delegationBoundHead does not match %q", tc.head)
 			}
-			if got := delegationVerdict(tc.head + body); got != tc.want {
-				t.Errorf("delegationVerdict = %q, want %q", got, tc.want)
+			if got := proseVerdictWords(tc.head + body); got != tc.want {
+				t.Errorf("proseVerdictWords = %q, want %q", got, tc.want)
 			}
 		})
 	}
-	if got := delegationVerdict("The child said:" + body); got != delegationDoneVerdict {
+	if got := proseVerdictWords("The child said:" + body); got != delegationDoneVerdict {
 		t.Errorf("a body sub-head with no bound head above it reads %q, want %q", got, delegationDoneVerdict)
 	}
 }
@@ -302,8 +302,8 @@ func TestDelegationBoundHeadReadsTheNonReportVariants(t *testing.T) {
 				if !delegationBoundHead.MatchString(head) {
 					t.Errorf("delegationBoundHead does not match %q", head)
 				}
-				if got := delegationVerdict(head + body); got != b.want {
-					t.Errorf("delegationVerdict = %q, want %q", got, b.want)
+				if got := proseVerdictWords(head + body); got != b.want {
+					t.Errorf("proseVerdictWords = %q, want %q", got, b.want)
 				}
 			})
 		}
@@ -336,8 +336,8 @@ func TestDelegationVerdictReadsTheHumansStop(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := delegationVerdict(tc.content); got != tc.want {
-				t.Errorf("delegationVerdict(%q) = %q, want %q", tc.content, got, tc.want)
+			if got := proseVerdictWords(tc.content); got != tc.want {
+				t.Errorf("proseVerdictWords(%q) = %q, want %q", tc.content, got, tc.want)
 			}
 		})
 	}
@@ -414,7 +414,7 @@ func TestDelegationRecognisersReadThroughTheRoutingNote(t *testing.T) {
 
 		plain := envelopeCapMarker + "\nI had read two files so far"
 
-		if got, want := delegationVerdict(plain+note), delegationVerdict(plain); got != want {
+		if got, want := proseVerdictWords(plain+note), proseVerdictWords(plain); got != want {
 			t.Errorf("fallen-back verdict = %q, want the plain result's %q", got, want)
 		}
 	})
@@ -424,9 +424,9 @@ func TestDelegationRecognisersReadThroughTheRoutingNote(t *testing.T) {
 
 		body := envelopeCapMarker + "\nI had read two files so far"
 
-		got := delegationVerdict(body + note + envelopeSteeredOne)
+		got := proseVerdictWords(body + note + envelopeSteeredOne)
 
-		if want := delegationVerdict(body + envelopeSteeredOne); got != want {
+		if want := proseVerdictWords(body + envelopeSteeredOne); got != want {
 			t.Errorf("fallen-back steered verdict = %q, want the plain result's %q", got, want)
 		}
 	})
@@ -434,7 +434,7 @@ func TestDelegationRecognisersReadThroughTheRoutingNote(t *testing.T) {
 	t.Run("a whole run still reads done", func(t *testing.T) {
 		t.Parallel()
 
-		if got := delegationVerdict("Found 4 gaps\nin the suite" + note); got != delegationDoneVerdict {
+		if got := proseVerdictWords("Found 4 gaps\nin the suite" + note); got != delegationDoneVerdict {
 			t.Errorf("fallen-back verdict = %q, want %q", got, delegationDoneVerdict)
 		}
 	})
@@ -496,7 +496,7 @@ func TestDelegationValidationFaultsReadThroughTheErrorSlot(t *testing.T) {
 	t.Run("the no-report marker ends without a report", func(t *testing.T) {
 		t.Parallel()
 
-		if got := delegationVerdict("[delegate returned no report]"); got != delegationNoReportVerdict {
+		if got := proseVerdictWords("[delegate returned no report]"); got != delegationNoReportVerdict {
 			t.Errorf("verdict = %q, want %q", got, delegationNoReportVerdict)
 		}
 	})
@@ -537,8 +537,8 @@ func TestDelegationVerdictReadsANonReport(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := delegationVerdict(tc.content); got != tc.want {
-				t.Errorf("delegationVerdict(%q) = %q, want %q", tc.content, got, tc.want)
+			if got := proseVerdictWords(tc.content); got != tc.want {
+				t.Errorf("proseVerdictWords(%q) = %q, want %q", tc.content, got, tc.want)
 			}
 		})
 	}
@@ -608,6 +608,90 @@ func TestDelegationOutcomeOutranksTheProse(t *testing.T) {
 
 			if !ok || got.text != tc.want {
 				t.Errorf("delegationStat(%+v, %q) = %+v, want %q", tc.outcome, tc.content, got, tc.want)
+			}
+		})
+	}
+}
+
+// proseVerdictWords is the slot a delegation result known only by its prose is worded with: the
+// outcome read off the prose (proseDelegationOutcome), worded by delegationOutcomeVerdict.
+func proseVerdictWords(content string) string {
+	return delegationOutcomeVerdict(proseDelegationOutcome(content))
+}
+
+// TestDelegationVerdictIsTypedOnTheSummary pins the typed verdict a sub_agent head's summary
+// carries ([branchSummary.verdict]) for every outcome the engine can attach, the unstarted kinds
+// included: the verdict, the slot words it is painted with, and the colour those take. A
+// never-started outcome renders exactly as the prose-detected never-started result does — the
+// refusal keeps the red `error`, the human's acts are neutral — and every unstarted kind counts as
+// never-started.
+func TestDelegationVerdictIsTypedOnTheSummary(t *testing.T) {
+	t.Parallel()
+
+	const report = "Found 4 gaps\nin the suite"
+	const (
+		marker = "marker"
+		red    = "red"
+		green  = "green"
+	)
+	cases := []struct {
+		name    string
+		outcome domain.DelegationOutcome
+		isError bool
+
+		want             delegationVerdict
+		wantWords        string
+		wantColour       string
+		wantNeverStarted bool
+	}{
+		{"a run that reported", domain.DelegationOutcome{}, false,
+			delegationVerdictDone, delegationDoneVerdict, green, false},
+		{"a steered run that reported", domain.DelegationOutcome{SteeredMessages: 1}, false,
+			delegationVerdictDone, delegationDoneVerdict + " · steered by 1 message", green, false},
+		{"a run with no report", domain.DelegationOutcome{HasNoReport: true}, false,
+			delegationVerdictNoReport, delegationNoReportVerdict, marker, false},
+		{"a run the human stopped", domain.DelegationOutcome{IsStoppedByUser: true}, false,
+			delegationVerdictStopped, delegationStoppedVerdict, marker, false},
+		{"a run capped at a bound", domain.DelegationOutcome{Bound: domain.DelegationTimeLimit}, false,
+			delegationVerdictCapped, "capped at its time limit", marker, false},
+		{"a run that failed", domain.DelegationOutcome{}, true,
+			delegationVerdictFailed, erroredSummary, red, false},
+		{"a delegation pre-empted before it started", domain.DelegationOutcome{Unstarted: domain.DelegationSkipped}, true,
+			delegationVerdictPreempted, delegationPreemptedVerdict, marker, true},
+		{"a delegation refused past the ceiling", domain.DelegationOutcome{Unstarted: domain.DelegationRefused}, true,
+			delegationVerdictRefused, erroredSummary, red, true},
+		{"a delegation a turn cancel caught queued", domain.DelegationOutcome{Unstarted: domain.DelegationCancelled}, true,
+			delegationVerdictCancelledQueued, delegationStoppedVerdict, marker, true},
+		{"a delegation stopped while it queued", domain.DelegationOutcome{Unstarted: domain.DelegationStoppedQueued}, true,
+			delegationVerdictStoppedQueued, delegationStoppedVerdict, marker, true},
+	}
+	th := newTheme(scheme.Default())
+	colours := map[string]any{marker: th.toolMarker, red: th.errorText, green: th.successMark}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			call := domain.ToolCall{ID: "s1", Tool: subAgentToolName, Arguments: []byte(`{"task":"survey the tests"}`)}
+			tv := presentToolCall(call, "", workspaceRoot{})
+			content := report
+			if tc.outcome.Unstarted != domain.DelegationRan {
+				content = unstartedDelegationPrefix + " the engine's own words"
+			}
+
+			tv.enrichWithResult(domain.ToolResult{CallID: "s1", Content: content, IsError: tc.isError,
+				Summary: tc.outcome}, workspaceRoot{})
+
+			if tv.Summary.verdict != tc.want {
+				t.Errorf("verdict = %d, want %d", tv.Summary.verdict, tc.want)
+			}
+			if tv.Summary.Text != tc.wantWords {
+				t.Errorf("slot words = %q, want %q", tv.Summary.Text, tc.wantWords)
+			}
+			if got := summaryStyle(th, tv.Summary, false); !reflect.DeepEqual(got, colours[tc.wantColour]) {
+				t.Errorf("slot %q is not painted %s", tv.Summary.Text, tc.wantColour)
+			}
+			head := entry{kind: entryToolCall, tool: tv, done: true}
+			if got := head.neverStarted(); got != tc.wantNeverStarted {
+				t.Errorf("neverStarted = %v, want %v", got, tc.wantNeverStarted)
 			}
 		})
 	}

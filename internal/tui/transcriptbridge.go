@@ -101,6 +101,58 @@ func decodeTranscript(data []byte) ([]entry, error) {
 	return entries, nil
 }
 
+// replayedDelegationSummary is a replayed sub_agent head's summary with its delegation verdict
+// read back off the record ([branchSummary.verdict]): the verdict word is the slot's own text where
+// the slot is the presenter's wording, and the stored stat's where the slot holds a QUOTED report
+// line — the stat is the verdict delegationStat worded behind it (applyStat), exactly as the live
+// head carried it. A head whose stored body opens under the unstarted head
+// (unstartedDelegationPrefix) never started, and is read off that body instead
+// (proseFailedDelegationOutcome); an older record's `error` slot over the human's act is re-worded
+// with the neutral verdict the live row now shows.
+func replayedDelegationSummary(summary branchSummary, stat statValue, body []detailLine) branchSummary {
+	if len(body) > 0 && strings.HasPrefix(body[0].Text, unstartedDelegationPrefix) {
+		texts := make([]string, 0, len(body))
+		for _, d := range body {
+			texts = append(texts, d.Text)
+		}
+		outcome := proseFailedDelegationOutcome(strings.Join(texts, "\n"))
+		verdict := delegationVerdictOf(outcome, true)
+		if verdict.humanSettled() && !summary.quoted && summary.Text == erroredSummary {
+			words := detailLine{Kind: summary.Kind, Text: delegationOutcomeVerdict(outcome)}
+			summary = branchSummary{detailLine: words}
+		}
+		return summary.withVerdict(verdict)
+	}
+	word := summary.Text
+	if summary.quoted {
+		word = stat.spell()
+	}
+	return summary.withVerdict(replayedDelegationVerdict(word))
+}
+
+// replayedDelegationVerdict reads a started delegation's verdict back off the words its slot was
+// rendered with (delegationOutcomeVerdict, absorbFailure, closeInterruptedCalls). Words that name
+// no verdict read as the zero verdict, which withholds nothing.
+func replayedDelegationVerdict(word string) delegationVerdict {
+	switch {
+	case succeededSummary(word):
+		return delegationVerdictDone
+	case endedWithoutReportSummary(word):
+		return delegationVerdictNoReport
+	case word == delegationPreemptedVerdict:
+		return delegationVerdictPreempted
+	case stoppedSummary(word):
+		return delegationVerdictStopped
+	case strings.HasPrefix(word, delegationBoundLead):
+		return delegationVerdictCapped
+	case word == interruptedSummary:
+		return delegationVerdictInterrupted
+	case failedSummary(word):
+		return delegationVerdictFailed
+	}
+	return delegationVerdictNone
+}
+
 // closeInterruptedCalls closes every tool call a decoded record left OPEN, wording each one with the
 // outcome that actually befell it (interruptedSummary), and reports how many it closed. It is the
 // firing rule one kind over (decodeTranscript): a record can now be written mid-Turn while a
@@ -143,6 +195,9 @@ func closeInterruptedCalls(entries []entry) (closed int) {
 		case (e.kind == entryToolCall || e.kind == entryWorkflowItem) && !e.done:
 			e.done = true
 			e.tool.Summary = namedSummary(detailLine{Text: interruptedSummary})
+			if e.tool.headsRun() {
+				e.tool.Summary = e.tool.Summary.withVerdict(delegationVerdictInterrupted)
+			}
 			closed++
 		}
 	}
@@ -659,20 +714,15 @@ func fromWireToolView(w *session.ToolView, done bool) toolView {
 	if tv.Summary.failed {
 		tv.denied = deniedFailureBody(tv.Details.all())
 	}
-	// A delegation the human's act settled before it started — pre-empted by a queued message, or
-	// caught queued by a turn cancel — is re-derived from its stored body rather than trusted: a
-	// session recorded before those rows took their neutral verdict (delegationNeverStartedVerdict)
-	// stored the failure's `error`, and replaying it as such would paint red what the live row now
-	// paints in the marker tone. The body is the very failure body absorbFailure laid the result out
-	// as, so it reads back whole; only an `error` slot is re-read, so no other verdict can move.
-	if tv.headsRun() && !tv.Summary.quoted && tv.Summary.Text == erroredSummary {
-		texts := make([]string, 0, len(w.Details))
-		for _, d := range w.Details {
-			texts = append(texts, d.Text)
-		}
-		if verdict, ok := delegationNeverStartedVerdict(strings.Join(texts, "\n")); ok {
-			tv.Summary = namedSummary(detailLine{Kind: tv.Summary.Kind, Text: verdict})
-		}
+	// A delegation head's verdict is not on the wire ([branchSummary.verdict]) and is read back off
+	// the record's words (replayedDelegationVerdict) — the same rendered words the live row showed
+	// (ADR 0083 §1). A delegation the human's act settled before it started is re-derived from its
+	// stored body as well rather than trusted: a session recorded before those rows took their
+	// neutral verdict stored the failure's `error`, and replaying it as such would paint red what the
+	// live row now paints in the marker tone, so such a slot is re-worded too. The body is the very
+	// failure body absorbFailure laid the result out as, so it reads back whole.
+	if tv.headsRun() {
+		tv.Summary = replayedDelegationSummary(tv.Summary, tv.stat, tv.Details.all())
 	}
 	// The header's count is the third thing re-derived rather than trusted, and for the same reason:
 	// it is not on the wire at all (toolView.count), and the rows it is read off ARE — task_list's

@@ -2801,21 +2801,15 @@ func (e entry) spawned() runRef {
 // there has to fail the test that pins it here.
 const unstartedDelegationPrefix = "sub-agent not started:"
 
-// neverStarted reports whether a run head's result says its child never ran — the pre-emption, the
-// ceiling refusal and the queued stop, which are the only results opening with
-// unstartedDelegationPrefix. Such a
-// head is neither finished work nor a queued job, whatever its phase says: the engine closes it
-// through its finished phase alone (childBracket.neverStarted), so a count that read the phase would take a
-// refused delegation for a report a stop keeps. The result's head line is the first line of the
-// body the failure laid out (absorbFailure): a sub_agent head carries no body of its own before its
-// result, and the prompt an expanded row shows above the result is composed at paint time
-// (subAgentPromptDetails), never stored.
+// neverStarted reports whether a run head's child never ran — the pre-emption, the ceiling refusal,
+// the queued stop and the queued turn cancel, the unstarted verdicts on its summary
+// ([delegationVerdict.neverStarted]), settled where its result was absorbed (absorbFailure) or read
+// back on replay (replayedDelegationVerdict). Such a head is neither finished work nor a queued job,
+// whatever its phase says: the engine closes it through its finished phase alone
+// (childBracket.neverStarted), so a count that read the phase would take a refused delegation for a
+// report a stop keeps.
 func (e entry) neverStarted() bool {
-	if !e.headsRun() {
-		return false
-	}
-	lines := e.tool.Details.all()
-	return len(lines) > 0 && strings.HasPrefix(lines[0].Text, unstartedDelegationPrefix)
+	return e.headsRun() && e.tool.Summary.verdict.neverStarted()
 }
 
 // fanOutFloor is the fewest delegations an unannounced group needs to be a wave in flight

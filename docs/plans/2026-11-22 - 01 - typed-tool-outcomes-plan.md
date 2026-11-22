@@ -162,7 +162,14 @@ internal/tools/console_send.go — ConsoleSend.Execute; internal/tools/console_r
 
 **Commit:** `refactor(tools): a console's state travels as a ProcessEnding`
 
-## 6. The TUI keeps a delegation's verdict typed
+## 6. The TUI keeps a delegation's verdict typed — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): the enum is `delegationVerdict` (toolregistry.go), with eleven values: none (zero), done, no-report, stopped, capped, failed, interrupted, and the unstarted kinds preempted, refused, cancelled-queued, stopped-queued. `delegationVerdictOf(outcome, isError)` classifies, and `branchSummary.withVerdict` settles the verdict plus failed/succeeded (painted fields only on an unquoted slot, F-29). It is set in `enrichWithResult` after the stat hook, in `absorbFailure` (via `failedDelegationOutcome`: the typed outcome, else `proseFailedDelegationOutcome`), on replay in `fromWireToolView` (`replayedDelegationSummary` / `replayedDelegationVerdict`), and in `closeInterruptedCalls` (interrupted) for heads.
+NOTES (2026-11-22): `summaryStyle` and `failedCalls` are unchanged in code. They still read `failed` / `succeeded`, and on a sub_agent head the typed verdict now sets those fields, per the item's regression guard. `subAgentFinished` reads `!failed && !verdict.withholdsCheck()`. It keeps the `failed` read because a Workflow item head (workflowItemSummary) settles `failed` and no verdict.
+NOTES (2026-11-22): retired `delegationVerdict(content)` (its test callers now go through a test helper `proseVerdictWords` that calls `delegationOutcomeVerdict(proseDelegationOutcome(...))`), `delegationNeverStartedVerdict` (replaced by `proseFailedDelegationOutcome`, which feeds the classifier) and `subAgentVerdictWord` (its quoted-slot/stat split moved into `replayedDelegationSummary`). `delegationOutcomeVerdict` now also words the unstarted kinds.
+NOTES (2026-11-22): `toolView.runVerdict` is now typed `delegationVerdict` (still the demotion gate). Its entry in `sanitizeExemptToolViewMembers` (toolpresent_test.go) is removed because the field is no longer a string member.
+NOTES (2026-11-22): consequential edit — internal/tui/toolleader.go: made necessary by subAgentFinished no longer reading the words. The endedWithoutReportSummary / stoppedSummary doc comments now name the replay reader as their one reader.
+NOTES (2026-11-22): golangci-lint on ./internal/tui reports 0 issues. The Acceptance -run was used together with narrow runs of TestGeneratedDelegationNameReachesEverySurface, TestPromotionCarriesBothReadingsOfTheOutcome, TestTranscriptCodecCloses*, TestWorkflowItem* and TestToolViewSanitizeReachesEveryStringMember; all pass. A wider multi-pattern -run over internal/tui was refused by the harness, so the full suite still needs the closeout `make check`.
 
 Depends on item 2.
 
