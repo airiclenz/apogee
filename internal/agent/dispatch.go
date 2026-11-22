@@ -1788,6 +1788,13 @@ func (a *Agent) executeToolDemotable(ctx context.Context, turn int, tool domain.
 		}
 		return errResult, dispatchDone, nil
 	}
+	// A structural tool-result fact (every mode, Bypass included, no config key): a built-in
+	// called with a top-level argument its schema does not declare ran with that key dropped, so
+	// its result gains one line naming it. Appended here — once, on the one leaf path every
+	// dispatch outcome runs through, and before the tree warning, audit, reactions and the clamp
+	// — so the session record and transcript carry the same line the model reads. A declared-only
+	// call, an MCP or host tool and finish come back unchanged.
+	res = tools.NoteIgnoredArguments(tool, call, res)
 	if watchTree {
 		appendTreeMutationWarning(&res, a.tree.mutationWarning(floorCtx, preTree))
 	}

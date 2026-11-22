@@ -58,7 +58,7 @@ internal/tools/grep.go — grepCapNudge; internal/tools/readonly_subprocess.go �
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestNoteIgnoredArguments' ./internal/tools/`
 **Commit:** `feat(tools): name a call's ignored arguments in its result`
 
-## 2. Append the note on the engine's leaf tool path
+## 2. Append the note on the engine's leaf tool path — ✅ DONE (2026-11-22)
 
 **What:** Depends on item 1.
 **Goal:** every leaf tool call the engine runs returns its result through `tools.NoteIgnoredArguments` exactly once, so the next request the model receives carries the note for a built-in called with an undeclared key — under Bypass too — and is byte-identical for a declared-only call.
