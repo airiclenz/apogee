@@ -26,6 +26,15 @@ the next idle point.**
    once, so a call to any of its tools is refused with `mcp server "X" is not connected` before the
    next key, mid-Turn included. Its in-flight dial, if any, is cancelled. Its process closes off the
    Update loop, and its tools leave the menu at the next idle rebuild.
+
+   > **Amended 2026-11-22 (`docs/plans/2026-11-22 - 00 - mcp-holder-consolidation-plan.md`, item
+   > 7).** A `url-safety` edit's deny is a two-phase move on the MCP holder. Before the host-list
+   > swap, the holder partitions its own last-requested servers, never the config file, and closes
+   > each one the edit newly denies; after the swap, a plain request of the whole layered set
+   > readmits. A server that is denied and still configured stays known and denied: dialled nowhere,
+   > retried by nothing, never reported removed, and dialled once a later edit admits it again. This
+   > supersedes the 2026-11-07 decision 7 amendment's "is retired and dialled nowhere". A config file
+   > that fails to load still has every server the edit denies closed.
 6. **A newer request for a server supersedes the older one.** Each entry carries a generation. A new
    request for server X bumps X's generation and cancels X's in-flight dial. A result whose
    generation is stale is closed off the loop and writes no note: a superseded dial's

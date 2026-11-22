@@ -2730,8 +2730,9 @@ func TestMCPNoteForDoesNotDoubleTheLabel(t *testing.T) {
 // host the OTHER server sits on, and the re-admission that follows dials what is left and fails. What
 // the human reads on the `url-safety:` row, and the note the dial's commit answers, are asserted
 // whole, because the defect this pins is a property of the composed sentences and of nothing smaller
-// — the helper reads correctly in isolation either way. The broken server is new to the session, so
-// its note is the connect-failed sentence; docs is denied, so it is never dialled.
+// — the helper reads correctly in isolation either way. docs is live on its configured endpoint; the
+// broken server is new to the session, so the readmit request dials it and its note is the
+// connect-failed sentence; docs is denied, so it is never dialled.
 func TestApplySettingURLSafetyRowCarriesTheMCPLabelOnce(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
@@ -2741,8 +2742,9 @@ func TestApplySettingURLSafetyRowCarriesTheMCPLabelOnce(t *testing.T) {
 
 	workspace := t.TempDir()
 	home := t.TempDir()
-	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "serving__echo"}}}
-	fixture := newMCPFixture(old, "", func(servers []mcp.ServerConfig) (mcpSession, error) {
+	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__echo"}}}
+	docs := mcpEntry{config: resolvedMCPServer(t, path, "docs"), session: old}
+	fixture := newMCPFixtureWith([]mcpEntry{docs}, "", func(servers []mcp.ServerConfig) (mcpSession, error) {
 		// The production recipe (wire_live.go): the file's blocks, this session's guard, the real client.
 		return mcp.ConnectWith(context.Background(), liveMCPHost(home), servers, mcpGuard(nil, nil), workspace)
 	})
@@ -2754,8 +2756,8 @@ func TestApplySettingURLSafetyRowCarriesTheMCPLabelOnce(t *testing.T) {
 	applier.configPath = path
 	apply := applySettingFor(applier)
 
-	// Closing the docs host changes WHICH servers are admitted, which is what makes the row request a
-	// dial at all; the dial then fails on the block behind it and its note says so in one sentence.
+	// Closing the docs host closes docs on the keystroke; the readmit request then dials broken, the
+	// one server the holder never knew, which fails on the block behind it and says so in one sentence.
 	note, err := apply("url-safety.deny-hosts", "[mcp.example.com]")
 	if err != nil {
 		t.Fatalf("apply url-safety.deny-hosts: %v — the MCP half of this row cannot fail it", err)
@@ -4895,9 +4897,9 @@ func TestSettingsApplierReloadsRefuseAnUnparseableFile(t *testing.T) {
 	}
 
 	// readmitMCP is the one caller that dresses the refusal rather than returning it: this half cannot
-	// fail the row, so a file it cannot parse plans and retires no configured server and says so. With
-	// nothing denied, the note is the refusal alone.
-	if got, wantNote := a.readmitMCP(a.denyMCP(toolSetSpec{}, toolSetSpec{})), mcpNoteFor(mcpReconnectFailed(loadErr)); got != wantNote {
+	// fail the row, so a file it cannot parse requests nothing and says so. The note is the refusal
+	// alone.
+	if got, wantNote := a.readmitMCP(), mcpNoteFor(mcpReconnectFailed(loadErr)); got != wantNote {
 		t.Errorf("readmitMCP note = %q, want %q", got, wantNote)
 	}
 }
@@ -4947,6 +4949,61 @@ func TestURLSafetyDenyWithAnUnreadableConfigClosesTheDeniedSession(t *testing.T)
 	}
 	if got := fixture.set.session("docs"); got != nil {
 		t.Errorf("the holder still carries %p for docs after the deny; want no live entry", got)
+	}
+}
+
+// A url-safety deny of a server's CONFIGURED endpoint lands on the keystroke even when the config file
+// does not parse: the deny half reads the holder's own last-requested servers, never the file, so
+// docs' dial in flight to the endpoint the edit closes is superseded, the row names docs before it
+// reports the file it could not read, and the superseded dial's session is closed when it returns,
+// never installed.
+func TestURLSafetyDenyWithAnUnreadableConfigClosesTheConfiguredServer(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, mcpServersFixture)
+	dial := newGatedDial("docs")
+	fixture := newMCPFixtureDialling(nil, "", dial.connect)
+	spy := &applySettingSpy{}
+	if err := fixture.set.request([]mcp.ServerConfig{resolvedMCPServer(t, path, "docs")}, openGuard, false); err != nil {
+		t.Fatalf("request docs: %v", err)
+	}
+	finished := runJobsAsync(fixture.set.takeWork())
+	awaitClosed(t, dial.entered, "the dial to docs to start")
+	writeSettingsFixture(t, path, "servers: [\n")
+	_, loadErr := config.LoadFileConfig(path, os.ReadFile, func(string) {})
+	if loadErr == nil {
+		t.Fatal("the fixture parses; want a file the loader refuses")
+	}
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+
+	note, err := applySettingFor(applier)("url-safety.deny-hosts", "[mcp.example.com]")
+
+	if err != nil {
+		t.Fatalf("apply url-safety.deny-hosts: %v", err)
+	}
+	want := toolRosterNote + "; mcp server docs disconnected — its endpoint is denied" +
+		mcpNoteFor(mcpReconnectFailed(loadErr))
+	if note != want {
+		t.Errorf("note = %q, want %q", note, want)
+	}
+	close(dial.release)
+	awaitClosed(t, finished, "the superseded dial to return")
+	outcomes, err := drainMCP(t, fixture.set, fixture.tools, spy)
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if len(outcomes) != 0 {
+		t.Errorf("outcomes = %q, want none: the deny superseded docs' dial", outcomeNotes(outcomes))
+	}
+	if !dial.session.isClosed() {
+		t.Error("the superseded dial's session to the denied endpoint was left open")
+	}
+	if got := fixture.set.session("docs"); got != nil {
+		t.Errorf("the holder carries %p for docs after the deny; want no live entry", got)
 	}
 }
 

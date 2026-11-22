@@ -609,7 +609,7 @@ func (d *gatedDial) connect(_ context.Context, _ mcp.ServerConfig, _, _ []string
 // denyOldEndpointMidDial moves docs from host A to host B, and — while B's dial is held in dial —
 // denies A through the request path: the live tool set's deny list moves, then the admitted set is
 // requested under it, as a later `mcp-servers:` save would, so the drop under test is
-// requestServerLocked's. (The `url-safety:` row's own deny half, settingsApplier.denyMCP, is driven by
+// requestServerLocked's. (The `url-safety:` row's own deny half, liveMCP.deny, is driven by
 // denyLiveEndpointThroughURLSafety.) It releases the dial and returns once the job has returned, with
 // nothing committed yet.
 func denyOldEndpointMidDial(t *testing.T, dial *gatedDial) (*mcpFixture, *fakeMCPSession, *applySettingSpy) {
@@ -1025,6 +1025,115 @@ func TestURLSafetyDenyOfAKeptSessionWithAnUncommittedFailedDialRedials(t *testin
 	seed.assertLandsOnB(t)
 }
 
+// urlSafetyApplier is the settings applier a `url-safety:` row commits through, over fixture's holder
+// and tool set, with the config file at path.
+func urlSafetyApplier(t *testing.T, fixture *mcpFixture, spy *applySettingSpy, path string) settingsApplier {
+	t.Helper()
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+	return applier
+}
+
+// A server a `url-safety:` edit denies stays known to the holder, as denied: the retry gesture, which
+// re-dials only a server whose last dial failed, dials nothing for it, and a later edit that widens
+// the lists again dials it exactly once.
+func TestURLSafetyDenyKeepsTheServerKnownAsDenied(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, mcpServersFixture)
+	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__echo"}}}
+	dials := newMCPDialRecorder()
+	fixture := newMCPFixtureWith([]mcpEntry{{config: resolvedMCPServer(t, path, "docs"), session: old}}, "", dials.connect)
+	spy := &applySettingSpy{}
+	applier := urlSafetyApplier(t, fixture, spy, path)
+	apply := applySettingFor(applier)
+	if _, err := apply("url-safety.deny-hosts", "[mcp.example.com]"); err != nil {
+		t.Fatalf("apply the deny: %v", err)
+	}
+	if _, err := drainMCP(t, fixture.set, fixture.tools, spy); err != nil {
+		t.Fatalf("commit the deny: %v", err)
+	}
+
+	if err := applier.requestMCP(true); err != nil {
+		t.Fatalf("retry gesture: %v", err)
+	}
+	if fixture.set.isDialQueued() || fixture.set.hasFailedDial() {
+		t.Errorf("the retry gesture queued a dial (%v) or found a failed one (%v) for a denied server",
+			fixture.set.isDialQueued(), fixture.set.hasFailedDial())
+	}
+	if _, err := drainMCP(t, fixture.set, fixture.tools, spy); err != nil {
+		t.Fatalf("commit the retry: %v", err)
+	}
+	if len(dials.dialled) != 0 {
+		t.Fatalf("dialled = %v before the widening, want none: docs is denied", dials.dialled)
+	}
+
+	note, err := apply("url-safety.deny-hosts", "")
+
+	if err != nil {
+		t.Fatalf("apply the widening: %v", err)
+	}
+	if note != toolRosterNote {
+		t.Errorf("note = %q, want just %q: the readmitted server reports by its own note", note, toolRosterNote)
+	}
+	outcomes, err := drainMCP(t, fixture.set, fixture.tools, spy)
+	if err != nil {
+		t.Fatalf("commit the widening: %v", err)
+	}
+	if want := []string{"docs"}; !slices.Equal(dials.dialled, want) {
+		t.Errorf("dialled = %v, want %v: the widening readmits docs with one dial", dials.dialled, want)
+	}
+	if want := []string{"mcp docs connected"}; !slices.Equal(outcomeNotes(outcomes), want) {
+		t.Errorf("notes = %q, want %q", outcomeNotes(outcomes), want)
+	}
+	if got := fixture.set.session("docs"); got == nil || got == mcpSession(old) {
+		t.Errorf("docs is on %p after the widening, want the fresh session", got)
+	}
+}
+
+// A server that is configured but denied — known to the holder with isAdmitted false — stays denied
+// when a later `url-safety:` edit moves another server's verdict: the readmit request carries the
+// whole layered set, so it is never reported removed. (At the plan's base the readmit requested only
+// the admitted subset, and wiki was posted `disconnected removed`.)
+func TestURLSafetyReadmitNeverReportsADeniedServerRemoved(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, mcpServersFixture+
+		"  - name: wiki\n"+
+		"    transport: streamable-http\n"+
+		"    endpoint: https://wiki.example.com/\n")
+	docs := resolvedMCPServer(t, path, "docs")
+	wiki := resolvedMCPServer(t, path, "wiki")
+	fixture := newMCPFixtureWith([]mcpEntry{liveTwoToolServer(docs)}, "", newMCPDialRecorder().connect)
+	spy := &applySettingSpy{}
+	if err := fixture.tools.setDenyHosts([]string{"wiki.example.com"}, spy); err != nil {
+		t.Fatalf("seed the deny list: %v", err)
+	}
+	if err := fixture.set.request([]mcp.ServerConfig{docs, wiki}, mcpGuard(nil, []string{"wiki.example.com"}), false); err != nil {
+		t.Fatalf("request the layered set: %v", err)
+	}
+	if _, err := drainMCP(t, fixture.set, fixture.tools, spy); err != nil {
+		t.Fatalf("commit the seed: %v", err)
+	}
+	events := recordMCPEvents(fixture)
+
+	note, err := applySettingFor(urlSafetyApplier(t, fixture, spy, path))("url-safety.deny-hosts", "[wiki.example.com, mcp.example.com]")
+
+	if err != nil {
+		t.Fatalf("apply url-safety.deny-hosts: %v", err)
+	}
+	if want := toolRosterNote + "; mcp server docs disconnected — its endpoint is denied"; note != want {
+		t.Errorf("note = %q, want %q: wiki was denied already, so the row says nothing new of it", note, want)
+	}
+	assertMCPEvents(t, "the edit", events.take(), "docs disconnected denied")
+	if fixture.set.isDialQueued() {
+		t.Error("the readmit queued a dial though every configured server is denied")
+	}
+}
+
 // Every finished dial lands in ONE swap, its tools in config order whatever order the dials
 // finished in, with the outcomes in config order too.
 func TestLiveMCPCommitIsOneSwapInConfigOrder(t *testing.T) {
@@ -1377,10 +1486,17 @@ func TestLiveMCPEmitsLifecycleEvents(t *testing.T) {
 		fixture := newMCPFixtureWith([]mcpEntry{liveTwoToolServer(httpServer)}, "", newMCPDialRecorder().connect)
 		events := recordMCPEvents(fixture)
 
-		fixture.set.dropDenied(denyExample)
-		assertMCPEvents(t, "dropDenied", events.take(), "docs disconnected denied")
-		fixture.set.retire([]string{"docs"})
-		assertMCPEvents(t, "retire", events.take(), "docs disconnected denied")
+		denied := fixture.set.deny(denyExample)
+		assertMCPEvents(t, "the deny", events.take(), "docs disconnected denied")
+		if len(denied) != 1 || denied[0].Name != "docs" {
+			t.Errorf("deny = %+v, want the one refusal of docs", denied)
+		}
+		// docs stays known and denied, so a later deny under the same lists neither acts on it nor
+		// says it again.
+		if again := fixture.set.deny(denyExample); len(again) != 0 {
+			t.Errorf("a second deny = %+v, want none: docs is already denied", again)
+		}
+		assertMCPEvents(t, "a second deny", events.take())
 	})
 	t.Run("denied at the commit's re-admit", func(t *testing.T) {
 		t.Parallel()

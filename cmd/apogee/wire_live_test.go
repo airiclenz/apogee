@@ -383,12 +383,13 @@ func TestApplySettingURLSafetyWideningDialsUnderTheNewLists(t *testing.T) {
 	}
 }
 
-// The guard on that re-admission, and the reason it is a comparison rather than an unconditional
-// dial: a reconnect launches a process per stdio server and handshakes every HTTP one, synchronously
-// on the Update goroutine. The ordinary edit — a web-tool host, while an MCP server is connected —
-// changes no endpoint verdict at all, and paying a full re-dial for it would freeze the frame, reset
-// every server's state and break a stdio server holding a lock or a port. So a deny that covers
-// nothing leaves the connection exactly where it is.
+// The guard on that re-admission, and the reason it is the holder's diff rather than an unconditional
+// dial: a reconnect launches a process per stdio server and handshakes every HTTP one. The ordinary
+// edit — a web-tool host, while an MCP server is connected — changes no endpoint verdict at all, and
+// paying a full re-dial for it would reset every server's state and break a stdio server holding a
+// lock or a port. The readmit request diffs each server against the config and verdict the holder
+// last requested it with (liveMCP.request), never a name compare, so a deny that covers nothing
+// leaves the connection exactly where it is.
 func TestApplySettingURLSafetyHostsLeavesMCPAloneWhenNoVerdictMoved(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
@@ -396,7 +397,7 @@ func TestApplySettingURLSafetyHostsLeavesMCPAloneWhenNoVerdictMoved(t *testing.T
 
 	serving := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__echo"}}}
 	dials := 0
-	fixture := newMCPFixtureWith([]mcpEntry{{config: mcp.ServerConfig{Name: "docs"}, session: serving}}, "", func([]mcp.ServerConfig) (mcpSession, error) {
+	fixture := newMCPFixtureWith([]mcpEntry{{config: resolvedMCPServer(t, path, "docs"), session: serving}}, "", func([]mcp.ServerConfig) (mcpSession, error) {
 		dials++
 		return &fakeMCPSession{}, nil
 	})

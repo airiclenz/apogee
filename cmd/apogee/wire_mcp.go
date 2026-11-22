@@ -8,8 +8,9 @@ package main
 // once and queues one dial job per server it adds or changes; the jobs run off the caller; a commit at
 // the next idle point folds every finished dial into one rebuild and one SwapTools, then closes the
 // sessions it replaced — so a server that cannot be reached keeps its old session, or stays absent,
-// and costs the healthy ones nothing. A `url-safety:` edit that newly denies a server marks it closed
-// on its own (retire), ahead of the host-list swap. A session that ends on its own — the server died or
+// and costs the healthy ones nothing. A `url-safety:` edit is a two-phase move on the holder: a deny
+// closes every server it newly denies on its own (deny), ahead of the host-list swap, and a plain
+// request readmits after it. A session that ends on its own — the server died or
 // dropped its connection — is dropped the same way and reported lost (watch); it is never re-dialled
 // but by the retry gesture. The wiring itself is the TUI's tui.MCPHost over this holder: the TUI runs the jobs as Cmds and commits
 // at its idle point.
@@ -103,8 +104,8 @@ type mcpDialJob struct {
 //
 // The lifecycle is three calls. request (on the caller) marks a removed or newly denied server closed
 // at once and queues a dial job per server that moved; the jobs (takeWork) run anywhere; commit (on
-// the caller, at an idle point) takes the finished dials in with one rebuild. retire is request's
-// removal alone, for a `url-safety:` edit whose deny must land before its host lists move. close is
+// the caller, at an idle point) takes the finished dials in with one rebuild. deny is the close half
+// alone, for a `url-safety:` edit whose deny must land before its host lists move. close is
 // the run's teardown: it cancels every dial, waits for them, and closes everything still open. Beside
 // the three calls, one watcher per installed session (watch) drops a session that ends on its own and
 // reports it `disconnected (lost)`, marking the server failed so the retry gesture re-dials it.
@@ -600,60 +601,55 @@ func (m *liveMCP) dropLiveLocked(name string) {
 	m.needsRebuild = true
 }
 
-// dropDenied closes, now, every live session whose OWN endpoint guard denies — whatever endpoint its
-// server is configured on — and returns their names in config order. Each one is retired at once,
-// dropped from the installed set and closed off the loop (dropLiveLocked), while a dial in flight for
-// its server is left to land, or to fail into hasFailed, which retry-failed re-dials. A server whose
-// closed session was a kept connection — its dial to its configured endpoint failed — with no dial
-// pending is dialled on that endpoint now, under guard, when its last request and guard both admit it
-// (canRedialDroppedLocked); takeWork hands that dial out. It is the deny
-// half of a `url-safety:` edit for a server already moving off the endpoint the edit closes: the deny
-// takes effect on the keystroke (ADR 0109 decision 5), and a dial to the still-admitted endpoint that
-// fails can never keep or bring back the session on the denied one.
-func (m *liveMCP) dropDenied(guard security.URLGuard) []string {
+// deny is the deny half of a `url-safety:` edit, run before its host lists move (ADR 0109 decision 5):
+// over the holder's own last-requested servers, never the config file, it closes now every server
+// guard newly denies and returns one mcp.Denied per server it closed, in config order. It runs ahead
+// of the swap door, mid-Turn included, so a swap the engine refuses cannot keep a server the operator
+// has just closed talking; it needs no config file, so a file that no longer parses still closes them.
+//
+// A server whose configured endpoint the last request admitted and guard now denies has its dial
+// superseded and its live session dropped (disconnectLocked); it stays known with isAdmitted false —
+// and hasFailed false, as settleLocked records a commit-time deny — so the retry gesture never dials
+// it, and the request that follows the swap diffs it unmoved while the lists still deny it and dials
+// it once they admit it again. A server connected on an endpoint guard denies, whatever endpoint it
+// is configured on, has that session dropped alone (dropLiveLocked): a dial in flight for its
+// still-admitted config is left to land, or to fail into hasFailed, which retry-failed re-dials, and a
+// closed kept connection with no dial pending is dialled on its configured endpoint now, under guard
+// (canRedialDroppedLocked; ADR 0109 decision 7). A server already known denied, whose live session
+// guard admits, is neither — so a later url-safety edit never closes or names it again.
+func (m *liveMCP) deny(guard security.URLGuard) []mcp.Denied {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.isStopped {
 		return nil
 	}
-	var dropped []string
-	for _, name := range slices.Clone(m.order) {
-		if !mcpAdmits(m.entries[name].config, guard) {
+	var denied []mcp.Denied
+	for _, name := range slices.Clone(m.requested) {
+		state := m.servers[name]
+		if state == nil {
+			continue
+		}
+		if refusal, isDenied := mcpRefusal(state.config, guard); state.isAdmitted && isDenied {
+			m.disconnectLocked(name)
+			state.isAdmitted, state.hasFailed = false, false
+			m.postDisconnectedLocked(state, apogee.MCPDisconnectDenied)
+			denied = append(denied, refusal)
+			continue
+		}
+		live, isLive := m.entries[name]
+		if !isLive {
+			continue
+		}
+		if refusal, isDenied := mcpRefusal(live.config, guard); isDenied {
 			m.dropLiveLocked(name)
-			dropped = append(dropped, name)
-			state := m.servers[name]
-			if state != nil {
-				m.postDisconnectedLocked(state, apogee.MCPDisconnectDenied)
-			}
+			m.postDisconnectedLocked(state, apogee.MCPDisconnectDenied)
 			if m.canRedialDroppedLocked(state, guard) {
 				m.queueDialLocked(state, guard)
 			}
+			denied = append(denied, refusal)
 		}
 	}
-	return dropped
-}
-
-// retire marks the servers named names closed now and drops them from the last-requested set —
-// request's removal path, with no request behind it: each one's tools are refused from here on
-// (mcpSession.Retire), its in-flight dial is cancelled, its session closes off the loop, and its tools
-// leave the registry at the next commit. It is the deny half of a `url-safety:` edit (ADR 0109),
-// which runs before the host lists move, mid-Turn included, so a swap the engine refuses cannot keep
-// a server the operator has just closed talking. A name the holder does not know is skipped; a server
-// retired here and configured again is a new one to the next request, so it is dialled.
-func (m *liveMCP) retire(names []string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.isStopped {
-		return
-	}
-	for _, name := range names {
-		if state := m.servers[name]; state != nil {
-			m.postDisconnectedLocked(state, apogee.MCPDisconnectDenied)
-		}
-		m.disconnectLocked(name)
-		delete(m.servers, name)
-	}
-	m.requested = slices.DeleteFunc(slices.Clone(m.requested), func(n string) bool { return slices.Contains(names, n) })
+	return denied
 }
 
 // supersedeLocked moves the server named name to a fresh generation, so no older dial for it lands:
@@ -1197,6 +1193,16 @@ func (m *liveMCP) dial(ctx context.Context, server mcp.ServerConfig, guard secur
 func mcpAdmits(server mcp.ServerConfig, guard security.URLGuard) bool {
 	_, denied := mcp.Admit([]mcp.ServerConfig{server}, guard)
 	return len(denied) == 0
+}
+
+// mcpRefusal is mcp.Admit's refusal of server under guard, and whether there is one: the error the
+// url-safety row words (deniedReason) for a server a deny closes.
+func mcpRefusal(server mcp.ServerConfig, guard security.URLGuard) (mcp.Denied, bool) {
+	_, denied := mcp.Admit([]mcp.ServerConfig{server}, guard)
+	if len(denied) == 0 {
+		return mcp.Denied{}, false
+	}
+	return denied[0], true
 }
 
 // mcpRowFailures is what the outcomes of a commit that landed (liveMCP.commit) say as one row error: nil

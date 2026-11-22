@@ -244,7 +244,13 @@ internal/tui/mcpreconnect_test.go — mcpRowApplies.apply, TestMCPDialStartsWhil
 
 **Commit:** `refactor(tui): the mcp-servers row arms on the queued-dials fact`
 
-## 7. The url-safety move is a two-phase move on the MCP holder
+## 7. The url-safety move is a two-phase move on the MCP holder — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): `denyMCP` returns a small `mcpDenyNote` string type that carries the `refused` method, so the row wording (`deniedReason`, `refused`, the load-error clause) stays in wire_settings.go; `liveMCP.deny` returns one `mcp.Denied` per server it closed, via a new `mcpRefusal` helper beside `mcpAdmits` in wire_mcp.go.
+
+NOTES (2026-11-22): `readmitMCP` requests directly through `liveMCP.request`, not `requestMCPFrom`, so it does not widen the secret scrub (`widenSecretEnv`): unchanged from the base behaviour.
+
+NOTES (2026-11-22): added test helper `urlSafetyApplier` in wire_mcp_test.go for the two new holder tests; `TestURLSafetyReadmitNeverReportsADeniedServerRemoved` confirmed failing at 27439797 (`wiki disconnected removed` posted).
 
 **What:**
 This also fixes a defect found at the base: `readmitMCP` requests only the admitted subset, so a server that is still configured but denied (known with `isAdmitted=false`) is disconnected and posted as `disconnected removed`, when it should stay denied.

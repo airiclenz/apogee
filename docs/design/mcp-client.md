@@ -285,7 +285,10 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   `SwapTools`, re-admitted under the live url-safety lists. A failed re-dial keeps that server's old
   session, a new server whose first dial fails stays absent, and a removed or denied server is
   refused at once. A deny that closes such a kept connection dials the server's configured endpoint
-  again when the lists, at its last request and now, admit it and no dial for it is pending. Each outcome is one transcript note per server (`mcp <server> reconnected`,
+  again when the lists, at its last request and now, admit it and no dial for it is pending. A `url-safety:` edit is a two-phase move on the holder: before the host-list swap
+  it closes every server the edit newly denies among the holder's own last-requested servers
+  (`liveMCP.deny`), and after it a plain request of the whole layered set readmits — a server that is
+  denied and still configured stays known as denied, never reported removed. Each outcome is one transcript note per server (`mcp <server> reconnected`,
   `mcp reconnect failed: <server>: … — previous connection kept`, …). Startup's `Connect` stays
   all-or-nothing and fatal.
 - **Lifecycle is an Event too (ADR 0111 decisions 8–10).** `internal/mcp` knows nothing of it: the
