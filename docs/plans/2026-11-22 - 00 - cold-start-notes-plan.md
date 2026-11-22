@@ -33,7 +33,7 @@
 - Any change to boundary or ambient note destinations, or to the loud/routine class of a kind.
 - Deduplicating notes already stored in existing session records.
 
-## 1. A later refusal drops the stashed first-contact refusal
+## 1. A later refusal drops the stashed first-contact refusal — ✅ DONE (2026-11-22)
 
 **What:**
 **Goal:** fixes `first-contact-lines-stale` (a defect, not a regression). After a first-contact rebind refusal for target A and a later refusal for target B at any other contact, a `/sessions` restore or `/fork` re-places no refusal line; every other stashed first-contact line (an unknown window, an unapplied roster) is still re-placed once. A repeat refusal for the same target as the stashed one leaves the stash as it is.

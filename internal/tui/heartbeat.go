@@ -84,14 +84,23 @@ type heartbeatState struct {
 	// the refusal is noted once per distinct target instead of once every Interval. Only
 	// [Model.applyRebind] sets it; "" once a rebind succeeds.
 	lastRebindFailed string
-	// firstContactLines are the texts of the first-contact notes that took a line of their own
-	// rather than joining the start-up log ([destination]), in the order they were placed. Those
-	// lines are display-only, so a transcript swap — a /sessions restore or a /fork — would drop
-	// them while the binding they describe still stands; [Model.replaceFirstContactLines] puts them
-	// back. Only [Model.noteBinding] appends; a later binding ([Model.applyRebind] for any other contact)
-	// and a `/server` switch (which resets this whole state) supersede them. Only ever replaced or
-	// appended to a clipped copy, so it copies with the Model (ADR 0011).
-	firstContactLines []string
+	// firstContactLines are the first-contact notes that took a line of their own rather than
+	// joining the start-up log ([destination]), in the order they were placed. Those lines are
+	// display-only, so a transcript swap — a /sessions restore or a /fork — would drop them while
+	// the binding they describe still stands; [Model.replaceFirstContactLines] puts them back. Only
+	// [Model.noteBinding] appends. A later binding ([Model.applyRebind] for any other contact) and a
+	// `/server` switch (which resets this whole state) supersede them all; a refusal noted at any
+	// other contact supersedes only the refusal line, which no longer names the target the binding
+	// last failed on (a repeat refusal for the same target is not noted, so it keeps it). Only ever
+	// replaced or appended to a clipped copy, so it copies with the Model (ADR 0011).
+	firstContactLines []firstContactLine
+}
+
+// firstContactLine is one standing first-contact note: the kind it was raised as, which is what a
+// later refusal supersedes it by, and the text placed.
+type firstContactLine struct {
+	kind NoticeKind
+	text string
 }
 
 // rebindIntent is one captured binding change: the model the last beat observed the server to be
@@ -412,7 +421,9 @@ func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bo
 // the one place that sets it, for every caller — and says so ONCE per distinct target: the marker
 // makes [Model.observeBinding] retry on every later beat, and a transcript repeating the same refusal
 // at that rate would bury the conversation it is meant to annotate (the saveFailing fail-once
-// posture). The success that finally lands clears the marker and writes the ordinary note.
+// posture). A refusal raised at any contact but the first also drops the first contact's standing
+// refusal line ([heartbeatState.firstContactLines]), which it supersedes. The success that finally
+// lands clears the marker and writes the ordinary note.
 func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	if !m.appliesRebinds() {
 		return m, false
@@ -426,6 +437,11 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 			return m, false
 		}
 		m.hb.lastRebindFailed = intent.model
+		if intent.contact != contactFirst {
+			// This refusal names the target the binding fails on now; the first contact's refusal
+			// names one it no longer is.
+			m.hb.firstContactLines = slices.DeleteFunc(slices.Clone(m.hb.firstContactLines), isRefusalLine)
+		}
 		m.noteBinding(kindRebindFailed, intent.contact, rebindFailNote(oldModel, intent.model, err))
 		return m, true
 	}
@@ -483,10 +499,13 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 // (TestSessionViewHoldsEveryFieldTheBoundariesReset).
 func (m *Model) noteBinding(kind NoticeKind, c contact, text string) {
 	if c == contactFirst && destination(kindRow(kind), c, m.chrome.isLogOpen) != destLog {
-		m.hb.firstContactLines = append(slices.Clip(m.hb.firstContactLines), text)
+		m.hb.firstContactLines = append(slices.Clip(m.hb.firstContactLines), firstContactLine{kind: kind, text: text})
 	}
 	m.note(kind, c, text)
 }
+
+// isRefusalLine reports whether a standing first-contact line is a refused rebind's note.
+func isRefusalLine(line firstContactLine) bool { return line.kind == kindRebindFailed }
 
 // effortExcluded reports whether a live session effort override is one the bound model has ruled
 // out — the only case a switch clears it in. It answers true only where the model REPORTED a

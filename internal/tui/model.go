@@ -1079,8 +1079,8 @@ func (m *Model) note(kind NoticeKind, c contact, text string) {
 // after the boundary reseeds the box, so the lines sit where the first contact put them at launch:
 // under the box, above the conversation.
 func (m *Model) replaceFirstContactLines() {
-	for _, text := range m.hb.firstContactLines {
-		m.transcript.addEphemeralNote(text)
+	for _, line := range m.hb.firstContactLines {
+		m.transcript.addEphemeralNote(line.text)
 	}
 }
 

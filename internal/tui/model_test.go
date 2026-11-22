@@ -4581,6 +4581,42 @@ func TestRestoreRePlacesFirstContactLines(t *testing.T) {
 	}
 }
 
+// TestRestoreDropsASupersededFirstContactRefusal pins that a refusal noted at a later contact
+// supersedes the first contact's standing refusal line, so a /sessions restore does not re-place a
+// refusal naming a target the binding no longer fails on — while a repeat refusal for the same
+// target, which is not noted again, leaves the line standing.
+func TestRestoreDropsASupersededFirstContactRefusal(t *testing.T) {
+	t.Parallel()
+
+	refusal := errors.New("no profile serves it")
+	firstRefusal := rebindFailNote(testOpts.Model, "model-a", refusal)
+	tests := []struct {
+		name      string
+		laterBeat string
+		want      int
+	}{
+		{name: "a refusal for another target drops it", laterBeat: "model-b", want: 0},
+		{name: "a repeat refusal for the same target keeps it", laterBeat: "model-a", want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rb := &fakeRebind{answer: func(string, int) (RebindResult, error) { return RebindResult{}, refusal }}
+			m := foldBeatMsg(t, wireRebind(t, testOpts, &fakeHeartbeat{}, rb), upBeat("model-a", 32768))
+			m = foldBeatMsg(t, m, upBeat(tt.laterBeat, 32768))
+			if len(rb.calls) != 2 {
+				t.Fatalf("the later beat asked the seam %d times in all, want 2 (a retry or a change)", len(rb.calls))
+			}
+
+			m = restoreSession(t, m)
+
+			if n := countNotes(m, firstRefusal); n != tt.want {
+				t.Errorf("the first contact's refusal shown %d times after the restore, want %d; notes = %q", n, tt.want, noteTexts(m))
+			}
+		})
+	}
+}
+
 // TestNewModelReplaysARunnerWrittenScrollback is the blank-replay gap closed from the reading
 // end: a blob the RUNNER wrote (internal/run's fold — stream facts only, no presenter verdicts)
 // replays as real entries, and the "no scrollback recorded" degrade note stops firing for it.
