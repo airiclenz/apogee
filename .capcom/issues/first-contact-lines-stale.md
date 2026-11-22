@@ -4,6 +4,7 @@ status: open
 type: bug
 priority: 3
 labels: [tui]
+plan: 2026-11-22 - 00 - cold-start-notes-plan.md
 created: 2026-11-22T05:43:45Z
 ---
 
