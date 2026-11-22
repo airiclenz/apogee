@@ -1252,6 +1252,47 @@ func TestUIRowsLandThroughUIPrefsSet(t *testing.T) {
 	}
 }
 
+// TestUIRowsReadTheDomainTable pins the `ui.*` rows to the domain key table they are declared from:
+// every key of the block has exactly one row, every template-listed key's row declares the table's
+// default text (the width's `44`, never the unset 0 it resolves to), and every structured key's row
+// keeps `Default ""` — its default lives in domain.DefaultUIPrefs and the starter template, and
+// readsAlike refuses a structured default — so a row that restated a default, or a key the table
+// gained without a row, is caught here.
+func TestUIRowsReadTheDomainTable(t *testing.T) {
+	t.Parallel()
+
+	listed := domain.UIKeys()
+	for _, key := range domain.AllUIKeys() {
+		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+			rows := 0
+			for _, k := range KeyRegistry {
+				if k.Path == key {
+					rows++
+				}
+			}
+			if rows != 1 {
+				t.Fatalf("%d registry rows for %s; want exactly one", rows, key)
+			}
+
+			row := mustKey(key)
+			if !slices.Contains(listed, key) {
+				if row.Default != "" {
+					t.Errorf("structured row %s declares Default %q; want none", key, row.Default)
+				}
+				return
+			}
+			if want := domain.UIDefaultText(key); row.Default != want || want == "" {
+				t.Errorf("row %s declares Default %q; want the domain table's default text %q", key, row.Default, want)
+			}
+		})
+	}
+
+	if got := mustKey(domain.UIKeySidePanelWidth).Default; got != "44" {
+		t.Errorf("row %s declares Default %q; want the width the unset panel is drawn at, 44", domain.UIKeySidePanelWidth, got)
+	}
+}
+
 // TestRegistrySetRefusesWhatValidateRefuses pins the admission half of Set to the row's own
 // validate hook: whatever the hook refuses, Set refuses, in the hook's own sentence — so a site that
 // lands a value through the row (the env pass, a Driver's live apply) reports the refusal the

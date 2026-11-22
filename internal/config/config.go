@@ -277,12 +277,6 @@ func (cf contextFilesSettings) resolved() []string {
 	return cf.names
 }
 
-// defaultStallAfterText is how long the engine may stay silent before the status line reports the
-// quiet, as the config file spells it — the value the starter template ships, so a config that
-// omits the key and one seeded on first run agree; domain.DefaultStallAfter is the same threshold
-// resolved, which TestRegistryDefaultsReadBackFromAnEmptyFile holds the two to.
-const defaultStallAfterText = "120s"
-
 // SessionSettings is the resolved `sessions:` block — the retention policy the session store is
 // swept against, and who else may watch it: the other homes this apogee watches and the group its
 // session files are shared with. It is one struct rather than loose fields on [Options] for

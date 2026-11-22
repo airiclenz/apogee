@@ -251,6 +251,15 @@ func AllUIKeys() []string {
 	return keys
 }
 
+// UIDefaultText is key's documented default as the config file spells it — the text a config that
+// names no such key reads as (ui.stall-after `120s`, ui.side-panel.width `44`), never a formatting
+// of [DefaultUIPrefs]. A structured key, whose default lives in [DefaultUIPrefs] and the starter
+// template, reads `""`, as does a key the block does not carry.
+func UIDefaultText(key string) string {
+	def, _ := uiKeyDefOf(key)
+	return def.defaultText
+}
+
 // ValidateUIKey judges one key's text alone: the text, trimmed, is landed onto a copy of
 // [DefaultUIPrefs] and only that key's refusal is run, so the answer never rests on what another
 // field's zero value happens to be. A key the block does not carry is refused.

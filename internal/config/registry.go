@@ -1056,10 +1056,11 @@ var KeyRegistry = bindRows([]Key{
 			func(p *presentConfig) *string { return &p.Host }),
 	},
 	{
-		Path: "ui.spinner", Kind: KindEnum, Default: "snake", EnumValues: spinnerValues,
-		Editable: true,
-		Validate: validateSpinnerName,
-		Desc:     "The status-line spinner animation shown while a turn runs.",
+		Path: "ui.spinner", Kind: KindEnum, Default: domain.UIDefaultText(domain.UIKeySpinner),
+		EnumValues: spinnerValues,
+		Editable:   true,
+		Validate:   uiKeyValidator(domain.UIKeySpinner),
+		Desc:       "The status-line spinner animation shown while a turn runs.",
 		// Copied across as the file names it: UIPrefs.Validate judges the name at ResolveOptions, so
 		// an unknown one reaches startup as an error rather than being quietly dropped at the load.
 		field: uiField(domain.UIKeySpinner, named[domain.SpinnerStyle], spelled[domain.SpinnerStyle],
@@ -1067,17 +1068,18 @@ var KeyRegistry = bindRows([]Key{
 			func(u *uiConfig) *domain.SpinnerStyle { return nonEmptyName[domain.SpinnerStyle](u.Spinner) }),
 	},
 	{
-		Path: "ui.spinner-color", Kind: KindBool, Default: "true",
+		Path: "ui.spinner-color", Kind: KindBool, Default: domain.UIDefaultText(domain.UIKeySpinnerColor),
 		Editable: true,
 		Desc:     "Run the ten-second colour loop over the spinner glyph.",
 		field: uiBool(domain.UIKeySpinnerColor, func(u *domain.UIPrefs) *bool { return &u.SpinnerColor },
 			func(u *uiConfig) *bool { return u.SpinnerColor }),
 	},
 	{
-		Path: "ui.glyphs", Kind: KindEnum, Default: string(domain.DefaultGlyphSet), EnumValues: glyphsValues,
-		Editable: true,
-		Validate: validateGlyphSetName,
-		Desc:     "The symbols the screen is drawn with; safe swaps the ones a terminal font may lack.",
+		Path: "ui.glyphs", Kind: KindEnum, Default: domain.UIDefaultText(domain.UIKeyGlyphs),
+		EnumValues: glyphsValues,
+		Editable:   true,
+		Validate:   uiKeyValidator(domain.UIKeyGlyphs),
+		Desc:       "The symbols the screen is drawn with; safe swaps the ones a terminal font may lack.",
 		// Copied across as the file names it, ui.spinner's posture: UIPrefs.Validate judges the name
 		// at ResolveOptions, so an unknown one reaches startup as an error.
 		field: uiField(domain.UIKeyGlyphs, named[domain.GlyphSet], spelled[domain.GlyphSet],
@@ -1085,7 +1087,7 @@ var KeyRegistry = bindRows([]Key{
 			func(u *uiConfig) *domain.GlyphSet { return nonEmptyName[domain.GlyphSet](u.Glyphs) }),
 	},
 	{
-		Path: "ui.show-scrollbar", Kind: KindBool, Default: "true",
+		Path: "ui.show-scrollbar", Kind: KindBool, Default: domain.UIDefaultText(domain.UIKeyShowScrollbar),
 		Editable: true,
 		Desc:     "Paint the scroll bar on the transcript, on any overflowing popup and on an overflowing prompt box, and reserve its column.",
 		field: uiBool(domain.UIKeyShowScrollbar, func(u *domain.UIPrefs) *bool { return &u.ShowScrollbar },
@@ -1095,7 +1097,7 @@ var KeyRegistry = bindRows([]Key{
 		// A dynamic vocabulary (KindScheme), so EnumValues is empty and the surface asks the session
 		// which schemes exist — the built-ins plus every `*.yaml` in <apogee-home>/schemes/, where a
 		// user file shadows a built-in of the same name.
-		Path: "ui.color-scheme", Kind: KindScheme, Default: scheme.DefaultName,
+		Path: "ui.color-scheme", Kind: KindScheme, Default: domain.UIDefaultText(domain.UIKeyColorScheme),
 		Editable: true,
 		Validate: validateColorSchemeName,
 		Desc:     "Palette the screen is drawn in; ~/.apogee/schemes/<name>.yaml shadows a built-in.",
@@ -1109,9 +1111,9 @@ var KeyRegistry = bindRows([]Key{
 		// A length of time, which this table has no kind for — and one key is not a vocabulary, so it
 		// is the writer's plain string with a hook that parses it, the posture present.port takes with
 		// its range: the kind carries the shape, and the hook carries the contract the kind cannot.
-		Path: "ui.stall-after", Kind: KindString, Default: defaultStallAfterText,
+		Path: "ui.stall-after", Kind: KindString, Default: domain.UIDefaultText(domain.UIKeyStallAfter),
 		Editable: true,
-		Validate: validateStallAfter,
+		Validate: uiKeyValidator(domain.UIKeyStallAfter),
 		Desc:     "Engine silence after which a running turn is marked quiet on the status line; 0 turns it off.",
 		// The threshold as a DURATION prints itself (`1m30s`), a spelling the key takes back — so the
 		// value seeding an edit field is one the next commit persists unchanged.
@@ -1122,7 +1124,7 @@ var KeyRegistry = bindRows([]Key{
 		// edit is honoured at the NEXT start — the observer is installed while the engine is
 		// constructed — which the description says out loud so a row that took the write without
 		// changing the session reads as the key's contract rather than as a failure.
-		Path: "ui.inspector", Kind: KindBool, Default: "false",
+		Path: "ui.inspector", Kind: KindBool, Default: domain.UIDefaultText(domain.UIKeyInspector),
 		Editable: true,
 		Desc:     "Capture raw request/response traffic for /inspect; takes effect at the next start.",
 		// What this RUN is capturing, which for a startup-only key is what the file said when it
@@ -1135,7 +1137,7 @@ var KeyRegistry = bindRows([]Key{
 		// A bool like ui.spinner-color beside it, and applied the same way: its whole effect is on
 		// THIS screen, so the renderer applies it to itself and the binary's dispatcher never sees it
 		// (internal/tui's settingsApplyLocal).
-		Path: "ui.skill-suggestions", Kind: KindBool, Default: "true",
+		Path: "ui.skill-suggestions", Kind: KindBool, Default: domain.UIDefaultText(domain.UIKeySkillSuggestions),
 		Editable: true,
 		Desc: "Show the skills that fit the message you are typing in a band above the input box; " +
 			"Tab opens the / menu on them.",
@@ -1147,7 +1149,7 @@ var KeyRegistry = bindRows([]Key{
 		// settingsApplyLocal) — and the one `ui:` key the program writes as well as reads: the fold
 		// gesture on a task-list card records the flip here silently, so the choice outlives the
 		// session (ADR 0035 addendum).
-		Path: "ui.task-list-open", Kind: KindBool, Default: "true",
+		Path: "ui.task-list-open", Kind: KindBool, Default: domain.UIDefaultText(domain.UIKeyTaskListOpen),
 		Editable: true,
 		Desc: "Start with the task-list cards in the transcript open; a click on one folds them all " +
 			"and records the choice here.",
@@ -1159,7 +1161,7 @@ var KeyRegistry = bindRows([]Key{
 		// the fold gesture on a large umbrella writes back silently (ADR 0035 addendum). It defaults
 		// OFF, unlike its twin — a large umbrella is a finished burst of calls, and folding it out of
 		// the box is the point; what "large" means is the row below.
-		Path: "ui.tools-open", Kind: KindBool, Default: "false",
+		Path: "ui.tools-open", Kind: KindBool, Default: domain.UIDefaultText(domain.UIKeyToolsOpen),
 		Editable: true,
 		Desc: "Large Tools umbrellas (more type rows than `ui.tools-fold-over`) start open; " +
 			"a click on one folds them all and records the choice here. An umbrella " +
@@ -1172,9 +1174,9 @@ var KeyRegistry = bindRows([]Key{
 		// no ceiling: how many type rows an umbrella may show before it is "large" is the user's
 		// call, and only a negative one is meaningless. 0 is the documented "never": no umbrella can
 		// have fewer than zero rows, so none is ever large.
-		Path: "ui.tools-fold-over", Kind: KindInt, Default: "5",
+		Path: "ui.tools-fold-over", Kind: KindInt, Default: domain.UIDefaultText(domain.UIKeyToolsFoldOver),
 		Editable: true,
-		Validate: validateToolsFoldOver,
+		Validate: uiKeyValidator(domain.UIKeyToolsFoldOver),
 		Desc: "Type rows a Tools umbrella may show before it is large and obeys `ui.tools-open` " +
 			"(unless `ui.tools-auto-collapse` folds it settled); 0 makes none large.",
 		// A pointer on disk: the explicit `0` ("never") is told from an absent key, which keeps the
@@ -1189,7 +1191,7 @@ var KeyRegistry = bindRows([]Key{
 		// reaches every Tools umbrella, a group of one included, and Sub-agent or Skill group (ADR 0035
 		// amendment of 2026-11-20). It defaults ON: finished work is history, and its one-row Group
 		// summary or group header is what is worth reading.
-		Path: "ui.tools-auto-collapse", Kind: KindBool, Default: "true",
+		Path: "ui.tools-auto-collapse", Kind: KindBool, Default: domain.UIDefaultText(domain.UIKeyToolsAutoCollapse),
 		Editable: true,
 		Desc: "Fold settled tool work the reader has not touched to one row: a Tools umbrella, a " +
 			"single call's group of one included, to its summary, whatever its size, a Sub-agents or " +
@@ -1204,7 +1206,7 @@ var KeyRegistry = bindRows([]Key{
 		// on it still waits for the terminal to answer an OSC 22 query (ADR 0106) — which the
 		// description says, so a row reading true over an unchanged pointer reads as the terminal's
 		// answer rather than a failed write.
-		Path: "ui.pointer-shapes", Kind: KindBool, Default: "false",
+		Path: "ui.pointer-shapes", Kind: KindBool, Default: domain.UIDefaultText(domain.UIKeyPointerShapes),
 		Editable: true,
 		Desc: "Show a text or hand mouse pointer over what a click does; " +
 			"only on a terminal that answers an OSC 22 query.",
@@ -1212,10 +1214,11 @@ var KeyRegistry = bindRows([]Key{
 			func(u *uiConfig) *bool { return u.PointerShapes }),
 	},
 	{
-		Path: "ui.notify", Kind: KindEnum, Default: string(domain.DefaultNotifyMode), EnumValues: notifyValues,
-		Editable: true,
-		Validate: validateNotifyMode,
-		Desc:     "How the terminal is told apogee waits on you: the bell, an OSC 9 desktop notification, both, or off.",
+		Path: "ui.notify", Kind: KindEnum, Default: domain.UIDefaultText(domain.UIKeyNotify),
+		EnumValues: notifyValues,
+		Editable:   true,
+		Validate:   uiKeyValidator(domain.UIKeyNotify),
+		Desc:       "How the terminal is told apogee waits on you: the bell, an OSC 9 desktop notification, both, or off.",
 		// Copied across as the file names it, ui.spinner's posture: UIPrefs.Validate judges the name
 		// at ResolveOptions. An absent key keeps the shipped bell — nonEmptyName leaves the default
 		// standing — though a zero UIPrefs.Notify reads as off.
@@ -1228,7 +1231,7 @@ var KeyRegistry = bindRows([]Key{
 		// settingsApplyLocal): the poll chain that runs the fetch is the renderer's, so a flip is
 		// live. The one `ui:` key whose effect leaves the screen — a fetch touches the network and
 		// writes remote-tracking refs — which the manual says out loud.
-		Path: "ui.git-fetch", Kind: KindBool, Default: "true",
+		Path: "ui.git-fetch", Kind: KindBool, Default: domain.UIDefaultText(domain.UIKeyGitFetch),
 		Editable: true,
 		Desc:     "Run a periodic `git fetch` so the footer's ↓ count sees new upstream commits.",
 		field: uiBool(domain.UIKeyGitFetch, func(u *domain.UIPrefs) *bool { return &u.GitFetch },
@@ -1240,10 +1243,10 @@ var KeyRegistry = bindRows([]Key{
 		// ui.spinner's posture: UIPrefs.Validate judges the name at ResolveOptions. The path is three
 		// segments deep, past the scalar writer's reach (scalarPathDepth), so a write of it goes
 		// through the `side-panel:` block as a whole.
-		Path: "ui.side-panel.show", Kind: KindEnum, Default: string(domain.DefaultSidePanelShow),
+		Path: "ui.side-panel.show", Kind: KindEnum, Default: domain.UIDefaultText(domain.UIKeySidePanelShow),
 		EnumValues: sidePanelValues,
 		Editable:   true,
-		Validate:   validateSidePanelShow,
+		Validate:   uiKeyValidator(domain.UIKeySidePanelShow),
 		Desc: "When the side panel is drawn right of the transcript: auto on a wide window, on down to " +
 			"its floor width, or off.",
 		field: uiField(domain.UIKeySidePanelShow, named[domain.SidePanelShow], spelled[domain.SidePanelShow],
@@ -1262,9 +1265,9 @@ var KeyRegistry = bindRows([]Key{
 		// layout's clamp, never a rewrite of the value. A pointer on disk: a stated `0` is refused at
 		// the load by domain.ParseSidePanelWidth rather than read as an absent key. An absent key
 		// resolves to 0, the unset width (uiSidePanelWidth); Default is the width that reads as.
-		Path: "ui.side-panel.width", Kind: KindInt, Default: strconv.Itoa(domain.DefaultSidePanelWidth),
+		Path: "ui.side-panel.width", Kind: KindInt, Default: domain.UIDefaultText(domain.UIKeySidePanelWidth),
 		Editable: true,
-		Validate: validateSidePanelWidth,
+		Validate: uiKeyValidator(domain.UIKeySidePanelWidth),
 		Desc:     "The side panel's width in columns, 24 or more; a narrow window draws it narrower.",
 		field:    uiSidePanelWidth(),
 	},
@@ -1861,46 +1864,13 @@ func validatePresentPort(value string) error {
 	return PresentSettings{Port: n}.Validate()
 }
 
-// validateSpinnerName refuses a spinner style this build has no animation for, through the startup
-// check itself — domain.UIPrefs.Validate, which asks the package that owns the vocabulary and
-// names the key the value was read from.
-func validateSpinnerName(value string) error {
-	return domain.UIPrefs{Spinner: domain.SpinnerStyle(value)}.Validate()
-}
-
-// validateGlyphSetName refuses a glyph set this build does not draw, through the startup check
-// itself — domain.UIPrefs.Validate, validateSpinnerName's posture.
-func validateGlyphSetName(value string) error {
-	return domain.UIPrefs{Glyphs: domain.GlyphSet(value)}.Validate()
-}
-
-// validateNotifyMode refuses a notify mode this build does not know, through the startup check
-// itself — domain.UIPrefs.Validate, validateSpinnerName's posture.
-func validateNotifyMode(value string) error {
-	return domain.UIPrefs{Notify: domain.NotifyMode(value)}.Validate()
-}
-
-// validateSidePanelShow refuses a side-panel show mode this build does not know, through the
-// startup check itself — domain.UIPrefs.Validate, validateSpinnerName's posture.
-func validateSidePanelShow(value string) error {
-	return domain.UIPrefs{SidePanelShow: domain.SidePanelShow(value)}.Validate()
-}
-
-// validateSidePanelWidth refuses a `ui.side-panel.width:` that is not a number of columns of at
-// least 24, through the one parser every surface reads the key with (domain.ParseSidePanelWidth) —
-// validateToolsFoldOver's shape.
-func validateSidePanelWidth(value string) error {
-	_, err := domain.ParseSidePanelWidth(value)
-	return err
-}
-
-// validateStallAfter refuses a `ui.stall-after:` that is not a length of time to wait, through the
-// one parser every surface reads the key with (domain.ParseStallAfter): the file pass, this hook
-// and the landing (UIPrefs.Set) give one answer, so the empty value that means "the default" and
-// the `0` that means "off" are the parser's calls, not this hook's.
-func validateStallAfter(value string) error {
-	_, err := domain.ParseStallAfter(value)
-	return err
+// uiKeyValidator is the Validate hook of the `ui.*` row for key: the domain table's own judgment of
+// that key's text alone (domain.ValidateUIKey) — the parser the file pass and UIPrefs.Set land the
+// key with, and the refusal startup's block check (UIPrefs.Validate) makes — so the hook, the load
+// and the landing give one answer in one sentence, and the empty value that means "the default" is
+// the table's call, not this hook's.
+func uiKeyValidator(key string) func(string) error {
+	return func(value string) error { return domain.ValidateUIKey(key, value) }
 }
 
 // validateSessionsMaxAge refuses a `sessions.max-age:` that is not a length of time to keep a
@@ -1923,15 +1893,6 @@ func validateSessionsMaxCount(value string) error {
 			"(0 — the default — keeps every one)", value)
 	}
 	return SessionSettings{MaxCount: n}.Validate()
-}
-
-// validateToolsFoldOver refuses a `ui.tools-fold-over:` that is not a number of type rows, through
-// the one parser every surface reads the key with (domain.ParseToolsFoldOver), which refuses a
-// count below zero in the sentence startup's block check (UIPrefs.Validate) refuses it in —
-// validateStallAfter's shape.
-func validateToolsFoldOver(value string) error {
-	_, err := domain.ParseToolsFoldOver(value)
-	return err
 }
 
 // validateColorSchemeName refuses a name that could not be a scheme's file name — empty, or one

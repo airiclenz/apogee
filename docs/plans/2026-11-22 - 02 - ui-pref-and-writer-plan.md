@@ -66,7 +66,12 @@ Also: `internal/domain/doc.go`'s file map gains a `uikeys.go is …` line beside
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/domain/`
 **Commit:** `refactor(domain): declare every ui key once in a per-key table`
 
-## 2. The registry's ui.* rows read the domain table
+## 2. The registry's ui.* rows read the domain table — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): the six named ui validators (spinner, glyphs, notify, side-panel show, side-panel width, stall-after) plus validateToolsFoldOver are replaced by one factory, uiKeyValidator(key), that calls domain.ValidateUIKey — one hook shape instead of seven near-identical functions; fold-over was not named by the item but is the same ui-row duplicate, and ValidateUIKey gives the same answer and sentence as each parser it replaces.
+NOTES (2026-11-22): new accessor is domain.UIDefaultText(key) (the plan's example name); an unknown or structured key reads "". All 17 template-listed rows' Default (ui.color-scheme included, formerly scheme.DefaultName) now read it.
+NOTES (2026-11-22): consequential edit — internal/config/config.go: made necessary by the ui.stall-after row reading its Default from domain.UIDefaultText; the defaultStallAfterText const had no other user and was deleted as dead code.
+NOTES (2026-11-22): internal/config/keyfield.go named in Files needed no change: the uiField file projection stays in config as the item requires, and nothing there restated a default or a validator.
 
 Depends on item 1.
 
