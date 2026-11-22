@@ -23,9 +23,8 @@ type fakeMCPHost struct {
 	pending      bool
 	commits      int
 	cancels      int
-	// retryNote is what every RetryFailedMCP answers, and retries counts the calls.
-	retryNote string
-	retries   int
+	// retries counts the RetryFailedMCP calls.
+	retries int
 	// states is the snapshot every MCPServerStates answers.
 	states []domain.MCPServerEvent
 }
@@ -52,12 +51,20 @@ func (f *fakeMCPHost) CancelMCPDials() {
 	f.cancels++
 }
 
-// RetryFailedMCP answers the scripted retryNote and counts the call.
-func (f *fakeMCPHost) RetryFailedMCP() (string, error) {
+// RetryFailedMCP counts the call and answers whether a dial is queued, as the binary's retry answers
+// its holder's queue: a test scripts a retry that dials by queueing a dial first.
+func (f *fakeMCPHost) RetryFailedMCP() (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.retries++
-	return f.retryNote, nil
+	return len(f.dials) > 0, nil
+}
+
+// MCPDialQueued answers whether a dial waits for the next TakeMCPWork.
+func (f *fakeMCPHost) MCPDialQueued() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.dials) > 0
 }
 
 // MCPServerStates answers the seeded snapshot, as a fresh slice.
@@ -502,13 +509,13 @@ func TestMCPRowShowsTheOutcomeWhenTheDialsLand(t *testing.T) {
 }
 
 // TestMCPRowUnchangedRoundTrip: a round trip that leaves `mcp-servers` unchanged applies nothing and
-// asks RetryFailedMCP. A `reconnecting MCP…` answer arms the row and resolves once the dial lands;
-// a "" answer leaves the row exactly as it was.
+// asks RetryFailedMCP. A retry that queued a dial arms the row on `reconnecting MCP…` and resolves
+// once the dial lands; one that queued none leaves the row exactly as it was.
 func TestMCPRowUnchangedRoundTrip(t *testing.T) {
 	t.Parallel()
 	t.Run("a retry arms the row and resolves", func(t *testing.T) {
 		t.Parallel()
-		host := &fakeMCPHost{retryNote: MCPReconnectingNote}
+		host := &fakeMCPHost{}
 		applies := &mcpRowApplies{}
 		m := mcpRowModel(t, host, nil, applies)
 		host.script([]MCPOutcome{{Note: "mcp docs connected"}}, false)

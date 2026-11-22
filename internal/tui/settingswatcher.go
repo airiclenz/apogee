@@ -207,20 +207,20 @@ func (m Model) foldSettingsEdit(msg settingsEditedMsg) (tea.Model, tea.Cmd) {
 
 // retryFailedMCP is the `mcp-servers` row's retry gesture (ADR 0109 decision 7): a round trip that
 // left the key unchanged applies nothing, yet asks [MCPHost.RetryFailedMCP] to re-dial every server
-// whose last dial failed. Its in-progress note is the row's answer and arms the row watch, as an
-// apply's does (settingsApplied); "" — nothing had failed — leaves the row exactly as it was, and a
-// refusal is the row's failure. Unwired, it is inert.
+// whose last dial failed. A retry that queued a dial answers the row with [MCPReconnectingNote] and
+// arms the row watch, as an apply's does (settingsApplied); one that queued none — nothing had
+// failed — leaves the row exactly as it was, and a refusal is the row's failure. Unwired, it is inert.
 func (m Model) retryFailedMCP(row SettingRow) Model {
 	if m.opts.MCP == nil {
 		return m
 	}
-	note, err := m.opts.MCP.RetryFailedMCP()
+	queued, err := m.opts.MCP.RetryFailedMCP()
 	if err != nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: settingsApplyFailedNote + stripEscapes(err.Error())}
 		return m
 	}
-	if note == MCPReconnectingNote {
-		m.settings.answer = settingAnswer{path: row.Path, msg: note}
+	if queued {
+		m.settings.answer = settingAnswer{path: row.Path, msg: MCPReconnectingNote}
 		m.armMCPRow()
 	}
 	return m

@@ -2461,7 +2461,7 @@ func mcpHostWiring(t *testing.T, fixture *mcpFixture, engine *lateEngine, config
 }
 
 // An unchanged `$EDITOR` round trip on the row, after a failed dial, is the retry: RetryFailedMCP
-// answers the in-progress note and the drained work is exactly one dial, of the failed server.
+// answers that it queued a dial, and the drained work is exactly one dial, of the failed server.
 func TestMCPUnchangedRoundTripRedialsOnlyTheFailedServer(t *testing.T) {
 	t.Parallel()
 	_, fixture, path := mcpWikiFailsFixture(t)
@@ -2472,10 +2472,10 @@ func TestMCPUnchangedRoundTripRedialsOnlyTheFailedServer(t *testing.T) {
 	}
 	w := mcpHostWiring(t, fixture, &lateEngine{}, filepath.Dir(path))
 
-	note, err := w.RetryFailedMCP()
+	queued, err := w.RetryFailedMCP()
 
-	if err != nil || note != tui.MCPReconnectingNote {
-		t.Fatalf("RetryFailedMCP = (%q, %v), want (%q, nil)", note, err, tui.MCPReconnectingNote)
+	if err != nil || !queued {
+		t.Fatalf("RetryFailedMCP = (%t, %v), want (true, nil)", queued, err)
 	}
 	if _, err := drainMCP(t, fixture.set, fixture.tools, &applySettingSpy{}); err != nil {
 		t.Fatalf("drain: %v", err)
@@ -2485,7 +2485,7 @@ func TestMCPUnchangedRoundTripRedialsOnlyTheFailedServer(t *testing.T) {
 	}
 }
 
-// With no failed dial the same round trip is the no-op it has always been: no note, no work.
+// With no failed dial the same round trip is the no-op it has always been: nothing queued, no work.
 func TestMCPUnchangedRoundTripWithNothingFailedDialsNothing(t *testing.T) {
 	t.Parallel()
 	fixture := newMCPFixture(&fakeMCPSession{}, "", func([]mcp.ServerConfig) (mcpSession, error) {
@@ -2493,10 +2493,10 @@ func TestMCPUnchangedRoundTripWithNothingFailedDialsNothing(t *testing.T) {
 	})
 	w := mcpHostWiring(t, fixture, &lateEngine{}, t.TempDir())
 
-	note, err := w.RetryFailedMCP()
+	queued, err := w.RetryFailedMCP()
 
-	if err != nil || note != "" {
-		t.Errorf("RetryFailedMCP = (%q, %v), want a silent no-op", note, err)
+	if err != nil || queued {
+		t.Errorf("RetryFailedMCP = (%t, %v), want a silent no-op", queued, err)
 	}
 	if dials, commit := w.TakeMCPWork(); len(dials) != 0 || commit {
 		t.Errorf("TakeMCPWork = (%d dials, commit %t), want no work", len(dials), commit)

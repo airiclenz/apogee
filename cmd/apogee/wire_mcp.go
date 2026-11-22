@@ -1363,11 +1363,18 @@ func (w *rootWiring) CancelMCPDials() { w.mcpSet.cancelDials() }
 
 // RetryFailedMCP is the `mcp-servers` row's retry gesture over an unchanged file (ADR 0109 decision
 // 7): when some server's last dial failed it requests the configured set with the retry-failed flag,
-// answering the request's note; when none did it requests nothing and answers "". The error is the
-// request's refusal (settingsApplier.requestMCP).
-func (w *rootWiring) RetryFailedMCP() (string, error) {
+// answering whether the holder then holds a queued dial; when none did it requests nothing and
+// answers false. The error is the request's refusal (settingsApplier.requestMCP).
+func (w *rootWiring) RetryFailedMCP() (bool, error) {
 	if !w.mcpSet.hasFailedDial() {
-		return "", nil
+		return false, nil
 	}
-	return w.settingsApplier().requestMCP(true)
+	if _, err := w.settingsApplier().requestMCP(true); err != nil {
+		return false, err
+	}
+	return w.mcpSet.isDialQueued(), nil
 }
+
+// MCPDialQueued reports whether a dial the holder queued still waits for TakeMCPWork
+// (liveMCP.isDialQueued).
+func (w *rootWiring) MCPDialQueued() bool { return w.mcpSet.isDialQueued() }

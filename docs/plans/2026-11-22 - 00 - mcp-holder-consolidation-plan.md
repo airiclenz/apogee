@@ -167,7 +167,11 @@ cmd/apogee/wire_mcp_test.go — TestMCPSeedStatesReplayTheFold; internal/sidepan
 
 **Commit:** `refactor(mcp): one MCP state fold serves the seed and the side panel`
 
-## 5. The MCP host answers whether dials are queued
+## 5. The MCP host answers whether dials are queued — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): cmd/apogee/wire_settings.go (named in **Files:**) needed no change — RetryFailedMCP discards requestMCP's note and answers liveMCP.isDialQueued itself; requestMCP's note return is item 6's.
+
+NOTES (2026-11-22): the fakeMCPHost's "queued answer for the retry" is derived, not a field: RetryFailedMCP answers len(f.dials) > 0 like MCPDialQueued, so a test scripts a dialling retry by queueing a dial (the retryNote field is gone).
 
 **What:**
 Recast at the regression check (2026-11-22).

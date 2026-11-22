@@ -17,7 +17,6 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/testtime"
-	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // mcpDialRecorder stands in for one server's dial: it records every server it is asked for, refuses
@@ -1664,6 +1663,36 @@ func TestMCPLostServerIsDroppedAndReportedLost(t *testing.T) {
 	}
 }
 
+// The host's MCPDialQueued is the holder's queue: false while idle, true once a request queued a
+// dial, and false again once TakeMCPWork has handed that dial out.
+func TestMCPDialQueuedReportsTheHoldersQueue(t *testing.T) {
+	t.Parallel()
+	fixture := newMCPFixtureWith(nil, "", newMCPDialRecorder().connect)
+	w := mcpHostWiring(t, fixture, &lateEngine{}, t.TempDir())
+
+	isIdleQueued := w.MCPDialQueued()
+	if err := fixture.set.request([]mcp.ServerConfig{stdioServer("docs", "docs-mcp")}, openGuard, false); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	isRequestQueued := w.MCPDialQueued()
+	dials, _ := w.TakeMCPWork()
+	isTakenQueued := w.MCPDialQueued()
+
+	if isIdleQueued {
+		t.Error("MCPDialQueued = true on an idle holder, want false")
+	}
+	if !isRequestQueued {
+		t.Error("MCPDialQueued = false after a request queued a dial, want true")
+	}
+	if len(dials) != 1 {
+		t.Errorf("TakeMCPWork handed out %d dials, want the one the request queued", len(dials))
+	}
+	if isTakenQueued {
+		t.Error("MCPDialQueued = true after TakeMCPWork took the dial, want false")
+	}
+	_ = fixture.set.close()
+}
+
 // The retry gesture (RetryFailedMCP) re-dials a lost server, and its dial lands as a fresh connect.
 func TestMCPLostServerIsRedialledByTheRetryGesture(t *testing.T) {
 	t.Parallel()
@@ -1678,11 +1707,11 @@ func TestMCPLostServerIsRedialledByTheRetryGesture(t *testing.T) {
 	session.die(errors.New("signal: killed"))
 	awaitMCPDropped(t, fixture.set, "docs")
 
-	note, err := w.RetryFailedMCP()
+	queued, err := w.RetryFailedMCP()
 	outcomes, drainErr := drainMCP(t, fixture.set, fixture.tools, &applySettingSpy{})
 
-	if err != nil || note != tui.MCPReconnectingNote {
-		t.Fatalf("RetryFailedMCP = (%q, %v), want (%q, nil)", note, err, tui.MCPReconnectingNote)
+	if err != nil || !queued {
+		t.Fatalf("RetryFailedMCP = (%t, %v), want (true, nil)", queued, err)
 	}
 	if drainErr != nil {
 		t.Fatalf("drain: %v", drainErr)

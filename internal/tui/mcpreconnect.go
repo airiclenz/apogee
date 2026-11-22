@@ -32,9 +32,12 @@ type MCPHost interface {
 	CancelMCPDials()
 	// RetryFailedMCP is the `mcp-servers` row's retry gesture over an unchanged file (ADR 0109
 	// decision 7): when some server's last dial failed it requests every failed server again and
-	// answers [MCPReconnectingNote]; when none did it requests nothing and answers "". The error is
-	// a refused request, with nothing requested.
-	RetryFailedMCP() (note string, err error)
+	// answers whether that request queued a dial; when none did it requests nothing and answers
+	// false. The error is a refused request, with nothing requested.
+	RetryFailedMCP() (queued bool, err error)
+	// MCPDialQueued reports whether a dial the requests so far queued still waits for TakeMCPWork:
+	// what a request that just ran says about whether it started a dial. It never blocks.
+	MCPDialQueued() bool
 	// MCPServerStates is every configured server's current state as the snapshot the Model is seeded
 	// with at construction ([Model.seedMCP], ADR 0111 decision 8): the servers startup dialled before
 	// the view could hear their Events — a repo server startup skipped included, as failed — and
