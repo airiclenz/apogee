@@ -131,6 +131,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// (ADR 0109). The one exception is a repo server whose pin moved: the connect skips it rather than
 	// failing the set (mcp.Client.Skipped), and connectMCPServers announces the skip and cues the
 	// re-read that asks about the server again, so the session starts on the rest (announceSkippedMCP).
+	// The holder below holds it as an ordinary failed server (newLiveMCP, adr-0109-amend-1122).
 	//
 	// The endpoint of an `sse`/`streamable-http` server is checked against the operator's OWN
 	// url-safety host lists — scheme/host allow-deny, with the resolved-IP floor disabled for it
@@ -169,7 +170,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// admitted (applyURLSafetyHosts): a server the operator has just closed is dropped on the
 	// keystroke, mid-Turn included, and one the lists newly admit is requested and dialled off the
 	// loop, rather than either waiting until something else happens to dial.
-	w.mcpSet = newLiveMCP(mcpEntries, func(dialCtx context.Context, server mcp.ServerConfig, allowHosts, denyHosts []string) (mcpSession, error) {
+	w.mcpSet = newLiveMCP(mcpEntries, mcpSkipped, func(dialCtx context.Context, server mcp.ServerConfig, allowHosts, denyHosts []string) (mcpSession, error) {
 		// It never offers a login: a server that needs one fails its dial with the error naming
 		// `apogee mcp login <name>`, which that server's transcript note carries.
 		client, err := mcp.ConnectWith(dialCtx, w.mcpLogin.mcpHost(w.roots.config), []mcp.ServerConfig{server},
@@ -190,7 +191,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// of them listened, so the outbox starts out on the state startup left — the skipped repo servers'
 	// failed state with it — which the TUI is seeded with at construction (MCPHost.MCPServerStates)
 	// and every live Event journal at its birth (sessionHost.mcpSeed, attached below).
-	w.mcpSet.emitThrough(w.cfg.Events, mcpSkipped)
+	w.mcpSet.emitThrough(w.cfg.Events)
 	// The resolver a user reaction's mcp: handler calls through (adr-0076-amend-1029), over the live
 	// set rather than this startup snapshot, so a reconnect's servers are what the next firing
 	// resolves against without a restart. It reads w.mcpSet through a closure, never a method value:

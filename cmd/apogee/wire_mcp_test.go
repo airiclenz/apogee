@@ -1346,7 +1346,7 @@ func (r *mcpEventRecorder) take() []string {
 // recordMCPEvents points the fixture's holder at a fresh recorder.
 func recordMCPEvents(fixture *mcpFixture) *mcpEventRecorder {
 	recorder := &mcpEventRecorder{set: fixture.set}
-	fixture.set.emitThrough(recorder, nil)
+	fixture.set.emitThrough(recorder)
 	return recorder
 }
 
@@ -1621,7 +1621,7 @@ func TestLiveMCPNeverEmitsUnderLock(t *testing.T) {
 	old, _ := liveServer(stdioServer("old", "old-mcp"))
 	fixture := newMCPFixtureWith([]mcpEntry{old}, "", newMCPDialRecorder().connect)
 	events := &mcpEventRecorder{set: fixture.set, gate: make(chan struct{})}
-	fixture.set.emitThrough(events, nil)
+	fixture.set.emitThrough(events)
 
 	requested := make(chan struct{})
 	go func() {
@@ -1643,18 +1643,11 @@ func TestLiveMCPNeverEmitsUnderLock(t *testing.T) {
 
 // TestMCPSeedCarriesTheStartupState: the holder's state starts out on what startup left — the
 // connected server with its tool count, and a repo server skipped for a moved pin as failed with the
-// skip's cause — and the first request that no longer configures the skipped server says it removed,
-// while that server was never one the holder's request diff knew.
+// skip's cause — the skipped server is held as an ordinary failed server the request diff knows
+// (adr-0109-amend-1122), and the first request that no longer configures it says it removed.
 func TestMCPSeedCarriesTheStartupState(t *testing.T) {
 	t.Parallel()
-	global := newPingMCPServer(t, "remote")
-	w := startupWiring(t, testMCPLoginDeps(t, &scriptedInput{}, &bytes.Buffer{}, false), global)
-	w.opts.MCPServers = append(w.opts.MCPServers, adoptedRepoWikiServer(t, w))
-	writeRepoWikiScript(t, w.roots.project, "echo edited")
-
-	if err := w.wireSession(context.Background()); err != nil {
-		t.Fatalf("wireSession: %v", err)
-	}
+	w, global, _ := startupSkippedWiki(t)
 
 	states := w.mcpSet.stateEvents()
 	if len(states) != 2 || states[0].Server != "remote" || states[0].Phase != apogee.MCPServerConnected ||
@@ -1666,8 +1659,11 @@ func TestMCPSeedCarriesTheStartupState(t *testing.T) {
 		!strings.Contains(wiki.Cause, "bin/wiki.sh changed since you adopted it") {
 		t.Errorf("skipped repo server's state = %+v; want wiki failed with the moved pin's cause", wiki)
 	}
-	if _, isKnown := w.mcpSet.servers["wiki"]; isKnown {
-		t.Error("the skipped server joined the request diff's servers; want it on the seed-only list")
+	if !w.mcpSet.hasFailedDial() {
+		t.Error("the holder reports no failed server; want the skipped wiki held as failed")
+	}
+	if w.mcpSet.session("wiki") != nil {
+		t.Error("the skipped server holds a live session; want it held failed, with none")
 	}
 
 	if err := w.mcpSet.request([]mcp.ServerConfig{global}, mcpGuard(nil, nil), false); err != nil {
@@ -1676,6 +1672,107 @@ func TestMCPSeedCarriesTheStartupState(t *testing.T) {
 	w.mcpSet.outbox.wait()
 	if got := mcpEventLines(w.mcpSet.stateEvents()); !slices.Equal(got, []string{"remote connected 1"}) {
 		t.Errorf("after the request the state is %q; want the skipped server removed", got)
+	}
+}
+
+// startupSkippedWiki wires a session over a global server and an adopted repo server, wiki, whose
+// pinned script was edited before the startup dial, so the startup connect skips it. It returns the
+// wiring and the two servers as they were configured.
+func startupSkippedWiki(t *testing.T) (*rootWiring, mcp.ServerConfig, mcp.ServerConfig) {
+	t.Helper()
+	global := newPingMCPServer(t, "remote")
+	w := startupWiring(t, testMCPLoginDeps(t, &scriptedInput{}, &bytes.Buffer{}, false), global)
+	wiki := adoptedRepoWikiServer(t, w)
+	w.opts.MCPServers = append(w.opts.MCPServers, wiki)
+	writeRepoWikiScript(t, w.roots.project, "echo edited")
+	if err := w.wireSession(context.Background()); err != nil {
+		t.Fatalf("wireSession: %v", err)
+	}
+	return w, global, wiki
+}
+
+// queuedDialServers takes the holder's queued dial jobs and names the server of each, in order.
+func queuedDialServers(set *liveMCP) []string {
+	var servers []string
+	for _, job := range set.takeWork() {
+		servers = append(servers, job.server)
+	}
+	return servers
+}
+
+// A repo server the startup connect skipped is held as failed, so a later request that still
+// configures it unchanged — one the skip has nothing to do with — dials nothing for it: only a
+// change to its config, the retry gesture, or a restart does (adr-0109-amend-1122).
+func TestMCPStartupSkippedServerIsNotRedialledByAnUnrelatedRequest(t *testing.T) {
+	t.Parallel()
+	w, global, wiki := startupSkippedWiki(t)
+	docs := stdioServer("docs", "docs-mcp")
+
+	if err := w.mcpSet.request([]mcp.ServerConfig{global, wiki, docs}, mcpGuard(nil, nil), false); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+
+	if got := queuedDialServers(w.mcpSet); !slices.Equal(got, []string{"docs"}) {
+		t.Errorf("the request queued dials for %q; want docs alone, never the skipped wiki", got)
+	}
+	if !w.mcpSet.hasFailedDial() {
+		t.Error("the unrelated request cleared the skipped server's failure; want it still failed")
+	}
+}
+
+// The `mcp-servers` row's retry gesture re-dials a repo server the startup connect skipped, as it
+// does any failed server — here once the operator has put the pinned script back as adopted, so the
+// layered config holds the server in force again under the same pin.
+func TestMCPStartupSkippedServerIsRedialledByTheRetryGesture(t *testing.T) {
+	t.Parallel()
+	w, _, skipped := startupSkippedWiki(t)
+	writeRepoWikiScript(t, w.roots.project, "exec true")
+	o, err := loadLayeredOptions(w.configPath(), w.roots.project)
+	if err != nil {
+		t.Fatalf("load the layered config: %v", err)
+	}
+	if !slices.ContainsFunc(o.MCPServers, skipped.Equal) {
+		t.Fatalf("mcp-servers = %+v; want wiki in force under the pin the skip held, so only the retry dials it", o.MCPServers)
+	}
+
+	queued, err := w.RetryFailedMCP()
+
+	if err != nil {
+		t.Fatalf("RetryFailedMCP: %v", err)
+	}
+	if !queued {
+		t.Error("RetryFailedMCP answered no dial queued; want the skipped server re-dialled")
+	}
+	if got := queuedDialServers(w.mcpSet); !slices.Contains(got, "wiki") {
+		t.Errorf("the retry gesture queued dials for %q; want one for the skipped wiki", got)
+	}
+}
+
+// Re-adopting a repo server the startup connect skipped moves its pin onto the files as they now
+// are, which changes its config (mcp.ServerConfig.Equal), so the request that carries it dials it.
+func TestMCPStartupSkippedServerReadoptedWithANewPinDials(t *testing.T) {
+	t.Parallel()
+	w, global, skipped := startupSkippedWiki(t)
+	adoptEveryProposal(t, w.configPath(), w.roots.project)
+	o, err := loadLayeredOptions(w.configPath(), w.roots.project)
+	if err != nil {
+		t.Fatalf("load the layered config: %v", err)
+	}
+	i := slices.IndexFunc(o.MCPServers, func(s mcp.ServerConfig) bool { return s.Name == "wiki" })
+	if i < 0 {
+		t.Fatalf("mcp-servers = %+v; want the re-adopted wiki in force", o.MCPServers)
+	}
+	readopted := o.MCPServers[i]
+	if readopted.Equal(skipped) {
+		t.Fatal("the re-adoption left wiki's config as the skip held it; want its pin moved")
+	}
+
+	if err := w.mcpSet.request([]mcp.ServerConfig{global, readopted}, mcpGuard(nil, nil), false); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+
+	if got := queuedDialServers(w.mcpSet); !slices.Equal(got, []string{"wiki"}) {
+		t.Errorf("the request queued dials for %q; want one for the re-adopted wiki", got)
 	}
 }
 

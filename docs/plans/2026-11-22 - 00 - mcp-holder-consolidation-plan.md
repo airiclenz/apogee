@@ -292,7 +292,13 @@ cmd/apogee/wire_helpers_test.go — resolvedMCPServer
 
 **Commit:** `fix(mcp): a url-safety move is one two-phase move on the MCP holder`
 
-## 8. A startup-skipped repo server is an ordinary failed server
+## 8. A startup-skipped repo server is an ordinary failed server — ✅ DONE (2026-11-22)
+
+NOTES (2026-11-22): `newLiveMCP` takes the skipped servers as a new `mcpSkip{config, cause}` value (not failed Events), and the skip's cause is held on the server's state as `mcpServerState.skipCause`, read only by `emitThrough` to fold the seed's failed Event; the seed order is unchanged (connected servers, then skipped ones), so the startup `requested` list is connected-then-skipped rather than strict config order until the first request.
+
+NOTES (2026-11-22): the import of the root `apogee` package left mcp_cmd.go, which no longer builds a seed Event.
+
+NOTES (2026-11-22): the retry-gesture test drives `rootWiring.RetryFailedMCP` end to end after restoring the pinned script to its adopted content, and first asserts the layered config holds wiki under the same pin, so only the retry flag can dial it.
 
 Depends on item 7.
 

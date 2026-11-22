@@ -15,7 +15,6 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
-	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
@@ -456,12 +455,12 @@ func findMCPServer(servers []mcp.ServerConfig, name string) (mcp.ServerConfig, b
 // asks on stderr while it is still a safe place to write: declined, or with stdin not a terminal, the
 // launch aborts with the error naming `apogee mcp login <name>`. A server whose tool list discovery
 // cut short connects as any other and is announced, naming each cause (announceTruncatedMCP). A repo
-// server the connect skipped
-// for a moved pin does not abort the launch and holds no entry: it is announced and the entry asked
-// about again (announceSkippedMCP), and the session starts on the rest of the set. Its failed state,
-// the skip's cause in it, is returned in the seed-only list, in config order, for the MCP holder to
-// seed the views and journals with (liveMCP.emitThrough, ADR 0111 decision 8).
-func (w *rootWiring) connectMCPServers(ctx context.Context) ([]mcpEntry, []apogee.MCPServerEvent, error) {
+// server the connect skipped for a moved or unreadable pin does not abort the launch and holds no
+// entry: it is announced and the entry asked about again (announceSkippedMCP), and the session starts
+// on the rest of the set. It is returned, its config and the skip's cause, in config order, for the
+// MCP holder to hold as an ordinary failed server (newLiveMCP, adr-0109-amend-1122) and to seed the
+// views and journals with as failed (liveMCP.emitThrough, ADR 0111 decision 8).
+func (w *rootWiring) connectMCPServers(ctx context.Context) ([]mcpEntry, []mcpSkip, error) {
 	deps := w.mcpLogin.withDefaults()
 	host := deps.mcpHost(w.roots.config)
 	guard := mcpGuard(w.cfg.URLAllowHosts, w.cfg.URLDenyHosts)
@@ -484,7 +483,7 @@ func (w *rootWiring) connectMCPServers(ctx context.Context) ([]mcpEntry, []apoge
 
 	entries := make([]mcpEntry, 0, len(w.opts.MCPServers))
 	var skipped []mcp.Denied
-	var seed []apogee.MCPServerEvent
+	var skips []mcpSkip
 	for _, server := range w.opts.MCPServers {
 		client, err := connectStartupServer(ctx, host, server, guard, w.roots.workspace, login)
 		if err != nil {
@@ -497,16 +496,14 @@ func (w *rootWiring) connectMCPServers(ctx context.Context) ([]mcpEntry, []apoge
 		}
 		if s := client.Skipped(); len(s) > 0 {
 			skipped = append(skipped, s...)
-			failed := mcpServerEvent(server, apogee.MCPServerFailed)
-			failed.Cause = mcpSentence(s[0].Err)
-			seed = append(seed, failed)
+			skips = append(skips, mcpSkip{config: server, cause: s[0].Err})
 			continue
 		}
 		w.announceTruncatedMCP(client.Truncated())
 		entries = append(entries, mcpEntry{config: server, session: client})
 	}
 	w.announceSkippedMCP(skipped)
-	return entries, seed, nil
+	return entries, skips, nil
 }
 
 // connectStartupServer dials one server at startup, offering an `auth: oauth` server a login and

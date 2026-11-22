@@ -73,8 +73,20 @@ type mcpServerState struct {
 	cancel context.CancelFunc
 	// result is the finished current-generation dial, held until a commit takes it in.
 	result *mcpDialResult
-	// hasFailed says the server's last finished dial failed: the retry-failed flag re-dials it.
+	// hasFailed says the server's last finished dial failed: the retry-failed flag re-dials it. A
+	// repo server the startup connect skipped starts out failed (newLiveMCP).
 	hasFailed bool
+	// skipCause is why the startup connect skipped the server — a project file its adoption pinned
+	// moved or could not be read — which the seed's failed state carries (emitThrough), its one
+	// reader. Nil for a server startup did not skip.
+	skipCause error
+}
+
+// mcpSkip is one repo server the startup connect skipped because a project file its adoption pinned
+// moved or could not be read (mcp.Client.Skipped): the config it is configured with, and why.
+type mcpSkip struct {
+	config mcp.ServerConfig
+	cause  error
 }
 
 // mcpDialResult is a finished dial: on success the entry it would install, on failure the cause
@@ -126,7 +138,7 @@ type liveMCP struct {
 	order []string
 
 	// servers is the last-requested configured set, by name (mcpServerState), and requested its names
-	// in config order.
+	// in config order — at startup, the connected servers' before the skipped ones' (newLiveMCP).
 	servers   map[string]*mcpServerState
 	requested []string
 	// jobs are the queued dials takeWork has not handed out yet, in request order.
@@ -160,22 +172,17 @@ type liveMCP struct {
 	// outbox carries the lifecycle Events the holder decides on to the Event stream (mcpOutbox); nil
 	// until emitThrough points it at a sink, and then a holder that emits nothing.
 	outbox *mcpOutbox
-	// skipped is the seed-only list: the failed state of each repo server the startup connect skipped
-	// for a moved pin (connectMCPServers). It is kept outside servers, so a later request that
-	// configures one of them still dials it; the first request says removed of each one it no longer
-	// configures, and empties the list.
-	skipped []apogee.MCPServerEvent
 }
 
 // emitThrough points the holder's MCP server lifecycle Events (ADR 0111 decision 8) at sink — the
 // engine's own serialised sink (apogee.SerializeEvents) — through an ordered outbox drained off the
 // caller (mcpOutbox). It is called once, as the holder is wired and before any request. The outbox
 // starts out holding the state startup left — each connected server with its tool count, in config
-// order, then skipped, the failed state of each repo server the startup connect skipped — which is
+// order, then each repo server the startup connect skipped, failed with the skip's cause — which is
 // what a view or a journal born before any Event is seeded with (stateEvents, seedJournal). Startup's
 // sessions are watched from here on (watch), not before: one that ended before the outbox existed is
 // reported lost on top of that seed, rather than vanishing from it.
-func (m *liveMCP) emitThrough(sink apogee.EventSink, skipped []apogee.MCPServerEvent) {
+func (m *liveMCP) emitThrough(sink apogee.EventSink) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	outbox := &mcpOutbox{sink: sink}
@@ -186,11 +193,14 @@ func (m *liveMCP) emitThrough(sink apogee.EventSink, skipped []apogee.MCPServerE
 			outbox.states.Fold(event)
 		}
 	}
-	for _, event := range skipped {
-		outbox.states.Fold(event)
+	for _, name := range m.requested {
+		if state := m.servers[name]; state.skipCause != nil {
+			event := mcpServerEvent(state.config, apogee.MCPServerFailed)
+			event.Cause = mcpSentence(state.skipCause)
+			outbox.states.Fold(event)
+		}
 	}
 	m.outbox = outbox
-	m.skipped = slices.Clone(skipped)
 	for _, name := range m.order {
 		m.watchLocked(name, m.entries[name].session)
 	}
@@ -395,11 +405,14 @@ func (o *mcpOutbox) wait() {
 	}
 }
 
-// newLiveMCP holds the servers this run connected at startup, in config order, as the
-// last-requested set (each admitted, since startup refuses a denied endpoint), and the recipe for
-// dialling another.
-func newLiveMCP(entries []mcpEntry, connect mcpConnect) *liveMCP {
-	m := &liveMCP{connect: connect, servers: make(map[string]*mcpServerState, len(entries))}
+// newLiveMCP holds the servers this run's startup connect left as the last-requested set — the
+// connected ones, in config order, then the skipped ones, in config order — and the recipe for
+// dialling another. Each is admitted, since startup refuses a denied endpoint. A skipped repo server
+// is an ordinary failed server (ADR 0109 decision 7, adr-0109-amend-1122): it holds no session, and
+// only a request that changes its config (a re-adoption moves its pin), the retry-failed flag, or a
+// restart dials it again — never an unrelated request.
+func newLiveMCP(entries []mcpEntry, skipped []mcpSkip, connect mcpConnect) *liveMCP {
+	m := &liveMCP{connect: connect, servers: make(map[string]*mcpServerState, len(entries)+len(skipped))}
 	held := make(map[string]mcpEntry, len(entries))
 	order := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -407,7 +420,17 @@ func newLiveMCP(entries []mcpEntry, connect mcpConnect) *liveMCP {
 		order = append(order, entry.config.Name)
 		m.servers[entry.config.Name] = &mcpServerState{config: entry.config, isAdmitted: true}
 	}
-	m.requested = order
+	requested := slices.Clone(order)
+	for _, skip := range skipped {
+		requested = append(requested, skip.config.Name)
+		m.servers[skip.config.Name] = &mcpServerState{
+			config:     skip.config,
+			isAdmitted: true,
+			hasFailed:  true,
+			skipCause:  skip.cause,
+		}
+	}
+	m.requested = requested
 	m.install(held, order)
 	return m
 }
@@ -460,14 +483,6 @@ func (m *liveMCP) request(servers []mcp.ServerConfig, guard security.URLGuard, r
 	for _, server := range servers {
 		configured[server.Name] = true
 	}
-	for _, skipped := range m.skipped {
-		if !configured[skipped.Server] {
-			removed := skipped
-			removed.Phase, removed.Cause, removed.Reason = apogee.MCPServerDisconnected, "", apogee.MCPDisconnectRemoved
-			m.postLocked(removed)
-		}
-	}
-	m.skipped = nil
 	for _, name := range m.requested {
 		if state := m.servers[name]; state != nil && !configured[name] {
 			m.disconnectLocked(name)

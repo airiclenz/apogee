@@ -292,7 +292,7 @@ func newMCPFixtureWith(entries []mcpEntry, endpoint string, connect func([]mcp.S
 // dial's context — a dial held open until it is cancelled.
 func newMCPFixtureDialling(entries []mcpEntry, endpoint string, connect mcpConnect) *mcpFixture {
 	f := &mcpFixture{}
-	f.set = newLiveMCP(entries, connect)
+	f.set = newLiveMCP(entries, nil, connect)
 	f.tools = newLiveTools(apogee.NewToolRegistry(), toolSetSpec{endpoint: endpoint}, func(spec toolSetSpec) *apogee.ToolRegistry {
 		f.built = append(f.built, spec.endpoint)
 		registry := apogee.NewToolRegistry()

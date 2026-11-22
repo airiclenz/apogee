@@ -301,7 +301,8 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   outbox drained off the TUI's Update goroutine and never under the holder's lock, and leave through
   the engine's own serialised sink (`apogee.SerializeEvents`), so the engine stays MCP-blind. The
   startup state — each connected server and its tool count, and a repo server skipped for a moved
-  pin as `failed` — seeds the TUI's state at launch and opens every live Event journal (fresh,
+  pin as `failed`, which the holder holds as an ordinary failed server (no session; re-dialled only
+  by a re-adoption, the retry gesture or a restart, `adr-0109-amend-1122`) — seeds the TUI's state at launch and opens every live Event journal (fresh,
   resumed, or reborn after `/clear`) right after `run_started`. Every Driver view folds those Events
   into one per-server state (`internal/sidepanel`'s `MCPServers`), which the read-only `/mcp` report
   pane and the side panel's `mcp` section read, and a watch folds the watched process's journal

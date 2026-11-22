@@ -873,7 +873,9 @@ that cannot log in holds back the rest. (A repo server whose pinned file moved i
 connect skips rather than fails the set over: a notice names it and the moved file, the rest of the
 set connects, and the server is proposed for adoption again. One whose pinned file cannot be read is
 skipped the same way, its notice saying why, but it is not proposed again: the config re-read that
-follows drops it with a notice naming the file it could not read.) Mid-session nothing ever prompts: a reconnect that needs a
+follows drops it with a notice naming the file it could not read. A skipped server counts as failed
+— `/mcp` reads it so, with the cause — and nothing dials it again on its own: adopting it again
+does, and so do the `/settings` round trip below and a restart.) Mid-session nothing ever prompts: a reconnect that needs a
 login fails and keeps that server's old connection serving, and its transcript note — and the
 `mcp-servers:` row in `/settings`, while the pane is open — names the same command.
 
