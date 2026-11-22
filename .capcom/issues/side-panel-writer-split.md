@@ -1,10 +1,12 @@
 ---
 title: "The config writer reaches any registry path (architecture review 2026-11-10 #2)"
-status: open
+status: done
 type: task
 priority: 3
 plan: 2026-11-22 - 02 - ui-pref-and-writer-plan.md
 created: 2026-11-10T19:36:32Z
+closed: 2026-11-22T21:24:13Z
+reason: "Pursued and delivered by plan '2026-11-22 - 02 - ui-pref-and-writer-plan' (items 3-8; archived at 905c9796): the writer splices any registry path, the side-panel splice engine and the two panel-only SettingsHost methods are gone."
 ---
 
 Found by docs/reviews/architecture-review-2026-11-10.html, verified 2026-11-10 at a5c4f2db. Verified VALID, with two minor overstatements: SettingsHost has 8 methods, so dropping the two panel-only ones leaves 6 (the write family drops to four); the footer keys being unwritable is by design today (structured, edited in the file).

@@ -1,10 +1,12 @@
 ---
 title: "A UI pref is declared once, in domain (architecture review 2026-11-10 #8)"
-status: open
+status: done
 type: task
 priority: 3
 plan: 2026-11-22 - 02 - ui-pref-and-writer-plan.md
 created: 2026-11-10T19:36:32Z
+closed: 2026-11-22T21:24:13Z
+reason: "Pursued and delivered by plan '2026-11-22 - 02 - ui-pref-and-writer-plan' (items 1-2, 9; archived at 905c9796): ui.* keys declared once in a domain table; domain.SidePanelWidth is a stated-or-unset value."
 ---
 
 Found by docs/reviews/architecture-review-2026-11-10.html, verified 2026-11-10 at a5c4f2db. Verified PARTLY: the sites are as described, but drift between the three default statements is already caught by tests (TestRegistryDefaultsFollowTheStarterTemplate; config_test.go `wantUIDefault`, hand-spelled on purpose), and the starter template's default is hand-written documentation that stays. The gain is fewer sites per new key and losing the hidden Validate invariant, not removing drift.

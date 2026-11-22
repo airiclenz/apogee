@@ -1,11 +1,13 @@
 ---
 title: "Applying a UI pref on screen is one module (architecture review 2026-11-10 #3)"
-status: open
+status: done
 type: task
 priority: 3
 labels: [tui, test-gap]
 plan: 2026-11-22 - 02 - ui-pref-and-writer-plan.md
 created: 2026-11-10T19:36:32Z
+closed: 2026-11-22T21:24:14Z
+reason: "Pursued and delivered by plan '2026-11-22 - 02 - ui-pref-and-writer-plan' (items 10-11; archived at 905c9796): one tui module applies ui prefs with an exported key set; one persist door serves every gesture write-back."
 ---
 
 Found by docs/reviews/architecture-review-2026-11-10.html, verified 2026-11-10 at a5c4f2db. Verified VALID. The latent sweep gap is real but not reachable today (every current ui.* key has an arm).
