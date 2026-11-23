@@ -215,7 +215,14 @@ NOTES (2026-11-23): consequential edit — internal/tui/doc.go: made necessary b
 **Closes:** panel-geometry-scattered
 **Commit:** `refactor(tui): one panel hit-test answers click, hover and wheel`
 
-## 10. Navigation mode over two region adapters
+## 10. Navigation mode over two region adapters — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): the `navRegion` interface is `stopCount`, `place(cursor, row)`, `stand(m, at)`, `activate(m)`, `runHead(m)`, `isOverlay` — the approach's `nearest(row)` is folded into `place` (the row a cursor with no place there falls back to, −1 for the first stop), and `entry(dir)` is the shared `entryIndex(dir, stopCount())`, the same for both regions. `navigation` carries `m`, `transcript` and a `panel` region that stays nil until a way into the panel asks for it (`withPanel`), so a key that stays in the transcript builds no frame (as at the base) and a panel key builds it once, from `panelFrameAs(blockCursorOwnsKeys())`; `standingOn()` returns `(cursorRegion, bool)` (false while the mode is off) for item 11's esc read.
+NOTES (2026-11-23): `blockCursorKey` returns early, before `m.navigation()`, for a key that does not open the mode while the mode is off, so prompt typing computes no transcript stops; `reseatPanelCursor` survives as a one-line delegate of `m.navigation()` because runview.go's esc read still calls it (item 11's swap). `seatBlockCursor` hands a stopless transcript's cursor to the panel through `panelRegion.place`/`stand` over `navPanelStops()`, which stays (seat and many tests read it).
+NOTES (2026-11-23): two unreachable edge cases now share one rule: a transcript line that is no stop resolves to the stop before it (the clamp's rule) rather than the binary-search insertion point, and a ↑/↓ that finds no place in the region it stands in ends the mode in either region (the panel's case cannot arise after the per-key reseat). `right()`'s explicit "overlay while a decision owns the keys" check was dropped as unreachable: `withPanel` never asks for the overlay then, so the region has no stops.
+NOTES (2026-11-23): consequential edit — internal/tui/panelframe_test.go: made necessary by removing `enterPanelRegion` (the test now calls `navigation().right()`; its assertion is unchanged).
+NOTES (2026-11-23): consequential edit — internal/tui/doc.go: made necessary by the new navmode.go (the package file map names it; TestDocMapNamesEveryFile still fails only on the known blockfold.go gap).
+NOTES (2026-11-23): prose still naming the removed verbs (`[Model.activatePanelCursor]` in doc.go's navigation paragraph, panelstops.go and `followPanelTarget`'s comment in sidepanel.go) is left to item 11, whose Approach owns that prose rule.
 
 **What:**
 **Goal:** `blockCursorKey` resolves the cursor once per key through `m.navigation()` (reseat, build the panel frame once, return a `navigation`); `grep -nE 'func \(m Model\) (movePanelCursor|panelCursorRunHead|activatePanelCursor|moveBlockCursor|cursorRunHead)\(' internal/tui/` prints nothing. Depends on item 9.

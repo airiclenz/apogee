@@ -958,7 +958,7 @@ func TestNavModeCtrlXStopsPanelSubAgent(t *testing.T) {
 			delegationPhase("r1", domain.SubAgentStarted, time.Minute),
 		)
 		m = cursorOnPanelStop(t, m, panelStopID{section: domain.SidePanelSubAgents, isHeader: true})
-		if _, ok := m.cursorRunHead(); ok {
+		if _, ok := m.navigation().runHead(); ok {
 			t.Fatal("the section header heads a run")
 		}
 
@@ -1036,6 +1036,170 @@ func assertPanelCursorMark(t *testing.T, m Model) {
 		column := strip(m.th.measure.Cut(line, m.slotWidth(), m.width))
 		if got := strings.HasPrefix(column, sidePanelSeparator+glyphCursorMark); got != (i == stop.y) {
 			t.Errorf("row %d's panel gutter carries the ▌ mark %v, want it on the panel cursor's row %d alone: %q", i, got, stop.y, column)
+		}
+	}
+}
+
+// fakeRegion is a navigation region of count stops, standing as region: a transcript-role fake keeps
+// the cursor's place in its line, a panel-role fake in its panel row. Its last stop heads a run, and
+// ⏎ answers with a command naming the stop it acted on.
+type fakeRegion struct {
+	region cursorRegion
+	count  int
+}
+
+// fakeActivated is the message a fakeRegion's ⏎ command reports: the region and stop it acted on.
+type fakeActivated struct {
+	region cursorRegion
+	at     int
+}
+
+func (f fakeRegion) stopCount() int { return f.count }
+
+func (f fakeRegion) place(cursor blockCursor, _ int) (int, bool) {
+	switch {
+	case f.count == 0:
+		return 0, false
+	case f.region == regionTranscript:
+		return cursor.line, true
+	case cursor.hasPanel:
+		return cursor.panelY, true
+	}
+	return 0, true
+}
+
+func (f fakeRegion) stand(m Model, at int) Model {
+	m.cursor.region = f.region
+	if f.region == regionTranscript {
+		m.cursor.line = at
+		return m
+	}
+	m.cursor.panelY, m.cursor.hasPanel = at, true
+	return m
+}
+
+func (f fakeRegion) activate(m Model) (Model, tea.Cmd) {
+	at, _ := f.place(m.cursor, -1)
+	return m, func() tea.Msg { return fakeActivated{region: f.region, at: at} }
+}
+
+func (f fakeRegion) runHead(m Model) (entry, bool) {
+	if at, ok := f.place(m.cursor, -1); !ok || at != f.count-1 {
+		return entry{}, false
+	}
+	return entry{callID: "fake-run"}, true
+}
+
+func (fakeRegion) isOverlay() bool { return false }
+
+// TestNavigationWalksAFakeRegion pins the walk as the regions' adapters see it (ADR 0111 D1–3): the
+// keys mean one thing over any [navRegion] — ⌥↓ enters at the first stop and ⌥↑ at the last, ↑/↓
+// move clamped, → and ← cross and come back to the place each region remembers, ⏎ is the adapter's
+// own act, `^x` is claimed only on a stop that heads a run, esc and typing end the mode — and a
+// transcript with no stop hands the entry to the panel.
+func TestNavigationWalksAFakeRegion(t *testing.T) {
+	t.Parallel()
+	walk := navigation{
+		m:          newTestModel(t),
+		transcript: fakeRegion{region: regionTranscript, count: 3},
+		panel:      fakeRegion{region: regionPanel, count: 2},
+	}
+	press := func(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+		t.Helper()
+		next, cmd, claimed := walk.key(msg)
+		walk.m = next
+		return cmd, claimed
+	}
+	standsAt := func(when string, region cursorRegion, at int) {
+		t.Helper()
+		got, on := walk.standingOn()
+		place, _ := fakeRegion{region: region, count: 1}.place(walk.m.cursor, -1)
+		if !on || got != region || place != at {
+			t.Errorf("%s: the cursor stands in region %v at %d (mode on %v), want region %v at %d",
+				when, got, place, on, region, at)
+		}
+	}
+
+	if _, claimed := press(keyDown()); claimed || walk.m.cursor.active {
+		t.Fatal("↓ with the mode off was claimed or turned it on")
+	}
+	press(keyAltDown())
+	standsAt("⌥↓ from the prompt", regionTranscript, 0)
+	for range 3 {
+		press(keyDown())
+	}
+	standsAt("↓ past the last stop", regionTranscript, 2)
+	if cmd, claimed := press(keyEnter()); !claimed || cmd == nil || cmd() != (fakeActivated{regionTranscript, 2}) {
+		t.Errorf("⏎ was not the transcript adapter's act on stop 2 (claimed %v)", claimed)
+	}
+	if _, claimed := press(keyCtrlX()); !claimed {
+		t.Error("^x on the transcript's run-heading stop was not claimed")
+	}
+
+	press(keyRight())
+	standsAt("→ on the first visit", regionPanel, 0)
+	if _, claimed := press(keyCtrlX()); claimed {
+		t.Error("^x on a panel stop that heads no run was claimed")
+	}
+	for range 2 {
+		press(keyDown())
+	}
+	standsAt("↓ past the panel's last stop", regionPanel, 1)
+	press(keyLeft())
+	standsAt("← back", regionTranscript, 2)
+	press(keyRight())
+	standsAt("the second →", regionPanel, 1)
+	if _, claimed := press(keyEsc()); !claimed || walk.m.cursor.active {
+		t.Error("esc in the panel did not end the mode")
+	}
+
+	walk.transcript = fakeRegion{region: regionTranscript}
+	press(keyAltUp())
+	standsAt("⌥↑ over an empty transcript", regionPanel, 1)
+	if _, claimed := press(tea.KeyPressMsg{Code: 'q', Text: "q"}); claimed || walk.m.cursor.active {
+		t.Error("typing was claimed or left the mode on")
+	}
+}
+
+// TestNavigationResolvesPanelOncePerKey pins the panel's frame to one build per key: with the
+// sessions browser up, each key renders it at most once through the frame's spans — one walk of the
+// pane table — and a key that stays in the transcript not at all. At the header base a key in the panel composed the frame once to re-judge
+// the cursor and again to act (↑/↓, `^x`), so the pane rendered twice. It reads the process-wide
+// paneRenders counter, so it does not run in parallel.
+func TestNavigationResolvesPanelOncePerKey(t *testing.T) {
+	m, _ := navModel(t, domain.DefaultSidePanelSections, panelStopEvents(t)...)
+	m.sessionBrowser = browserWithSessions(12)
+	m.layout()
+	if !paneSpecs[paneBrowser].open(m) {
+		t.Fatal("setup: the sessions browser is not on the frame")
+	}
+	rendersSince := func() int64 {
+		return paneRenders[paneBrowser].Swap(0)
+	}
+	keys := []struct {
+		name    string
+		msg     tea.KeyPressMsg
+		ceiling int64
+		inPanel bool
+	}{
+		{"⌥↑ into the transcript", keyAltUp(), 0, false},
+		{"↑ in the transcript", keyUp(), 0, false},
+		{"→ into the panel", keyRight(), 1, true},
+		{"↓ in the panel", keyDown(), 1, true},
+		{"↑ in the panel", keyUp(), 1, true},
+		{"^x in the panel", keyCtrlX(), 1, true},
+		{"← back to the transcript", keyLeft(), 1, false},
+	}
+	rendersSince()
+	for _, key := range keys {
+		next, _, claimed := m.blockCursorKey(key.msg)
+		m = next
+		got := rendersSince()
+		if key.inPanel != m.cursor.inPanel() || (!key.inPanel && !m.cursor.inTranscript()) {
+			t.Fatalf("%s: the cursor %+v (claimed %v) is not in the region the walk expects", key.name, m.cursor, claimed)
+		}
+		if got > key.ceiling {
+			t.Errorf("%s rendered the open pane %d times, want at most %d", key.name, got, key.ceiling)
 		}
 	}
 }

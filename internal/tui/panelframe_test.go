@@ -552,7 +552,7 @@ func TestBarePanelParksNoCursorWhileADecisionIsPending(t *testing.T) {
 		t.Fatal("setup: ⌥↑ does not stand the cursor in the transcript")
 	}
 	inTranscript.state = stateAwaitingApproval
-	if got := inTranscript.enterPanelRegion(); !got.cursor.inTranscript() {
+	if got := inTranscript.navigation().right(); !got.cursor.inTranscript() {
 		t.Errorf("→ under a pending approval moved the cursor to %+v, want it left in the transcript", got.cursor)
 	}
 

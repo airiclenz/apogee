@@ -1075,7 +1075,9 @@
 // the hover ask off the gesture's snapshot; panelstops.go the column's stops ([Model.panelStops]) —
 // the rows a click acts on, in paint order, each with its row span, its target and an identity
 // (header, run, path, task card, usage, mcp) — through which the pointer resolves a body row and which
-// navigation mode's cursor walks in the panel region (blockcursor.go);
+// navigation mode's cursor walks in the panel region (blockcursor.go); navmode.go that walk as one
+// rule over two region adapters ([navRegion]: [transcriptRegion], [panelRegion]), resolved once per
+// key ([Model.navigation]);
 // recall.go prompt recall — the per-workspace list of sent inputs the box walks with ↑/↓, where
 // this package owns only WHEN (one load at start-up, one fire-and-forget append per send) while
 // internal/recall owns the file and cmd/apogee owns which directory and which workspace

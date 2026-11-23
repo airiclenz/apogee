@@ -1330,7 +1330,7 @@ func TestRunViewCtrlXStopsTheCursorsRowInsteadOfTheView(t *testing.T) {
 	m.refreshViewport()
 
 	m = step(t, m, keyAltUp())
-	if head, ok := m.cursorRunHead(); !ok || head.spawnRunID != "run-g1" {
+	if head, ok := m.navigation().runHead(); !ok || head.spawnRunID != "run-g1" {
 		t.Fatalf("setup: the cursor stands on %+v (a run row: %v); want the grandchild's row", head.spawnRunID, ok)
 	}
 	m = step(t, m, keyCtrlX())

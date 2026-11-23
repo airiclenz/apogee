@@ -4438,11 +4438,11 @@ func TestGroupHeaderFoldsItsGroupAlone(t *testing.T) {
 		m, _ := setup(t)
 
 		onMember := cursorOnTarget(t, m, targetHeader, middleAgent)
-		if head, ok := onMember.cursorRunHead(); !ok || head.callID != "s2" {
-			t.Errorf("cursorRunHead on the middle member = %q, %v; want its delegation s2", head.callID, ok)
+		if head, ok := onMember.navigation().runHead(); !ok || head.callID != "s2" {
+			t.Errorf("the run head on the middle member = %q, %v; want its delegation s2", head.callID, ok)
 		}
-		if _, ok := cursorOnTarget(t, m, targetUmbrella, subAgentHead).cursorRunHead(); ok {
-			t.Error("cursorRunHead on the group header named a run; the header is the group's fold")
+		if _, ok := cursorOnTarget(t, m, targetUmbrella, subAgentHead).navigation().runHead(); ok {
+			t.Error("the run head on the group header named a run; the header is the group's fold")
 		}
 	})
 

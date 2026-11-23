@@ -39,21 +39,22 @@ import (
 // row appearing or vanishing above it leaves the cursor on its own row. The row it was last seen on
 // is kept beside it as the hint a vanished identity falls back to ([blockCursor.panelStopIndex]).
 type blockCursor struct {
-	active bool      // the mode is on: ↑/↓/←/→/esc are the mode's until a printable key hands them back
-	region navRegion // which region the cursor stands in; the other one's place is only remembered
-	line   int       // the index into Model.lines / Model.lineTargets the transcript place is on
+	active bool         // the mode is on: ↑/↓/←/→/esc are the mode's until a printable key hands them back
+	region cursorRegion // which region the cursor stands in; the other one's place is only remembered
+	line   int          // the index into Model.lines / Model.lineTargets the transcript place is on
 
 	panel    panelStopID // the panel stop the panel place is on, while hasPanel
 	panelY   int         // the row that stop was last laid out on: the fallback when its identity is gone
 	hasPanel bool        // the panel has a place: the region was entered at least once this mode
 }
 
-// navRegion is which of navigation mode's two regions the cursor stands in.
-type navRegion int
+// cursorRegion is which of navigation mode's two regions the cursor stands in; the walk over each is
+// its region adapter ([navRegion], navmode.go).
+type cursorRegion int
 
 const (
-	regionTranscript navRegion = iota // the transcript's click surfaces (the zero value: the mode began there)
-	regionPanel                       // the side panel's stops ([Model.panelStops])
+	regionTranscript cursorRegion = iota // the transcript's click surfaces (the zero value: the mode began there)
+	regionPanel                          // the side panel's stops ([Model.panelStops])
 )
 
 // inTranscript reports whether the cursor is on and standing in the transcript — the gate every
@@ -212,25 +213,21 @@ func (c blockCursor) clamp(targets []lineTarget, pads []bool) blockCursor {
 
 // seatBlockCursor is the cursor re-seated against the paint that just landed ([Model.refreshViewport]):
 // the transcript place clamped onto a stop ([blockCursor.clamp]), and — when the region the cursor
-// stands in was the transcript and it lost every stop — the cursor handed to the panel's remembered
-// or first stop, the mode ending only where the panel has none either. The panel region needs no
-// seating here: the column is re-judged at the next key ([Model.reseatPanelCursor]) and at paint.
+// stands in was the transcript and it lost every stop — the cursor handed to the panel region's
+// remembered or first stop ([panelRegion]), the mode ending only where the panel has none either.
+// The panel region needs no seating here: the column is re-judged at the next key
+// ([Model.navigation]) and at paint.
 func (m Model) seatBlockCursor() blockCursor {
 	c := m.cursor.clamp(m.lineTargets, m.pads)
 	if c.active || !m.cursor.inTranscript() {
 		return c
 	}
-	stops := m.navPanelStops()
-	if len(stops) == 0 {
+	panel := panelRegion{stops: m.navPanelStops()}
+	at, ok := panel.place(m.cursor, -1)
+	if !ok {
 		return c
 	}
-	handed := m.cursor
-	handed.region = regionPanel
-	at, ok := handed.panelStopIndex(stops)
-	if !ok {
-		at = 0
-	}
-	return handed.standOnPanel(stops[at])
+	return panel.stand(m, at).cursor
 }
 
 // navPanelStops is the side panel's stops as navigation mode may walk them: the column's stops
@@ -238,7 +235,7 @@ func (m Model) seatBlockCursor() blockCursor {
 // column docked beside the transcript offers them to every way in; one hidden under the window's
 // gate offers them only to a cursor already standing in the panel region — which is what paints it
 // as the overlay ([Model.panelOverlaid]) — so ⌥↑/⌥↓ and a transcript that loses its stops never
-// open the overlay: only → does ([Model.enterPanelRegion], ADR 0111 D7).
+// open the overlay: only → does ([navigation.right], ADR 0111 D7).
 func (m Model) navPanelStops() []panelStop {
 	if !m.panelShown() && !m.panelOverlaid() {
 		return nil
@@ -246,31 +243,10 @@ func (m Model) navPanelStops() []panelStop {
 	return m.panelStops(m.frameSpans().slotBottom)
 }
 
-// reseatPanelCursor re-judges a panel-standing cursor against the column as it stands now, before a
-// key is claimed: the column re-lays out under every Event and a deadline (the sub-agents linger)
-// can empty it with no key pressed, so its stop is found again by identity — or by the nearest row —
-// and a column with no stops left hands the cursor back to the transcript's place, or ends the mode
-// where the transcript has no stop either.
+// reseatPanelCursor is m with a panel-standing cursor re-judged against the column as it stands now,
+// as a key resolves it ([Model.navigation]).
 func (m Model) reseatPanelCursor() Model {
-	if !m.cursor.inPanel() {
-		return m
-	}
-	stops := m.navPanelStops()
-	if at, ok := m.cursor.panelStopIndex(stops); ok {
-		m.cursor = m.cursor.standOnPanel(stops[at])
-		return m
-	}
-	if len(stops) > 0 {
-		m.cursor = m.cursor.standOnPanel(stops[0])
-		return m
-	}
-	if len(cursorStops(m.lineTargets, m.pads)) == 0 {
-		m.cursor = blockCursor{}
-		return m
-	}
-	m.cursor.region = regionTranscript
-	m.followBlockCursor()
-	return m
+	return m.navigation().m
 }
 
 // blockCursorOwnsKeys reports whether the transcript's cursor may hold the frame's keys this frame.
@@ -296,179 +272,24 @@ func (m Model) blockCursorOwnsKeys() bool {
 // (ADR 0111 D1–3) — and are claimed even where there is nowhere to go, so the prompt's caret never
 // moves under a reader who is navigating — and esc leaves the mode from either region. In the
 // transcript ⏎ opens or closes the surface under the highlight and `^x` stops the delegation whose
-// row it stands on; in the panel ⏎ is the click on the stop it stands on ([Model.activatePanelCursor],
+// row it stands on; in the panel ⏎ is the click on the stop it stands on ([panelRegion.activate],
 // ADR 0111 D4), and `^x` on a sub-agent row stops that run (ADR 0111 D3) — off one it is not the
 // mode's and goes on to the frame.
 // Every other key — ⌃c, PgUp, ⇧⇥ — is left alone and leaves the mode standing: they are the frame's
 // own verbs, and none of them is a reason to lose your place in the scrollback.
 //
-// A panel-standing cursor is re-judged against the column first ([Model.reseatPanelCursor]), so a
-// key never acts on a stop the column no longer has.
+// The key resolves the cursor once ([Model.navigation]): a panel-standing cursor is re-judged
+// against the column first, so a key never acts on a stop the column no longer has, and the walk over
+// either region is its adapter's ([navRegion], navmode.go). A mode that is off resolves nothing for
+// a key that does not open it, so the keys typed into the prompt pay for no walk.
 func (m Model) blockCursorKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.blockCursorOwnsKeys() {
 		return m, nil, false
 	}
-	m = m.reseatPanelCursor()
-	switch msg.String() {
-	case "alt+up":
-		return m.moveBlockCursor(-1), nil, true
-	case "alt+down":
-		return m.moveBlockCursor(1), nil, true
-	}
-	if !m.cursor.active {
+	if _, isEntry := navEntryDir(msg); !isEntry && !m.cursor.active {
 		return m, nil, false
 	}
-	switch msg.String() {
-	case "up":
-		return m.moveBlockCursor(-1), nil, true
-	case "down":
-		return m.moveBlockCursor(1), nil, true
-	case "right":
-		return m.enterPanelRegion(), nil, true
-	case "left":
-		return m.enterTranscriptRegion(), nil, true
-	case "esc":
-		m.cursor = blockCursor{}
-		return m, nil, true
-	case "enter":
-		if m.cursor.inPanel() {
-			next, cmd := m.activatePanelCursor()
-			return next, cmd, true
-		}
-		if !m.cursor.inTranscript() {
-			return m, nil, false
-		}
-		next, cmd := m.toggleAtBlockCursor()
-		return next, cmd, true
-	case "ctrl+x":
-		// `^x` on a delegation's row stops that run alone — a member of a ✦ Sub-agents umbrella, a
-		// grandchild's row inside a view (ADR 0086 D5), or a side-panel sub-agent row (ADR 0111 D3) —
-		// and leaves the mode standing: the row is still there, and says how the run ended once it
-		// has. Anywhere else the key is not the cursor's, and inside a view it goes on to stop
-		// nothing (the view's claimant declined it).
-		head, ok := m.cursorRunHead()
-		if !ok {
-			return m, nil, false
-		}
-		if m.watch.isActive {
-			// A watched run's rows stop nothing: the watch is read-only (watch.go).
-			cmd := m.showFlash(watchRefusedFlash)
-			return m, cmd, true
-		}
-		m.stopRun(head)
-		return m, nil, true
-	}
-	if msg.Text != "" {
-		// Typing is the way out that needs no key of its own: the human has stopped reading and
-		// started writing. The keypress is NOT claimed — it goes on to the prompt box below and
-		// opens the message with the letter they meant to type.
-		m.cursor = blockCursor{}
-		return m, nil, false
-	}
-	return m, nil, false
-}
-
-// enterPanelRegion is → : the cursor moves into the side panel, onto the stop it remembers there or,
-// on the first visit this mode, the stop nearest the transcript row it leaves. On a window under the
-// column's gate the move opens it as the overlay (ADR 0111 D7), so the stops are judged as the panel
-// region would see them — the overlay's, which are the docked column's laid out over the same rows
-// ([Model.panelFrameAs]), read before the cursor moves. A panel with no stop to stand on — a column
-// `off` hides, or an overlay while a decision owns the keys — leaves the cursor where it is.
-func (m Model) enterPanelRegion() Model {
-	if !m.cursor.inTranscript() {
-		return m
-	}
-	frame := m.panelFrameAs(true)
-	if frame.geometry.isOverlaid && !m.blockCursorOwnsKeys() {
-		return m
-	}
-	stops := frame.stops
-	if len(stops) == 0 {
-		return m
-	}
-	at, ok := m.cursor.panelStopIndex(stops)
-	if !ok {
-		at, _ = nearestPanelStop(stops, m.blockCursorRow(), anyPanelStop)
-	}
-	m.cursor.region = regionPanel
-	m.cursor = m.cursor.standOnPanel(stops[at])
-	return m
-}
-
-// activatePanelCursor is ⏎ on the panel stop the cursor stands on (ADR 0111 D4, adr-0111-amend-1109b):
-// exactly the click on that stop, through the click's own [Model.followPanelTarget], so the two ways
-// in are one gesture — under a modal pane or on a watched pin it acts as the click does there. A
-// header's two stops keep the mode, the cursor still on the stop it acted on: the pin stop toggles
-// pinned ↔ auto, the title stop folds ↔ opens the section, and the title's identity outlives the
-// re-layout the fold makes ([blockCursor.panelStopIndex]). A stop that opens a detail — a Run view,
-// a tool block, /usage, /mcp — ends it, as ⏎ on a delegation's transcript row does: the reader's
-// attention has moved to what opened. The stop is the one [Model.reseatPanelCursor] resolved for
-// this key.
-func (m Model) activatePanelCursor() (Model, tea.Cmd) {
-	stops := m.navPanelStops()
-	at, ok := m.cursor.panelStopIndex(stops)
-	if !ok {
-		return m, nil
-	}
-	target := stops[at].target
-	isOpening := !stops[at].id.isHeader && m.panelTargetLive(target)
-	next, cmd := m.followPanelTarget(target)
-	m = next.(Model)
-	if isOpening {
-		m.cursor = blockCursor{}
-	}
-	return m, cmd
-}
-
-// enterTranscriptRegion is ← : the cursor moves back to the transcript row it remembers, scrolled
-// into view as any move there is. A transcript with no stop leaves the cursor in the docked panel;
-// in the narrow-window overlay ← closes it whatever the transcript holds (ADR 0111 D7), so there it
-// ends the mode instead.
-func (m Model) enterTranscriptRegion() Model {
-	if !m.cursor.inPanel() {
-		return m
-	}
-	if len(cursorStops(m.lineTargets, m.pads)) == 0 {
-		if m.panelOverlaid() {
-			m.cursor = blockCursor{}
-		}
-		return m
-	}
-	m.cursor.region = regionTranscript
-	m.followBlockCursor()
-	return m
-}
-
-// cursorRunHead is the delegation the highlight stands on, when it stands on one: a cursor standing
-// in the transcript whose line the paint marked as a header ([targetHeader]) of an entry that heads a run — a
-// delegation's collapsed row at any depth, a ✦ Sub-agents umbrella's member rows included — or a
-// cursor standing on a side-panel sub-agent row, whose stop opens that run (ADR 0111 D3). It reads
-// the paint's own accounting (m.lineTargets, the column's stops), as [Model.toggleBlockAt] and
-// [Model.activatePanelCursor] do, so the row `^x` stops is the row the human sees highlighted.
-func (m Model) cursorRunHead() (entry, bool) {
-	if m.cursor.inPanel() {
-		return m.panelCursorRunHead()
-	}
-	if !m.cursor.inTranscript() || m.cursor.line < 0 || m.cursor.line >= len(m.lineTargets) {
-		return entry{}, false
-	}
-	target := m.lineTargets[m.cursor.line]
-	if target.kind != targetHeader {
-		return entry{}, false
-	}
-	return m.runHeadAt(target.entry)
-}
-
-// panelCursorRunHead is the delegation a panel-standing cursor's stop opens: the stop the cursor
-// resolves to ([blockCursor.panelStopIndex]) when it is a sub-agent row. Any other stop — a header,
-// a task card, a changed file, the usage or the mcp report — heads no run.
-func (m Model) panelCursorRunHead() (entry, bool) {
-	stops := m.navPanelStops()
-	at, ok := m.cursor.panelStopIndex(stops)
-	if !ok || stops[at].target.kind != panelTargetRun {
-		return entry{}, false
-	}
-	return m.runHeadAt(stops[at].target.entry)
+	return m.navigation().key(msg)
 }
 
 // runHeadAt is entries[index] when it heads a run.
@@ -481,72 +302,6 @@ func (m Model) runHeadAt(index int) (entry, bool) {
 		return entry{}, false
 	}
 	return head, true
-}
-
-// moveBlockCursor moves the highlight one stop in dir, entering the mode when it is not already on.
-//
-// Entering comes from OUTSIDE the transcript — the prompt box, below everything — so each key lands
-// on the end it is pointing away from: ⌥↑ enters at the LAST stop, the most recent block and the one
-// a reader looking away from the prompt wants first, and ⌥↓ at the first, which is the oldest thing
-// the scrollback still holds. Inside, movement is clamped rather than wrapping: a walk that fell off
-// the top and reappeared at the bottom would lose the reader's place in a scrollback that is often
-// screens long, and the ask_user choice list already takes the same non-wrapping shape.
-//
-// Standing in the panel, the move walks the column's stops instead ([Model.movePanelCursor]), by the
-// same clamped rule.
-//
-// A live drag-selection is dropped on the way in. The transcript has one highlight and one meaning
-// for it — this is the thing you are pointing at — and the two would otherwise paint at once, which
-// is the same region arbitration the prompt's own selection is cleared for on every keypress
-// (handleKey).
-func (m Model) moveBlockCursor(dir int) Model {
-	if !m.cursor.active {
-		return m.enterNavigationMode(dir)
-	}
-	if m.cursor.region == regionPanel {
-		return m.movePanelCursor(dir)
-	}
-	stops := cursorStops(m.lineTargets, m.pads)
-	if len(stops) == 0 {
-		m.cursor = blockCursor{}
-		return m
-	}
-	at, _ := slices.BinarySearch(stops, m.cursor.line)
-	m.cursor.line = stops[stepIndex(at, dir, len(stops))]
-	m.followBlockCursor()
-	return m
-}
-
-// enterNavigationMode turns the mode on from the prompt, at the end of the transcript's stops that
-// dir points away from — or, where the transcript has no stop, at that end of the side panel's
-// (ADR 0111 D3). With no stop in either region the mode stays off.
-func (m Model) enterNavigationMode(dir int) Model {
-	if stops := cursorStops(m.lineTargets, m.pads); len(stops) > 0 {
-		m.transcriptSel = transcriptSel{}
-		m.cursor = blockCursor{active: true, line: stops[entryIndex(dir, len(stops))]}
-		m.followBlockCursor()
-		return m
-	}
-	stops := m.navPanelStops()
-	if len(stops) == 0 {
-		m.cursor = blockCursor{}
-		return m
-	}
-	m.transcriptSel = transcriptSel{}
-	m.cursor = blockCursor{active: true, region: regionPanel}.standOnPanel(stops[entryIndex(dir, len(stops))])
-	return m
-}
-
-// movePanelCursor moves a panel-standing cursor one stop in dir down the column, clamped at either
-// end; a column with no stops leaves it where it is (the next key re-judges it).
-func (m Model) movePanelCursor(dir int) Model {
-	stops := m.navPanelStops()
-	at, ok := m.cursor.panelStopIndex(stops)
-	if !ok {
-		return m
-	}
-	m.cursor = m.cursor.standOnPanel(stops[stepIndex(at, dir, len(stops))])
-	return m
 }
 
 // entryIndex is the stop a region is entered at from the prompt below it: the last for dir < 0 (⌥↑),

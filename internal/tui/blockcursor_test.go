@@ -409,7 +409,7 @@ func cursorOnRun(t *testing.T, m Model, runID string) Model {
 	t.Helper()
 	m = step(t, m, keyAltUp())
 	for range len(m.lineTargets) {
-		if head, ok := m.cursorRunHead(); ok && head.spawnRunID == runID {
+		if head, ok := m.navigation().runHead(); ok && head.spawnRunID == runID {
 			return m
 		}
 		m = step(t, m, keyUp())
