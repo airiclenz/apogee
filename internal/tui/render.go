@@ -446,10 +446,11 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		appendJoined(false, false, depth, at, preview)
 	}
 
-	// records is the walk's one painter-record buffer: every block states its records into it
-	// ([transcript.resolveBlock]), so an all-hit repaint allocates them once per frame rather than
-	// once per block. A block's records live until the next block is resolved, and its paint is
-	// drawn (or served) before that.
+	// records is the walk's one painter-record buffer: a block states its records into it
+	// ([transcript.resolveBlock]) only where its paint needs them — a single entry's own record, and
+	// a span's records on the miss that draws it — and its key is read off the entries in place
+	// ([blockKeyOver]), so an all-hit repaint states no record for an entry a block covers. A block's
+	// records live until the next block is resolved, and its paint is drawn (or served) before that.
 	var records []paintInput
 	// The item runs a retry superseded (retiredAttempts): each is stepped over whole, head and run,
 	// because an item keeps ONE row — the one its latest attempt heads.
@@ -467,20 +468,21 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 			continue
 		}
 		// The entry the walk stands on, stated once as the record the painters read ([paintInput]):
-		// the resolver hands THAT to its painter and to its key, so what a block paints and what its
-		// memo names are one value (paintcache.go). The entries themselves stay with the walk, which
-		// is the only part that needs them — where a block ENDS is a question about the list
+		// the resolver hands THAT to its painter, and its key names the same terms read off the
+		// entries in place ([blockKeyOver]), so what a block paints and what its memo names cannot
+		// part company (paintcache.go). The entries themselves stay with the walk and the key, which
+		// are the only parts that need them — where a block ENDS is a question about the list
 		// (toolBlockAt, subAgentSpan), never about a paint.
-		in := root.painted(t.entries[i])
+		in := root.painted(&t.entries[i])
 		// One question, asked once: what block starts here? The answer carries its shape, the records
 		// it covers, its paint and the index the walk resumes at ([resolvedBlock]), so the step past a
 		// folded run or a collapsed span is stated by the code that resolved that span rather than by
 		// a per-branch `i += …` — the one arithmetic in the renderer whose off-by-one would silently
 		// skip a block or paint it twice.
 		block := t.resolveBlock(i, in, width, blink, root, records)
-		// the buffer, grown if this block needed more; the next block overwrites it
+		// the buffer handed back; the next block overwrites it
 		records = block.ins
-		key := blockKey(block.shape, block.ins, th, width, blink, block.live, root, block.fold)
+		key := block.key(th, width, blink, root)
 		appendJoined(block.isUser, block.closes, in.depth, i,
 			t.paintBlock(i, key, func() blockPaint { return block.draw(th) }))
 		// A block ending on an OPEN span does not end the run: that span follows, railed one level
@@ -722,19 +724,19 @@ type paintRoot struct {
 func (r paintRoot) rooted() bool { return !r.ref.isTop() || r.stage.isStage() }
 
 // painted states one entry as its painter's record ([entry.painted]), rebased to the root.
-func (r paintRoot) painted(e entry) paintInput {
+func (r paintRoot) painted(e *entry) paintInput {
 	in := e.painted()
 	in.depth -= r.depth
 	return in
 }
 
 // appendInputs states a whole block's entries as painter records ([entry.painted]), in the order
-// the block covers them, rebased to the root and appended to dst. [transcript.renderView] hands the
-// SAME records to [blockKey] and to the painter, so what the key names and what the paint reads
-// cannot part company. The walk hands it its one record buffer cut back to empty
-// ([transcript.renderView]), so a repaint states every block's records into the same backing array
-// rather than a fresh one per block — a block covering a collapsed run's whole span is otherwise
-// one ≈ 832 B record per covered entry, on every hit.
+// the block covers them, rebased to the root and appended to dst. A multi-entry block calls it on
+// the miss that draws it alone ([resolvedBlock.draw]): its key is read off the same entries in place
+// ([blockKeyOver], which names exactly [blockKey]'s key over these records), so a hit states no
+// ≈ 832 B record per covered entry — a collapsed run's whole span included. The draw hands it the
+// walk's one record buffer cut back to empty ([transcript.renderView]), so a repaint's misses state
+// their records into the same backing array rather than a fresh one per block.
 func (r paintRoot) appendInputs(dst []paintInput, entries []entry) []paintInput {
 	at := len(dst)
 	for i := range entries {
@@ -828,10 +830,10 @@ func (t *transcript) paintStage(th theme, width int, blink bool, root paintRoot,
 			appendJoined(false, false, 0, at, plainPaint(header))
 			continue
 		}
-		in := root.painted(t.entries[row.head])
+		in := root.painted(&t.entries[row.head])
 		block := t.resolveBlock(row.head, in, width, blink, root, records)
 		records = block.ins
-		key := blockKey(block.shape, block.ins, th, width, blink, block.live, root, block.fold)
+		key := block.key(th, width, blink, root)
 		var paint blockPaint
 		// Joined into a fresh paint: the row may be the cache's own stored slices.
 		paint.join(t.paintBlock(row.head, key, func() blockPaint { return block.draw(th) }))
@@ -856,8 +858,15 @@ const stageAttemptWord = "attempt "
 // cause. Here the span a shape resolved and the step past it are stated in the same breath, by the
 // code that resolved the span.
 type resolvedBlock struct {
-	shape blockShape   // which painter draws it, as the paint key names the branch (paintcache.go)
-	ins   []paintInput // the records the key names and the painter reads, the block's head first
+	shape blockShape // which painter draws it, as the paint key names the branch (paintcache.go)
+	// covers is the entries the block covers, its head first: what the key is read off in place
+	// ([resolvedBlock.key]) and what draw states as the painter's records on a miss. It is the
+	// shared entries array itself, and nothing here writes through it.
+	covers []entry
+	// ins is the walk's record buffer handed back for the next block: a single entry's own record,
+	// or — for a block covering a span — the buffer cut back to empty, which its draw states the
+	// span's records into on a miss.
+	ins []paintInput
 	// live is whether the block still holds an open call — each shape's own rule (blockState.live).
 	live bool
 	// fold is a Tools umbrella's large/folded answer, the zero value for every other shape
@@ -866,8 +875,9 @@ type resolvedBlock struct {
 	// draw is the paint, called only when the cache misses (transcript.paintBlock). The theme is
 	// its ARGUMENT rather than something it closes over: a closure holding the ≈ 32 KB theme moved
 	// it to the heap on every block resolved, hit or miss, so the repaint of an all-hit scrollback
-	// cost a theme copy per block. It reads ins, and so is valid only until the walk resolves the
-	// next block into the same record buffer ([transcript.renderView]).
+	// cost a theme copy per block. It states its records into the walk's record buffer, and so is
+	// valid only until the walk resolves the next block into the same buffer
+	// ([transcript.renderView]).
 	draw func(th theme) blockPaint
 
 	next   int  // where the walk resumes: past the block's own entries, and past a collapsed span's elided ones
@@ -877,6 +887,12 @@ type resolvedBlock struct {
 	// railed one level deeper than the block's own depth, so the seam below joins from there rather
 	// than from the depth this block stood at.
 	openTail bool
+}
+
+// key is the block's paint key, read off the entries it covers in place ([blockKeyOver]): the key
+// [blockKey] names over the records its draw would state, without stating them.
+func (b *resolvedBlock) key(th theme, width int, blink bool, root paintRoot) paintKey {
+	return blockKeyOver(b.shape, b.covers, th, width, blink, b.live, root, b.fold)
 }
 
 // resolveBlock answers what block starts at entry index head, whose painter record is in. It is the
@@ -890,10 +906,12 @@ type resolvedBlock struct {
 // instead, which is what keeps a painter to what it needs to draw and nothing it could write through
 // (paintcache.go, ADR 0011).
 //
-// buf is the walk's one record buffer: the block's records are appended to buf[:0] and handed back
-// as [resolvedBlock.ins], which the walk passes in again for the next block, so a hit states them
-// without allocating. Nothing a hit needs is built here beyond them — the painter's own inputs (a
-// group's member rows) are built inside draw, which only a miss calls.
+// buf is the walk's one record buffer, handed back as [resolvedBlock.ins] for the walk to pass in
+// again for the next block. A single entry's record is appended to buf[:0] here; a block covering a
+// span states its records into buf[:0] inside draw, which only a miss calls, and keys off the
+// entries in place ([resolvedBlock.covers]) — so a hit copies no entry it covers. Nothing a hit
+// needs is built here beyond the key's own inputs — the painter's (the records, a group's member
+// rows) are built inside draw.
 func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool,
 	root paintRoot, buf []paintInput) resolvedBlock {
 	// A descent used to be announced by a label block of its own, and then by the delegation's own
@@ -954,18 +972,20 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 		// answer's too (groupOfOne), which the painter draws the call's own block under the header
 		// from.
 		sup := b.sup
-		ins := root.appendInputs(buf[:0], t.entries[b.head:b.end])
-		live := anyOpenCall(ins)
+		covers := t.entries[b.head:b.end]
+		live := anyOpenEntry(covers)
 		fold := umbrellaFold{large: t.umbrellaIsLarge(b.head), folded: t.blockFolded(b.head)}
 		groupOfOne := b.groupOfOne()
 		// The head record's level, read here so draw closes over an int and not the record.
 		depth := in.depth
 		return resolvedBlock{
-			shape: shapeToolSuper,
-			ins:   ins,
-			live:  live,
-			fold:  fold,
+			shape:  shapeToolSuper,
+			covers: covers,
+			ins:    buf[:0],
+			live:   live,
+			fold:   fold,
 			draw: func(th theme) blockPaint {
+				ins := root.appendInputs(buf[:0], covers)
 				return renderSuperGroup(th, superRunViews(ins, sup), railedWidth(width, depth),
 					blockState{live: live, blink: blink}, fold, groupOfOne).railed(th, depth)
 			},
@@ -999,12 +1019,14 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 	// stage rows — a live one, or one replayed with its structure — is the exception below: its stage
 	// rows stand for its item runs, so it steps over its span whole.
 	if span := subAgentSpan(t.entries, head); subAgentFramed(in, span) {
-		ins := root.appendInputs(buf[:0], t.entries[head:head+span+1])
+		covers := t.entries[head : head+span+1]
 		return resolvedBlock{
-			shape: shapeSubAgentRun,
-			ins:   ins,
-			live:  !subAgentReported(in) || anyOpenCall(ins[1:]),
+			shape:  shapeSubAgentRun,
+			covers: covers,
+			ins:    buf[:0],
+			live:   !subAgentReported(in) || anyOpenEntry(covers[1:]),
 			draw: func(th theme) blockPaint {
+				ins := root.appendInputs(buf[:0], covers)
 				return renderSubAgentRun(th, ins[0], ins[1:], width, blink)
 			},
 			next: head + span + 1, // the span is elided whole: it is read in the run's own view
@@ -1028,9 +1050,10 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 	live := in.kind.hasLiveStar() && !in.done || in.kind == entryWorkflow && in.workflowView.running()
 	ins := append(buf[:0], in)
 	return resolvedBlock{
-		shape: shapeEntry,
-		ins:   ins,
-		live:  live,
+		shape:  shapeEntry,
+		covers: t.entries[head : head+1],
+		ins:    ins,
+		live:   live,
 		draw: func(th theme) blockPaint {
 			return renderEntryLines(th, ins[0], width, blink)
 		},
@@ -1139,16 +1162,16 @@ func (t *transcript) resolveGroup(head int, in paintInput, width int, blink bool
 	// member's row changes shape the moment its delegation grows a span to reveal, so a key
 	// stopping at the last row it paints would serve a stale one (paintcache.go).
 	cover := b.end - head
-	// One record per covered entry, stated once and read by both the key and the rows: a
-	// member's own record sits at its offset from the head and its span is the records behind
-	// it, so what the paint reads is exactly what the key named (paintcache.go).
-	ins := root.appendInputs(buf[:0], t.entries[head:head+cover])
+	// The covered entries, read in place by the key and stated as one record each by the draw
+	// alone: a member's own record sits at its offset from the head and its span is the records
+	// behind it, so what the paint reads is exactly what the key named (paintcache.go).
+	covers := t.entries[head : head+cover]
 	// count opens the header, and only the group's FIRST block carries one.
 	count := 0
 	if pos == 0 {
 		count = len(grp)
 	}
-	live := anyOpenCall(ins)
+	live := anyOpenEntry(covers)
 	// The head record's level, read here so draw closes over an int and not the record.
 	depth := in.depth
 	// The walk resumes ON the member the block stopped at when that member is open — its span
@@ -1160,13 +1183,15 @@ func (t *transcript) resolveGroup(head int, in paintInput, width int, blink bool
 		next += grp[end].span
 	}
 	return resolvedBlock{
-		shape: b.kind,
-		ins:   ins,
-		live:  live,
-		fold:  umbrellaFold{folded: folded},
-		// The member rows are the painter's input alone, so they are built on the miss that paints
-		// them: a hit reads only the key, which the records already name.
+		shape:  b.kind,
+		covers: covers,
+		ins:    buf[:0],
+		live:   live,
+		fold:   umbrellaFold{folded: folded},
+		// The records and the member rows are the painter's input alone, so they are built on the
+		// miss that paints them: a hit reads only the key, which the covered entries already name.
 		draw: func(th theme) blockPaint {
+			ins := root.appendInputs(buf[:0], covers)
 			members := make([]subAgentMember, 0, end-pos+1)
 			for k := pos; k <= end; k++ {
 				at := grp[k].at - head

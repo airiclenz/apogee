@@ -187,7 +187,15 @@ internal/tui/panelframe_test.go — TestPanelSectionsPaintOncePerView; cmd/apoge
 - `go test -run '^$' -bench 'SidePanelView' -benchmem ./internal/tui/` (record before/after)
 **Commit:** `perf(tui): memoise the side panel's changed-files section`
 
-## 7. Sub-agent paint keys without copying hidden entries
+## 7. Sub-agent paint keys without copying hidden entries — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): benchmark `go test -run '^$' -bench 'RenderViewDelegationsAllHit' -benchmem ./internal/tui/` (Pi 5, no -race) before → after: 4×30 calls 178 µs 324 KB/op 32 allocs → 8.3 µs 2.7 KB/op 25 allocs; 4×300 calls 2.21 ms 3.72 MB/op 36 allocs → 36.6 µs 5.0 KB/op 25 allocs (allocs flat in the hidden entries; the remaining bytes are the key's one-byte-per-entry flags string).
+
+NOTES (2026-11-23): the walk keys each block through a new `blockKeyOver` (paintcache.go), reached as `resolvedBlock.key`, over a new `resolvedBlock.covers` field (the covered entries, head first); `blockKey` stays as the record-path reference. `spanFlags`/`spanFills` and their in-place twins `entryFlags`/`entryFills` share one packing helper each (`stateFlag`, `appendFill`); `anyOpenEntry` (blockstate.go) is `anyOpenCall` over entries.
+
+NOTES (2026-11-23): the buffer hand-back stays (`records = block.ins` in renderView, paintStage and paintWalk): a single entry's block hands back its one record as before; a span-covering block hands back the buffer cut to empty, and its draw states the span's records into it on a miss.
+
+NOTES (2026-11-23): `TestDelegationKeysMatchTheRecordPath` was checked by mutation: dropping the root rebase from `blockKeyOver`'s depth fails it on the run-view fixture. It covers entry, umbrella, Sub-agents group and sub-agent run (fan_out item) shapes, live and settled, at both star phases. colorprofile_test.go did not change.
 
 **What:**
 **Goal:** building a block's paint key does not copy entries a collapsed Sub-agent run or group covers; keys, hits and misses are unchanged and frames byte-identical.

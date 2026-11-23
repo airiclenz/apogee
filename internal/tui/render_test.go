@@ -805,3 +805,145 @@ func TestRenderViewAdjacentPaddedBlocksAddOneRow(t *testing.T) {
 		t.Errorf("the seam sits between %q and %q; want the two remarks", above, below)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// A Sub-agents group's paint key reads its hidden entries in place (render.go, blockKeyOver)
+// ----------------------------------------------------------------------------
+
+// delegationsFixture is one prompt and a Sub-agents group of four settled delegates, each with
+// calls nested reads behind it: the group's block covers every one of those entries, and a
+// collapsed member's span is all hidden behind its row.
+func delegationsFixture(calls int) *transcript {
+	tr := &transcript{}
+	tr.addUser("survey the repo", nil)
+	for d := range 4 {
+		spawn := "s" + strconv.Itoa(d)
+		delegationCall(tr, "", spawn, "scout-"+spawn, "scout "+spawn, 0)
+		for k := range calls {
+			delegatedRead(tr, spawn, spawn+"-r"+strconv.Itoa(k), "f"+strconv.Itoa(k)+".go", 1)
+		}
+	}
+	for d := range 4 {
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "s" + strconv.Itoa(d), Content: "done"}})
+	}
+	return tr
+}
+
+// BenchmarkRenderViewDelegationsAllHit is one all-hit repaint of a Sub-agents group of four
+// delegates: every block is served from the cache, so what the repaint costs is the paint KEYS.
+// The two sizes are the claim — allocs/op stay flat as the hidden entries behind each row grow,
+// because a hit states no painter record for an entry it covers.
+func BenchmarkRenderViewDelegationsAllHit(b *testing.B) {
+	th := newTheme(scheme.Default())
+	for _, calls := range []int{30, 300} {
+		b.Run(strconv.Itoa(calls)+" calls", func(b *testing.B) {
+			tr := warmed(delegationsFixture(calls))
+			tr.renderView(th, 100, false, breadcrumbHint)
+			b.ReportAllocs()
+			for b.Loop() {
+				if got := tr.renderView(th, 100, false, breadcrumbHint); len(got.lines) == 0 {
+					b.Fatal("rendered nothing")
+				}
+			}
+		})
+	}
+}
+
+// TestDelegationKeysMatchTheRecordPath pins the walk's key to the record path it replaced: at every
+// block the paint walk resolves — a settled Sub-agents group with readings and phases on its heads,
+// live and nested delegations at the top level and in a run view, a fan_out card's collapsed item
+// runs, the umbrella and the rest of the shape table — the key read off the covered entries in
+// place (resolvedBlock.key) is the key blockKey names over the records appendInputs states for the
+// span the block's shape covers, and the block's liveness is the record path's rule. Both star
+// phases are asked, so a live block's blink term is compared too.
+func TestDelegationKeysMatchTheRecordPath(t *testing.T) {
+	t.Parallel()
+
+	th := newTheme(scheme.Default())
+	fixtures := map[string]func() *transcript{
+		"a settled group with readings": func() *transcript {
+			tr := delegationsFixture(3)
+			heads := 0
+			for i := range tr.entries {
+				if e := &tr.entries[i]; e.headsRun() {
+					heads++
+					if heads == 2 { // a reading on a member past the first, at its own offset
+						e.ctxUsed, e.ctxLimit, e.ctxModel = 1200, 32768, "small-model"
+						e.phase = domain.SubAgentFinished
+					}
+				}
+			}
+			return tr
+		},
+		"live and nested delegations":  func() *transcript { tr, _ := rootedFixture(); return tr },
+		"a run view over a nested run": func() *transcript { tr, root := rootedFixture(); tr.setRoot(root); return tr },
+		"groups, umbrellas and runs":   allHitMultiFixture,
+		"a fan_out card's item runs": func() *transcript {
+			const call = "f1"
+			tr := &transcript{}
+			tr.addUser("fan it out", nil)
+			tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: call, Tool: fanOutToolName, Arguments: []byte(`{"task":"check {item}"}`)}})
+			tr.apply(startedUnder(call))
+			tr.apply(itemStartedUnder(call, "run.1", "items", "alpha", 0, 1))
+			itemSays(tr, call, "run.1", "still working")
+			tr.apply(itemStartedUnder(call, "run.2", "items", "beta", 1, 1))
+			itemSays(tr, call, "run.2", "all done")
+			stampedPhase(tr, runRef{depth: 1, spawn: call, id: "run.2"}, domain.SubAgentFinished, "fixed it")
+			return tr
+		},
+	}
+	for _, tc := range blockShapeCases() {
+		fixtures["shape table: "+tc.name] = func() *transcript { tr := &transcript{}; tc.build(tr); return tr }
+	}
+
+	shapes := map[blockShape]int{}
+	for name, build := range fixtures {
+		tr := build()
+		root := tr.paintRoot()
+		retired := retiredAttempts(tr.entries)
+		var records []paintInput
+		for i := root.first; i < root.last; {
+			if retired[i] {
+				i += 1 + subAgentSpan(tr.entries, i)
+				continue
+			}
+			in := root.painted(&tr.entries[i])
+			block := tr.resolveBlock(i, in, 80, false, root, records)
+			records = block.ins
+
+			// The span the record path stated for this shape, derived from the list alone.
+			end := i + 1
+			switch block.shape {
+			case shapeToolSuper, shapeSubAgentGroup, shapeSkillGroup:
+				end = toolBlockAt(tr.entries, i).end
+			case shapeSubAgentRun:
+				end = i + 1 + subAgentSpan(tr.entries, i)
+			}
+			ins := root.appendInputs(nil, tr.entries[i:end])
+			live := block.live
+			switch block.shape {
+			case shapeToolSuper, shapeSubAgentGroup, shapeSkillGroup:
+				live = anyOpenCall(ins)
+			case shapeSubAgentRun:
+				live = !subAgentReported(ins[0]) || anyOpenCall(ins[1:])
+			}
+			if block.live != live {
+				t.Errorf("%s: block at %d (shape %v) live = %v; the record path says %v", name, i, block.shape, block.live, live)
+			}
+			for _, blink := range []bool{false, true} {
+				want := blockKey(block.shape, ins, th, 80, blink, live, root, block.fold)
+				if got := block.key(th, 80, blink, root); got != want {
+					t.Errorf("%s: block at %d (shape %v, blink %v) keys\n %+v\nthe record path keys\n %+v",
+						name, i, block.shape, blink, got, want)
+				}
+			}
+			shapes[block.shape]++
+			i = block.next
+		}
+	}
+	for _, shape := range []blockShape{shapeEntry, shapeToolSuper, shapeSubAgentGroup, shapeSubAgentRun} {
+		if shapes[shape] == 0 {
+			t.Errorf("no fixture resolved a block of shape %v; the comparison never reached it", shape)
+		}
+	}
+}

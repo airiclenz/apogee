@@ -120,8 +120,9 @@ type paintInput struct {
 
 // painted states one entry as the painters' input record. The literal is deliberately UNKEYED: a
 // field added to either record fails to compile here until it is stated, which is the mechanism the
-// record exists for (see [paintInput]).
-func (e entry) painted() paintInput {
+// record exists for (see [paintInput]). The receiver is a pointer so asking it copies the record
+// out and nothing more: an entry is larger than the record it states.
+func (e *entry) painted() paintInput {
 	return paintInput{
 		e.kind, e.depth, e.text, e.tool, e.skillSpans, e.images, e.presented, e.startup, e.workflow, e.notes,
 		entryState{e.expanded, e.done, e.typeExpanded, e.phase, e.ctxUsed, e.ctxLimit, e.ctxModel,
@@ -144,7 +145,10 @@ func (in paintInput) headsRun() bool {
 //
 // Its per-entry terms are derived from [paintInput] and from nothing else (blockKey, spanFlags,
 // spanFills): the record states what a painter may read, so "is this list complete?" is answered by
-// reading one struct rather than by remembering what five painter files touch.
+// reading one struct rather than by remembering what five painter files touch. The walk reads the
+// same terms off the entries in place ([blockKeyOver]) rather than stating a record per covered
+// entry first, and each term is packed by the one helper both forms share ([stateFlag],
+// [appendFill]), so the two cannot come to disagree about what a term is.
 //
 // It is a comparable struct compared with ==: every field is a scalar or a string, which is what
 // lets the whole check be one equality test rather than a walk.
@@ -244,25 +248,42 @@ type paintKey struct {
 func spanFlags(ins []paintInput) string {
 	b := make([]byte, len(ins))
 	for i := range ins {
-		var f byte
-		if ins[i].expanded {
-			f |= 1
-		}
-		if ins[i].done {
-			f |= 2
-		}
-		if ins[i].typeExpanded {
-			f |= 4
-		}
-		switch ins[i].phase {
-		case domain.SubAgentStarted:
-			f |= 8
-		case domain.SubAgentFinished:
-			f |= 16
-		}
-		b[i] = f
+		b[i] = stateFlag(ins[i].expanded, ins[i].done, ins[i].typeExpanded, ins[i].phase)
 	}
 	return string(b)
+}
+
+// entryFlags is [spanFlags] read off the entries a block covers in place, one byte per entry, so a
+// block covering a collapsed run's whole span keys without stating a record per hidden entry.
+func entryFlags(entries []entry) string {
+	b := make([]byte, len(entries))
+	for i := range entries {
+		e := &entries[i]
+		b[i] = stateFlag(e.expanded, e.done, e.typeExpanded, e.phase)
+	}
+	return string(b)
+}
+
+// stateFlag packs one entry's view flags and lifecycle phase into its [spanFlags] byte: bit 0
+// expanded, bit 1 done, bit 2 typeExpanded, bit 3 a started delegation and bit 4 a finished one.
+func stateFlag(expanded, done, typeExpanded bool, phase domain.SubAgentPhase) byte {
+	var f byte
+	if expanded {
+		f |= 1
+	}
+	if done {
+		f |= 2
+	}
+	if typeExpanded {
+		f |= 4
+	}
+	switch phase {
+	case domain.SubAgentStarted:
+		f |= 8
+	case domain.SubAgentFinished:
+		f |= 16
+	}
+	return f
 }
 
 // spanFills packs the context readings of the entries a paint covers into one comparable string:
@@ -281,20 +302,35 @@ func spanFlags(ins []paintInput) string {
 func spanFills(ins []paintInput) string {
 	var b []byte
 	for i := range ins {
-		e := ins[i]
-		if e.ctxUsed <= 0 && e.ctxLimit <= 0 && e.ctxModel == "" {
-			continue
-		}
-		b = strconv.AppendInt(b, int64(i), 10)
-		b = append(b, ':')
-		b = strconv.AppendInt(b, int64(e.ctxUsed), 10)
-		b = append(b, '/')
-		b = strconv.AppendInt(b, int64(e.ctxLimit), 10)
-		b = append(b, '@')
-		b = append(b, e.ctxModel...)
-		b = append(b, ';')
+		b = appendFill(b, i, ins[i].ctxUsed, ins[i].ctxLimit, ins[i].ctxModel)
 	}
 	return string(b)
+}
+
+// entryFills is [spanFills] read off the entries a block covers in place.
+func entryFills(entries []entry) string {
+	var b []byte
+	for i := range entries {
+		e := &entries[i]
+		b = appendFill(b, i, e.ctxUsed, e.ctxLimit, e.ctxModel)
+	}
+	return string(b)
+}
+
+// appendFill appends the [spanFills] term of the entry at offset at — "<offset>:<used>/<limit>@<model>;"
+// — or nothing when it carries no reading.
+func appendFill(b []byte, at, used, limit int, model string) []byte {
+	if used <= 0 && limit <= 0 && model == "" {
+		return b
+	}
+	b = strconv.AppendInt(b, int64(at), 10)
+	b = append(b, ':')
+	b = strconv.AppendInt(b, int64(used), 10)
+	b = append(b, '/')
+	b = strconv.AppendInt(b, int64(limit), 10)
+	b = append(b, '@')
+	b = append(b, model...)
+	return append(b, ';')
 }
 
 // paintRow is one memoised block: the paint, and the key it was painted under. The key is stored
@@ -451,7 +487,8 @@ func (m Model) frameKey() frameKey {
 // ordinary entry, the whole folded run or the head plus its sub-agent span otherwise. It takes the
 // very value the painter is handed ([paintRoot.appendInputs]) and reads nothing else about the
 // transcript, which is what makes "the key names every input" checkable by reading one record
-// rather than by remembering what five painter files touch.
+// rather than by remembering what five painter files touch. It is the RECORD path: the walk keys a
+// block through [blockKeyOver], which must name exactly this key.
 //
 // live is the caller's because it is the PAINTER's own liveness rule and each branch has a
 // different one (blockState.live); root is the caller's for the same reason one level up — it is a
@@ -473,6 +510,33 @@ func blockKey(shape blockShape, ins []paintInput, th theme, width int, blink, li
 		blink:      blink && live, // a settled block's paint does not depend on the phase; folding it in anyway would miss on every phase flip
 		flags:      spanFlags(ins),
 		fills:      spanFills(ins),
+		large:      fold.large,
+		folded:     fold.folded,
+	}
+}
+
+// blockKeyOver is [blockKey] read off the entries a block covers in place — covers is the block's
+// head entry first, as [paintRoot.appendInputs] would have stated it — so the walk keys every block,
+// hit or miss, without copying a painter record per covered entry: a collapsed run or group covers
+// every entry of its members' spans, and on a hit none of them is painted. The head's depth is
+// rebased to the root here, as [paintRoot.rebase] would have rebased the record; every other term
+// is the record path's own (TestDelegationKeysMatchTheRecordPath).
+func blockKeyOver(shape blockShape, covers []entry, th theme, width int, blink, live bool, root paintRoot, fold umbrellaFold) paintKey {
+	head := &covers[0]
+	return paintKey{
+		shape:      shape,
+		kind:       head.kind,
+		depth:      head.depth - root.depth,
+		width:      width,
+		measure:    th.measure,
+		padPrompts: th.padPrompts,
+		root:       root.ref,
+		stage:      root.stage,
+		span:       len(covers),
+		live:       live,
+		blink:      blink && live,
+		flags:      entryFlags(covers),
+		fills:      entryFills(covers),
 		large:      fold.large,
 		folded:     fold.folded,
 	}

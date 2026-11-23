@@ -96,6 +96,17 @@ func anyOpenCall(ins []paintInput) bool {
 	return false
 }
 
+// anyOpenEntry is [anyOpenCall] read off the entries a block covers in place: the walk asks it of a
+// block's covered entries without stating a painter record for each (render.go, resolveBlock).
+func anyOpenEntry(entries []entry) bool {
+	for i := range entries {
+		if entries[i].kind == entryToolCall && !entries[i].done {
+			return true
+		}
+	}
+	return false
+}
+
 // memberFlags is a grouped block's per-member view state, read off the run's own paint inputs in
 // view order ([toolRunView.members]). It is a copy rather than the entries themselves because a
 // painter is handed what it needs to draw and nothing it could write through: the flag is owned by

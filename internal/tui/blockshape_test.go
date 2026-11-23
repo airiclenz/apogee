@@ -294,7 +294,7 @@ func paintWalk(t *testing.T, tr *transcript) []walkedBlock {
 			i += 1 + subAgentSpan(tr.entries, i)
 			continue
 		}
-		block := tr.resolveBlock(i, root.painted(tr.entries[i]), 80, false, root, records)
+		block := tr.resolveBlock(i, root.painted(&tr.entries[i]), 80, false, root, records)
 		records = block.ins
 		if block.next <= i {
 			t.Fatalf("resolveBlock(%d) resumes the walk at %d; it must move forward", i, block.next)
