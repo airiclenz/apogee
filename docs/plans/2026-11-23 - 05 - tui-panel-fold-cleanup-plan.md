@@ -138,7 +138,9 @@ NOTES (2026-11-23): setup calls `markBlockTouched` (`TestAutoCollapseFoldsSettle
 - the Goal's grep prints nothing.
 **Commit:** `test(tui): fold gesture tests assert the fold, not the flags`
 
-## 6. The block-fold rule lives in its own file
+## 6. The block-fold rule lives in its own file — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): blockfold.go already existed (item 4 created it for applyFoldAct/actOnFold); the moved run, setToolsOpen through toggleTypeExpanded (transcript.go 2223-2655 at HEAD), is appended verbatim after actOnFold, with `internal/domain` imported for blockSettled's `domain.SubAgentFinished`. No comment named the run's file, so no cross-reference changed.
 
 **What:**
 **Goal:** `blockFoldRule`, `blockFoldBy`, `blockFolded`, `blockSettled` and the fold writers (`setToolsOpen`, `setToolsFoldOver`, `umbrellaIsLarge`, `setToolsAutoCollapse`, `setTurnLive`, `setBlockFolded`, `markBlockTouched`, `openBlockAlone`, `revealBlockMember`, `setTypeExpanded`, `toggleTypeExpanded`) are defined in `internal/tui/blockfold.go`, none in `transcript.go`. Depends on items 4 and 5.
