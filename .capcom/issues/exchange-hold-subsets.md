@@ -15,3 +15,4 @@ Found by docs/reviews/archived/architecture-review-2026-10-14.html (#6), re-veri
 ## Log
 
 - 2026-11-21 Airic Lenz: Triage 2026-11-21 at 7869cca7 (read-only sub-agent check, not re-verified): VALID — launchExchange leaves guards to callers (internal/tui/commandrun.go:121-125); still blocked on the owner flush/wake-mid-actuation call (actuation.go:428)
+- 2026-11-23 Airic Lenz: Owner call 2026-11-23: every Exchange opener refuses mid-actuation — flush and wake wait and retry on the hold's release, like typed submit.
