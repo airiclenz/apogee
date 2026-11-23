@@ -27,6 +27,7 @@ import (
 	"github.com/airiclenz/apogee/internal/sidepanel"
 	"github.com/airiclenz/apogee/internal/tasklist"
 	"github.com/airiclenz/apogee/internal/testtime"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // sidePanelModel builds a ready, idle model under show and the scroll-bar setting, sized width × 30.
@@ -4274,6 +4275,55 @@ func TestSidePanelResumeThenLiveWriteUnderSymlinkedRootIsOneRow(t *testing.T) {
 
 	if files := m.panel.ChangedFiles(sidepanel.RunKey{}).Rows; len(files) != 1 || files[0].Path != "src/a.go" || files[0].CallID != "w9" {
 		t.Errorf("changed files = %+v, want one src/a.go row naming w9", files)
+	}
+}
+
+// TestPanelWriterTargetArgsCoverEveryWriter pins panelWriterTargetArgs to the tools' own writers:
+// a resume rebuilds the changed-files rows from that map alone, so a workspace-scoped writer it
+// misses would vanish from a resumed panel, and a wrong argument would key a row on the wrong path.
+// The writers are found by the engine's own seam (tools.WorkspaceWriteTarget) over every built-in
+// tool, default-off ones lifted; each mapped argument must, on its own, name the call's target.
+func TestPanelWriterTargetArgsCoverEveryWriter(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	builtins := tools.DefaultToolsWithHost(root, tools.HostTools{Enabled: tools.KnownToolNames()})
+	probe := json.RawMessage(`{"path":"p","destination":"d","source":"s"}`)
+
+	writers := map[string]domain.Tool{}
+	for _, tool := range builtins {
+		call := domain.ToolCall{ID: "probe", Tool: tool.Name(), Arguments: probe}
+		if _, ok := tools.WorkspaceWriteTarget(tool, call); ok {
+			writers[tool.Name()] = tool
+		}
+	}
+	if len(writers) == 0 {
+		t.Fatal("no built-in tool resolved a write target: the probe no longer reaches the writers")
+	}
+
+	for name := range writers {
+		if _, ok := panelWriterTargetArgs[name]; !ok {
+			t.Errorf("writer %q is missing from panelWriterTargetArgs", name)
+		}
+	}
+	for name, arg := range panelWriterTargetArgs {
+		tool, ok := writers[name]
+		if !ok {
+			t.Errorf("panelWriterTargetArgs names %q, which is not a workspace-scoped writer", name)
+			continue
+		}
+		args, err := json.Marshal(map[string]string{arg: "only.txt"})
+		if err != nil {
+			t.Fatalf("marshal %s args: %v", name, err)
+		}
+		target, ok := tools.WorkspaceWriteTarget(tool, domain.ToolCall{ID: "only", Tool: name, Arguments: args})
+		if !ok {
+			t.Errorf("%s: a call carrying only %q resolves no write target — the map names the wrong argument", name, arg)
+			continue
+		}
+		if base := filepath.Base(target); base != "only.txt" {
+			t.Errorf("%s: a call carrying only %q writes %q, want a target named only.txt", name, arg, target)
+		}
 	}
 }
 

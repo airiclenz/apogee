@@ -44,7 +44,7 @@
 - Merging `shapeSubAgentGroup` and `shapeSkillGroup`.
 - Any change to fold, grouping, panel or navigation behaviour a reader can see; engine, `domain` and session record shapes beyond the `task_list` solo verdict.
 
-## 1. Pin the panel's writer-target map to the tools' writers
+## 1. Pin the panel's writer-target map to the tools' writers — ✅ DONE (2026-11-23)
 
 **What:**
 **Goal:** a test in `internal/tui` fails when a workspace-writing tool is missing from `panelWriterTargetArgs`, when the map names a non-writer, or when the map names the wrong target argument.
