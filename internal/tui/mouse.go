@@ -1220,7 +1220,7 @@ func (m Model) settingsPaneRect() (y0, h int, ok bool) {
 // arithmetic that can disagree with it. It is called only once the point is inside the rectangle, so a
 // gesture the pane has no part in costs no render.
 func popupPaneHit(pre Model, pane framePane, render func() (string, popupPlacement), y int) (row, top int, inRect, ok bool) {
-	if !pre.openPanes().has(pane) {
+	if !paneSpecs[pane].open(pre) {
 		return 0, 0, false, false
 	}
 	paneTop, h, drawn := pre.frameSpans().pane(pane)
@@ -2076,7 +2076,7 @@ func (m Model) handleDropdownClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 // dropdownHit is handleDropdownClick's decision for a point, read without acting on it ([paneHit]).
 // Geometry is put to pre and every state gate to the receiver (handleMouseClick's rule).
 func (m Model) dropdownHit(pre Model, y int) paneHit {
-	if !m.openPanes().has(paneDropdown) || !pre.openPanes().has(paneDropdown) {
+	if !m.dropdownOpen() || !pre.dropdownOpen() {
 		return paneHit{}
 	}
 	row, top, inRect, onRow := popupPaneHit(pre, paneDropdown, pre.renderAutocompletePlaced, y)

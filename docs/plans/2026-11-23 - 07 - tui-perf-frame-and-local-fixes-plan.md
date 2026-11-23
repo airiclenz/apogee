@@ -58,7 +58,15 @@ NOTES (2026-11-23): copied verbatim from the audit's .txt copy; only the TEMPORA
 - `go test -run '^$' -bench 'PerfAuditType' -benchtime 1x ./internal/tui/`
 **Commit:** `test(tui): keep the 2026-11-23 perf audit benchmarks`
 
-## 2. No Model heap copy when asking which panes are open
+## 2. No Model heap copy when asking which panes are open — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): benchmark `go test -run '^$' -bench 'PerfAuditBlocks/view' -benchmem ./internal/tui/` (Pi 5, no -race) before → after: N=48 2.36 ms 751244 B/op 5273 allocs → 1.84 ms 170713 B/op 5233 allocs; N=300 2.22 ms 728153 B/op 5267 allocs → 1.93 ms 166452 B/op 5232 allocs; N=900 2.52 ms 715735 B/op 5262 allocs → 2.30 ms 163547 B/op 5229 allocs (B/op −77%). `-gcflags=-m` "moved to heap: m" 14 → 2; the two left (toolargs.go:50, mouse.go:1292) predate this item and are outside report/pane predicates.
+
+NOTES (2026-11-23): TestOpenPanesAllocatesNothing measures "no Model heap copy per View" with the runtime/metrics allocs-by-size histogram, counting only the Model's own size class (24576–27264 B; Model is 24800 B). Counting every class ≥ the Model's size failed under -race, where the race runtime's sync.Pool drops add ~4 large (>32 KB) allocations per View. Old code: 5 allocs per openPanes, ~20 Model-class allocations per View; new code: 0 and 0. The test fails loudly if the Model ever grows into the large-object bucket, where the histogram cannot isolate it.
+
+NOTES (2026-11-23): folded mouse.go popupPaneHit's generic `pre.openPanes().has(pane)` into `paneSpecs[pane].open(pre)` (same boolean, one pane's predicate), beyond the two has(paneDropdown) sites the item named; the shared dropdown helper is `Model.dropdownOpen` (panes.go), also used as the dropdown row's open predicate.
+
+NOTES (2026-11-23): consequential edit — internal/tui/doc.go: made necessary by moving report state lookup out of reportRows into the reportState switch (the file map said "each kind one row of [reportRows]").
 
 **What:**
 **Goal:** a `View` of an unchanged model with no pane open performs no heap copy of the Model; pane predicates return the same booleans as before.

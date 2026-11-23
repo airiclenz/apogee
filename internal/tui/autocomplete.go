@@ -738,12 +738,12 @@ func (m Model) autocompleteKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 // list module's own rather than this overlay's ([listCursor.wheel], listsurface.go): ↑/↓ walk a list as
 // a cycle, while a wheel is a scroll.
 func (m Model) dropdownWheel(msg tea.MouseWheelMsg) (Model, bool) {
-	if !m.openPanes().has(paneDropdown) {
+	if !m.dropdownOpen() {
 		// Asked before the frame is composed, because every wheel notch asks: with no menu up there is
 		// nothing to place, and composing the frame's overlays to learn that would put a render on the
 		// path of a notch the dropdown has no part in (browserWheel, sessions.go). The pane's OWN open
-		// predicate (openPanes, model.go) is reused rather than restated, so the guard cannot drift from
-		// what the renderer draws.
+		// predicate (dropdownOpen, panes.go) is reused rather than restated, so the guard cannot drift
+		// from what the renderer draws.
 		return m, false
 	}
 	y0, h, ok := m.frameSpans().pane(paneDropdown)

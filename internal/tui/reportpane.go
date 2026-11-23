@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -67,13 +69,15 @@ import (
 // same code for all of them — which is what keeps "what a report does" a single answer rather than
 // four copies that drift a key at a time.
 //
-// The four things that resolve THROUGH a kind — [reportKind.pane], [reportKind.follows],
-// [Model.reportState] and [Model.reportContent] — are one row of [reportRows] each, indexed by the
-// kind, rather than four switches over it. A kind that had no row would index a zero row — a nil
-// func rather than a build error — which is why TestReportKindsResolveDistinctly walks every
-// declared kind and checks its row is filled and its pane is its own; because that walk runs from
-// reportKind(0) to reportKinds rather than a hand-written list, a fifth report is covered the day
-// it is declared.
+// Three of the four things that resolve THROUGH a kind — [reportKind.pane], [reportKind.follows]
+// and [Model.reportContent] — are one row of [reportRows] each, indexed by the kind. The fourth,
+// [Model.reportState], is a direct switch instead, because a pointer handed to a function value
+// escapes and would heap-copy the Model on every call (its doc says why). A kind that had no row
+// would index a zero row — a nil func rather than a build error — and a kind with no case would
+// reach the switch's panicking default, which is why TestReportKindsResolveDistinctly walks every
+// declared kind and checks its row is filled and its pane and state are its own; because that walk
+// runs from reportKind(0) to reportKinds rather than a hand-written list, a fifth report is covered
+// the day it is declared.
 type reportKind int
 
 const (
@@ -85,18 +89,18 @@ const (
 	reportKinds                      // not a kind: the count, so a walk over the reports needs no hand-written list
 )
 
-// reportRow is everything the module resolves through a kind: the frame slot the report draws in, its
-// follow scope, where its state lives on the Model, and the pane's own composition of its content.
+// reportRow is what the module resolves through a kind's table row: the frame slot the report draws
+// in, its follow scope, and the pane's own composition of its content. Where its state lives on the
+// Model is not here but in [Model.reportState]'s switch.
 type reportRow struct {
 	pane    framePane                 // the slot in the frame's row allocation ([reportKind.pane])
 	follows bool                      // whether the report follows the tail of its rows ([reportKind.follows])
-	state   func(*Model) *reportPane  // the report's state field inside a Model value ([Model.reportState])
 	content func(Model) reportContent // the pane's content for one frame ([Model.reportContent])
 }
 
-// reportRows is the one table every kind-specific question is answered from — pane, follows,
-// reportState and reportContent are each a lookup into it. It is package-level and indexed by the
-// kind precisely so that no function value ever sits on the Model (ADR 0011).
+// reportRows is the table the kind-specific questions but one are answered from — pane, follows and
+// reportContent are each a lookup into it; reportState is the switch beside it. It is package-level
+// and indexed by the kind precisely so that no function value ever sits on the Model (ADR 0011).
 //
 // It is filled in by its DECLARATION and must stay so — not by an init function the way
 // pickerOfferings and paneSpecs are (picker.go, panes.go). The content funcs compose rows and never
@@ -108,31 +112,26 @@ var reportRows = [reportKinds]reportRow{
 	usageReport: {
 		pane:    paneUsage,
 		follows: false,
-		state:   func(m *Model) *reportPane { return &m.usagePane },
 		content: func(m Model) reportContent { return usageContent(m.usageRows(), m.servedModels) },
 	},
 	inspectReport: {
 		pane:    paneInspector,
 		follows: true,
-		state:   func(m *Model) *reportPane { return &m.inspector },
 		content: Model.inspectContent,
 	},
 	thinkingReport: {
 		pane:    paneThinking,
 		follows: true,
-		state:   func(m *Model) *reportPane { return &m.thinkingPane },
 		content: Model.thinkingContent,
 	},
 	adviceReport: {
 		pane:    paneAdvice,
 		follows: true,
-		state:   func(m *Model) *reportPane { return &m.advicePane },
 		content: Model.adviceContent,
 	},
 	mcpReport: {
 		pane:    paneMCP,
 		follows: false,
-		state:   func(m *Model) *reportPane { return &m.mcpPane },
 		content: Model.mcpContent,
 	},
 }
@@ -170,7 +169,7 @@ type reportPane struct {
 // an accounting, asked and answered, rather than a stream a reader sits and watches, and its scroll
 // stays the clamp-only one it has always had.
 //
-// The answer rides the kind's row ([reportRows]) beside its pane and its state, so a fifth report
+// The answer rides the kind's row ([reportRows]) beside its pane and its content, so a fifth report
 // states its own answer where it states everything else about itself rather than inheriting
 // /usage's by falling through.
 func (r reportKind) follows() bool { return reportRows[r].follows }
@@ -181,7 +180,33 @@ func (r reportKind) follows() bool { return reportRows[r].follows }
 // The pointer never outlives the call: every caller is a value-receiver method that reads or
 // mutates through it and returns its own copy, so nothing here puts a self-pointer on a Model that is
 // copied on every Update (ADR 0011).
-func (m *Model) reportState(r reportKind) *reportPane { return reportRows[r].state(m) }
+//
+// It is a direct switch rather than a function value on the kind's row ([reportRows]) because the
+// compiler cannot see through an indirect call: a *Model handed to one escapes, and every
+// value-receiver caller — the pane table's open predicate among them, asked for all five reports on
+// every frame (openPanes) — then heap-copies the whole Model to take that pointer. The default
+// panics, so a kind declared without its case fails loudly the first time it is asked rather than
+// resolving to another report's state.
+func (m *Model) reportState(r reportKind) *reportPane {
+	switch r {
+	case usageReport:
+		return &m.usagePane
+	case inspectReport:
+		return &m.inspector
+	case thinkingReport:
+		return &m.thinkingPane
+	case adviceReport:
+		return &m.advicePane
+	case mcpReport:
+		return &m.mcpPane
+	default:
+		panic(fmt.Sprintf("reportState: report kind %d has no state field", r))
+	}
+}
+
+// reportOpen reports whether the named report is up — the pane table's open predicate for every
+// report row (reportPaneRow, panes.go).
+func (m Model) reportOpen(r reportKind) bool { return m.reportState(r).open }
 
 // reportContent is everything ONE report says about itself that this module cannot know: what the box
 // is called, the keys it spells, how many rows it likes to show at once, its rows, their kinds, and

@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"math"
+	"runtime/metrics"
 	"slices"
 	"strings"
 	"testing"
+	"unsafe"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -357,4 +360,59 @@ func sweepOverlayHeightQuery(t *testing.T, fx paneFixture) {
 	if !seen {
 		t.Errorf("no window of the sweep drew the %s: the sweep pinned only its zero", paneSpecs[fx.pane].name)
 	}
+}
+
+// TestOpenPanesAllocatesNothing pins that asking which panes are open costs no heap copy of the
+// Model. A pane predicate that handed a *Model to a function value — the report rows' state column
+// once did — made every value-receiver caller heap-copy the whole Model to take that pointer, about
+// twenty copies per View of an unchanged frame with no pane open. openPanes and every row's own
+// predicate must allocate nothing, and a View must make no allocation in the Model's size class.
+// Not parallel: testing.AllocsPerRun refuses to run inside a parallel test, and the size histogram
+// is process-wide.
+func TestOpenPanesAllocatesNothing(t *testing.T) {
+	const runs = 50
+	m := paModel(t, 48)
+	_ = m.View() // warm the paint caches, so the measured Views are of an unchanged model
+	if open := m.openPanes(); open != 0 {
+		t.Fatalf("setup: panes %b open, want none", open)
+	}
+
+	if allocs := testing.AllocsPerRun(runs, func() { _ = m.openPanes() }); allocs != 0 {
+		t.Errorf("openPanes allocates %.1f times per call, want 0", allocs)
+	}
+	for p := framePane(0); p < paneKinds; p++ {
+		row := paneSpecs[p]
+		if allocs := testing.AllocsPerRun(runs, func() { _ = row.open(m) }); allocs != 0 {
+			t.Errorf("pane %d (%s): its open predicate allocates %.1f times per call, want 0", p, row.name, allocs)
+		}
+	}
+
+	modelSize := float64(unsafe.Sizeof(m))
+	before, ok := heapAllocsInSizeClassOf(modelSize)
+	if !ok {
+		t.Fatalf("the Model (%.0f bytes) is now a large object, which the size histogram does not tell apart from other large allocations (the race detector's pool drops among them): measure its copies another way", modelSize)
+	}
+	for range runs {
+		_ = m.View()
+	}
+	after, _ := heapAllocsInSizeClassOf(modelSize)
+	if perView := float64(after-before) / runs; perView >= 1 {
+		t.Errorf("a View of an unchanged model makes %.2f heap allocations in the Model's size class (%.0f bytes), want none", perView, modelSize)
+	}
+}
+
+// heapAllocsInSizeClassOf is how many heap allocations the process has made so far in the size
+// class that holds size bytes, read off the runtime's allocation-size histogram. ok is false when
+// size is past the small size classes: the histogram's last bucket lumps every large object
+// together, so a count there says nothing about one size.
+func heapAllocsInSizeClassOf(size float64) (count uint64, ok bool) {
+	sample := []metrics.Sample{{Name: "/gc/heap/allocs-by-size:bytes"}}
+	metrics.Read(sample)
+	histogram := sample[0].Value.Float64Histogram()
+	for i, c := range histogram.Counts {
+		if histogram.Buckets[i] < size && size <= histogram.Buckets[i+1] {
+			return c, !math.IsInf(histogram.Buckets[i+1], 1)
+		}
+	}
+	return 0, false
 }

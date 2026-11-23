@@ -40,10 +40,11 @@ func reportCases(t *testing.T) []reportCase {
 	}
 }
 
-// TestReportKindsResolveDistinctly is the row invariant of [reportRows]: every declared reportKind
-// has a FILLED row — a state func and a content func, since a kind with no row indexes a zero row
-// and would nil-call rather than fail to build — and resolves through it to its OWN frame pane, its
-// OWN state field and its OWN content, and states its OWN follow answer. The four resolvers were
+// TestReportKindsResolveDistinctly is the row invariant of [reportRows] and [Model.reportState]:
+// every declared reportKind has a FILLED row — a content func, since a kind with no row indexes a
+// zero row and would nil-call rather than fail to build — and a case in reportState's switch, whose
+// default panics on a kind declared without one; and it resolves to its OWN frame pane, its OWN
+// state field and its OWN content, and states its OWN follow answer. The four resolvers were
 // once `if r == inspectReport {…}` with /usage as the fall-through, so a kind that missed a branch
 // compiled and painted ANOTHER pane's state or rows inside its box — a wrong pane rather than a
 // build error. Walking the kinds is what makes a fifth report inherit this guard.
@@ -58,8 +59,8 @@ func TestReportKindsResolveDistinctly(t *testing.T) {
 	follows := map[reportKind]bool{}
 	for r := reportKind(0); r < reportKinds; r++ {
 		row := reportRows[r]
-		if row.state == nil || row.content == nil {
-			t.Fatalf("report %d has an unfilled row: state %v, content %v — a kind declared without its row", r, row.state != nil, row.content != nil)
+		if row.content == nil {
+			t.Fatalf("report %d has an unfilled row: no content func — a kind declared without its row", r)
 		}
 		if other, seen := panes[r.pane()]; seen {
 			t.Errorf("report %d and report %d share the frame pane %d", r, other, r.pane())

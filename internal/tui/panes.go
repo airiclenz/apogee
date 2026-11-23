@@ -278,7 +278,7 @@ func init() {
 			name:   "autocomplete dropdown",
 			slot:   slotInput,
 			modal:  false,
-			open:   func(m Model) bool { return m.autocomplete.active && len(m.autocomplete.items) > 0 },
+			open:   Model.dropdownOpen,
 			render: Model.renderAutocomplete,
 			height: Model.autocompleteHeight,
 			key:    paneClaim(Model.autocompleteKey),
@@ -329,8 +329,8 @@ func keyClaimRungs() []keyClaimant {
 }
 
 // reportPaneRow is the row of one report pane: open, render, key, click, wheel and hover all resolve
-// through the kind's row of reportRows (reportpane.go), so a fifth report is one row here and one
-// there. A report is never modal — it says something rather than asking, and the box behind it stays
+// through the kind (reportpane.go) — its row of reportRows, and the reportState switch for where its
+// state lives — so a fifth report is one row here, one there and one case in that switch. A report is never modal — it says something rather than asking, and the box behind it stays
 // live — so its key claim is the soft one ([paneClaim] over [Model.reportKey]) with no gate: the claim
 // itself answers false while the report is closed. The click is [Model.handleReportClick] — inside
 // the box it is claimed and nothing happens, outside it the report is dismissed and the click goes on
@@ -342,7 +342,7 @@ func reportPaneRow(name string, r reportKind, rank paneRank) paneSpec {
 		name:   name,
 		slot:   slotTranscript,
 		modal:  false,
-		open:   func(m Model) bool { return m.reportState(r).open },
+		open:   func(m Model) bool { return m.reportOpen(r) },
 		render: func(m Model) string { return m.renderReport(r) },
 		height: func(m Model) int { return m.reportHeight(r) },
 		key:    paneClaim(reportClaim(r)),
@@ -372,6 +372,12 @@ func (m Model) promptOpen() bool {
 	return (m.state == stateAwaitingApproval && m.pending != nil) ||
 		(m.state == stateAwaitingAsk && m.pendingAsk != nil)
 }
+
+// dropdownOpen reports whether the autocomplete dropdown is drawn — active with at least one item.
+// It is the dropdown row's open predicate and the one a caller asking about the dropdown alone reads,
+// so the guard cannot drift from what the renderer draws, and asking costs no walk over every pane
+// (openPanes).
+func (m Model) dropdownOpen() bool { return m.autocomplete.active && len(m.autocomplete.items) > 0 }
 
 // renderPrompt paints the decision prompt the frame has up, or "" when it has none (promptOpen).
 func (m Model) renderPrompt() string {

@@ -3183,7 +3183,7 @@ func (m Model) pendingImageRows() int {
 		return 0
 	}
 	spare := m.height - m.frameFixedRows() - inputBorderRows - minInputRows
-	if m.openPanes().has(panePrompt) {
+	if m.promptOpen() {
 		spare -= popupChrome
 	}
 	if spare < 1 {
@@ -3296,7 +3296,13 @@ func (m *Model) inputScrollbarShown() bool {
 	if !m.popupScrollbarOn() || full-inputScrollbarGutter <= 1 {
 		return false
 	}
-	return m.promptEditor.contentRows(full) > min(maxInputRows, m.draftRowsCeiling())
+	rows := m.promptEditor.contentRows(full)
+	if rows <= minInputRows {
+		// The ceiling never falls below minInputRows, so a draft this short cannot overflow it —
+		// answered without asking the frame which panes are open.
+		return false
+	}
+	return rows > min(maxInputRows, m.draftRowsCeiling())
 }
 
 // inputRows is the textarea's height in visual rows at the current window width — the editor's
@@ -3339,7 +3345,7 @@ func (m *Model) inputRows() int {
 func (m Model) draftRowsCeiling() int {
 	box := inputBorderRows + m.pendingImageRows() // what the box spends besides the draft's own rows
 	ceiling := m.height - m.frameFixedRows() - box
-	if m.openPanes().has(panePrompt) {
+	if m.promptOpen() {
 		// The prompt needs popupChrome of the transcript's budget to be seated at all (frameRowPlan),
 		// so the rows the draft may keep are what is left after it.
 		ceiling = min(ceiling, m.height-m.frameFixedRows()-popupChrome-box)

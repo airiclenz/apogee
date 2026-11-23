@@ -401,7 +401,7 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // which is what both these panes' keys already do (listStopsAtEnds), so here the wheel and the
 // arrows agree at the ends by construction rather than by two rules that happen to match.
 func (m Model) promptWheel(msg tea.MouseWheelMsg) (Model, bool) {
-	if !m.openPanes().has(panePrompt) {
+	if !m.promptOpen() {
 		// Asked before the frame is composed, because every wheel notch asks: with no pane up there is
 		// nothing to place, and composing the frame's overlays to learn that would put a render on the
 		// path of a notch the pane has no part in (browserWheel, sessions.go).
