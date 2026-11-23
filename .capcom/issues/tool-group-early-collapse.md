@@ -1,11 +1,13 @@
 ---
 title: A tool group auto-collapses when the next tool call arrives, not when tool work ends
-status: open
+status: done
 type: bug
 priority: 2
 labels: [tui]
 plan: 2026-11-23 - 04 - tool-group-early-collapse-plan.md
 created: 2026-11-23T08:19:52Z
+closed: 2026-11-23T14:16:45Z
+reason: "Resolved by plan '2026-11-23 - 04 - tool-group-early-collapse-plan' (archived at 7f49e4ea): tool group settles on a follower, not the next Turn's start; driven test; ADR 0035 amendment and docs."
 ---
 
 With `ui.tools-auto-collapse` on (the default), a tool group folds as soon as the next Turn of its run starts past it. In a run of consecutive tool-call Turns that means only the first call is ever seen expanded: the group folds while the model is thinking about its second call, and every later call joins a folded group.
