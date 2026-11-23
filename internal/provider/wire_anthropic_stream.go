@@ -10,11 +10,11 @@ import (
 // This file is the streaming half of the Anthropic Messages codec (wire_anthropic.go): the
 // parser for the event-typed SSE the Messages API streams. Every `data:` payload is keyed on
 // its JSON `type` — the `event:` framing lines repeat it and are not read, and there is no
-// `[DONE]` terminator on this wire; `message_stop` ends the reply. The Client's caps and
-// verdicts are shared with the openai parser (maxReplyTextBytes, openToolCalls and its
-// maxToolCallBytes and maxOpenToolCalls, the malformed-chunk count, isTransientReadError,
-// inBandErrorDelta);
-// what differs is only the event vocabulary, which lives here and nowhere else.
+// `[DONE]` terminator on this wire; `message_stop` ends the reply. How a reply is read and how
+// it ends — the scan loop, the text and tool-call caps, the malformed-chunk count, the read
+// fault and every terminal Delta — is the reply accumulator's, shared with the openai parser
+// (replyAccumulator); what differs is only the event vocabulary, which lives here and nowhere
+// else.
 
 // The Messages stream event types, as each `data:` payload's `type` names them.
 const (
@@ -55,12 +55,14 @@ const anthropicBlockToolUse = "tool_use"
 // sseDataPrefix is the SSE line prefix carrying a payload; every other line is framing.
 const sseDataPrefix = "data: "
 
-// parseSSE reads the Messages event stream line by line and yields Deltas: text_delta as
+// parseSSE decodes the Messages event stream into what a reply accumulator is told — the scan
+// loop, the caps, the read fault and every terminal Delta are the accumulator's
+// (replyAccumulator) — so that the consumer is yielded: text_delta as
 // content, thinking_delta as thinking, every thinking and redacted_thinking block — its text,
 // signature or data — as one verbatim DeltaThinkingBlock when the block closes, carrying the
 // place it opened at among the reply's text and tool_use blocks and the sent request's prefix
 // digest, when it has one (anthropicReasoningEntry), and after them the reply's layout entry
-// when its text sat in more than one block or after a tool call (anthropicReplyLayout), tool_use blocks accumulated in openToolCalls by block index across their input_json_delta
+// when its text sat in more than one block or after a tool call (anthropicReplyLayout), tool_use blocks accumulated by block index across their input_json_delta
 // fragments and emitted together immediately before the terminal Done, the stop reason mapped
 // onto the loop's finish vocabulary (anthropicFinishReason), and usage assembled from
 // message_start's input side and message_delta's output side. A payload that fails to decode is skipped and counted, exactly
@@ -69,35 +71,9 @@ const sseDataPrefix = "data: "
 // error delta, its prefixDigest for the reasoning entries; toolFragment, when non-nil, runs on every tool_use start and input_json_delta as it arrives
 // (openToolCalls). Returning false from yield (consumer broke) stops cleanly.
 func (a *anthropicCodec) parseSSE(body io.Reader, sent sentRequest, toolFragment func(), yield func(Delta) bool) {
-	s := &anthropicStream{codec: a, carriedEffort: sent.carriesEffort, prefixDigest: sent.prefixDigest, yield: yield}
-	s.open.onFragment = toolFragment
-	scanner := newSSEScanner(body)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if !strings.HasPrefix(line, sseDataPrefix) {
-			continue
-		}
-		if s.event(strings.TrimPrefix(line, sseDataPrefix)) {
-			return
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		// A read that failed before message_stop: retryable when the failure is the
-		// connection's — a mid-stream EOF or a network timeout — as on the openai wire.
-		yield(Delta{
-			Kind:            DeltaError,
-			Err:             fmt.Sprintf("apogee: read stream: %v", err) + malformedChunksNote(s.malformed),
-			Retryable:       isTransientReadError(err),
-			MalformedChunks: s.malformed,
-			Fault:           readFault(err),
-		})
-		return
-	}
-
-	// The server closed the connection without message_stop: end the reply on what it sent —
-	// the stop reason and usage a message_delta may already have carried are kept.
-	s.finish()
+	s := &anthropicStream{codec: a, carriedEffort: sent.carriesEffort, prefixDigest: sent.prefixDigest}
+	s.acc = newReplyAccumulator(toolFragment, yield, s.epilogue)
+	s.acc.run(body, s.event)
 }
 
 // reasoningBlockCountTripped is the fault a streamed Messages reply ends on when it opens more
@@ -107,16 +83,22 @@ var reasoningBlockCountTripped = fmt.Sprintf(
 	maxReasoningBlocks,
 )
 
-// anthropicStream is the state one streamed Messages reply accumulates between its events.
+// anthropicStream is the dialect state one streamed Messages reply keeps between its events:
+// what only this wire's vocabulary can address. Everything a reply of any wire accumulates —
+// the text charged, the open tool calls, the malformed count, the finish reason, usage and
+// model — and how the stream ends is the accumulator's.
 type anthropicStream struct {
 	codec         *anthropicCodec
 	carriedEffort bool
 	// prefixDigest is the sent request's prefix digest, stamped into every reasoning entry the
 	// reply yields; "" stamps nothing (sentRequest).
 	prefixDigest string
-	yield        func(Delta) bool
-	// open holds every tool_use block under accumulation, addressed by its block index.
-	open openToolCalls
+	// acc is the reply's accumulator: every Delta is yielded, every byte charged and the
+	// stream ended through it. Besides content and thinking text it is charged the signature
+	// and redacted data bytes the reasoning blocks accumulate and the reasoningBlockCost of
+	// each reasoning block as it opens, so a reply that only opened a reasoning block did
+	// carry something.
+	acc *replyAccumulator
 	// reasoning holds every thinking or redacted_thinking block under accumulation, addressed by
 	// its block index; nil until the first one opens. A block still open when the stream ends
 	// never closed — its signature may be cut short — and is dropped with the map.
@@ -130,30 +112,20 @@ type anthropicStream struct {
 	// at its end when the places alone cannot rebuild it (anthropicReplyLayout).
 	layout anthropicReplyLayout
 	// usage is the accounting so far: input tokens from message_start, output tokens from
-	// message_delta; nil until either arrives.
+	// message_delta; nil until either arrives. The merged whole is handed to the accumulator
+	// each time an event adds to it (mergeUsage).
 	usage *anthropicUsage
-	// servedModel is the id message_start named; it rides the terminal Done.
-	servedModel string
-	// stopReason is message_delta's stop reason, already mapped; "" until it arrives.
-	stopReason string
-	// textBytes is the running total of content plus thinking bytes yielded, of the
-	// signature and redacted data bytes the reasoning blocks accumulate, and of the
-	// reasoningBlockCost each reasoning block is charged as it opens, against
-	// maxReplyTextBytes; tool-call bytes are openToolCalls' own count.
-	textBytes int
 	// reasoningOpened counts every reasoning block the reply has opened, closed ones included,
 	// against maxReasoningBlocks (openReasoning).
 	reasoningOpened int
-	// malformed counts the payloads that failed to decode; it rides the terminal Delta.
-	malformed int
 }
 
 // event folds one decoded payload into the stream and reports whether the stream has ended —
-// by its terminator, a fault, or a consumer that broke — so parseSSE stops reading.
+// by its terminator, a fault, or a consumer that broke — so the accumulator stops reading.
 func (s *anthropicStream) event(data string) (ended bool) {
 	var ev anthropicEvent
 	if err := json.Unmarshal([]byte(data), &ev); err != nil {
-		s.malformed++ // skip the payload, but on the record
+		s.acc.skipMalformed() // skip the payload, but on the record
 		return false
 	}
 	switch ev.Type {
@@ -166,7 +138,7 @@ func (s *anthropicStream) event(data string) (ended bool) {
 	case anthropicEventMessageDelta:
 		s.closeMessage(ev)
 	case anthropicEventMessageStop:
-		s.finish()
+		s.acc.finish()
 		return true
 	case anthropicEventError:
 		return s.fail(ev, data)
@@ -178,12 +150,13 @@ func (s *anthropicStream) event(data string) (ended bool) {
 	return false
 }
 
-// startMessage records what message_start carries: the served model and the input usage.
+// startMessage records what message_start carries: the served model — whatever this event
+// names, so the last message_start wins — and the input usage.
 func (s *anthropicStream) startMessage(ev anthropicEvent) {
 	if ev.Message == nil {
 		return
 	}
-	s.servedModel = ev.Message.Model
+	s.acc.setModel(ev.Message.Model)
 	if ev.Message.Usage != nil {
 		s.mergeUsage(*ev.Message.Usage)
 	}
@@ -203,7 +176,7 @@ func (s *anthropicStream) startBlock(ev anthropicEvent) (ended bool) {
 		s.layout.block(anthropicLayoutToolUse)
 		frag := sseToolCall{ID: ev.ContentBlock.ID, Index: ev.Index}
 		frag.Function.Name = ev.ContentBlock.Name
-		return s.foldCall(frag)
+		return s.acc.foldCall(frag)
 	case anthropicBlockThinking, anthropicBlockRedactedThinking:
 		return s.openReasoning(ev)
 	}
@@ -223,21 +196,20 @@ func (s *anthropicStream) openReasoning(ev anthropicEvent) (ended bool) {
 	}
 	s.reasoningOpened++
 	if s.reasoningOpened > maxReasoningBlocks {
-		s.yield(Delta{
+		return s.acc.failLocal(Delta{
 			Kind:  DeltaError,
 			Err:   reasoningBlockCountTripped,
 			Fault: UpstreamFault{Class: FaultLocal},
 		})
-		return true
 	}
-	if s.charge(reasoningBlockCost) {
+	if s.acc.charge(reasoningBlockCost) {
 		return true
 	}
 	block := &anthropicReasoningBlock{afterText: s.textSeen, afterCalls: s.callsSeen}
 	s.layout.block(anthropicLayoutReasoning)
 	if ev.ContentBlock.Type == anthropicBlockRedactedThinking {
 		block.redacted = ev.ContentBlock.raw
-		if s.charge(len(block.redacted)) {
+		if s.acc.charge(len(block.redacted)) {
 			return true
 		}
 	}
@@ -263,21 +235,21 @@ func (s *anthropicStream) deltaBlock(ev anthropicEvent) (ended bool) {
 			s.textSeen = true
 		}
 		s.layout.text(blockIndex(ev.Index), len(ev.Delta.Text))
-		return s.text(Delta{Kind: DeltaContent, Content: ev.Delta.Text}, len(ev.Delta.Text))
+		return s.acc.text(Delta{Kind: DeltaContent, Content: ev.Delta.Text}, len(ev.Delta.Text))
 	case anthropicDeltaThinking:
 		if block := s.reasoningAt(ev.Index); block != nil {
 			block.thinking.WriteString(ev.Delta.Thinking)
 		}
-		return s.text(Delta{Kind: DeltaThinking, Thinking: ev.Delta.Thinking}, len(ev.Delta.Thinking))
+		return s.acc.text(Delta{Kind: DeltaThinking, Thinking: ev.Delta.Thinking}, len(ev.Delta.Thinking))
 	case anthropicDeltaSignature:
 		if block := s.reasoningAt(ev.Index); block != nil {
 			block.signature.WriteString(ev.Delta.Signature)
-			return s.charge(len(ev.Delta.Signature))
+			return s.acc.charge(len(ev.Delta.Signature))
 		}
 	case anthropicDeltaInputJSON:
 		frag := sseToolCall{Index: ev.Index}
 		frag.Function.Arguments = ev.Delta.PartialJSON
-		return s.foldCall(frag)
+		return s.acc.foldCall(frag)
 	}
 	return false
 }
@@ -309,15 +281,33 @@ func (s *anthropicStream) stopBlock(ev anthropicEvent) (ended bool) {
 	delete(s.reasoning, *ev.Index)
 	raw, err := block.encode()
 	if err != nil {
-		s.yield(Delta{
+		return s.acc.failLocal(Delta{
 			Kind:  DeltaError,
 			Err:   fmt.Sprintf("apogee: encode thinking block: %v", err),
 			Fault: UpstreamFault{Class: FaultLocal},
 		})
-		return true
 	}
 	entry := reasoningEntry(raw, block.afterText, block.afterCalls, s.prefixDigest)
-	return !s.yield(Delta{Kind: DeltaThinkingBlock, ThinkingBlock: entry})
+	return s.acc.emit(Delta{Kind: DeltaThinkingBlock, ThinkingBlock: entry})
+}
+
+// epilogue is this wire's last word before the accumulator flushes the reply's tool calls and
+// ends it — on message_stop, or on the server closing without one: the reply's layout entry
+// when it needs one (yieldLayout), then the argument patch. A tool_use block that streamed no
+// input at all is the empty object, as anthropicToolArguments makes it on the whole-reply
+// path, so a no-argument call reads the same from either surface. It reports whether the
+// consumer still listens.
+func (s *anthropicStream) epilogue() bool {
+	if !s.yieldLayout() {
+		return false
+	}
+	s.acc.patchOpenCalls(func(args string) string {
+		if args == "" {
+			return anthropicToolArguments(nil)
+		}
+		return args
+	})
+	return true
 }
 
 // yieldLayout yields the reply's layout entry, as one more DeltaThinkingBlock after its reasoning
@@ -332,55 +322,14 @@ func (s *anthropicStream) yieldLayout() bool {
 	if entry == nil {
 		return true
 	}
-	return s.yield(Delta{Kind: DeltaThinkingBlock, ThinkingBlock: entry})
-}
-
-// text yields one content or thinking fragment of n bytes under maxReplyTextBytes (charge).
-func (s *anthropicStream) text(d Delta, n int) (ended bool) {
-	if n == 0 {
-		return false
-	}
-	if s.charge(n) {
-		return true
-	}
-	return !s.yield(d)
-}
-
-// charge counts n more reply bytes against maxReplyTextBytes. Crossing the cap is terminal and
-// NOT retryable — the same request re-streamed would overflow again — and the bytes that
-// crossed it are never yielded, so what the consumer received stays under it.
-func (s *anthropicStream) charge(n int) (ended bool) {
-	s.textBytes += n
-	if s.textBytes > maxReplyTextBytes {
-		s.yield(Delta{
-			Kind: DeltaError,
-			Err: fmt.Sprintf(
-				"apogee: streamed reply exceeded the %d MiB text limit",
-				maxReplyTextBytes>>20,
-			),
-			Fault: UpstreamFault{Class: FaultLocal},
-		})
-		return true
-	}
-	return false
-}
-
-// foldCall folds one tool-call fragment into the open set; crossing maxToolCallBytes or
-// opening a call past maxOpenToolCalls is terminal, as on the openai wire, and the fault text
-// is the set's own (openToolCalls.tripped) so both wires render one message.
-func (s *anthropicStream) foldCall(frag sseToolCall) (ended bool) {
-	if s.open.fold(frag) {
-		s.yield(Delta{Kind: DeltaError, Err: s.open.tripped, Fault: UpstreamFault{Class: FaultLocal}})
-		return true
-	}
-	return false
+	return !s.acc.emit(Delta{Kind: DeltaThinkingBlock, ThinkingBlock: entry})
 }
 
 // closeMessage records what message_delta carries: the stop reason, mapped onto the loop's
 // vocabulary, and the output usage.
 func (s *anthropicStream) closeMessage(ev anthropicEvent) {
 	if ev.Delta != nil && ev.Delta.StopReason != "" {
-		s.stopReason = anthropicFinishReason(ev.Delta.StopReason)
+		s.acc.setFinish(anthropicFinishReason(ev.Delta.StopReason))
 	}
 	if ev.Usage != nil {
 		s.mergeUsage(*ev.Usage)
@@ -390,7 +339,8 @@ func (s *anthropicStream) closeMessage(ev anthropicEvent) {
 // mergeUsage overlays the fields an event carried onto the running accounting. message_start
 // reports the input side with a placeholder output count and message_delta the cumulative
 // output side, sometimes repeating the input — each is written only when the event sent it,
-// so neither event zeroes what the other reported.
+// so neither event zeroes what the other reported. The merged whole replaces what the
+// accumulator held.
 func (s *anthropicStream) mergeUsage(u anthropicUsage) {
 	if s.usage == nil {
 		s.usage = &anthropicUsage{}
@@ -404,6 +354,7 @@ func (s *anthropicStream) mergeUsage(u anthropicUsage) {
 	if u.OutputTokens != 0 {
 		s.usage.OutputTokens = u.OutputTokens
 	}
+	s.acc.setUsage(s.usage.usage())
 }
 
 // fail renders the in-band error event as the terminal fault, through the Client's shared
@@ -412,59 +363,10 @@ func (s *anthropicStream) mergeUsage(u anthropicUsage) {
 // malformed rather than faulting the stream on nothing.
 func (s *anthropicStream) fail(ev anthropicEvent, data string) (ended bool) {
 	if ev.Error == nil {
-		s.malformed++
+		s.acc.skipMalformed()
 		return false
 	}
-	fault := s.codec.client.inBandErrorDelta(*ev.Error.wireError(), data, s.carriedEffort)
-	fault.MalformedChunks = s.malformed
-	s.yield(fault)
-	return true
-}
-
-// finish ends the stream on its success path — message_stop, or the server closing without
-// one: the reply's layout entry when it needs one (yieldLayout), every accumulated tool call,
-// then the terminal Done. A stream that yielded no text, no
-// tool call, and skipped at least one chunk carried nothing the consumer could commit and is
-// faulted on the count instead, as on the openai wire. A tool_use block that streamed no
-// input at all is the empty object, as anthropicToolArguments makes it on the whole-reply
-// path, so a no-argument call reads the same from either surface.
-func (s *anthropicStream) finish() {
-	if s.textBytes == 0 && len(s.open.entries) == 0 && s.malformed > 0 {
-		s.yield(Delta{
-			Kind:            DeltaError,
-			Err:             fmt.Sprintf(malformedOnlyErrFmt, s.malformed),
-			MalformedChunks: s.malformed,
-			Fault:           UpstreamFault{Class: FaultLocal},
-		})
-		return
-	}
-	if !s.yieldLayout() {
-		return
-	}
-	for _, e := range s.open.entries {
-		if e.call.Function.Arguments == "" {
-			e.call.Function.Arguments = anthropicToolArguments(nil)
-		}
-	}
-	if !s.open.flush(s.yield) {
-		return
-	}
-	reason := s.stopReason
-	if reason == "" {
-		reason = "stop"
-	}
-	var usage *Usage
-	if s.usage != nil {
-		u := s.usage.usage()
-		usage = &u
-	}
-	s.yield(Delta{
-		Kind:            DeltaDone,
-		FinishReason:    reason,
-		Usage:           usage,
-		Model:           s.servedModel,
-		MalformedChunks: s.malformed,
-	})
+	return s.acc.fail(s.codec.client.inBandErrorDelta(*ev.Error.wireError(), data, s.carriedEffort))
 }
 
 // anthropicEvent is one decoded stream payload. Every event type populates a different

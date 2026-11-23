@@ -89,7 +89,11 @@ Depends on items 1 and 2.
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestTerminalPaths|TestReplyAccumulator' ./internal/provider/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestStream_' ./internal/provider/ && test -z "$(git diff --name-only HEAD~1 -- internal/provider/terminal_paths_test.go)" && test -z "$(grep -n 'newSSEScanner\|maxReplyTextBytes\|malformedOnlyErrFmt\|isTransientReadError\|DeltaDone' internal/provider/wire_openai.go)"`
 **Commit:** `refactor(provider): the openai codec ends through the reply accumulator`
 
-## 4. The Anthropic codec ends through the accumulator
+## 4. The Anthropic codec ends through the accumulator — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): internal/provider/stream.go is named in the item's Files but was left unchanged — item 3 already reworded its scanner/read-fault comments wire-neutrally ("the scan loop", "every reply"), and the stale-comment grep (`scanner\|both wires\|both codecs\|terminal path\|parser reads`) finds nothing in it that this item made false.
+NOTES (2026-11-23): `anthropicStream.fail` is kept as the codec's in-band-error dialect method (the no-member `error` event calls `skipMalformed`, D4; otherwise it renders through `inBandErrorDelta` and ends through the accumulator's `fail`); `yieldLayout` is kept and called from the new `anthropicStream.epilogue`, which is the func passed at construction.
+NOTES (2026-11-23): `sseDataPrefix` stays declared in wire_anthropic_stream.go although its only reader is now reply_accumulator.go — moving it is a content move the item does not ask for.
 
 Depends on items 1 and 2.
 
