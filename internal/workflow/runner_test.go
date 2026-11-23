@@ -1155,3 +1155,89 @@ func TestRunnerRecordsFailedWhenAStageErrors(t *testing.T) {
 		t.Errorf("item a spawned %d times, want 1 — the failed folder's finished item is kept", len(specs))
 	}
 }
+
+// blockReport makes the plan's report path a non-empty directory in the folder Run will open, so
+// the merge stage errors once the stages before it have run.
+func blockReport(t *testing.T, runner *Runner, plan Plan) {
+	t.Helper()
+	opened, err := runner.Open(plan, "")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	dir, err := runner.Store.Dir(opened.ID)
+	if err != nil {
+		t.Fatalf("Dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, reportName, "keep"), 0o755); err != nil {
+		t.Fatalf("make the report a directory: %v", err)
+	}
+}
+
+func TestRun_EveryExitSettlesStatusAndItems(t *testing.T) {
+	t.Parallel()
+	mergePlan := fanPlan("a")
+	mergePlan.Stages = append(mergePlan.Stages, Stage{Name: "report", Kind: StageMerge, Task: "merge"})
+	tests := []struct {
+		name string
+		plan Plan
+		// cancelAt is the label of the item whose child cancels the run; "" never cancels.
+		cancelAt string
+		// finishesCancelled reports whether the cancelling child still completes its item.
+		finishesCancelled bool
+		prepare           func(t *testing.T, runner *Runner, plan Plan)
+		wantPhase         Phase
+		wantErr           bool
+		wantOK            int
+	}{
+		{name: "every stage done", plan: fanPlan("a", "b"), wantPhase: PhaseDone, wantOK: 2},
+		{name: "cancel mid-stage keeps the finished items", plan: fanPlan("a", "b", "c"), cancelAt: "b", wantPhase: PhaseStopped, wantOK: 1},
+		{name: "cancel after the last stage's last item", plan: fanPlan("a"), cancelAt: "a", finishesCancelled: true, wantPhase: PhaseDone, wantOK: 1},
+		{name: "stage error", plan: mergePlan, prepare: blockReport, wantPhase: PhaseFailed, wantErr: true, wantOK: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			runner := newTestRunner(t, spawnFunc(func(ctx context.Context, spec ItemSpec) (Outcome, error) {
+				if spec.Item.Label == tt.cancelAt {
+					cancel()
+					if !tt.finishesCancelled {
+						return Outcome{Ending: EndStopped}, nil
+					}
+				}
+				return Outcome{Ending: EndCompleted, Receipt: okReceipt(spec.Item.Label)}, nil
+			}))
+			// One child at a time, so the items before the cancelling one have finished.
+			runner.Width = 1
+			if tt.prepare != nil {
+				tt.prepare(t, runner, tt.plan)
+			}
+
+			result, err := runner.Run(ctx, tt.plan)
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Run error = %v, want an error: %v", err, tt.wantErr)
+			}
+			if result.Phase != tt.wantPhase {
+				t.Errorf("result phase = %s, want %s", result.Phase, tt.wantPhase)
+			}
+			status, readErr := runner.Store.ReadStatus(result.ID)
+			if readErr != nil {
+				t.Fatalf("ReadStatus: %v", readErr)
+			}
+			if status.Phase != tt.wantPhase {
+				t.Errorf("status.json phase = %s, want %s", status.Phase, tt.wantPhase)
+			}
+			if _, statErr := os.Stat(result.Listing); statErr != nil {
+				t.Errorf("items.md at %q: %v, want it written", result.Listing, statErr)
+			}
+			if len(result.Stages) == 0 {
+				t.Fatal("result has no stages, want the fanout's")
+			}
+			if ok := result.Stages[0].Tally.OK; ok != tt.wantOK {
+				t.Errorf("finished items = %d, want %d kept", ok, tt.wantOK)
+			}
+		})
+	}
+}

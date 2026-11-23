@@ -39,7 +39,11 @@
 - 6: guard folded — a settling set of its own, clock-blocked test, Goal made the observable half
 - 7: guard folded — pending-only mark, a library call for an id-less failure, launch id for a background observer only
 
-## 1. The Runner settles every exit through one function
+## 1. The Runner settles every exit through one function — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): `runState.settle(result *Result, cause error) error` replaces both the loop tail and `failRun` (deleted); `setWorkflowPhase` stays as its status.json half. A nil cause keeps the normal end's rules (a write error returned as it is, items.md unwritten when the phase write fails); a non-nil cause keeps `failRun`'s best-effort joined writes.
+NOTES (2026-11-23): both `Run` exits now call settle on its own line before `return result, err`, instead of `return result, state.settle(&result, …)` — Go leaves the order of reading `result` and the call unspecified, and settle writes Phase and Listing into it. Returned values are unchanged.
+NOTES (2026-11-23): the table's "cancel after the last stage (done)" case cancels from inside the last stage's last child, which then completes its item — the latest point a test can cancel a Run; the run ends done with ctx cancelled.
 
 **What:**
 **Goal:** inside `Runner.Run`, every exit taken after the run's folder is open — done, stopped on cancel, stage error — writes the workflow phase and `items.md` through one unexported settle function; recorded phases, `items.md` content and returned `(Result, error)` are what they are at the header base.

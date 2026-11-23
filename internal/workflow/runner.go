@@ -327,7 +327,7 @@ type Tally struct {
 // writing items.md (Store.WriteItems) into the folder. The error is for a run that
 // could not proceed: an invalid plan, an unreadable item source, a store that cannot be written, a
 // folder Admit refused. A stage that errors once the folder is running ends the run as failed: its
-// status.json phase PhaseFailed and items.md written, best-effort (failRun), so no listing shows it
+// status.json phase PhaseFailed and items.md written, best-effort (settle), so no listing shows it
 // running.
 func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 	if r.Spawner == nil || r.Store == nil || r.Workspace == nil {
@@ -363,7 +363,8 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 		}
 		stageResult, err := state.runStage(ctx, plan, index, stageItems, &result)
 		if err != nil {
-			return result, state.failRun(&result, err)
+			err = state.settle(&result, err)
+			return result, err
 		}
 		result.Stages = append(result.Stages, stageResult)
 		if stageResult.Phase == PhaseStopped {
@@ -371,15 +372,9 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 			break
 		}
 	}
-	if err := state.setWorkflowPhase(result.Phase); err != nil {
-		return result, err
-	}
-	listing, err := r.Store.WriteItems(result.ID, result)
-	if err != nil {
-		return result, err
-	}
-	result.Listing = listing
-	return result, nil
+	// settle writes into result, so it runs before the return reads it.
+	err = state.settle(&result, nil)
+	return result, err
 }
 
 // expandStages expands every fanout's items up front, so an unreadable source fails the run before
@@ -1061,14 +1056,27 @@ func (s *runState) notifyStage(stageIndex int, stage Stage, phase Phase, items i
 	}
 }
 
-// failRun ends a run whose stage returned cause: the result and status.json take PhaseFailed and
-// items.md lists what the run reached, each write attempted whatever the other did, since the run
-// is over either way. It returns cause joined with any write error.
-func (s *runState) failRun(result *Result, cause error) error {
-	result.Phase = PhaseFailed
-	phaseErr := s.setWorkflowPhase(PhaseFailed)
+// settle ends a run whose folder is open — every exit Run takes from there on: it records the
+// workflow's phase in status.json and writes items.md, the listing of what the run reached, whose
+// path result.Listing takes. cause is the stage error that ended the run, nil for a run that ran to
+// done or stopped on a cancel and so ends in the phase result already holds. With a cause the
+// result takes PhaseFailed and both writes are best-effort — each attempted whatever the other
+// did, since the run is over either way — and settle returns cause joined with any write error.
+// Without one a write error is returned as it is, and a phase that could not be recorded leaves
+// items.md unwritten.
+func (s *runState) settle(result *Result, cause error) error {
+	if cause != nil {
+		result.Phase = PhaseFailed
+	}
+	phaseErr := s.setWorkflowPhase(result.Phase)
+	if cause == nil && phaseErr != nil {
+		return phaseErr
+	}
 	listing, itemsErr := s.runner.Store.WriteItems(result.ID, *result)
 	result.Listing = listing
+	if cause == nil {
+		return itemsErr
+	}
 	return errors.Join(cause, phaseErr, itemsErr)
 }
 
