@@ -57,7 +57,11 @@ NOTES (2026-11-23): the table's "cancel after the last stage (done)" case cancel
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestRun' ./internal/workflow/`
 **Commit:** `refactor(workflow): the runner settles every exit through one function`
 
-## 2. A run whose final write fails records failed
+## 2. A run whose final write fails records failed — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): `settle` writes `items.md` before the phase on every path, the stage-error one included (both writes stay best-effort there, only their order changed). The first write to fail stands in as the cause and takes the same best-effort `failed` path.
+NOTES (2026-11-23): on a failed final write the returned `Result.Phase` is `failed` too (it was `done`/`stopped` beside a non-nil error), so the Result agrees with status.json; the returned error is the write error wrapped by `errors.Join` (same text, `errors.Is` holds), joined with the `failed` write's own error when that fails as well.
+NOTES (2026-11-23): row 2's clock hook picks the final phase write by reading status.json (workflow `running`, every stage `done`) instead of counting clock reads, so it also turns red on the pre-item tree for the right reason.
 
 Depends on item 1.
 

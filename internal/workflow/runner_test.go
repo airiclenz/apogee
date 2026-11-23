@@ -1156,6 +1156,104 @@ func TestRunnerRecordsFailedWhenAStageErrors(t *testing.T) {
 	}
 }
 
+func TestRun_AFailedFinalWriteRecordsFailed(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		// block makes one of the run's two final writes fail, by real filesystem state in dir, the
+		// folder Run will open.
+		block func(t *testing.T, runner *Runner, dir string)
+	}{
+		{name: "items.md cannot be written", block: blockListing},
+		{name: "the phase cannot be written", block: blockFinalPhaseWrite},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			runner := newTestRunner(t, spawnFunc(func(_ context.Context, spec ItemSpec) (Outcome, error) {
+				return Outcome{Ending: EndCompleted, Receipt: okReceipt(spec.Item.Label)}, nil
+			}))
+			plan := fanPlan("a")
+			opened, err := runner.Open(plan, "")
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			dir, err := runner.Store.Dir(opened.ID)
+			if err != nil {
+				t.Fatalf("Dir: %v", err)
+			}
+			tt.block(t, runner, dir)
+
+			result, err := runner.Run(context.Background(), plan)
+
+			if err == nil {
+				t.Fatal("Run succeeded, want the failed write's error")
+			}
+			if result.Phase != PhaseFailed {
+				t.Errorf("result phase = %s, want %s", result.Phase, PhaseFailed)
+			}
+			status, readErr := runner.Store.ReadStatus(opened.ID)
+			if readErr != nil {
+				t.Fatalf("ReadStatus: %v", readErr)
+			}
+			if status.Phase != PhaseFailed {
+				t.Errorf("status.json phase = %s, want %s — the note and the event say failed", status.Phase, PhaseFailed)
+			}
+		})
+	}
+}
+
+// blockListing makes items.md a non-empty directory in the run's folder, so WriteItems fails for
+// any user.
+func blockListing(t *testing.T, _ *Runner, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, listingName, "keep"), 0o755); err != nil {
+		t.Fatalf("make items.md a directory: %v", err)
+	}
+}
+
+// blockFinalPhaseWrite fails the one status.json write that records the run's final phase. The
+// runner's clock is read just before each status write, so from it a non-empty directory is stood
+// at status.json once the file shows the last stage done and the workflow still running — the
+// next write is the final phase's — and cleared again at the following read, the write that
+// records failed.
+func blockFinalPhaseWrite(t *testing.T, runner *Runner, dir string) {
+	t.Helper()
+	statusPath := filepath.Join(dir, statusFileName)
+	var mu sync.Mutex
+	isBlocked, isSpent := false, false
+	runner.Now = func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case isBlocked:
+			isBlocked = false
+			if err := os.RemoveAll(statusPath); err != nil {
+				t.Errorf("clear the status.json directory: %v", err)
+			}
+		case !isSpent && isAwaitingFinalPhase(statusPath):
+			isBlocked, isSpent = true, true
+			if err := os.Remove(statusPath); err != nil {
+				t.Errorf("remove status.json: %v", err)
+			}
+			if err := os.MkdirAll(filepath.Join(statusPath, "keep"), 0o755); err != nil {
+				t.Errorf("make status.json a directory: %v", err)
+			}
+		}
+		return storeClock
+	}
+}
+
+// isAwaitingFinalPhase reports whether the status.json at path shows a running workflow whose
+// every stage is done: the state the final phase write finds.
+func isAwaitingFinalPhase(path string) bool {
+	var status RunStatus
+	if err := readJSON(path, &status); err != nil || status.Phase != PhaseRunning || len(status.Stages) == 0 {
+		return false
+	}
+	return !slices.ContainsFunc(status.Stages, func(stage StageStatus) bool { return stage.Phase != PhaseDone })
+}
+
 // blockReport makes the plan's report path a non-empty directory in the folder Run will open, so
 // the merge stage errors once the stages before it have run.
 func blockReport(t *testing.T, runner *Runner, plan Plan) {

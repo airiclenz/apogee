@@ -1056,28 +1056,31 @@ func (s *runState) notifyStage(stageIndex int, stage Stage, phase Phase, items i
 	}
 }
 
-// settle ends a run whose folder is open — every exit Run takes from there on: it records the
-// workflow's phase in status.json and writes items.md, the listing of what the run reached, whose
-// path result.Listing takes. cause is the stage error that ended the run, nil for a run that ran to
-// done or stopped on a cancel and so ends in the phase result already holds. With a cause the
-// result takes PhaseFailed and both writes are best-effort — each attempted whatever the other
-// did, since the run is over either way — and settle returns cause joined with any write error.
-// Without one a write error is returned as it is, and a phase that could not be recorded leaves
-// items.md unwritten.
+// settle ends a run whose folder is open — every exit Run takes from there on: it writes items.md,
+// the listing of what the run reached, whose path result.Listing takes, and then records the
+// workflow's phase in status.json. cause is the stage error that ended the run, nil for a run that
+// ran to done or stopped on a cancel and so ends in the phase result already holds. A run with a
+// cause, and a run whose items.md or phase could not be written, ends failed: the result takes
+// PhaseFailed, status.json is written failed best-effort — the run is over either way — and settle
+// returns the cause, or the write error that stood in for one, joined with any write error after
+// it. So a status.json that reads done or stopped always has its items.md beside it.
 func (s *runState) settle(result *Result, cause error) error {
 	if cause != nil {
 		result.Phase = PhaseFailed
 	}
-	phaseErr := s.setWorkflowPhase(result.Phase)
-	if cause == nil && phaseErr != nil {
-		return phaseErr
-	}
 	listing, itemsErr := s.runner.Store.WriteItems(result.ID, *result)
 	result.Listing = listing
 	if cause == nil {
-		return itemsErr
+		// The first write to fail is what failed the run.
+		cause, itemsErr = itemsErr, nil
 	}
-	return errors.Join(cause, phaseErr, itemsErr)
+	if cause == nil {
+		if cause = s.setWorkflowPhase(result.Phase); cause == nil {
+			return nil
+		}
+	}
+	result.Phase = PhaseFailed
+	return errors.Join(cause, itemsErr, s.setWorkflowPhase(PhaseFailed))
 }
 
 // setWorkflowPhase records the workflow's final phase in status.json.
