@@ -1027,10 +1027,13 @@ files +18 −5 · 1 failed`, with the edits' summed diffstat in the diff colours
 denied counts in the failure red, a live verb (`Reading 2 files`) while a call of that kind is in
 flight, and a width fallback that ends at `Tools (N calls)` (`docs/layout/tool-layout.md`,
 Vocabulary). Which fold holds an umbrella is decided in order. First, with `ui.tools-auto-collapse`
-on (the default), a **settled** umbrella — the next Turn of its run has started past it (it folds
-while that Turn is still thinking or streaming, and stays folded while that Turn's calls join it
-unless one waits on the user), or every call returned and a later entry of its run placed after it
-or its run over (2026-11-20; `docs/layout/tool-layout.md`, "Fold states and interaction") — that
+on (the default), a **settled** umbrella — something that will not join it follows it: its run's
+reply or narration text has turned non-blank (it folds as that text first shows, not once it
+commits, and stays folded through a stream reset and a re-streamed call joining it, unless one waits
+on the user), or every call returned and a later entry of its run placed after it or its run over;
+a new Turn starting is not a follower, and reasoning is not one, so a burst of Turns that each add
+a call stands as one open umbrella until its follower comes (2026-11-23, `adr-0035-amend-1123`;
+`docs/layout/tool-layout.md`, "Fold states and interaction") — that
 the reader has not **touched** (clicked, or opened anything inside)
 is folded whatever its size and whatever `ui.tools-open` says; a click on it opens that one alone
 and writes nothing, and touched is session-only view state, so a resumed session shows every

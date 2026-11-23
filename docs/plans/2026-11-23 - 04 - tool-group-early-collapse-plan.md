@@ -95,7 +95,10 @@ cmd/apogee/e2e_support_test.go — launchTUIIn, e2eWorkspace; docs/design/test-d
 
 **Commit:** `test(tui): a multi-Turn tool burst stays open until its follower`
 
-## 3. Record the rule: ADR 0035 amendment and the layout and manual docs
+## 3. Record the rule: ADR 0035 amendment and the layout and manual docs — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): the prose sweep also rewrote three tool-layout.md settle sentences the plan's example list did not name — the group-of-one fold paragraph, the "Grouped tools folded (auto-collapsed umbrella)" intro and the Sub-agent group header bullet ("every member reported, and the next Turn started or something after it") — all on the item's Files line.
+NOTES (2026-11-23): `capcom check` exits 1 on "AGENTS.md:47: the capcom block is out of date; run capcom agents to refresh it" — pre-existing on the clean base tree (checked with this item's changes stashed and the new Note moved aside); no Note error; not refreshed here, as AGENTS.md is outside this item's scope.
 
 Depends on item 1.
 

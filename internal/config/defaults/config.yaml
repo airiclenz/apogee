@@ -1155,8 +1155,10 @@ update-check: true
 # no umbrella is ever large, so none follows `tools-open`.
 # Defaults: `tools-open: false`, `tools-fold-over: 5`.
 #
-# `tools-auto-collapse` folds *settled* tool work — everything in it finished, and the conversation
-# moved past it or its Turn over — to one line: an umbrella to its summary line, whatever its size
+# `tools-auto-collapse` folds *settled* tool work — everything in it finished, and something that
+# will not join it following it (the model's reply text, a note, your next message, a further block)
+# or its Turn over; the model's next step adding a call keeps it open and growing — to one line: an
+# umbrella to its summary line, whatever its size
 # and `tools-open`, a single call's group of one included ("Read 1 file"), a `✦ Sub-agents (N)` or
 # `✦ Skill (N)` group to its header line, a single delegation or skill fetch included ("(1)") —
 # until you click it or open one of its tools or members; opening it then is for this session only

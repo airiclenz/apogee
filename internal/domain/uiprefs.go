@@ -89,14 +89,16 @@ type UIPrefs struct {
 	// so none is ever large and every one folds on its own session-only flag alone. Negative is
 	// meaningless and Validate refuses it.
 	ToolsFoldOver int
-	// ToolsAutoCollapse is whether SETTLED tool work — everything in it done, its Turn over or the
-	// conversation moved past it — that the reader has not touched folds on its own to one row: a
-	// Tools umbrella to its Group summary, whatever its size and whatever ToolsOpen says, a single
+	// ToolsAutoCollapse is whether SETTLED tool work — everything in it done, and something that will
+	// not join it following it (the model's reply or narration text, a note, a user message, a
+	// further block) or its Turn over — that the reader has not touched folds on its own to one row:
+	// a Tools umbrella to its Group summary, whatever its size and whatever ToolsOpen says, a single
 	// call included as a group of one (`✦ Read 1 file`); a Sub-agent or Skill group to its header,
-	// a single delegation or skill fetch included (`✦ Sub-agents (1)`). Default TRUE: a finished
-	// burst is history, and its summary is the part worth reading. Off, every umbrella follows the
-	// size rule above alone, so a single call's group starts open. Screen-only, like ToolsOpen:
-	// nothing about it reaches the model.
+	// a single delegation or skill fetch included (`✦ Sub-agents (1)`). The next Turn starting is
+	// not a follower, so a burst of Turns that each add a call keeps one group open and growing.
+	// Default TRUE: a finished burst is history, and its summary is the part worth reading. Off,
+	// every umbrella follows the size rule above alone, so a single call's group starts open.
+	// Screen-only, like ToolsOpen: nothing about it reaches the model.
 	ToolsAutoCollapse bool
 	// Glyphs names the set the screen's symbols are drawn from: [GlyphsUnicode], the look apogee
 	// has always had, or [GlyphsSafe], which swaps every symbol a terminal font may lack for one

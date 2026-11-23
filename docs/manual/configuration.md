@@ -1295,12 +1295,16 @@ single tool call included, as a group of one (`✦ Read 1 file`, `✦ Ran 1 comm
 `✦ Sub-agents (N)` or `✦ Skill (N)` group to its header line, a single delegation or skill fetch
 included (`✦ Sub-agents (1)`, `✦ Skill (1)`). A
 block is settled once everything in it has finished — every call returned, every sub-agent
-reported — and the conversation has moved past it: the model has started its next step (it folds
-while the model is still thinking or writing, not once the reply lands), or the model's next reply,
-a note or your next message comes after it, or the Turn has ended. One still running, or still
-waiting for the rest of its step's calls, stays as it is. A folded block stays folded when the
-model's next step adds a call to it, unless that call is waiting on you — a question to answer or a
-call to approve — which opens it until you have answered. A block you have touched — clicked its header, or opened one of its
+reported — and the conversation has moved past it: the model has started writing its next reply
+or narration (it folds as that text first shows, not once the reply lands), or a note, a further
+block or your next message comes after it, or the Turn has ended. The model's next step adding
+another call does not count: a burst of steps that each make a call keeps one block open and
+growing until something follows it, and the model only thinking leaves it open too. One still
+running, or still waiting for the rest of its step's calls, stays as it is. Once the reply text has
+folded a block it stays folded, even if that text is withdrawn and a call joins the block after
+all, unless that call is waiting on you — a question to answer or a call to approve — which opens it
+until you have answered. An umbrella that grows past `ui.tools-fold-over` type rows before it
+settles follows `ui.tools-open`, as any large umbrella does. A block you have touched — clicked its header, or opened one of its
 tools or members — is left alone from then on, and stays as you left it when the model's next step
 adds a call to it. Clicking a folded one opens that one only, for this session — a single call
 opens to its summary header over the block it always showed, and a further click on that header

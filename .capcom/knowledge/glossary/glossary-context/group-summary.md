@@ -10,8 +10,9 @@ open, folded, running or settled — a **group of one** included, the umbrella a
 standing alone forms, whose summary is that one call's (`✦ Read 1 file`, `✦ Ran 1 command`;
 every tool call is a tool group, `adr-0035-amend-1120c`) — and it is the whole row an umbrella
 folds to, from a click on it, or on its own once it is settled and untouched under
-`ui.tools-auto-collapse` (`adr-0035-amend-1118`; settled from the moment the next Turn of its run
-starts, `adr-0035-amend-1120b`). A Sub-agent or Skill group, which folds the same ways, folds to
+`ui.tools-auto-collapse` (`adr-0035-amend-1118`; settled once a follower comes — its run's reply or
+narration text first turning non-blank, a later entry of its run, or its run over — never by the
+next Turn's start alone, so a multi-Turn burst stays open, `adr-0035-amend-1123`). A Sub-agent or Skill group, which folds the same ways, folds to
 its own `✦ Sub-agents (N)` / `✦ Skill (N)` header, not to a Group summary; a delegation or skill
 fetch standing alone is such a group of one, `(1)`. The phrases, any clipped remainder of them and
 the base of the diffstat counts paint bold in the tools header colour (the scheme's `tool-header`
