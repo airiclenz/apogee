@@ -77,7 +77,13 @@ NOTES (2026-11-23): layout.md's "What stays standalone" paragraph now names the 
 - `! grep -n 'solo:' internal/tui/toolregistry.go internal/tui/toolview.go`
 **Commit:** `refactor(tui): a tool's grouping class is one registry column`
 
-## 3. Own groups key on the grouping class, not on tool names
+## 3. Own groups key on the grouping class, not on tool names — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): `toolBlockAt` gates on a new `ownGroupedAt(entries, i)` (bounds + `entryToolCall` + `ownGrouped`) so an out-of-range index still answers shapeEntry as before; the Sub-agent vs Skill shape is picked by `entries[i].headsRun()`.
+NOTES (2026-11-23): `TestEveryRowGroupsByItsClass` lives in blockshape_test.go beside `TestToolBlockShapes`; toolshape_test.go needed no change. It feeds every row one superset argument object (`rowGroupingArgs`) and fails setup if an umbrella row presents no target; own rows are pinned by name in `ownShapeByTool`, and a background sub-agent pair is a subtest.
+NOTES (2026-11-23): consequential edit — internal/tui/toolregistry.go: made necessary by blockshape.go no longer keying on `loadSkillToolName` (its comment said the own-kind grouping keys on the constant).
+NOTES (2026-11-23): consequential edit — internal/tui/toolbranch.go: made necessary by the same change (the `groupable` comment cited `subAgentToolName, loadSkillToolName` as the own-group key).
+NOTES (2026-11-23): consequential edit — internal/tui/toolview.go: made necessary by the same change (the `presentToolCall` comment cited `loadSkillToolName` as what a skill fetch groups by).
 
 **What:**
 **Goal:** `toolBlockAt` (`internal/tui/blockshape.go`) forms an own group from the head's grouping class; `grep -n 'loadSkillToolName' internal/tui/blockshape.go` prints nothing and `toolBlockAt` names no tool constant (`subAgentGroup`/`subAgentGroupAt` keep `subAgentToolName` for delegation waves). Depends on item 2.

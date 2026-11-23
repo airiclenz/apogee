@@ -388,3 +388,105 @@ func TestPaintAndFoldAgreeWithTheBlockShape(t *testing.T) {
 		})
 	}
 }
+
+// rowGroupingArgs carries an argument for every key a registry row's target extractor reads, so one
+// call to any row is a TARGETED call — the precondition for an umbrella row to group at all
+// (groupable). A row with no extractor (task_list) stays targetless whatever it is handed.
+const rowGroupingArgs = `{"path":"a.go","pattern":"needle","source":"a.go","destination":"b.go","id":1,` +
+	`"input":"ls","base":"main","head":"dev","ref":"HEAD","command":"go test","code":"print(1)",` +
+	`"message":"fix it","action":"list","name":"scout","url":"https://example.com","method":"GET",` +
+	`"query":"go style","task":"look around","question":"Ship it?","title":"Notes"}`
+
+// ownShapeByTool is the group shape each groupOwn row's calls fold into, stated by name so a new
+// groupOwn row has to say which list it heads.
+var ownShapeByTool = map[string]blockShape{
+	"sub_agent":  shapeSubAgentGroup,
+	"load_skill": shapeSkillGroup,
+}
+
+// TestEveryRowGroupsByItsClass proves the shape answer reads a call's grouping class and nothing
+// else: for every registry row, two adjacent finished calls fold into the mixed umbrella when the
+// row is groupUmbrella, into a group of their own when it is groupOwn, and stay two blocks of their
+// own when it is groupSolo. ask_user's calls finish with an ERROR, because an answered question is
+// made solo at result time (askUserAnswerRecord) — the one verdict a class does not state — and an
+// errored one keeps its row's class. A background sub-agent call reads its own groupSolo presenter,
+// so two of them never form a "✦ Sub-agents (N)" group.
+func TestEveryRowGroupsByItsClass(t *testing.T) {
+	t.Parallel()
+
+	twoCalls := func(t *testing.T, tool, args string, failed bool) *transcript {
+		t.Helper()
+		tr := &transcript{}
+		for _, id := range []string{"c1", "c2"} {
+			tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: id, Tool: tool, Arguments: []byte(args)}})
+			tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: id, Content: "done", IsError: failed}})
+		}
+		if len(tr.entries) != 2 {
+			t.Fatalf("setup: two %s calls built %d entries; want 2", tool, len(tr.entries))
+		}
+		for at, e := range tr.entries {
+			if e.kind != entryToolCall || !e.done {
+				t.Fatalf("setup: entry %d of %s is not a finished call (kind %v, done %v)", at, tool, e.kind, e.done)
+			}
+		}
+		return tr
+	}
+
+	for name, p := range toolRegistry {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tr := twoCalls(t, name, rowGroupingArgs, name == askUserToolName)
+			switch p.grouping {
+			case groupUmbrella:
+				if tr.entries[0].tool.Target == "" {
+					t.Fatalf("setup: %s presented no target from rowGroupingArgs; an umbrella row needs one to group", name)
+				}
+				for at := range tr.entries {
+					if got, want := answerOf(toolBlockAt(tr.entries, at)), umbrellaAnswer(0, 2); got != want {
+						t.Errorf("toolBlockAt(%d) = %+v; an umbrella row's two calls want %+v", at, got, want)
+					}
+				}
+			case groupOwn:
+				kind, ok := ownShapeByTool[name]
+				if !ok {
+					t.Fatalf("groupOwn row %q has no entry in ownShapeByTool; state the group it forms", name)
+				}
+				for at := range tr.entries {
+					want := shapeAnswer{kind: kind, head: 0, pos: at, end: 2, members: 2, isFoldable: true}
+					if got := answerOf(toolBlockAt(tr.entries, at)); got != want {
+						t.Errorf("toolBlockAt(%d) = %+v; an own row's two calls want %+v", at, got, want)
+					}
+				}
+			case groupSolo:
+				for at := range tr.entries {
+					if got, want := answerOf(toolBlockAt(tr.entries, at)), loneAnswer(at); got != want {
+						t.Errorf("toolBlockAt(%d) = %+v; a solo row's call is a block of its own, want %+v", at, got, want)
+					}
+				}
+			default:
+				t.Fatalf("row %q has grouping class %d, which this test does not know", name, p.grouping)
+			}
+		})
+	}
+
+	t.Run("background sub-agent calls", func(t *testing.T) {
+		t.Parallel()
+
+		tr := twoCalls(t, subAgentToolName, `{"task":"survey","background":true}`, false)
+		for at, e := range tr.entries {
+			if !e.tool.background {
+				t.Fatalf("setup: entry %d is not a background sub-agent call", at)
+			}
+			if got, want := answerOf(toolBlockAt(tr.entries, at)), loneAnswer(at); got != want {
+				t.Errorf("toolBlockAt(%d) = %+v; a background sub-agent call is a block of its own, want %+v", at, got, want)
+			}
+		}
+	})
+
+	for name := range ownShapeByTool {
+		if p, ok := toolRegistry[name]; !ok || p.grouping != groupOwn {
+			t.Errorf("ownShapeByTool names %q, which is no groupOwn registry row", name)
+		}
+	}
+}

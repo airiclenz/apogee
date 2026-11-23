@@ -281,7 +281,7 @@ const askUserToolName = "ask_user"
 // folding one into a mixed umbrella beside the reads and greps around it would bury the
 // instructions the run just took on. The transcript codec re-derives the same verdict off the same
 // row (fromWireToolView), so a session recorded before the mark existed replays never-group; the
-// constant is what the own-kind grouping keys on (ownGroupAt, render.go).
+// own-kind grouping keys on that class (ownGrouped, blockshape.go), never on this constant.
 const loadSkillToolName = "load_skill"
 
 // toolRegistry is the open, name-keyed catalogue. Each later tool adds one entry here; the

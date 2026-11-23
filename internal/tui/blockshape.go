@@ -158,6 +158,21 @@ func ownHeads(entries []entry, i int, name string) bool {
 		!entries[i].tool.background
 }
 
+// ownGrouped reports whether tv's row is groupOwn ([toolPresenter.grouping]): a call that groups
+// with calls to its own tool rather than in the mixed umbrella. It asks [toolView.presenter], not
+// the registry by name, so a background sub-agent call reads its own groupSolo row and never joins
+// a "✦ Sub-agents (N)" group; a tool with no registry row reads the zero class and groups in none.
+func ownGrouped(tv toolView) bool {
+	p, _ := tv.presenter()
+	return p.grouping == groupOwn
+}
+
+// ownGroupedAt reports whether entries[i] is a call [ownGrouped] answers for — the gate the shape
+// answer asks before [ownGroupAt]. An index outside the list answers false.
+func ownGroupedAt(entries []entry, i int) bool {
+	return i >= 0 && i < len(entries) && entries[i].kind == entryToolCall && ownGrouped(entries[i].tool)
+}
+
 // ownGroup is the group entries[i] opens, or nil when it opens none: the adjacent calls to the tool
 // `name` standing at the same depth, each with the run nested beneath it
 // (docs/layout/tool-layout.md, Rules — "Sub-agent calls group with each other"). There is no floor:
@@ -279,8 +294,13 @@ func (b toolBlock) groupOfOne() bool {
 
 // toolBlockAt is the shape of the tool block entries[i] belongs to, asked from ANY entry of it — the
 // head, a type row's head, any umbrella call, any group member. It is the one place the block order
-// is stated: a Sub-agent group first, then a Skill group, then the umbrella; no entry answers two,
-// since a group's members are solo calls and so never groupable.
+// is stated: an own group first, then the umbrella; no entry answers two, since a group's members
+// are solo calls and so never groupable.
+//
+// Which call forms an own group is its row's grouping class ([ownGrouped]), never a tool name read
+// here: a groupOwn call groups with calls to its own tool, and the group is a Sub-agent group when
+// its head heads a run ([entry.headsRun]) and a Skill group otherwise. The class gate comes first
+// because [ownGroupAt] alone would match ANY call against its own name — two adjacent reads included.
 //
 // A group member finds its group's first member by [ownGroupAt]'s walk back. An umbrella call finds
 // its head by walking back over the adjacent groupable calls at its own depth — the stretch
@@ -289,11 +309,14 @@ func (b toolBlock) groupOfOne() bool {
 // is in neither shape — narration, a solo or targetless call, a background sub-agent, a workflow
 // block, an index outside the list — answers shapeEntry over [i, i+1).
 func toolBlockAt(entries []entry, i int) toolBlock {
-	if group, pos, ok := subAgentGroupAt(entries, i); ok {
-		return groupShape(shapeSubAgentGroup, group, pos)
-	}
-	if group, pos, ok := ownGroupAt(entries, i, loadSkillToolName); ok {
-		return groupShape(shapeSkillGroup, group, pos)
+	if ownGroupedAt(entries, i) {
+		if group, pos, ok := ownGroupAt(entries, i, entries[i].tool.name); ok {
+			kind := shapeSkillGroup
+			if entries[i].headsRun() {
+				kind = shapeSubAgentGroup
+			}
+			return groupShape(kind, group, pos)
+		}
 	}
 	lone := toolBlock{kind: shapeEntry, head: i, end: i + 1}
 	if sameLabelRun(entries, i) == 0 {

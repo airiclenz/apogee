@@ -951,7 +951,7 @@ func presentToolCall(call domain.ToolCall, resolved string, ws workspaceRoot) to
 	// stated on the registry row as its grouping class (toolPresenter.grouping) and copied here,
 	// where the call is recognised: any class but groupUmbrella keeps the block out of the mixed
 	// umbrella. A skill fetch is groupOwn too, for the other half of the same reason: it groups
-	// with its OWN kind (loadSkillToolName), and a mixed umbrella would bury the instructions the
+	// with its OWN kind (ownGrouped), and a mixed umbrella would bury the instructions the
 	// run just took on among the reads around them; fan_out and task_list are groupSolo.
 	tv.solo = p.grouping != groupUmbrella
 	// A block that folds to its header is the presenter's word too, and a fact about the tool
