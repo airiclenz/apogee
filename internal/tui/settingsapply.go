@@ -634,9 +634,10 @@ func (m *Model) setToolsOpen(open bool) {
 }
 
 // toggleToolsFold is what a click on a LARGE Tools umbrella's header, or ⏎ at the block cursor on
-// one, means (toggleBlockAt) while the shared preference is what holds its fold
-// (transcript.blockFoldBy's foldByShared) — an auto-collapsed umbrella, or one the reader gave a
-// fold of its own, moves its own head flag and writes nothing. The shared fold flips on every large
+// one, means (toggleBlockAt) while the shared preference is what holds its fold: the header act
+// asks for the flip (foldOutcome.flipToolsOpen) and [Model.actOnFold], its only reader, makes it
+// here — an auto-collapsed umbrella, or one the reader gave a fold of its own, moves its own head
+// flag and writes nothing. The shared fold flips on every large
 // umbrella, and the flip is PERSISTED as `ui.tools-open` through the gestures' one door
 // (persistUIPref) — toggleTaskListFold's whole contract, mirrored — returning the Model alone for
 // the caller to repaint, anchored.

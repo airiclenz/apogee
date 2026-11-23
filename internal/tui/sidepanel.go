@@ -1351,10 +1351,10 @@ func (m Model) followPanelTarget(target panelTarget) (tea.Model, tea.Cmd) {
 	case panelTargetFold:
 		return m.toggleSidePanelFold(target.section, target.isOpen), nil
 	case panelTargetRun:
-		// A member of a folded Sub-agents group paints no row: the group opens first, on its own
-		// fold (transcript.revealBlockMember), so the run the reader leaves to come back to is
-		// on screen.
-		m.transcript.revealBlockMember(target.entry)
+		// A member of a folded Sub-agents group paints no row: the reveal act opens the group
+		// first, on its own fold ([transcript.applyFoldAct]), so the run the reader leaves to come
+		// back to is on screen.
+		m, _ = m.actOnFold(foldAct{kind: foldActReveal, index: target.entry})
 		next, _ := m.openRunAt(target.entry)
 		return next, nil
 	case panelTargetBlock:
@@ -1362,9 +1362,9 @@ func (m Model) followPanelTarget(target panelTarget) (tea.Model, tea.Cmd) {
 			m = m.openRun(target.run)
 		}
 		// A member of a Tools umbrella paints no line while the umbrella is folded or its type row
-		// is shut: open both first, on the umbrella's own fold — the jump never moves the shared
-		// `ui.tools-open` fold, whose flip is a write (transcript.revealBlockMember).
-		m.transcript.revealBlockMember(target.entry)
+		// is shut: the reveal act opens both first, on the umbrella's own fold — the jump never
+		// moves the shared `ui.tools-open` fold, whose flip is a write ([transcript.applyFoldAct]).
+		m, _ = m.actOnFold(foldAct{kind: foldActReveal, index: target.entry})
 		m.transcript.setExpanded(target.entry, true)
 		m.revealEntry(target.entry)
 		return m, nil

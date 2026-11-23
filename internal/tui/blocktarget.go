@@ -38,18 +38,19 @@ package tui
 // row marked targetHeader here would paint a see-more marker that nothing could act on.
 //
 // A super-group adds the two kinds its extra LEVEL needs (renderSuperGroup). targetType is a type
-// row: it toggles the run's own second state (transcript.toggleTypeExpanded) rather than the
+// row: it toggles the run's own second state (entry.typeExpanded, the type-row act) rather than the
 // expanded flag every other target flips, which is what lets a reader open a run to its member rows
 // and then open a member to its body. targetUmbrella is the umbrella header — marked on EVERY
 // umbrella, small or large, open or folded, live or done, wearing the fold's ▶/▼ at its leader's edge
 // (renderSuperGroup). Its click folds the umbrella to its header line and back, and which fold it
 // moves is answered by the fold rule (transcript.blockFoldBy) — under auto-collapse, an umbrella
-// settled and untouched first, which opens alone on a fold of its own and writes nothing
-// (transcript.openBlockAlone), then the umbrella's size (transcript.umbrellaIsLarge): a LARGE one
-// follows the shared `ui.tools-open` preference (Model.toggleToolsFold), a small one — or a touched
-// one with a fold of its own — its own head flag alone (transcript.setBlockFolded), with every
-// child's state left as it stood beneath either fold. A click on any of the three levels marks the
-// umbrella touched (transcript.markBlockTouched), so auto-collapse never folds it again. A
+// settled and untouched first, which opens alone on a fold of its own and writes nothing, then the
+// umbrella's size (transcript.umbrellaIsLarge): a LARGE one follows the shared `ui.tools-open`
+// preference (Model.toggleToolsFold), a small one — or a touched one with a fold of its own — its
+// own head flag alone, with every child's state left as it stood beneath either fold. A click on
+// any of the three levels marks the umbrella touched, so auto-collapse never folds it again. Each
+// level's click is one reader act the fold module answers (Model.actOnFold,
+// transcript.applyFoldAct), so no gesture caller names the setters. A
 // Sub-agent or Skill group's header (renderSubAgentGroup) is marked targetUmbrella too, for its
 // group's head: settled and untouched under auto-collapse it is folded and opens alone like an
 // umbrella; otherwise it folds on that head flag alone, live or settled.

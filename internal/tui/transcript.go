@@ -2574,9 +2574,9 @@ func (t *transcript) markBlockTouched(index int) bool {
 // so auto-collapse leaves it be, and holding its own head flag (entry.foldOwn) open, so
 // neither its size nor the shared `ui.tools-open` preference decides it from here on — the
 // reader's open of an auto-collapsed umbrella, which opens that one and writes nothing (ratified
-// "Large-umbrella click"). A further click flips that same head flag (Model.toggleBlockAt), so a
-// group of one — a lone call — re-folds like any umbrella. A Sub-agent or Skill group opens like
-// an umbrella. It reports whether anything moved; an index heading no foldable block — a member
+// "Large-umbrella click"). A further click flips that same head flag (the header act,
+// transcript.applyFoldAct), so a group of one — a lone call — re-folds like any umbrella. A
+// Sub-agent or Skill group opens like an umbrella. It reports whether anything moved; an index heading no foldable block — a member
 // past its block's head included ([toolBlockAt]) — changes nothing.
 func (t *transcript) openBlockAlone(head int) bool {
 	if block := toolBlockAt(t.entries, head); !block.foldable() || block.head != head {
@@ -2592,17 +2592,18 @@ func (t *transcript) openBlockAlone(head int) bool {
 }
 
 // revealBlockMember makes the umbrella or group member entries[index] paintable, as a side-panel
-// jump to it needs (Model.followPanelTarget): a folded umbrella or group opens on a fold of its own
+// jump to it needs — the reveal act ([transcript.applyFoldAct]'s foldActReveal, which
+// Model.followPanelTarget asks): a folded umbrella or group opens on a fold of its own
 // ([transcript.openBlockAlone]) — never the shared toggle, whose flip writes `ui.tools-open` —
 // an open one is marked touched, and the TYPE ROW holding the member opens, since a closed type row
 // paints no member line for the jump to land on. A folded group of one or Sub-agent or Skill group
 // opens the same way and has no type row to open — a group of one paints its call's own block under
-// the header — so a flag left there would open a type row the moment the group grows. An index in
-// no foldable block changes nothing.
-func (t *transcript) revealBlockMember(index int) {
+// the header — so a flag left there would open a type row the moment the group grows. It reports
+// whether a foldable block holds the index; an index in no foldable block changes nothing.
+func (t *transcript) revealBlockMember(index int) bool {
 	block := toolBlockAt(t.entries, index)
 	if !block.foldable() {
-		return
+		return false
 	}
 	if t.blockFolded(block.head) {
 		t.openBlockAlone(block.head)
@@ -2610,14 +2611,15 @@ func (t *transcript) revealBlockMember(index int) {
 		t.markBlockTouched(block.head)
 	}
 	if block.kind != shapeToolSuper || block.groupOfOne() {
-		return
+		return true
 	}
 	for _, run := range block.sup {
 		if index >= run.at && index < run.at+run.n {
 			t.setTypeExpanded(run.at, true)
-			return
+			break
 		}
 	}
+	return true
 }
 
 // setTypeExpanded opens or closes the TYPE ROW of the run headed by entries[index] — the second,

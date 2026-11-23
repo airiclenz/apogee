@@ -846,8 +846,8 @@
 // carry is the umbrella's own fold, resolved by one rule ([transcript.blockFoldBy]): under
 // `ui.tools-auto-collapse` an umbrella that is SETTLED ([transcript.blockSettled] — from the
 // moment its run's reply text first shows past it) and that the reader has not touched folds to
-// its header line whatever its size, and opens alone on a fold of its own
-// ([transcript.openBlockAlone]);
+// its header line whatever its size, and opens alone on a fold of its own — the reader's header
+// act, every fold gesture being one act the fold module answers ([transcript.applyFoldAct]);
 // otherwise a LARGE umbrella — more type rows than `ui.tools-fold-over`
 // ([transcript.umbrellaIsLarge]) — folds under the shared `ui.tools-open` preference and back, a
 // SMALL one on its head entry's session-only flag ([transcript.blockFolded]), the members' own

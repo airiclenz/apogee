@@ -99,7 +99,12 @@ NOTES (2026-11-23): consequential edit — internal/tui/toolview.go: made necess
 **Closes:** tool-grouping-class-scattered
 **Commit:** `refactor(tui): own groups key on the grouping class`
 
-## 4. One reader act moves a block's fold
+## 4. One reader act moves a block's fold — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): `revealBlockMember` keeps its body and now reports whether a foldable block holds the index (the reveal act's `acted`); `applyFoldAct`'s reveal arm calls it rather than holding a copy of the body, so it survives as the transcript method item 6 moves.
+NOTES (2026-11-23): `foldOutcome.folded` is the fold of the foldable block holding the act's index once the act has landed, the caller's shared flip included (false where no foldable block holds it); no gesture caller reads it today, the tests do.
+NOTES (2026-11-23): the task-list branch of `toggleBlockAt` no longer runs the old trailing `markBlockTouched`: a task_list card is `groupSolo`, so it sits in no foldable block and that touch was always a no-op — behaviour unchanged.
+NOTES (2026-11-23): the shared header arm now touches before the Model's `toggleToolsFold` rather than after it; neither write reads the other, so the end state is the same.
 
 **What:**
 **Goal:** gesture callers never touch the fold rule or its setters: `grep -nE 'markBlockTouched|openBlockAlone|setBlockFolded|blockFoldBy|foldBy(Settled|Shared|Head|None)|revealBlockMember|toggleTypeExpanded' internal/tui/mouse.go internal/tui/sidepanel.go | grep -v '//'` prints nothing; fold behaviour is unchanged.

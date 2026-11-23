@@ -814,13 +814,14 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 //
 // A super-group's two extra kinds are the same rule at its two extra levels (renderSuperGroup): a
 // TYPE ROW flips the second state of the run it heads — its member rows, not their bodies — and the
-// UMBRELLA HEADER — marked on every umbrella, wearing the fold's ▶/▼ — answers by the fold rule
-// (transcript.blockFoldBy): an auto-collapsed one opens alone and writes nothing
-// (transcript.openBlockAlone); otherwise by its size, a LARGE one folding to its header line and
-// back under the one preference every large umbrella shares, written back as `ui.tools-open`
-// (toggleToolsFold), while a small one — or a touched one with a fold of its own — folds on its own
-// session-only head flag (setBlockFolded). Every action on an umbrella, at any of its levels,
-// marks it touched (transcript.markBlockTouched), exempting it from auto-collapse. A run view's TASK
+// UMBRELLA HEADER — marked on every umbrella, wearing the fold's ▶/▼ — moves the fold the fold rule
+// says is holding it: an auto-collapsed one opens alone and writes nothing; otherwise by its size, a
+// LARGE one folding to its header line and back under the one preference every large umbrella
+// shares, written back as `ui.tools-open` (toggleToolsFold), while a small one — or a touched one
+// with a fold of its own — folds on its own session-only head flag. Every action on an umbrella, at
+// any of its levels, marks it touched, exempting it from auto-collapse. Each of those is one reader
+// act — a header, type-row, member or enter-run act — that the fold module answers
+// ([Model.actOnFold], [transcript.applyFoldAct]); no arm here names the setters. A run view's TASK
 // ROW is the same rule again at the level ADR 0063 added: it flips the fold of the task the viewed
 // run was handed, which is the view's own state and not the head's block state (render.go's rooted
 // paint marks the row, transcript.setTaskExpanded holds it). A workflow's STAGE ROW opens rather
@@ -878,12 +879,12 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 		// A framed delegation opens as a run VIEW rather than as a rail in place (ADR 0063): one
 		// redirect, asked before the flip, so the mouse and the block cursor's ⏎ — which arrives
 		// through this same call — cannot come to mean different things by the same gesture.
-		// Entering a group member's run is the reader acting on that group, so the group is
-		// marked touched before the view opens (transcript.markBlockTouched; a lone delegation is
-		// a group of one and is marked the same): a settled group the reader went into never
-		// auto-collapses behind them.
+		// Entering a group member's run is the reader acting on that group, so the enter-run act
+		// marks the group touched before the view opens (a lone delegation is a group of one and
+		// is marked the same): a settled group the reader went into never auto-collapses behind
+		// them.
 		if _, openable := m.runOpenableAt(target.entry); openable {
-			m.transcript.markBlockTouched(target.entry)
+			m, _ = m.actOnFold(foldAct{kind: foldActEnterRun, index: target.entry})
 			next, _ := m.openRunAt(target.entry)
 			return next, nil
 		}
@@ -894,7 +895,11 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 			m = m.toggleTaskListFold()
 			break
 		}
-		if !m.transcript.toggleExpanded(target.entry) {
+		// The member act flips the block and touches the foldable block holding it — a type row,
+		// or a member's row or body, inside an umbrella, and the call's own row or body under a
+		// group of one's header — so auto-collapse leaves it as the reader arranged it.
+		var outcome foldOutcome
+		if m, outcome = m.actOnFold(foldAct{kind: foldActMember, index: target.entry}); !outcome.acted {
 			return m, nil
 		}
 	case targetStage:
@@ -913,44 +918,23 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 			return m, nil
 		}
 	case targetType:
-		if !m.transcript.toggleTypeExpanded(target.entry) {
+		var outcome foldOutcome
+		if m, outcome = m.actOnFold(foldAct{kind: foldActTypeRow, index: target.entry}); !outcome.acted {
 			return m, nil
 		}
 	case targetUmbrella:
-		// Every umbrella's header is a fold, and the gesture moves the fold that is actually
-		// holding it — the one rule the paint reads too (transcript.blockFoldBy), never a second
-		// derivation of it. An AUTO-COLLAPSED one (settled, untouched) opens alone on a fold of its
-		// own and writes nothing (openBlockAlone). A LARGE one under the shared preference flips
-		// it, which is also a write of `ui.tools-open` (toggleToolsFold) — asked first for the
-		// task-list card's reason, one rule for the mouse and for ⏎. A SMALL one, or a touched one
-		// with a fold of its own, flips its head flag alone (transcript.setBlockFolded):
-		// in-session, written nowhere, leaving every child's state beneath it exactly as it stood for
-		// the reopen. Either of the last two marks the umbrella touched, so it never auto-collapses
-		// under the reader afterwards. A group of one — a lone call — is an umbrella like any other:
-		// auto-collapsed it opens by the first arm, and its next click folds it again by the last.
-		// A Sub-agent or Skill group's header is this target too: auto-collapsed it takes the first
-		// arm, and otherwise its fold is its head flag's, live or settled — the foldByHead arm.
-		switch m.transcript.blockFoldBy(target.entry) {
-		case foldBySettled:
-			m.transcript.openBlockAlone(target.entry)
-		case foldByShared:
-			m = m.toggleToolsFold()
-			m.transcript.markBlockTouched(target.entry)
-		case foldByHead:
-			m.transcript.setBlockFolded(target.entry, !m.transcript.blockFolded(target.entry))
-			m.transcript.markBlockTouched(target.entry)
-		default:
+		// Every umbrella's header is a fold, and the header act moves the fold that is actually
+		// holding it — the one rule the paint reads too, never a second derivation of it
+		// ([transcript.applyFoldAct]). A LARGE one under the shared preference flips it, which is
+		// also a write of `ui.tools-open` ([Model.actOnFold] makes it) — asked here, after the
+		// run redirect, for the task-list card's reason: one rule for the mouse and for ⏎. A
+		// Sub-agent or Skill group's header is this target too.
+		var outcome foldOutcome
+		if m, outcome = m.actOnFold(foldAct{kind: foldActHeader, index: target.entry}); !outcome.acted {
 			return m, nil
 		}
 	default:
 		return m, nil
-	}
-	// A type row, or a member's row or body, inside an umbrella is the reader acting on that
-	// umbrella: it is touched, and auto-collapse leaves it as the reader arranged it — and so is the
-	// call's own row or body under a group of one's header (transcript.markBlockTouched; an entry in
-	// no foldable block marks nothing).
-	if target.kind == targetHeader || target.kind == targetType {
-		m.transcript.markBlockTouched(target.entry)
 	}
 	m.refreshViewportAnchored(line, releaseRow)
 	return m, nil
