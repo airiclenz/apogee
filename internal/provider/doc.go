@@ -29,7 +29,7 @@
 //     Retry-After and backoff rules, the upstream StatusError, sanitising, and the wireCodec
 //     interface every wire implements.
 //   - stream.go — Stream and the Delta it yields: the streaming round-trip, the idle-timeout
-//     body that bounds a silent stream, and the SSE scanner both codecs read through.
+//     body that bounds a silent stream, and the SSE scanner every reply is read through.
 //   - reply_accumulator.go — replyAccumulator, the one place a streamed reply ends: the scan
 //     loop, the text and tool-call caps, the malformed count, the pending finish reason, usage
 //     and model, and every terminal path. A codec keeps its dialect — the event vocabulary,

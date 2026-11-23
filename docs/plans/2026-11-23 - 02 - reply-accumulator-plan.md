@@ -69,7 +69,10 @@ Rows, both wires unless noted: terminator ends cleanly; bare EOF with a pending 
 **Acceptance:** `go build ./... && go vet ./internal/provider/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestReplyAccumulator|TestTerminalPaths' ./internal/provider/`
 **Commit:** `refactor(provider): add the reply accumulator`
 
-## 3. The OpenAI codec ends through the accumulator
+## 3. The OpenAI codec ends through the accumulator — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): internal/provider/client.go is named in the item's Files but was left unchanged — its parseSSE contract comment says nothing about who owns the scanner, the read fault or the terminal path, so nothing in it became false.
+NOTES (2026-11-23): comments in stream.go and doc.go that named "both codecs"/"the codec's scanner" as the reader were reworded wire-neutrally ("the scan loop", "every reply") so they hold both now, while the Anthropic codec still runs its own scan loop, and after item 4; the "both wires" comments on openToolCalls (tripped, open, flush) and wire_anthropic_stream.go were left as they are — still true.
 
 Depends on items 1 and 2.
 

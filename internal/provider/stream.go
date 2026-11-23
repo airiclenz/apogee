@@ -228,8 +228,8 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 
 		// The body layer's idle cut sits beneath the capture tee, so both codecs inherit it and
 		// the observer's record ends where the codec's parse did: the reader closes the body when
-		// the window elapses with no byte read, the pending Read unblocks, and the codec sees
-		// errStreamIdle through scanner.Err — the one place both wires render a read fault.
+		// the window elapses with no byte read, the pending Read unblocks, and the scan loop sees
+		// errStreamIdle through scanner.Err and renders it as the read fault.
 		stream := io.Reader(resp.Body)
 		if c.streamIdleTimeout > 0 {
 			idle := newIdleBody(resp.Body, c.streamIdleTimeout)
@@ -255,7 +255,7 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 }
 
 // errStreamIdle is the sentinel behind the idle cut. It carries no `apogee:` prefix because
-// every path that renders it supplies its own — the codecs' `apogee: read stream: %v` over
+// every path that renders it supplies its own — the read fault's `apogee: read stream: %v` over
 // scanner.Err, the pre-header `apogee: await response: %v` — so the rendered fault reads
 // `apogee: read stream: upstream stream idle for 10m0s`, not doubled.
 var errStreamIdle = errors.New("upstream stream idle")
@@ -354,9 +354,10 @@ func (c *Client) streamCapture(raw []byte) []byte {
 }
 
 // joinDataPayloads extracts the `data:` payloads of an SSE body under exactly the line rule
-// the openai parser reads by — the same scanner, the same trim, the same prefix, and the same
-// stop at the [DONE] terminator (included: it is the protocol) — so the record holds every
-// payload the parser saw and nothing it skipped or never reached.
+// an openai reply is read by (replyAccumulator.run, and the openai codec's stop) — the same
+// scanner, the same trim, the same prefix, and the same stop at the [DONE] terminator
+// (included: it is the protocol) — so the record holds every payload the parser saw and
+// nothing it skipped or never reached.
 func joinDataPayloads(raw []byte) []byte {
 	scanner := newSSEScanner(bytes.NewReader(raw))
 	var payloads []string
@@ -376,7 +377,7 @@ func joinDataPayloads(raw []byte) []byte {
 
 // newSSEScanner is the line scanner every SSE read goes through: a 64 KiB initial buffer that
 // may grow to hold one tool call's whole argument payload plus framing. One constructor, so
-// the parser and the capture split lines under the same bound.
+// a reply's scan loop and the capture split lines under the same bound.
 func newSSEScanner(body io.Reader) *bufio.Scanner {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxToolCallBytes+64*1024)
@@ -486,8 +487,8 @@ func sendFault(ctx context.Context) UpstreamFault {
 	return UpstreamFault{Class: FaultTransport}
 }
 
-// readFault classifies the body-read fault a codec's scanner reported — the one place both wires
-// sort it, beside the Retryable verdict isTransientReadError gives the same error: the caller's
+// readFault classifies the body-read fault a reply's scan loop reported — the one place it is
+// sorted, beside the Retryable verdict isTransientReadError gives the same error: the caller's
 // cancel; the idle cut or a network timeout; a line past the scanner's buffer, which is the
 // reply breaking apogee's own limit; and any other failure — the connection dropped mid-chunk or
 // reset — as the stream cut. A cut that isTransientReadError calls non-retryable (a reset) is
