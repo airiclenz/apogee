@@ -44,7 +44,9 @@
 - Audit findings not filed as issues (blink repaint, preview markdown memo, debounce ticks, long-draft geometry, tool-group shape, cursor-move repaint).
 - Any visual or interaction change.
 
-## 1. Restore the audit benchmarks as kept code
+## 1. Restore the audit benchmarks as kept code — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): copied verbatim from the audit's .txt copy; only the TEMPORARY header was replaced by a doc comment (report path, one-benchmark-at-a-time run line). Nothing failed to compile at HEAD. Baseline 1x numbers (Pi 5): Blocks view N=48/300/900 ≈ 2.0/2.4/2.5 ms, 708 KB, 5263 allocs; repaint 5.0/14.6/40.7 ms; Type N=0/48/300 3.6/6.2/16.5 ms; Stream ≈ 4.0 / 16.4 ms per delta (session=0/300).
 
 **What:** test-only. Copy `docs/skill-runs/code-audit/2026-11-23/profile/zz_perfaudit_bench_test.go.txt` to `internal/tui/perfaudit_bench_test.go`, drop its "TEMPORARY" header comment, and add a doc comment naming the audit report and how to run one benchmark at a time. Keep the helper names (`paSession`, `paModel`, `paStep`, `paViewString`, …) and the benchmark names (`BenchmarkPerfAuditStream`, `…Blocks`, `…Fold`, `…Scroll`, `…Type`, `…Idle`) unchanged — later items and plan 08 cite them. If the source file is absent, rebuild the same benchmarks from the report's Profile section (resumed session of N tool blocks through `--resume`'s `ResumedSession`, 120×40). Fix only what fails to compile at HEAD.
 **Files:** internal/tui/perfaudit_bench_test.go
