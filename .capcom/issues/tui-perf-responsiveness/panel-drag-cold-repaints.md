@@ -4,6 +4,7 @@ status: open
 type: task
 priority: 2
 labels: [perf, tui, slow-box]
+plan: 2026-11-23 - 08 - tui-perf-repaint-plan.md
 created: 2026-11-23T19:29:39Z
 ---
 

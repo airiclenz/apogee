@@ -3,6 +3,7 @@ title: TUI performance and responsiveness — review and refactor
 status: open
 type: task
 priority: 3
+plan: 2026-11-23 - 08 - tui-perf-repaint-plan.md
 created: 2026-11-22T16:52:23Z
 ---
 
