@@ -97,7 +97,9 @@ Depends on item 1.
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestRun' ./internal/workflow/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestWorkflowsView' ./internal/tui/`
 **Commit:** `fix(workflow): a stage that fails its run reads failed`
 
-## 4. The library settles a run that never started
+## 4. The library settles a run that never started — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): consequential edit — internal/workflow/doc.go: made necessary by the new settle.go, which the package's file map (TestDocMapNamesEveryFile) must name
 
 **What:**
 **Goal:** `internal/agent` contains no call to `Store.WriteStatus`; a queued run that is stopped is settled by `(*workflow.Runner).SettleUnstarted(id) (Phase, error)`, which records `stopped` for a pending, running or stopped folder, keeps `done` and `failed`, stamps `Updated` from the Runner's clock, and returns the phase now recorded.

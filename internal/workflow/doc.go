@@ -36,6 +36,8 @@
 // cancel keeps finished items and returns a stopped Result. Runner.Open is Run's own folder open —
 // validate, expand, PlanHash, find or create — for a launch that needs the folder before the run
 // starts; it writes nothing to a found folder and refuses a moved one (ErrFolderMoved).
+// settle.go is Runner.SettleUnstarted: the settling of a run that never started — dropped from a
+// queue before any Run took it — whose folder is recorded stopped unless it is already done or failed.
 // stages.go is every stage kind beyond the fanout. verify and merge work over a fanout's results on
 // runner.go's wave path: verify runs one adversarial child per item its `when:` selects, the
 // engine's briefs/verify.txt leading the stage's brief, and folds each verdict into the item; merge

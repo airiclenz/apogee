@@ -1784,3 +1784,31 @@ func TestBackground_ABlockingWorkflowChildIsRolledBackWithAnAbortedExchange(t *t
 		t.Errorf("root retained after the abort = %v, want the blocking child rolled back", names)
 	}
 }
+
+// TestAgentWritesNoWorkflowStatus pins the workflow library as the only writer of a run's phase:
+// no shipped file of this package names Store.WriteStatus — a run that never started is settled by
+// workflow.Runner.SettleUnstarted, one that ran by its Runner.
+func TestAgentWritesNoWorkflowStatus(t *testing.T) {
+	t.Parallel()
+
+	paths, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("list the package's files: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("found no Go file in the package directory")
+	}
+
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if strings.Contains(string(source), "WriteStatus") {
+			t.Errorf("%s names WriteStatus; a workflow's status is written by internal/workflow alone", path)
+		}
+	}
+}
