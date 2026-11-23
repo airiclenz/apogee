@@ -12,6 +12,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.35.9] — 2026-11-23
+
 - **Fixed: a tool group no longer folds after its first call.** With `ui.tools-auto-collapse` on, a group folded as soon as the model's next Turn started, so a burst of calls made over several Turns collapsed after the first one and the later calls landed in a folded group. The group now stays open while the model keeps adding calls, and folds when something that will not join it follows: the reply or narration text (as soon as it starts to show), a sub-agent group, a note, a user message, or the end of the run. A group that grows past `ui.tools-fold-over` still folds by the size rule, and reasoning never folds a group.
 - **Docs: the tool-group fold rule is recorded.** ADR 0035 gains the amendment `adr-0035-amend-1123` (a finished tool group settles on a follower — the run's reply or narration text first showing, sticky through a stream reset; a later entry of its run; or its run over — never on the next Turn's start; reasoning never folds; `ui.tools-fold-over`'s size rule is the only other fold). `layout.md`, `docs/layout/tool-layout.md`, the `ui.tools-auto-collapse` paragraph of `docs/manual/configuration.md`, the `ToolsAutoCollapse` field comment, the shipped `config.yaml` comment and the glossary's Group summary Note now state that rule.
 - **A workflow whose final write fails is recorded `failed`.** When `items.md` or the final phase could not be written as a run ended, `status.json` could read `done` or `stopped` while the finish note and the Driver event said failed. The run now writes `items.md` first and records `failed` when either write fails, so `/workflows`, the note and the event agree.
