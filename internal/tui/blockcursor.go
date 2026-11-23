@@ -243,12 +243,6 @@ func (m Model) navPanelStops() []panelStop {
 	return m.panelStops(m.frameSpans().slotBottom)
 }
 
-// reseatPanelCursor is m with a panel-standing cursor re-judged against the column as it stands now,
-// as a key resolves it ([Model.navigation]).
-func (m Model) reseatPanelCursor() Model {
-	return m.navigation().m
-}
-
 // blockCursorOwnsKeys reports whether the transcript's cursor may hold the frame's keys this frame.
 // A pending decision — an approval menu, an ask_user question with choices — owns ↑/↓ and ⏎ for its
 // own rows, and a modal cursor that swallowed them would leave a human unable to answer the very

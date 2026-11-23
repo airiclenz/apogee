@@ -236,7 +236,10 @@ NOTES (2026-11-23): prose still naming the removed verbs (`[Model.activatePanelC
 - `go test -race -count=1 -run 'TestNavigation|TestNavMode|TestBlockCursor|TestGroupHeaderFolds|TestRunView|TestOverlayPanesRenderOncePerUpdateAndView' ./internal/tui/`
 **Commit:** `refactor(tui): navigation mode walks two region adapters`
 
-## 11. The run view asks the resolved navigation
+## 11. The run view asks the resolved navigation — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): re-derived from the esc read `m.reseatPanelCursor().cursor.inPanel()` — item 10 already swapped the `^x` read to `m.navigation().runHead()`, so only esc changed here (`region, on := m.navigation().standingOn(); on && region == regionPanel`); `reseatPanelCursor`, left by item 10 only for that read, lost its last caller and is deleted from blockcursor.go.
+NOTES (2026-11-23): the prose naming `[Model.activatePanelCursor]` (doc.go, panelstops.go, `followPanelTarget` in sidepanel.go) now names `[panelRegion.activate]`, and doc.go's `[Model.reseatPanelCursor]` names `[Model.navigation]`; doc.go's navigation-mode paragraph names navmode.go, `[navRegion]`, `[transcriptRegion]` and `[panelRegion]`. The verb grep over `internal/tui/` and `docs/` (historical records and this plan excepted) prints nothing.
 
 **What:**
 **Goal:** `runViewKey` (`internal/tui/runview.go`) asks `m.navigation().standingOn()` and `m.navigation().runHead()`; `grep -n reseatPanelCursor internal/tui/runview.go` prints nothing; `doc.go`'s navigation-mode paragraph names the region adapters. Depends on item 10.

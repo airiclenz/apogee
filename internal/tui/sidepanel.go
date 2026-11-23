@@ -1368,7 +1368,7 @@ func (m Model) resetPanelWidth() Model {
 // — never the shared task-list fold, whose toggle writes `ui.task-list-open`, nor the shared Tools
 // umbrella fold, whose toggle writes `ui.tools-open`: a folded umbrella holding it opens alone —
 // and scrolls it into view (opening the run that holds it first), a usage row opens /usage and an mcp row opens /mcp.
-// ⏎ on the row's stop in navigation mode is the same call ([Model.activatePanelCursor]), so the
+// ⏎ on the row's stop in navigation mode is the same call ([panelRegion.activate]), so the
 // click and the key cannot come to mean different things.
 //
 // Under a modal pane ([Model.modalPaneOpen]) no target acts: the pane owns the keyboard, and a

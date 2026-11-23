@@ -324,17 +324,19 @@
 // column (docs/layout/side-panel-layout.md, "Keyboard"). ⌥↑/⌥↓ enter the walk and move it — in the
 // transcript, or in the panel when the transcript has no stop — plain ↑/↓ move inside the region the
 // cursor stands in, → and ← move it between the two, ⏎ acts on what it stands on, and esc — or
-// typing, which ends the mode and still lands in the prompt — hands the keys back. In the transcript
-// it walks the PAINT'S OWN click map ([lineTarget], blocktarget.go), collapsed to one stop per
-// surface, so the levels a pointer can open are exactly the stops a cursor has and "deepest
-// visible" needs no second rule; ⏎ goes through the mouse's own [Model.toggleBlockAt], so both ways
-// in flip and anchor identically. In the panel it walks the column's own stops ([Model.panelStops],
-// panelstops.go) and ⏎ is the click on one ([Model.activatePanelCursor] through
-// [Model.followPanelTarget]). The state is plain fields on the value-copied Model — on/off, the
-// region, the CONTENT line of the transcript place and the stop IDENTITY of the panel place, each
-// region's place remembered while the cursor stands in the other — re-seated against every fresh
-// paint in [Model.refreshViewport] ([blockCursor.clamp]) and, for the panel, before every key
-// ([Model.reseatPanelCursor]); suspended (keys and mark together) while an approval or ask prompt
+// typing, which ends the mode and still lands in the prompt — hands the keys back. The walk is one
+// rule over two REGION ADAPTERS (navmode.go, [navRegion]; ADR 0111 D12 declines a third), and a key
+// resolves the cursor once ([Model.navigation]) before either answers it. In the transcript
+// ([transcriptRegion]) it walks the PAINT'S OWN click map ([lineTarget], blocktarget.go), collapsed
+// to one stop per surface, so the levels a pointer can open are exactly the stops a cursor has and
+// "deepest visible" needs no second rule; ⏎ goes through the mouse's own [Model.toggleBlockAt], so
+// both ways in flip and anchor identically. In the panel ([panelRegion]) it walks the column's own
+// stops ([Model.panelStops], panelstops.go) and ⏎ is the click on one ([panelRegion.activate]
+// through [Model.followPanelTarget]). The state is plain fields on the value-copied Model — on/off,
+// the region, the CONTENT line of the transcript place and the stop IDENTITY of the panel place,
+// each region's place remembered while the cursor stands in the other — re-seated against every
+// fresh paint in [Model.refreshViewport] ([blockCursor.clamp]) and, for the panel, before every key
+// ([Model.navigation]); suspended (keys and mark together) while an approval or ask prompt
 // owns ↑/↓/⏎; and painted only in the region it stands in, as [markCursorRow]: a ▌
 // (glyphCursorMark) over the row's first cell, so a terminal painting no colour still shows it, and
 // the theme's one selection field across the rest — on a side-panel header, which is two stops,

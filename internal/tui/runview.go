@@ -465,7 +465,7 @@ func (m Model) backHint() string {
 func (m Model) runViewKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		if m.reseatPanelCursor().cursor.inPanel() {
+		if region, on := m.navigation().standingOn(); on && region == regionPanel {
 			return false, m, nil
 		}
 		return true, m.upRun(), nil

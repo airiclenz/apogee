@@ -9,7 +9,7 @@ import (
 // with the target that click follows and an identity that outlives the row it sits on. The pointer
 // resolves a body row through them ([Model.panelTargetAt]), so a stop's target is the click at
 // every row of its span; navigation mode walks the same list, and its ⏎ follows the target of the
-// stop it stands on ([Model.activatePanelCursor]) — the click by another way in. A header is two
+// stop it stands on ([panelRegion.activate]) — the click by another way in. A header is two
 // stops on its one row, as it is two click targets (adr-0111-amend-1109b): its lead pin cell and its
 // title.
 
