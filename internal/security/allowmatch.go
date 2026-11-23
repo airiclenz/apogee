@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+
+	"github.com/airiclenz/apogee/internal/realpath"
 )
 
 // AllowSite is where a `terminal` command line would run, as the Allow-rule matcher needs to
@@ -241,8 +243,10 @@ func allowCandidates(command string, site AllowSite) ([][]string, bool) {
 // cannot vouch for it. It reads `cd` strictly rather than lexically, since bash follows
 // symlinks and CDPATH where a lexical join does not: exactly one operand and no option (`-P`,
 // `-L`, `-`, `--`); no `..` component, no absolute path, no `~`, no `$`, `:` or `\`, nothing
-// empty; and the operand, joined onto from and resolved through every symlink, must be an
-// existing directory inside the resolved Site.Root.
+// empty; and the operand, joined onto from and resolved through every link (a Windows junction
+// included), must be an existing directory inside the resolved Site.Root. Both sides resolve
+// through realpath.ResolveLenient, which never fails, so it is isDirectoryInRoot's os.Stat that
+// keeps a missing root or destination a no.
 func allowedCdDestination(words []string, from string, site AllowSite) (string, bool) {
 	if len(words) != 2 || site.Root == "" {
 		return "", false
@@ -257,10 +261,7 @@ func allowedCdDestination(words []string, from string, site AllowSite) (string, 
 			return "", false
 		}
 	}
-	realRoot, err := filepath.EvalSymlinks(site.Root)
-	if err != nil {
-		return "", false
-	}
+	realRoot := realpath.ResolveLenient(site.Root)
 	if from == "" {
 		start, err := ResolveInRoot(site.Workdir, site.Root)
 		if err != nil || !isDirectoryInRoot(start, realRoot) {
@@ -268,8 +269,8 @@ func allowedCdDestination(words []string, from string, site AllowSite) (string, 
 		}
 		from = start
 	}
-	dest, err := filepath.EvalSymlinks(filepath.Join(from, filepath.FromSlash(operand)))
-	if err != nil || !isDirectoryInRoot(dest, realRoot) {
+	dest := realpath.ResolveLenient(filepath.Join(from, filepath.FromSlash(operand)))
+	if !isDirectoryInRoot(dest, realRoot) {
 		return "", false
 	}
 	return dest, true

@@ -281,7 +281,9 @@ jobs:
         run: go test -race -count=1 -v -run 'TestWindows|TestAtomicWriteRetries' ./internal/session/
       - name: go test (race, config junction tests)
         # `internal/config`'s tests of a Project config read and written under a junctioned
-        # Project root, and of the global config written through a junction: every
+        # Project root, of the global config written through a junction, and of an exec pin
+        # whose file is named through a junction (one leaving the Project root pins nothing,
+        # one staying inside keeps pinning): every
         # `//go:build windows` test in the package carries `Junction` in its name, and the
         # `ProjectWrite` and `ReadProjectLayer` tests beside them skip what POSIX alone
         # can arrange. Only those run, because the rest of `internal/config` has never been
@@ -293,7 +295,9 @@ jobs:
         # `internal/security`'s path-safety tests under a real junction: a junction leaving the
         # workspace reads as an escape, one staying inside resolves, a junctioned root contains
         # its own files, and a root spelled through a subst drive contains a junctioned file
-        # (that last one fails here rather than skips when `subst` maps no drive). Every
+        # (that last one fails here rather than skips when `subst` maps no drive); and its
+        # Allow-rule tests of a `cd` through a junction (one leaving the workspace no longer
+        # matches a rule, one staying inside keeps matching). Every
         # `//go:build windows` test in the package carries `Junction` in its name. Only those
         # run, because the rest of `internal/security` has never been proven on Windows. A new
         # Windows-tagged test here takes a name this filter matches. `!cancelled()` runs this

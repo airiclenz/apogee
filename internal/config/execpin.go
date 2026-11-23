@@ -14,6 +14,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/adoption"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/realpath"
 )
 
 // The Adoption kinds of the two execution keys a Project config may propose (ADR 0104 §1). They
@@ -228,7 +229,7 @@ func textsOf(value any) []string {
 }
 
 // pinFile pins name when it resolves, against the Project root, to an existing regular file whose
-// path — as spelled and with its symlinks evaluated — lies inside the root. It reports false for
+// path — as spelled and with its links evaluated — lies inside the root. It reports false for
 // any other name, a missing file included, and fails only when such a file cannot be read.
 func pinFile(projectRoot, realRoot, name string) (pinnedFile, bool, error) {
 	if strings.TrimSpace(name) == "" {
@@ -263,13 +264,11 @@ func relativeInsideRoot(root, path string) (string, bool) {
 	return relative, true
 }
 
-// realPathOrSelf is path with its symlinks evaluated, or path cleaned when they cannot be.
+// realPathOrSelf is path with its links evaluated (a Windows junction included), or path itself
+// when they cannot be. It is realpath.ResolveLenient, which never fails: the root and a file
+// under it resolve the same way, so the two always share one spelling.
 func realPathOrSelf(path string) string {
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return filepath.Clean(path)
-	}
-	return resolved
+	return realpath.ResolveLenient(path)
 }
 
 // fileDigest is the hex SHA-256 of the file at path.

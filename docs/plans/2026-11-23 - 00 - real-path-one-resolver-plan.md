@@ -152,7 +152,12 @@ Depends on item 4.
 **Acceptance:** `go build ./... && GOOS=windows go vet ./internal/realpath/ && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/realpath/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestProjectConfigControlPlane' ./internal/security/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestProjectConfigControlPlane' ./internal/agent/`
 **Commit:** `refactor(realpath): the project root's spellings are computed in the leaf`
 
-## 6. No raw EvalSymlinks outside the leaf
+## 6. No raw EvalSymlinks outside the leaf — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): `.github/workflows/ci.yml` gains no `-run` step: the existing `internal/config` and `internal/security` junction steps already select every test whose name carries `Junction`, so only their comments were widened to name the new exec-pin and Allow-rule tests.
+NOTES (2026-11-23): `internal/realpath/guard_test.go` already existed (item 3's retired-delegate guard); `TestNoRawEvalSymlinksOutsideTheLeaf` was appended to it. The guard also follows a renamed `path/filepath` import and reports a dot-import, beyond the plan's literal selector match.
+NOTES (2026-11-23): `allowedCdDestination` no longer has an error branch for the root (`ResolveLenient` cannot fail); a missing root or destination stays a no through `isDirectoryInRoot`'s `os.Stat`, as the plan's Read-first note states. `realPathOrSelf` keeps its name and is now `realpath.ResolveLenient`, whose own fallback replaces the `filepath.Clean` one (absolute rather than merely cleaned for a relative path that resolves nowhere).
+NOTES (2026-11-23): the four new Windows junction tests are compile-checked here (`GOOS=windows go vet`) and unproven until the `test-windows` CI job runs; the guard was probed locally with a throwaway file holding an aliased `filepath.EvalSymlinks` reference (it failed, then the file was removed).
 
 Depends on items 2, 3 and 4.
 

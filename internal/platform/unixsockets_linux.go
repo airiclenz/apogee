@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/airiclenz/apogee/internal/realpath"
 )
 
 // The pathname unix sockets a Linux backend closes (ADR 0112). A same-user service listening on
@@ -76,7 +78,7 @@ type unixSocketLink struct {
 
 // currentUnixSocketHost reads this process's host state for planUnixSockets: its uid, its
 // environment, its home and temp directories, and the filesystem through os.Stat and
-// filepath.EvalSymlinks, with the production containerSocketCandidates. It is read at Confine
+// realpath.Resolve, with the production containerSocketCandidates. It is read at Confine
 // time, so the box sees the environment the confined command is launched from.
 func currentUnixSocketHost() unixSocketHost {
 	// A home directory apogee cannot name protects nothing and is skipped by the plan.
@@ -104,7 +106,7 @@ func readSymlink(p string) (string, bool) {
 
 // resolveExisting returns p with every symlink followed, and whether p exists at all.
 func resolveExisting(p string) (string, bool) {
-	resolved, err := filepath.EvalSymlinks(p)
+	resolved, err := realpath.Resolve(p)
 	if err != nil {
 		return "", false
 	}
