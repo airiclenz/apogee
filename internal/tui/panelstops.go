@@ -40,18 +40,19 @@ func (s panelStop) spans(y int) bool {
 	return y >= s.y && y < s.y+s.height
 }
 
-// panelStops is the column's stops in paint order, laid out over rows rows by the same layout the
-// paint reads ([panelLayout] over [Model.panelSections]). Every header is two stops on its row, the
-// pin cell's first — its target the pin toggle — and then the title's, its target the fold toggle;
-// a body row is one where it has a target, and adjacent rows that share one
-// target are one stop (the tasks body, the usage rows, the mcp rows). The `+N more` row, a spacer
-// between sections and a body row with nothing to open are none.
+// panelStops is the column's stops in paint order over rows rows, as the frame View paints at
+// this geometry lays them out ([Model.newPanelFrame]).
 func (m Model) panelStops(rows int) []panelStop {
-	sections := m.panelSections()
-	if len(sections) == 0 {
-		return nil
-	}
-	layout := panelLayout(sections, rows)
+	return m.newPanelFrame(m.panelGeometry(), rows).stops
+}
+
+// layPanelStops is the column's stops in paint order, over layout — the layout of sections the paint
+// reads ([panelLayout]). Every header is two stops on its row, the pin cell's first — its target the
+// pin toggle — and then the title's, its target the fold toggle; a body row is one where it has a
+// target, and adjacent rows that share one target are one stop (the tasks body, the usage rows, the
+// mcp rows). The `+N more` row, a spacer between sections and a body row with nothing to open are
+// none.
+func (m Model) layPanelStops(sections []panelSection, layout []panelLine) []panelStop {
 	stops := make([]panelStop, 0, len(layout))
 	for y, line := range layout {
 		if line.section < 0 {

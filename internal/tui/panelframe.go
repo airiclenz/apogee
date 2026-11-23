@@ -154,3 +154,37 @@ func (g panelGeometry) gripAt(x int) (grab int, isGrip bool) {
 	}
 	return grab, true
 }
+
+// panelFrame is the side panel as one frame paints and walks it: its geometry, the sections painted
+// once at the geometry's content width, their layout over the rows above the session-name rule, and
+// the stops laid out over that same layout. View builds one per frame and paints the column and the
+// cursor's row from it ([Model.sidePanelColumnIn], [Model.panelCursorRowIn]), so the sections are
+// painted once a frame and the stops land on the rows the paint put them on. It is built on a
+// per-Update copy and never held across Updates (ADR 0011), and its slices are never written after
+// [Model.newPanelFrame] returns.
+type panelFrame struct {
+	// geometry is the horizontal geometry the sections were painted at.
+	geometry panelGeometry
+	// sections is the shown sections, painted at geometry's content width ([Model.panelSectionsIn]).
+	sections []panelSection
+	// layout is sections laid out over rows by the overflow rule ([panelLayout]); nil when no section
+	// is shown.
+	layout []panelLine
+	// rows is the column's height: the rows above the session-name rule.
+	rows int
+	// stops is the column's stops over layout, in paint order ([Model.layPanelStops]).
+	stops []panelStop
+}
+
+// newPanelFrame builds the side panel's frame at geometry over rows rows — the row bound the caller
+// read off the frame it composes (View's belowSlot, or the spans a click chain snapshots). It never
+// composes a frame of its own ([Model.frameSpans]), so a width read builds none.
+func (m Model) newPanelFrame(geometry panelGeometry, rows int) panelFrame {
+	frame := panelFrame{geometry: geometry, sections: m.panelSectionsIn(geometry), rows: rows}
+	if len(frame.sections) == 0 {
+		return frame
+	}
+	frame.layout = panelLayout(frame.sections, rows)
+	frame.stops = m.layPanelStops(frame.sections, frame.layout)
+	return frame
+}

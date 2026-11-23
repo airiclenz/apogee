@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"slices"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -333,5 +336,113 @@ func TestPanelWidthNeverComposesTheFrame(t *testing.T) {
 	_ = m.frameSpans()
 	if rendersSince() == 0 {
 		t.Error("frameSpans rendered no pane: the counter cannot see a composed frame")
+	}
+}
+
+// TestPanelFrameStopsLandOnPaintedRows pins the frame's stops to the rows View paints: every stop of
+// a frame built over View's own row bound sits on the painted row of the section it names — a
+// header's two stops on the row its title paints on, a body stop on the row its body text paints on
+// — and the panelStops delegate answers the same stops.
+func TestPanelFrameStopsLandOnPaintedRows(t *testing.T) {
+	t.Parallel()
+	pre := panelModel(t, domain.DefaultSidePanelSections, 30, panelStopEvents(t)...).withFrameSpans()
+	rows := pre.frameSpans().slotBottom
+
+	frame := pre.newPanelFrame(pre.panelGeometry(), rows)
+
+	if len(frame.stops) == 0 {
+		t.Fatal("the frame lays out no stops")
+	}
+	painted := panelText(t, pre)
+	for _, stop := range frame.stops {
+		if stop.y >= len(painted) || stop.y >= len(frame.layout) {
+			t.Fatalf("stop %+v sits on row %d, below the %d painted rows", stop.id, stop.y, len(painted))
+		}
+		line := frame.layout[stop.y]
+		section := frame.sections[line.section]
+		if section.kind != stop.id.section {
+			t.Errorf("stop %+v sits on a row of the %s section", stop.id, section.kind)
+		}
+		want := section.title
+		if !stop.id.isHeader {
+			want = strings.TrimSpace(ansi.Strip(section.body[line.body]))
+		}
+		if !strings.Contains(painted[stop.y], want) {
+			t.Errorf("stop %+v sits on row %d, painted %q, want it to paint %q", stop.id, stop.y, painted[stop.y], want)
+		}
+	}
+	if delegated := pre.panelStops(rows); !slices.Equal(delegated, frame.stops) {
+		t.Errorf("panelStops answers\n%+v\nwant the frame's\n%+v", delegated, frame.stops)
+	}
+}
+
+// TestPanelFrameOverlaidPaintsAtOverlayWidth pins a frame built as overlaid on a window under the
+// gate to the overlay's width: its sections and its column are painted across the overlay's content
+// and paint widths, not the hidden docked column's nothing, and every header keeps its title.
+func TestPanelFrameOverlaidPaintsAtOverlayWidth(t *testing.T) {
+	t.Parallel()
+	m := overlayModel(t, domain.SidePanelShowAuto, 100, domain.SidePanelWidth{}, panelStopEvents(t)...)
+	if m.panelGeometry().contentWidth != 0 {
+		t.Fatal("setup: the column is painted before the overlay is asked for")
+	}
+
+	frame := m.newPanelFrame(m.panelGeometryAs(true), 20)
+
+	geometry := frame.geometry
+	if !geometry.isOverlaid || geometry.contentWidth <= 0 {
+		t.Fatalf("the frame is not overlaid (overlaid %v, content width %d)", geometry.isOverlaid, geometry.contentWidth)
+	}
+	content := m.sidePanelContentIn(frame)
+	headers := 0
+	for y, line := range frame.layout {
+		if line.section < 0 || line.body >= 0 {
+			continue
+		}
+		headers++
+		if got := m.th.measure.Width(content[y]); got != geometry.contentWidth {
+			t.Errorf("row %d: the header is %d cells wide, want the overlay's content width %d", y, got, geometry.contentWidth)
+		}
+		if title := frame.sections[line.section].title; !strings.Contains(ansi.Strip(content[y]), title) {
+			t.Errorf("row %d: the header %q lost its title %q", y, ansi.Strip(content[y]), title)
+		}
+	}
+	if headers == 0 {
+		t.Fatal("the overlaid frame paints no header")
+	}
+	for y, row := range m.sidePanelColumnIn(frame) {
+		if got := m.th.measure.Width(row); got != geometry.paintWidth {
+			t.Errorf("column row %d is %d cells wide, want the overlay's paint width %d", y, got, geometry.paintWidth)
+		}
+	}
+}
+
+// TestPanelSectionsPaintOncePerView pins the sections to one paint per View — the paint and the
+// cursor's row read one frame — whether the column docks with or without the navigation cursor in
+// it, or is painted as the overlay. It reads the process-wide panelSectionPaints counter, so it does
+// not run in parallel.
+func TestPanelSectionsPaintOncePerView(t *testing.T) {
+	docked := panelModel(t, domain.DefaultSidePanelSections, 30, panelStopEvents(t)...)
+	inPanel := step(t, step(t, docked, keyAltUp()), keyRight())
+	if !inPanel.cursor.inPanel() || !inPanel.blockCursorOwnsKeys() {
+		t.Fatal("setup: → does not stand the navigation cursor in the docked column")
+	}
+	cases := []struct {
+		name string
+		m    Model
+	}{
+		{"docked", docked},
+		{"docked with the cursor in the column", inPanel},
+		{"overlaid", overlaidModel(t)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			panelSectionPaints.Store(0)
+
+			_ = tc.m.View()
+
+			if got := panelSectionPaints.Load(); got != 1 {
+				t.Errorf("one View painted the sections %d times, want once", got)
+			}
+		})
 	}
 }

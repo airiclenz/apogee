@@ -3790,10 +3790,12 @@ func (m Model) View() tea.View {
 	// rows instead: they were laid out at the whole window's width, which the overlay never changes,
 	// so it covers their last columns and re-wraps nothing — and one column further left, the blank
 	// column it leaves between their text and its separator, where the window has that column to
-	// spare (panelOverlayGapHung; otherwise the blank comes out of the overlay's own width).
-	if width := m.panelPaintWidth(); width > 0 {
-		column, left := m.sidePanelColumn(belowSlot), m.width-width
-		if m.panelOverlayGapHung() {
+	// spare (panelOverlayGapHung; otherwise the blank comes out of the overlay's own width). The
+	// column is painted from the frame's one panel frame (newPanelFrame), built over the rows this
+	// walk left it, so the sections are painted once and the cursor's row lands on the row they paint.
+	if geometry := m.panelGeometry(); geometry.paintWidth > 0 {
+		column, left := m.sidePanelColumnIn(m.newPanelFrame(geometry, belowSlot)), m.width-geometry.paintWidth
+		if geometry.isOverlayGapHung {
 			for i := range column {
 				column[i] = sidePanelOverlayGap + column[i]
 			}

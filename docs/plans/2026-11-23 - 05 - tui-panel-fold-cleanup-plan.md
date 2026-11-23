@@ -176,7 +176,12 @@ The geometry gates the overlay itself: `overlaid = input.overlaid && overlayable
 - `go test -race -count=1 -run 'TestPanelGeometry|TestPanelWidthNeverComposesTheFrame|TestSidePanel|TestOverlay|TestSubAgentRowFacts|TestSlotPanesFitBesideTheSidePanel|TestSettingsClickBesideTheSidePanel|TestSettingsPaneReReadMovesTheSidePanelWidth' ./internal/tui/`
 **Commit:** `refactor(tui): the side panel's geometry is one pure value`
 
-## 8. One panel frame per View for paint and stops
+## 8. One panel frame per View for paint and stops — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): the frame builder is `Model.newPanelFrame(geometry, rows)` (a Model method: painting the sections and the body stops reads the Model); the geometry-taking paint functions use an `In` suffix (`panelSectionsIn`, `panelSectionIn`, `panelBodyLeadIn`, `panelTextRoomIn`, `sidePanelContentIn`, `sidePanelColumnIn`, `panelCursorRowIn`), and the stop walk moved from `panelStops` into `layPanelStops(sections, layout)` in panelstops.go.
+NOTES (2026-11-23): `panelSubAgentRow`, `panelFileRow` and `panelMCPRow` also keep zero-geometry delegates (over new `…In` versions), since sidepanel_test.go calls them; `panelRow`, `panelHeaderRow`, `panelTaskRow`, `panelUsageRows` and `panelFillRow` (no test callers) take the geometry as a first parameter instead. `panelTaskRow`'s three branches now pick glyph and style and share one `panelRow` call.
+NOTES (2026-11-23): the section-paint counter is `panelSectionPaints` (sidepanel.go), counted once per `panelSectionsIn` call; `panelTargetAt` and `navPanelStops` still reach the frame through the `panelStops(rows)` delegate (items 9 and 10 own those paths).
+NOTES (2026-11-23): consequential edit — internal/tui/doc.go: made necessary by the panel frame landing in panelframe.go (the file map's panelframe.go role named only the geometry).
 
 **What:**
 **Goal:** `View` builds one `panelFrame` (geometry, sections painted once at its content width, layout, rows, stops); `sidePanelColumn` and `panelCursorRow` read that frame, so the sections are painted once per frame. Depends on item 7.

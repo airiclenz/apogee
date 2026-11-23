@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -432,9 +433,15 @@ func (m *Model) resetPanelDisk() {
 	m.panelDisk = panelDiskCheck{gen: m.panelDisk.gen + 1}
 }
 
-// sidePanelColumn paints the column's rows rows, each exactly [Model.panelPaintWidth] columns in the
-// width authority's measure: the separator, the gutter, the content squared to its width
-// ([Model.panelContentWidth]) and the right margin ([Model.panelChrome]) — led by the overlay's blank
+// sidePanelColumn paints the column's rows rows as the frame at this geometry lays them out
+// ([Model.sidePanelColumnIn]).
+func (m Model) sidePanelColumn(rows int) []string {
+	return m.sidePanelColumnIn(m.newPanelFrame(m.panelGeometry(), rows))
+}
+
+// sidePanelColumnIn paints frame's column: its rows, each exactly the geometry's paint width in the
+// width authority's measure — the separator, the gutter, the content squared to the content width
+// and the right margin ([panelChrome]) — led by the overlay's blank
 // column where that comes out of the column's own width. With no
 // section to show it paints `nothing live` on its second row, below the blank top row every column
 // leads with ([panelLayout]), and leaves the rest blank — the column
@@ -443,21 +450,21 @@ func (m *Model) resetPanelDisk() {
 // strokes read as one recessive edge where the bar stands beside it, and it is accent-bold while a
 // drag holds it ([panelDrag]). The row navigation mode's
 // cursor stands on, while it stands in the column, wears the transcript's bar ([markPanelCursorRow],
-// [Model.panelCursorRow]): the ▌ in the gutter's first cell, right of the separator, and the selection tone
+// [Model.panelCursorRowIn]): the ▌ in the gutter's first cell, right of the separator, and the selection tone
 // across the content — on a header, across the part its stop is: the pin cell or the title. The
 // separator itself is untouched, so the grip stays where the pointer finds it.
-func (m Model) sidePanelColumn(rows int) []string {
+func (m Model) sidePanelColumnIn(frame panelFrame) []string {
 	ruleStyle := m.th.scrollTrack
 	if m.panelDrag.active {
 		ruleStyle = m.th.panelDragRule // the separator the pointer holds is lit (adr-0110-amend-1108 (b))
 	}
 	separator := ruleStyle.Render(sidePanelSeparator)
-	content := m.sidePanelContent(rows)
-	chrome, contentWidth := m.panelChrome(), m.panelContentWidth()
+	content := m.sidePanelContentIn(frame)
+	chrome, contentWidth := frame.geometry.chrome, frame.geometry.contentWidth
 	inset, gutter := strings.Repeat(sidePanelOverlayGap, chrome.inset), strings.Repeat(" ", chrome.gutter)
 	margin := strings.Repeat(" ", chrome.margin)
-	cursorRow, cursorStop := m.panelCursorRow(rows)
-	column := make([]string, rows)
+	cursorRow, cursorStop := m.panelCursorRowIn(frame)
+	column := make([]string, frame.rows)
 	for i := range column {
 		line := ""
 		if i < len(content) {
@@ -472,24 +479,29 @@ func (m Model) sidePanelColumn(rows int) []string {
 	return column
 }
 
-// sidePanelContent is the column's content rows, at most rows of them: the shown sections laid out
-// by the overflow rule ([panelAllocation]), or the one `nothing live` line — either led by the
-// column's blank top row ([panelLayout]).
+// sidePanelContent is the column's content rows, at most rows of them, as the frame at this
+// geometry lays them out ([Model.sidePanelContentIn]).
 func (m Model) sidePanelContent(rows int) []string {
-	sections := m.panelSections()
+	return m.sidePanelContentIn(m.newPanelFrame(m.panelGeometry(), rows))
+}
+
+// sidePanelContentIn is frame's content rows, at most its rows of them: the shown sections as its
+// layout lays them out by the overflow rule ([panelAllocation]), or the one `nothing live` line —
+// either led by the column's blank top row ([panelLayout]).
+func (m Model) sidePanelContentIn(frame panelFrame) []string {
+	sections := frame.sections
 	if len(sections) == 0 {
 		return []string{"", m.th.statusFaint.Render(sidePanelEmpty)}
 	}
-	layout := panelLayout(sections, rows)
-	lines := make([]string, 0, len(layout))
-	for _, line := range layout {
+	lines := make([]string, 0, len(frame.layout))
+	for _, line := range frame.layout {
 		switch {
 		case line.isSpacer:
 			lines = append(lines, "")
 		case line.more > 0:
 			lines = append(lines, m.th.toolMarker.Render("+"+strconv.Itoa(line.more)+sidePanelMore))
 		case line.body < 0:
-			lines = append(lines, m.panelHeaderRow(sections[line.section], line.isOpen))
+			lines = append(lines, m.panelHeaderRow(frame.geometry, sections[line.section], line.isOpen))
 		default:
 			lines = append(lines, sections[line.section].body[line.body])
 		}
@@ -514,8 +526,9 @@ type panelLine struct {
 // one panelLine per content row, led by one blank row that is no stop — so the first header paints
 // on the column's second row, clear of the window's top edge — then the sections over the rows
 // below it, a blank spacer before every header but the first where the allocation has room for
-// them. It is the one layout the paint ([Model.sidePanelContent]) and the stops
-// ([Model.panelStops]) — so the pointer — both read, so a click names the row it lands on.
+// them. It is the one layout the paint ([Model.sidePanelContentIn]) and the stops
+// ([Model.layPanelStops]) — so the pointer — both read off one frame ([Model.newPanelFrame]), so a
+// click names the row it lands on.
 func panelLayout(sections []panelSection, rows int) []panelLine {
 	kept, isExpanded, hasSpacers := panelAllocation(sections, max(rows-1, 0))
 	lines := make([]panelLine, 0, max(rows, 1))
@@ -598,11 +611,24 @@ func panelTier(section panelSection) int {
 	}
 }
 
-// panelSections is the sections the column shows, in list order: every entry of
-// `ui.side-panel.sections` that is pinned, or auto while its live rule holds, each folded where
-// `ui.side-panel.folded` lists it. Both are read off the Options on every frame, so a fold landed
-// by a click, a `/settings` apply or a re-read of the file paints on the next one.
+// panelSectionPaints counts how many times the side panel's sections were painted
+// ([Model.panelSectionsIn]). It exists for the test that pins one paint per View
+// (TestPanelSectionsPaintOncePerView) and is read by nothing else; it is atomic because the panel
+// paints from parallel tests, and that test reads it only when running alone.
+var panelSectionPaints atomic.Int64
+
+// panelSections is the sections the column shows, painted at this frame's geometry
+// ([Model.panelSectionsIn]).
 func (m Model) panelSections() []panelSection {
+	return m.panelSectionsIn(m.panelGeometry())
+}
+
+// panelSectionsIn is the sections the column shows, in list order, painted at geometry's content
+// width: every entry of `ui.side-panel.sections` that is pinned, or auto while its live rule holds,
+// each folded where `ui.side-panel.folded` lists it. Both are read off the Options on every frame,
+// so a fold landed by a click, a `/settings` apply or a re-read of the file paints on the next one.
+func (m Model) panelSectionsIn(geometry panelGeometry) []panelSection {
+	panelSectionPaints.Add(1)
 	entries, err := domain.ParseSidePanelSections(string(m.opts.UI.SidePanelSections))
 	if err != nil {
 		// Unreachable from a running session: the config loader and /settings both refuse a list
@@ -615,7 +641,7 @@ func (m Model) panelSections() []panelSection {
 		if entry.Mode == domain.SidePanelModeHidden {
 			continue
 		}
-		section, isLive := m.panelSection(entry.Section)
+		section, isLive := m.panelSectionIn(geometry, entry.Section)
 		if entry.Mode == domain.SidePanelModeAuto && !isLive {
 			continue
 		}
@@ -627,38 +653,45 @@ func (m Model) panelSections() []panelSection {
 	return shown
 }
 
-// panelSection paints one section from the folded state, and reports whether its live rule holds.
-// Every section but sub-agents and mcp reads the run the human is looking at ([Model.viewedRun]) —
+// panelSection paints one section at this frame's geometry ([Model.panelSectionIn]), and reports
+// whether its live rule holds.
+func (m Model) panelSection(section domain.SidePanelSection) (panelSection, bool) {
+	return m.panelSectionIn(m.panelGeometry(), section)
+}
+
+// panelSectionIn paints one section from the folded state at geometry's content width, and reports
+// whether its live rule holds. Every section but sub-agents and mcp reads the run the human is looking at ([Model.viewedRun]) —
 // the top-level run outside Run view — and the usage section measures that run's fill as the
 // status-line gauge states it ([Model.viewedFill]). Sub-agents lists every run and marks the viewed
 // one (ADR 0110 decision 12); mcp reads the process's MCP fold ([sessionView.mcpServers]), which no
 // run owns, and is live while any server is not connected (ADR 0111 decision 10).
-func (m Model) panelSection(section domain.SidePanelSection) (panelSection, bool) {
+func (m Model) panelSectionIn(geometry panelGeometry, section domain.SidePanelSection) (panelSection, bool) {
 	scope := panelRunKey(m.viewedRun())
 	switch section {
 	case domain.SidePanelSubAgents:
 		view := m.panel.SubAgents()
 		paint := func(row sidepanel.SubAgentRow) string {
-			return m.panelSubAgentRow(row, m.inRunView() && row.Run == scope)
+			return m.panelSubAgentRowIn(geometry, row, m.inRunView() && row.Run == scope)
 		}
 		return panelSection{
 			title: "Sub-agents", summary: view.Summary, body: paintPanelRows(view.Rows, paint), subAgents: view.Rows,
 		}, view.IsLive
 	case domain.SidePanelTasks:
 		view := m.panel.Tasks(scope)
-		return panelSection{title: "Tasks", summary: view.Summary, body: paintPanelRows(view.Rows, m.panelTaskRow)},
+		return panelSection{title: "Tasks", summary: view.Summary, body: paintPanelRows(view.Rows, func(row sidepanel.TaskRow) string { return m.panelTaskRow(geometry, row) })},
 			view.IsLive
 	case domain.SidePanelChangedFiles:
 		view := m.changedFileRows(scope)
 		return panelSection{
-			title: "Changed files", summary: view.Summary, body: paintPanelRows(view.Rows, m.panelFileRow), files: view.Rows,
+			title: "Changed files", summary: view.Summary, body: paintPanelRows(view.Rows, func(row sidepanel.FileRow) string { return m.panelFileRowIn(geometry, row) }),
+			files: view.Rows,
 		}, view.IsLive
 	case domain.SidePanelUsage:
 		view := m.panel.Usage(scope).WithFill(m.panelFill())
-		return panelSection{title: "Usage", summary: view.Summary, body: m.panelUsageRows(view)}, view.IsLive
+		return panelSection{title: "Usage", summary: view.Summary, body: m.panelUsageRows(geometry, view)}, view.IsLive
 	case domain.SidePanelMCP:
 		servers := m.mcpServers.Rows()
-		return panelSection{title: "MCP", summary: mcpPanelSummary(servers), body: paintPanelRows(servers, m.panelMCPRow)},
+		return panelSection{title: "MCP", summary: mcpPanelSummary(servers), body: paintPanelRows(servers, func(row sidepanel.MCPServerRow) string { return m.panelMCPRowIn(geometry, row) })},
 			m.mcpServers.IsLive()
 	default:
 		return panelSection{}, false
@@ -697,9 +730,9 @@ func paintPanelRows[R any](rows []R, paint func(R) string) []string {
 // ([Model.panelTextRoom]) — painted in style, then right (painted) flush against the column's right
 // edge, one blank cell at least from the text. On a narrow column the lead and the right-hand facts
 // alone can outrun the room: the pad then floors at nothing and the row runs long, for
-// sidePanelColumn's squareLine to cut.
-func (m Model) panelRow(lead, text string, style lipgloss.Style, right string) string {
-	room := m.panelTextRoom(lead, right)
+// sidePanelColumn's squareLine to cut. geometry is the frame's the row is painted at.
+func (m Model) panelRow(geometry panelGeometry, lead, text string, style lipgloss.Style, right string) string {
+	room := m.panelTextRoomIn(geometry, lead, right)
 	text = truncateToWidth(m.th, text, room)
 	row := lead + style.Render(text)
 	if right == "" {
@@ -708,26 +741,37 @@ func (m Model) panelRow(lead, text string, style lipgloss.Style, right string) s
 	return row + strings.Repeat(" ", max(0, room-m.th.measure.Width(text)+1)) + right
 }
 
-// panelTextRoom is the cells a body row's text has between lead and right (both painted, right
-// empty for none): the content width less the lead, and less the right-hand facts and the blank
-// cell before them. It goes negative on a column too narrow for the lead and facts alone.
+// panelTextRoom is the cells a body row's text has between lead and right at this frame's geometry
+// ([Model.panelTextRoomIn]).
 func (m Model) panelTextRoom(lead, right string) int {
-	room := m.panelContentWidth() - m.th.measure.Width(lead)
+	return m.panelTextRoomIn(m.panelGeometry(), lead, right)
+}
+
+// panelTextRoomIn is the cells a body row's text has between lead and right (both painted, right
+// empty for none): geometry's content width less the lead, and less the right-hand facts and the
+// blank cell before them. It goes negative on a column too narrow for the lead and facts alone.
+func (m Model) panelTextRoomIn(geometry panelGeometry, lead, right string) int {
+	room := geometry.contentWidth - m.th.measure.Width(lead)
 	if right != "" {
 		room -= m.th.measure.Width(right) + 1
 	}
 	return room
 }
 
-// panelBodyLead is a body row's lead: the body indent ([panelChrome.indent]) — its first cell
+// panelBodyLead is a body row's lead at this frame's geometry ([Model.panelBodyLeadIn]).
+func (m Model) panelBodyLead(marker, glyph string) string {
+	return m.panelBodyLeadIn(m.panelGeometry(), marker, glyph)
+}
+
+// panelBodyLeadIn is a body row's lead at geometry: the body indent ([panelChrome.indent]) — its first cell
 // holding marker (painted, or empty for none) — then glyph (painted, or empty for a blank lead) in
 // a lead cell the panel-wide lead width wide ([Model.panelLeadWidth]), padded on the right, then
 // one blank cell. Every section's body rows are led by it, so their text starts in one column
 // across the column, and a marker in the indent costs no width and moves no column. On a column so
 // narrow the indent has yielded too few cells for the marker ([Model.panelChrome]) the marker and a
 // blank cell follow the lead instead, so the row still wears it.
-func (m Model) panelBodyLead(marker, glyph string) string {
-	indent, markerWidth := m.panelChrome().indent, m.th.measure.Width(marker)
+func (m Model) panelBodyLeadIn(geometry panelGeometry, marker, glyph string) string {
+	indent, markerWidth := geometry.chrome.indent, m.th.measure.Width(marker)
 	pad := max(0, m.panelLeadWidth()-m.th.measure.Width(glyph))
 	lead := glyph + strings.Repeat(" ", pad) + " "
 	switch {
@@ -747,8 +791,9 @@ func (m Model) panelBodyLead(marker, glyph string) string {
 // showing, whether the human folded it or the overflow squeezed it ([panelLine]). It is the
 // transcript's header row (umbrellaHeader):
 // the same leader arithmetic ([leaderRowIn]) in the same `tool-leader` dots, and the indicator in
-// the same field ([indicatorRow], [toolRowCells]), so a panel header folds like a tool block.
-func (m Model) panelHeaderRow(section panelSection, isOpen bool) string {
+// the same field ([indicatorRow], [toolRowCells]), so a panel header folds like a tool block. It is
+// laid out across geometry's content width.
+func (m Model) panelHeaderRow(geometry panelGeometry, section panelSection, isOpen bool) string {
 	text := section.title
 	if section.summary != "" {
 		text += " (" + section.summary + ")"
@@ -757,7 +802,7 @@ func (m Model) panelHeaderRow(section panelSection, isOpen bool) string {
 	if section.isPinned {
 		pin = m.th.glyphs.panelPinned
 	}
-	width := m.panelContentWidth()
+	width := geometry.contentWidth
 	row := leaderRowIn(m.th, text, panelTitlePaint(m.th, section.title), branchSummary{}, pin+" ", paintPanelPin,
 		toolRowCells(m.th, width), isOpen, noRemainder)
 	return indicatorRow(m.th, row, width, stateIndicator(m.th, isOpen))
@@ -792,8 +837,14 @@ func paintPanelPin(th theme, marker string, _ bool) string {
 // marked as the current task is: `▸` in the first cell of its body indent, and its name, both in
 // the current task's style. The phase word speaks in the transcript's outcome tones
 // ([summaryStyle]): `done` in `successMark`, `failed` in `errorText` like its `✗`, and the
-// unfinished phases faint like the elapsed time and fill after them.
+// unfinished phases faint like the elapsed time and fill after them. It is painted at this frame's
+// geometry ([Model.panelSubAgentRowIn]).
 func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string {
+	return m.panelSubAgentRowIn(m.panelGeometry(), row, isViewed)
+}
+
+// panelSubAgentRowIn is the delegation row [Model.panelSubAgentRow] describes, painted at geometry.
+func (m Model) panelSubAgentRowIn(geometry panelGeometry, row sidepanel.SubAgentRow, isViewed bool) string {
 	var glyph, phase string
 	tone := m.th.statusFaint
 	switch {
@@ -824,7 +875,7 @@ func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string
 	if isViewed {
 		marker, style = m.th.panelCurrent.Render(m.th.glyphs.panelCurrent), m.th.panelCurrent
 	}
-	return m.panelRow(m.panelBodyLead(marker, glyph), row.Name, style, facts)
+	return m.panelRow(geometry, m.panelBodyLeadIn(geometry, marker, glyph), row.Name, style, facts)
 }
 
 // panelLeadWidth is the width of every body row's lead cell, in every section: the widest of the
@@ -850,8 +901,13 @@ func (m Model) panelLeadWidth() int {
 // `errorText` as /mcp paints it ([popupRowFailed]). The name is clipped first so the state and count
 // stay in view; on a column too narrow even for them the row runs long, for sidePanelColumn's
 // squareLine to cut. The name is untrusted text: the fold strips it and this strips it again, which
-// is idempotent.
+// is idempotent. It is painted at this frame's geometry ([Model.panelMCPRowIn]).
 func (m Model) panelMCPRow(row sidepanel.MCPServerRow) string {
+	return m.panelMCPRowIn(m.panelGeometry(), row)
+}
+
+// panelMCPRowIn is the MCP server row [Model.panelMCPRow] describes, painted at geometry.
+func (m Model) panelMCPRowIn(geometry panelGeometry, row sidepanel.MCPServerRow) string {
 	facts := m.th.statusFaint.Render(string(row.Phase))
 	if row.Phase == domain.MCPServerFailed {
 		facts = m.th.errorText.Render(string(row.Phase))
@@ -859,7 +915,8 @@ func (m Model) panelMCPRow(row sidepanel.MCPServerRow) string {
 	if mcpPanelServes(row) {
 		facts += m.th.statusFaint.Render(sidePanelPartSeparator + plural(row.Tools, "tool"))
 	}
-	return m.panelRow(m.panelBodyLead("", ""), firstLine(stripEscapes(row.Server)), lipgloss.NewStyle(), facts)
+	lead := m.panelBodyLeadIn(geometry, "", "")
+	return m.panelRow(geometry, lead, firstLine(stripEscapes(row.Server)), lipgloss.NewStyle(), facts)
 }
 
 // mcpPanelServes reports whether a connection serves row's server, so its tool count means
@@ -912,34 +969,42 @@ func panelElapsed(d time.Duration) string {
 }
 
 // panelTaskRow is one task: done, the current one (the first unfinished, marked ▸), or still open.
-// The text is the model's own, so it is escape-stripped and cut to its first line.
-func (m Model) panelTaskRow(row sidepanel.TaskRow) string {
+// The text is the model's own, so it is escape-stripped and cut to its first line. It is painted
+// at geometry.
+func (m Model) panelTaskRow(geometry panelGeometry, row sidepanel.TaskRow) string {
 	text := firstLine(stripEscapes(row.Text))
+	glyph, style := m.th.statusFaint.Render(m.th.glyphs.panelOpen), lipgloss.NewStyle()
 	switch {
 	case row.IsDone:
-		return m.panelRow(m.panelBodyLead("", m.th.successMark.Render(m.th.glyphs.done)), text, m.th.statusFaint, "")
+		glyph, style = m.th.successMark.Render(m.th.glyphs.done), m.th.statusFaint
 	case row.IsCurrent:
-		return m.panelRow(m.panelBodyLead("", m.th.panelCurrent.Render(m.th.glyphs.panelCurrent)), text, m.th.panelCurrent, "")
-	default:
-		return m.panelRow(m.panelBodyLead("", m.th.statusFaint.Render(m.th.glyphs.panelOpen)), text, lipgloss.NewStyle(), "")
+		glyph, style = m.th.panelCurrent.Render(m.th.glyphs.panelCurrent), m.th.panelCurrent
 	}
+	return m.panelRow(geometry, m.panelBodyLeadIn(geometry, "", glyph), text, style, "")
 }
 
 // panelFileRow is one changed file: ↳ in its lead when a sub-agent wrote it (blank otherwise), its
 // path, relative to the workspace where it lies inside it and trimmed from the left to the room
 // the row has, then the `+N −M` its Edit regions add up to, in `toolMarker` as the transcript's
-// outcome slot paints a diff's counts ([summaryStyle]).
+// outcome slot paints a diff's counts ([summaryStyle]). It is painted at this frame's geometry
+// ([Model.panelFileRowIn]).
 func (m Model) panelFileRow(row sidepanel.FileRow) string {
+	return m.panelFileRowIn(m.panelGeometry(), row)
+}
+
+// panelFileRowIn is the changed-file row [Model.panelFileRow] describes, painted at geometry.
+func (m Model) panelFileRowIn(geometry panelGeometry, row sidepanel.FileRow) string {
 	glyph := ""
 	if row.IsDelegated {
 		glyph = m.th.statusFaint.Render(m.th.glyphs.panelDelegated)
 	}
-	lead, right := m.panelBodyLead("", glyph), ""
+	lead, right := m.panelBodyLeadIn(geometry, "", glyph), ""
 	if row.HasStat {
 		right = m.th.toolMarker.Render(diffCounts(row.Stat.Added, row.Stat.Removed))
 	}
 	path := m.transcript.ws.shorten(firstLine(stripEscapes(row.Path)))
-	return m.panelRow(lead, trimPathLeft(m.th, path, m.panelTextRoom(lead, right)), lipgloss.NewStyle(), right)
+	room := m.panelTextRoomIn(geometry, lead, right)
+	return m.panelRow(geometry, lead, trimPathLeft(m.th, path, room), lipgloss.NewStyle(), right)
 }
 
 // trimPathLeft cuts path from the left, a whole component at a time, behind `…/` until it fits
@@ -967,46 +1032,47 @@ func trimPathLeft(th theme, path string, room int) string {
 // ([Model.panelBodyLead]). The fill row reads as the status-line gauge does, figures then bar
 // ([contextUsage.view]), its percentage clamped by the same helper, and its bar carries no
 // background ([renderGaugeInk]); the other rows take /usage's words and leave a zero figure out
-// (layout.md, "The /usage popup").
-func (m Model) panelUsageRows(view sidepanel.UsageView) []string {
-	plain, lead := lipgloss.NewStyle(), m.panelBodyLead("", "")
+// (layout.md, "The /usage popup"). They are painted at geometry.
+func (m Model) panelUsageRows(geometry panelGeometry, view sidepanel.UsageView) []string {
+	plain, lead := lipgloss.NewStyle(), m.panelBodyLeadIn(geometry, "", "")
 	rows := make([]string, 0, 5)
 	if fill := view.Fill; fill.Window > 0 && fill.Used > 0 {
-		rows = append(rows, m.panelFillRow(lead, fill))
+		rows = append(rows, m.panelFillRow(geometry, lead, fill))
 	}
 	if view.HasSplit {
 		if split := panelParts(panelFigure{"sys", view.System}, panelFigure{"tools", view.Tools}, panelFigure{"hist", view.History}); split != "" {
-			rows = append(rows, m.panelRow(lead, split, plain, ""))
+			rows = append(rows, m.panelRow(geometry, lead, split, plain, ""))
 		}
 	}
 	totals := view.Totals
 	if totals.Calls > 0 {
 		if spent := panelParts(panelFigure{"prompt", totals.PromptTokens}, panelFigure{"completion", totals.CompletionTokens}); spent != "" {
-			rows = append(rows, m.panelRow(lead, spent, plain, ""))
+			rows = append(rows, m.panelRow(geometry, lead, spent, plain, ""))
 		}
 	}
 	if totals.PromptTokens > 0 && totals.CachedPromptTokens > 0 {
 		cached := totals.CachedPromptTokens * percentCap / totals.PromptTokens
-		rows = append(rows, m.panelRow(lead, "cached "+strconv.Itoa(cached)+"%", plain, ""))
+		rows = append(rows, m.panelRow(geometry, lead, "cached "+strconv.Itoa(cached)+"%", plain, ""))
 	}
 	if spend := spendText(totals, m.currency()); spend != "" {
-		rows = append(rows, m.panelRow(lead, "cost "+spend, plain, ""))
+		rows = append(rows, m.panelRow(geometry, lead, "cost "+spend, plain, ""))
 	}
 	return rows
 }
 
 // panelFillRow is the usage section's fill row: `<used>/<window> <pct>% <bar>` — `~` before an
 // estimate — the status-line gauge's own reading with its bar in ink alone. A column too narrow for
-// the figures and the bar keeps the figures, the reading, and gives up the bar that draws it.
-func (m Model) panelFillRow(lead string, fill sidepanel.Fill) string {
+// the figures and the bar keeps the figures, the reading, and gives up the bar that draws it. It is
+// painted at geometry.
+func (m Model) panelFillRow(geometry panelGeometry, lead string, fill sidepanel.Fill) string {
 	approx := ""
 	if fill.IsEstimate {
 		approx = "~"
 	}
 	figures := fmt.Sprintf("%s%s/%s %d%%", approx, format.Tokens(fill.Used), format.Tokens(fill.Window),
 		sidepanel.ClampedPercent(fill.Used, fill.Window))
-	if m.panelTextRoom(lead, "") < m.th.measure.Width(figures)+1+gaugeWidth {
-		return m.panelRow(lead, figures, m.th.statusFaint, "")
+	if m.panelTextRoomIn(geometry, lead, "") < m.th.measure.Width(figures)+1+gaugeWidth {
+		return m.panelRow(geometry, lead, figures, m.th.statusFaint, "")
 	}
 	return lead + m.th.statusFaint.Render(figures) + " " + renderGaugeInk(m.th, fill.Used, fill.Window)
 }

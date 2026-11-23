@@ -695,19 +695,24 @@ func markPanelCursorRow(measure widthAuthority, line string, gutter int, id pane
 	return style.Render(glyphCursorMark) + shadeCells(measure, rest, c0-1, c1-1, style)
 }
 
-// panelCursorRow is the column row the panel-standing cursor is painted on — its stop's first row
-// among the stops laid out over rows rows — and that stop's identity, which says how the row is
-// marked ([markPanelCursorRow]); the row is −1 where nothing is: the cursor stands in the
-// transcript, a decision holds the keys ([Model.blockCursorOwnsKeys], which takes the highlight with
-// them), or the column has no stop.
+// panelCursorRow is the column row the panel-standing cursor is painted on over rows rows, as the
+// frame at this geometry lays them out ([Model.panelCursorRowIn]).
 func (m Model) panelCursorRow(rows int) (int, panelStopID) {
+	return m.panelCursorRowIn(m.newPanelFrame(m.panelGeometry(), rows))
+}
+
+// panelCursorRowIn is the column row the panel-standing cursor is painted on — its stop's first row
+// among frame's stops — and that stop's identity, which says how the row is marked
+// ([markPanelCursorRow]); the row is −1 where nothing is: the cursor stands in the transcript, a
+// decision holds the keys ([Model.blockCursorOwnsKeys], which takes the highlight with them), or the
+// column has no stop.
+func (m Model) panelCursorRowIn(frame panelFrame) (int, panelStopID) {
 	if !m.cursor.inPanel() || !m.blockCursorOwnsKeys() {
 		return -1, panelStopID{}
 	}
-	stops := m.panelStops(rows)
-	at, ok := m.cursor.panelStopIndex(stops)
+	at, ok := m.cursor.panelStopIndex(frame.stops)
 	if !ok {
 		return -1, panelStopID{}
 	}
-	return stops[at].y, stops[at].id
+	return frame.stops[at].y, frame.stops[at].id
 }
