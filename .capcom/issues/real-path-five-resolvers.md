@@ -4,6 +4,7 @@ status: open
 type: task
 priority: 3
 labels: [security, windows]
+plan: 2026-11-23 - 00 - real-path-one-resolver-plan
 created: 2026-11-21T12:27:13Z
 ---
 

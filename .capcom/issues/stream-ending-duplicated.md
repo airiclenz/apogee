@@ -3,6 +3,7 @@ title: "One reply accumulator ends every stream (architecture review 2026-10-14 
 status: open
 type: task
 priority: 3
+plan: 2026-11-23 - 02 - reply-accumulator-plan
 created: 2026-11-05T19:56:22Z
 ---
 

@@ -4,6 +4,7 @@ status: open
 type: task
 priority: 3
 labels: [security]
+plan: 2026-11-23 - 01 - git-repository-state-plan
 created: 2026-11-21T12:27:13Z
 ---
 

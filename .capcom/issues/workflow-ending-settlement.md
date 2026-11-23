@@ -3,6 +3,7 @@ title: "A workflow run's ending is settled once (architecture review 2026-10-14 
 status: open
 type: task
 priority: 3
+plan: 2026-11-23 - 03 - workflow-ending-settlement-plan
 created: 2026-11-05T19:56:22Z
 ---
 
