@@ -35,7 +35,11 @@
 - 2: guard folded (new turns ahead of every wrap-up, keyed on their own seeded files via `launchTUIIn`).
 - 3: guard folded (prose rule widened to every next-Turn/step/boundary settle sentence; glossary `group-summary.md` and the shipped `config.yaml` comment added).
 
-## 1. Settle a tool block on a follower, not on the next Turn's start
+## 1. Settle a tool block on a follower, not on the next Turn's start — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): internal/tui/autocollapse_test.go is on the item's Files line but needed no change — none of its tests or comments depend on the Turn-boundary settle (its tests pass unchanged).
+NOTES (2026-11-23): the rewritten autocollapse_turnboundary_test.go splits the cases into five tests (TestAutoCollapseKeepsABurstOpenAcrossTurns, TestAutoCollapseFoldsOnTheReplyText, TestAutoCollapseSettlesOnlyTheStreamingRunsBlock, TestAutoCollapseKeepsATextFoldedBlockFolded, TestAutoCollapseTurnBoundaryAndTouch); turnBoundary is kept for TestGroupOfOneGrowsIntoTypeRows.
+NOTES (2026-11-23): consequential edit — cmd/apogee/e2e_toolsautocollapse_test.go: the autoCollapseHoldWindow comment described a fold seen during the hold; it now describes the open header the renamed awaitOpenWhileHeld waits for.
 
 **What:**
 **Goal:** under auto-collapse a finished, untouched foldable block (umbrella, group of one, Sub-agent or Skill group) is settled only when (a) a later entry of its own run follows it, (b) its run is over, or (c) its run has streamed non-blank reply/narration text since the block's last member — sticky once set. A `TurnEvent` with `StatusTurnComplete` settles nothing. A block the reader touched, a member waiting on the user, and auto-collapse off behave as at the header base. This fixes issue `tool-group-early-collapse`: the Turn-boundary settle folded a burst after its first call.

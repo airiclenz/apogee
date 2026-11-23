@@ -253,10 +253,10 @@ func foldCases() []foldCase {
 			name: "TurnEvent is deliberately nothing",
 			// A Turn boundary is not news the human asked for: the transcript already shows the
 			// work the Turn did, and the activity line already says what the loop is doing — so no
-			// entry, no phrase, no stats. A boundary with more Turns to come does move one thing,
-			// and it is no entry either: it marks the run's last entry as closed, which settles a
-			// finished tool block under auto-collapse (transcript.closeTurn,
-			// autocollapse_turnboundary_test.go). This row's Exchange-complete boundary marks nothing.
+			// entry, no phrase, no stats. Nor does a boundary settle a finished tool block under
+			// auto-collapse, whatever its status: a tool burst runs across Turns, and the block
+			// settles on the reply text that follows it instead (transcript.passBlock,
+			// autocollapse_turnboundary_test.go).
 			event: domain.TurnEvent{Status: domain.StatusExchangeComplete},
 		},
 		{

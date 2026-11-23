@@ -10,8 +10,9 @@ package main
 // a settled lone call, a settled `✦ Sub-agents (N)` group and a settled `✦ Skill (N)` group each fold
 // to one line whose star wears the tools header colour, open on a click, and stay open through the
 // next reply. Every call is a tool group (plan "2026-11-20 - 00" for the group of one): a lone call
-// and a lone delegation are groups of one that fold when the next Turn starts, open on a click and
-// fold again on a second, and with the collapse off a lone call stands as an open group of one.
+// and a lone delegation are groups of one that stand open while the next Turn runs and fold once
+// its reply shows, open on a click and fold again on a second, and with the collapse off a lone
+// call stands as an open group of one.
 // The settledness, the touched exemption and the live apply are pinned in
 // internal/tui; only the binary shows that the config default, the composition root's inversion onto
 // tui.Options and the transcript's seed hold together.
@@ -67,9 +68,9 @@ const (
 )
 
 // autoCollapseHoldWindow is how long after the held wrap-up request reached the stub the group's
-// fold still counts as seen DURING the hold. It is Fixed because what it measures against is fixed:
-// the stub refuses a held request after its own unscaled ten seconds (stubllm's awaitLimit), and a
-// fold seen after that could be the one the refused request's run end paints rather than the one
+// open header still counts as seen DURING the hold. It is Fixed because what it measures against is
+// fixed: the stub refuses a held request after its own unscaled ten seconds (stubllm's awaitLimit),
+// and a frame seen after that belongs to the refused request's aftermath rather than to the hold
 // this test is about. It bounds no wait — the wait itself runs on the kit's scaled default — only
 // which frames may answer it.
 var autoCollapseHoldWindow = testtime.Fixed(9 * time.Second)
@@ -94,20 +95,21 @@ func heldRequests(stub *stubllm.Server, mark string) []time.Time {
 	return held
 }
 
-// awaitFoldedWhileHeld blocks until the wrap-up request answering the result that carries mark has
-// reached the stub and been held — the moment the next Turn has started — and then until the
-// frame carries folded while that one request is still held: no wrap-up on screen, no second
-// attempt at it, and inside the hold window, so the fold a refused request's run end would paint
-// can never answer this wait. The block's calls run first, on the kit's scaled default wait.
-func awaitFoldedWhileHeld(drv *tuitest.Driver, stub *stubllm.Server, mark, wrapUp string, folded umbrellaHeaderMatch) {
+// awaitOpenWhileHeld blocks until the wrap-up request answering the result that carries mark has
+// reached the stub and been held — the moment the next Turn has started and streamed nothing yet —
+// and then until the frame carries open while that one request is still held: no wrap-up on
+// screen, no second attempt at it, and inside the hold window, so a frame painted after a refused
+// request can never answer this wait. A new Turn starting is no reason to fold; only the reply text
+// the release lets through is. The block's calls run first, on the kit's scaled default wait.
+func awaitOpenWhileHeld(drv *tuitest.Driver, stub *stubllm.Server, mark, wrapUp string, open umbrellaHeaderMatch) {
 	drv.WaitFor(func() bool { return len(heldRequests(stub, mark)) > 0 },
 		tuitest.Awaiting("the wrap-up request to reach the stub and be held"))
 	drv.WaitFor(func() bool {
 		held := heldRequests(stub, mark)
 		frame := drv.Frame()
 		return len(held) == 1 && time.Since(held[0]) < autoCollapseHoldWindow &&
-			folded.in(frame) && !strings.Contains(frame.String(), wrapUp)
-	}, tuitest.Awaiting(fmt.Sprintf("the %q group header while the wrap-up is held", folded)))
+			open.in(frame) && !strings.Contains(frame.String(), wrapUp)
+	}, tuitest.Awaiting(fmt.Sprintf("the %q group header while the wrap-up is held", open)))
 }
 
 // autoCollapseFailedFolded is the missing-file umbrella folded to its Group summary.
@@ -362,10 +364,10 @@ func TestE2EToolsAutoCollapseFoldsALoneCall(t *testing.T) {
 }
 
 // TestE2EToolsAutoCollapseRefoldsALoneCall is the group of one's whole fold cycle: a lone search
-// folds to `✦ Searched 1 pattern ⋯ ▶` as soon as the NEXT Turn starts — the fixture holds the
-// wrap-up on the `zebra` gate, so the fold is seen while no reply has come back — a click on that
-// header opens it onto its own block under `▼`, and a second click folds it again: a lone call
-// re-folds exactly as a group of many does.
+// stands OPEN as `✦ Searched 1 pattern ⋯ ▼` while the NEXT Turn runs — the fixture holds the
+// wrap-up on the `zebra` gate, so the group is seen while no reply has come back — and folds to
+// `▶` once the wrap-up lands; a click on that header opens it onto its own block under `▼`, and a
+// second click folds it again: a lone call re-folds exactly as a group of many does.
 func TestE2EToolsAutoCollapseRefoldsALoneCall(t *testing.T) {
 	t.Parallel()
 
@@ -380,7 +382,7 @@ func TestE2EToolsAutoCollapseRefoldsALoneCall(t *testing.T) {
 	const member = "┕ zebra"
 
 	submit(drv, autoCollapseZebraPrompt)
-	awaitFoldedWhileHeld(drv, stub, autoCollapseZebraMark, autoCollapseZebraWrapUp, folded)
+	awaitOpenWhileHeld(drv, stub, autoCollapseZebraMark, autoCollapseZebraWrapUp, open)
 	stub.Release(autoCollapseZebraGate)
 	drv.WaitText(autoCollapseZebraWrapUp)
 	waitIdle(drv)
@@ -478,12 +480,12 @@ func TestE2EToolsAutoCollapseFoldsASkillGroup(t *testing.T) {
 	})
 }
 
-// TestE2EToolsAutoCollapseFoldsAGroupWhenTheNextTurnStarts is the settle's timing: a Sub-agents group
-// whose two delegations have reported folds to `✦ Sub-agents (2) ⋯ ▶` as soon as the NEXT Turn
-// starts — the Turn that will write the wrap-up — not once that Turn's reply lands. The fixture
-// holds the wrap-up request on the `wings` gate, so the folded header is seen while no reply has
-// come back, and the group stays folded once the wrap-up is let through.
-func TestE2EToolsAutoCollapseFoldsAGroupWhenTheNextTurnStarts(t *testing.T) {
+// TestE2EToolsAutoCollapseFoldsAGroupWhenItsWrapUpArrives is the settle's timing: a Sub-agents group
+// whose two delegations have reported stands OPEN as `✦ Sub-agents (2) ⋯ ▼` while the NEXT Turn —
+// the Turn that will write the wrap-up — has started and streamed nothing, since that Turn could
+// still add to the group, and folds to `▶` once the wrap-up's text lands. The fixture holds the
+// wrap-up request on the `wings` gate, so the open header is seen while no reply has come back.
+func TestE2EToolsAutoCollapseFoldsAGroupWhenItsWrapUpArrives(t *testing.T) {
 	t.Parallel()
 
 	stub := stubllm.New(t, loadScript(t, "toolsautocollapse"))
@@ -493,9 +495,10 @@ func TestE2EToolsAutoCollapseFoldsAGroupWhenTheNextTurnStarts(t *testing.T) {
 	// with the request still held must not wait out the gate on the way down.
 	t.Cleanup(func() { stub.Release(autoCollapseWingsGate) })
 	folded := umbrellaHeaderMatch{text: "✦ Sub-agents (2)", glyph: "▶"}
+	open := umbrellaHeaderMatch{text: folded.text, glyph: "▼"}
 
 	submit(drv, autoCollapseWingsPrompt)
-	awaitFoldedWhileHeld(drv, stub, autoCollapseWingsMark, autoCollapseWingsWrapUp, folded)
+	awaitOpenWhileHeld(drv, stub, autoCollapseWingsMark, autoCollapseWingsWrapUp, open)
 
 	stub.Release(autoCollapseWingsGate)
 	drv.WaitText(autoCollapseWingsWrapUp)

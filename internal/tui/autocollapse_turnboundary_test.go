@@ -23,6 +23,11 @@ func resultEvent(base domain.EventBase, id, content string) domain.ToolResultEve
 	return domain.ToolResultEvent{EventBase: base, Result: domain.ToolResult{CallID: id, Content: content}}
 }
 
+// replyText is one chunk of reply or narration text as the run base names streams it.
+func replyText(base domain.EventBase, text string) domain.TokenEvent {
+	return domain.TokenEvent{EventBase: base, Text: text}
+}
+
 // boundaryUmbrella is a two-call top-level umbrella at entries[0], both calls returned, under
 // auto-collapse with the Turn running — the last entry of a running Turn, standing open.
 func boundaryUmbrella(t *testing.T) *transcript {
@@ -38,13 +43,60 @@ func boundaryUmbrella(t *testing.T) *transcript {
 	return tr
 }
 
-// TestAutoCollapseFoldsWhenTheNextTurnStarts pins the Turn-boundary settle: under auto-collapse a
-// finished, untouched block — a Sub-agents group, a Tools umbrella, a group of one — folds once the
-// NEXT Turn of its own run starts (the boundary its Turn emits after every call it issued was
-// answered), not once that next Turn's reply commits an entry. Each shape is driven through the
-// Model's own Event fold (foldEvent) in the order a real Step emits it, and stays open while its
-// own Turn is still dispatching.
-func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
+// textMarked folds non-blank reply text for the top-level run into tr and then a stream reset
+// that discards it — the one path on which a later call joins the block the text settled — and
+// fails the test unless the text folded the umbrella or group at entries[0] and the reset left it
+// folded.
+func textMarked(t *testing.T, tr *transcript) {
+	t.Helper()
+	top := domain.EventBase{}
+	tr.apply(replyText(top, "Next, "))
+	if !tr.blockFolded(0) {
+		t.Fatalf("setup: the reply text did not fold the block:\n%s", renderPlain(tr, 80))
+	}
+	tr.apply(domain.StreamResetEvent{EventBase: top})
+	if !tr.blockFolded(0) {
+		t.Fatalf("setup: the stream reset reopened the block:\n%s", renderPlain(tr, 80))
+	}
+}
+
+// TestAutoCollapseKeepsABurstOpenAcrossTurns pins the burst: two Turns that each issue one call,
+// separated by nothing but a Turn boundary and the next Turn's reasoning, build ONE umbrella that
+// stands open showing both calls — the boundary between them settles nothing.
+func TestAutoCollapseKeepsABurstOpenAcrossTurns(t *testing.T) {
+	t.Parallel()
+
+	top := domain.EventBase{}
+	m := newTestModel(t)
+	m.transcript.setToolsAutoCollapse(true)
+	m.markRunning()
+	head := len(m.transcript.entries)
+
+	for _, e := range []domain.Event{
+		callEvent(top, "c1", "read_file", `{"path":"a.go"}`), resultEvent(top, "c1", "a"),
+		turnBoundary(top),
+		domain.ReasoningEvent{EventBase: top, Text: "now the pattern"},
+		callEvent(top, "c2", "grep", `{"pattern":"x"}`), resultEvent(top, "c2", "x"),
+		turnBoundary(top),
+	} {
+		m = m.foldEvent(e)
+	}
+
+	if got := toolSuperGroup(m.transcript.entries, head).calls(); got != 2 {
+		t.Fatalf("the two Turns' calls form an umbrella of %d calls; want one umbrella of 2", got)
+	}
+	if got := m.transcript.blockFoldBy(head); got == foldBySettled || m.transcript.blockFolded(head) {
+		t.Errorf("blockFoldBy = %d, folded %v across the burst's Turn boundaries; want it open:\n%s",
+			got, m.transcript.blockFolded(head), renderPlain(&m.transcript, 80))
+	}
+}
+
+// TestAutoCollapseFoldsOnTheReplyText pins the follower settle: under auto-collapse a finished,
+// untouched block — a Sub-agents group, a Tools umbrella, a group of one — stays open through the
+// next Turn's start and its reasoning, and folds once its run's reply text first turns non-blank,
+// not once that reply commits an entry; a stream reset after that leaves it folded. Each shape is
+// driven through the Model's own Event fold (foldEvent) in the order a real Step emits it.
+func TestAutoCollapseFoldsOnTheReplyText(t *testing.T) {
 	t.Parallel()
 
 	top := domain.EventBase{}
@@ -100,19 +152,58 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 
 			m = m.foldEvent(turnBoundary(top))
 			m = m.foldEvent(domain.ReasoningEvent{EventBase: top, Text: "both are done"})
-			if got := m.transcript.blockFoldBy(head); got != foldBySettled {
-				t.Errorf("next Turn started (boundary + reasoning): blockFoldBy = %d; want foldBySettled (%d)",
-					got, foldBySettled)
+			if got := m.transcript.blockFoldBy(head); got == foldBySettled {
+				t.Errorf("next Turn started (boundary + reasoning): blockFoldBy = foldBySettled; want open")
 			}
-			m = m.foldEvent(domain.TokenEvent{EventBase: top, Text: "Both scouts "})
+			m = m.foldEvent(replyText(top, "\n \n"))
+			if m.transcript.blockFolded(head) {
+				t.Errorf("blank reply text folded the block; want it open:\n%s", renderPlain(&m.transcript, 80))
+			}
+			m = m.foldEvent(replyText(top, "Both scouts "))
 			if !m.transcript.blockFolded(head) {
 				t.Errorf("next Turn streaming its reply: blockFolded = false; want true:\n%s",
+					renderPlain(&m.transcript, 80))
+			}
+			m = m.foldEvent(domain.StreamResetEvent{EventBase: top})
+			if !m.transcript.blockFolded(head) {
+				t.Errorf("a stream reset reopened the folded block; want it to stay folded:\n%s",
 					renderPlain(&m.transcript, 80))
 			}
 		})
 	}
 
-	t.Run("a block inside a delegated run folds at that child's boundary", func(t *testing.T) {
+	t.Run("blank text then a call: the call joins the open block", func(t *testing.T) {
+		t.Parallel()
+
+		m := newTestModel(t)
+		m.transcript.setToolsAutoCollapse(true)
+		m.markRunning()
+		head := len(m.transcript.entries)
+		for _, e := range []domain.Event{
+			callEvent(top, "c1", "read_file", `{"path":"a.go"}`), resultEvent(top, "c1", "a"),
+			turnBoundary(top),
+			replyText(top, "\n\n"),
+			callEvent(top, "c2", "grep", `{"pattern":"x"}`),
+		} {
+			m = m.foldEvent(e)
+		}
+
+		if got := toolSuperGroup(m.transcript.entries, head).calls(); got != 2 {
+			t.Fatalf("the call after blank text formed an umbrella of %d calls; want it to join, 2", got)
+		}
+		if m.transcript.blockFolded(head) {
+			t.Errorf("the umbrella folded on blank text; want it open:\n%s", renderPlain(&m.transcript, 80))
+		}
+	})
+}
+
+// TestAutoCollapseSettlesOnlyTheStreamingRunsBlock pins whose block a run's text settles: its own
+// last block and nothing else — never its parent's, never a sibling's — at every depth and in the
+// run's own view.
+func TestAutoCollapseSettlesOnlyTheStreamingRunsBlock(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a delegated child's text folds the child's block, not the parent's", func(t *testing.T) {
 		t.Parallel()
 
 		tr := &transcript{}
@@ -126,17 +217,22 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 		tr.apply(domain.SubAgentPhaseEvent{EventBase: child, Phase: domain.SubAgentStarted})
 		tr.apply(callEvent(child, "c1", "read_file", `{"path":"a.go"}`))
 		tr.apply(resultEvent(child, "c1", "a"))
+		tr.apply(turnBoundary(child))
 		tr.apply(callEvent(child, "c2", "grep", `{"pattern":"x"}`))
 		tr.apply(resultEvent(child, "c2", "x"))
+		tr.apply(turnBoundary(child))
 		head := 1
 		if len(toolSuperGroup(tr.entries, head)) == 0 || tr.blockFolded(head) {
 			t.Fatalf("setup: entries[%d] is no open umbrella in the child's run", head)
 		}
 
-		tr.apply(turnBoundary(child))
+		tr.apply(replyText(child, "Found it."))
 
 		if got := tr.blockFoldBy(head); got != foldBySettled {
-			t.Errorf("blockFoldBy = %d once the child's next Turn started; want foldBySettled", got)
+			t.Errorf("blockFoldBy = %d once the child's reply text arrived; want foldBySettled", got)
+		}
+		if got := tr.blockFoldBy(0); got == foldBySettled {
+			t.Error("the child's text settled its parent's delegation block; want it open while the child runs")
 		}
 		tr.setRoot(tr.entries[0].spawned())
 		if got := tr.blockFoldBy(head); got != foldBySettled {
@@ -144,7 +240,7 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 		}
 	})
 
-	t.Run("one run's boundary settles no other run's block", func(t *testing.T) {
+	t.Run("one run's text settles no sibling's block", func(t *testing.T) {
 		t.Parallel()
 
 		tr := &transcript{}
@@ -166,45 +262,51 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 			t.Fatal("setup: s1's two reads form no umbrella")
 		}
 
-		tr.apply(turnBoundary(domain.EventBase{Depth: 1, CallID: "s2"}))
+		tr.apply(replyText(domain.EventBase{Depth: 1, CallID: "s2"}, "All clear."))
 
 		if got := tr.blockFoldBy(head); got == foldBySettled {
-			t.Error("s2's boundary settled s1's umbrella; want it open while s1 runs")
+			t.Error("s2's text settled s1's umbrella; want it open while s1 runs")
 		}
-		tr.apply(turnBoundary(domain.EventBase{Depth: 1, CallID: "s1"}))
+		tr.apply(replyText(domain.EventBase{Depth: 1, CallID: "s1"}, "Both read."))
 		if got := tr.blockFoldBy(head); got != foldBySettled {
-			t.Errorf("blockFoldBy = %d at s1's own boundary; want foldBySettled", got)
+			t.Errorf("blockFoldBy = %d at s1's own text; want foldBySettled", got)
 		}
 	})
+}
 
-	t.Run("an umbrella the boundary folded stays folded while the next Turn extends it", func(t *testing.T) {
+// TestAutoCollapseKeepsATextFoldedBlockFolded pins the mark's stickiness: a block the reply text
+// folded stays folded when a stream reset discards that text and the re-stream's call joins it
+// instead — its header growing, its new member hidden — unless that member waits on the human.
+func TestAutoCollapseKeepsATextFoldedBlockFolded(t *testing.T) {
+	t.Parallel()
+
+	top := domain.EventBase{}
+
+	t.Run("an umbrella stays folded as a call joins it after a reset", func(t *testing.T) {
 		t.Parallel()
 
 		tr := boundaryUmbrella(t)
-		tr.apply(turnBoundary(domain.EventBase{}))
-		tr.apply(callEvent(domain.EventBase{}, "c3", "read_file", `{"path":"b.go"}`))
+		textMarked(t, tr)
+		tr.apply(callEvent(top, "c3", "read_file", `{"path":"b.go"}`))
 		if got := toolSuperGroup(tr.entries, 0).calls(); got != 3 || tr.entries[2].done {
 			t.Fatalf("setup: the in-flight Read did not join the umbrella (%d calls)", got)
 		}
 		if !tr.blockFolded(0) {
-			t.Fatalf("the boundary-folded umbrella sprang open for the next Turn's call:\n%s", renderPlain(tr, 80))
+			t.Fatalf("the text-folded umbrella sprang open for the re-stream's call:\n%s", renderPlain(tr, 80))
 		}
 		if paint := renderPlain(tr, 80); !strings.Contains(paint, "Reading") {
 			t.Errorf("the folded umbrella with a call in flight paints no live verb:\n%s", paint)
 		}
 	})
 
-	t.Run("a group the boundary folded stays folded as the next Turn adds a member", func(t *testing.T) {
+	t.Run("a Sub-agents group stays folded as a member joins it after a reset", func(t *testing.T) {
 		t.Parallel()
 
 		tr := subAgentGroupOf(t)
-		tr.apply(turnBoundary(domain.EventBase{}))
-		if !tr.blockFolded(0) {
-			t.Fatal("setup: the boundary did not fold the group")
-		}
+		textMarked(t, tr)
 		delegationCall(tr, "", "s3", "s3", "look again", 0)
 		if group, _, ok := subAgentGroupAt(tr.entries, 0); !ok || len(group) != 3 {
-			t.Fatal("setup: the next Turn's delegation did not join the group")
+			t.Fatal("setup: the re-stream's delegation did not join the group")
 		}
 		paint := renderPlain(tr, 80)
 		if !tr.blockFolded(0) || !strings.Contains(paint, "✦ Sub-agents (3)") || strings.Contains(paint, "look again") {
@@ -212,8 +314,8 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 		}
 	})
 
-	// A lone delegation and a lone skill fetch are groups of one, so the boundary folds them like any
-	// group, and the group the next Turn's call grows them into stays folded, its header counting
+	// A lone delegation and a lone skill fetch are groups of one, so the text folds them like any
+	// group, and the group a re-stream's call grows them into stays folded, its header counting
 	// the new member (adr-0035-amend-1120b (b)).
 	for name, tc := range map[string]struct {
 		lone   func(tr *transcript)
@@ -241,7 +343,7 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 				skillFetch(tr, "k1", "format Go", "<skill: Coding Standards>\nUse gofmt.\n</skill>\n")
 			},
 			next: func(tr *transcript) {
-				tr.apply(callEvent(domain.EventBase{}, "k2", "load_skill", `{"query":"cut a release"}`))
+				tr.apply(callEvent(top, "k2", "load_skill", `{"query":"cut a release"}`))
 			},
 			group: func(entries []entry) int {
 				group, _, _ := ownGroupAt(entries, 0, loadSkillToolName)
@@ -258,13 +360,10 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 			tr.setToolsAutoCollapse(true)
 			tr.setTurnLive(true)
 			tc.lone(tr)
-			tr.apply(turnBoundary(domain.EventBase{}))
-			if !tr.blockFolded(0) {
-				t.Fatalf("the boundary did not fold the group of one:\n%s", renderPlain(tr, 80))
-			}
+			textMarked(t, tr)
 			tc.next(tr)
 			if got := tc.group(tr.entries); got != 2 {
-				t.Fatalf("setup: the next Turn's call formed a group of %d; want 2", got)
+				t.Fatalf("setup: the re-stream's call formed a group of %d; want 2", got)
 			}
 			paint := renderPlain(tr, 80)
 			if !tr.blockFolded(0) || !strings.Contains(paint, tc.header) || strings.Contains(paint, tc.hidden) {
@@ -273,19 +372,19 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 		})
 	}
 
-	t.Run("a pending question in the extension opens the block while it waits", func(t *testing.T) {
+	t.Run("a pending question joining the block opens it while it waits", func(t *testing.T) {
 		t.Parallel()
 
 		tr := boundaryUmbrella(t)
-		tr.apply(turnBoundary(domain.EventBase{}))
-		tr.apply(callEvent(domain.EventBase{}, "q1", "ask_user", `{"question":"Which file?"}`))
+		textMarked(t, tr)
+		tr.apply(callEvent(top, "q1", "ask_user", `{"question":"Which file?"}`))
 		if toolSuperGroup(tr.entries, 0).calls() != 3 {
 			t.Fatal("setup: the pending ask_user did not join the umbrella")
 		}
 		if tr.blockFolded(0) {
 			t.Errorf("the umbrella stayed folded over a question waiting on the user:\n%s", renderPlain(tr, 80))
 		}
-		tr.apply(resultEvent(domain.EventBase{}, "q1", "a.go"))
+		tr.apply(resultEvent(top, "q1", "a.go"))
 		if !tr.blockFolded(0) {
 			t.Errorf("the umbrella did not fold again once the question was answered:\n%s", renderPlain(tr, 80))
 		}
@@ -295,8 +394,8 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 		t.Parallel()
 
 		tr := boundaryUmbrella(t)
-		tr.apply(turnBoundary(domain.EventBase{}))
-		tr.apply(callEvent(domain.EventBase{}, "c3", "terminal", `{"command":"rm -rf build"}`))
+		textMarked(t, tr)
+		tr.apply(callEvent(top, "c3", "terminal", `{"command":"rm -rf build"}`))
 		req := domain.ApprovalRequest{Tool: "terminal", Arguments: []byte(`{"command":"rm -rf build"}`)}
 		if !tr.blockFolded(0) {
 			t.Fatal("setup: the umbrella sprang open before the gate was raised")
@@ -310,8 +409,16 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 			t.Errorf("the umbrella did not fold again once the approval was decided:\n%s", renderPlain(tr, 80))
 		}
 	})
+}
 
-	t.Run("a group of one the reader opened stays open as the next Turn extends it", func(t *testing.T) {
+// TestAutoCollapseTurnBoundaryAndTouch pins what does NOT settle a block: a Turn boundary of any
+// status, and anything at all once the reader has touched the block.
+func TestAutoCollapseTurnBoundaryAndTouch(t *testing.T) {
+	t.Parallel()
+
+	top := domain.EventBase{}
+
+	t.Run("a group of one the reader opened stays open as a later Turn extends it", func(t *testing.T) {
 		t.Parallel()
 
 		tr := &transcript{}
@@ -321,18 +428,16 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 		if !tr.openBlockAlone(0) || !tr.entries[0].foldTouched {
 			t.Fatal("setup: opening the group of one did not touch it")
 		}
-		tr.apply(turnBoundary(domain.EventBase{}))
-		if tr.blockFolded(0) {
-			t.Fatal("the boundary folded a group of one the reader opened")
-		}
-		tr.apply(callEvent(domain.EventBase{}, "c2", "grep", `{"pattern":"x"}`))
+		tr.apply(turnBoundary(top))
+		tr.apply(callEvent(top, "c2", "grep", `{"pattern":"x"}`))
 		if len(toolSuperGroup(tr.entries, 0)) == 0 {
 			t.Fatal("setup: the next Turn's call left entry 0 heading no group")
 		}
 		if tr.blockFolded(0) {
-			t.Errorf("the group the opened group of one grew into folded on the old boundary:\n%s", renderPlain(tr, 80))
+			t.Errorf("the group the opened group of one grew into folded:\n%s", renderPlain(tr, 80))
 		}
-		tr.apply(resultEvent(domain.EventBase{}, "c2", "x"))
+		tr.apply(resultEvent(top, "c2", "x"))
+		tr.apply(replyText(top, "Found it."))
 		tr.apply(domain.MessageEvent{Text: "Found it."})
 		// The touched group grows and stays as the reader left it: settled, it is still open.
 		if got := tr.blockFoldBy(0); got == foldBySettled || tr.blockFolded(0) {
@@ -341,51 +446,55 @@ func TestAutoCollapseFoldsWhenTheNextTurnStarts(t *testing.T) {
 		}
 	})
 
-	t.Run("a touched block is not refolded by a boundary", func(t *testing.T) {
+	t.Run("a touched block is not refolded by the reply text", func(t *testing.T) {
 		t.Parallel()
 
 		tr := boundaryUmbrella(t)
 		if !tr.markBlockTouched(1) {
 			t.Fatal("setup: touching a member did not mark the umbrella")
 		}
-		tr.apply(turnBoundary(domain.EventBase{}))
+		tr.apply(replyText(top, "Done."))
 		if got := tr.blockFoldBy(0); got == foldBySettled || tr.blockFolded(0) {
-			t.Errorf("blockFoldBy(0) = %d, folded %v on a touched umbrella at a boundary; want it open",
+			t.Errorf("blockFoldBy(0) = %d, folded %v on a touched umbrella under reply text; want it open",
 				got, tr.blockFolded(0))
 		}
 	})
 
-	t.Run("only a Turn with more to come settles", func(t *testing.T) {
+	t.Run("a Turn boundary settles nothing, whatever its status", func(t *testing.T) {
 		t.Parallel()
 
-		for _, status := range []domain.StepStatus{domain.StatusExchangeComplete, domain.StatusCancelled} {
+		for _, status := range []domain.StepStatus{
+			domain.StatusTurnComplete, domain.StatusExchangeComplete, domain.StatusCancelled,
+		} {
 			tr := boundaryUmbrella(t)
 			tr.apply(domain.TurnEvent{Status: status})
-			if tr.entries[1].turnClosed || tr.blockFolded(0) {
-				t.Errorf("a %s boundary marked the run's last entry; want only turn-complete to", status)
+			if got := tr.blockFoldBy(0); got == foldBySettled || tr.blockFolded(0) {
+				t.Errorf("a %s boundary settled the running Turn's umbrella; want it open", status)
 			}
 		}
 	})
 
-	t.Run("the boundary repaints a cached paint", func(t *testing.T) {
+	t.Run("the reply text repaints a cached paint", func(t *testing.T) {
 		t.Parallel()
 
 		th := newTheme(scheme.Default())
 		tr := boundaryUmbrella(t)
 		tr.paints = newPaintCache()
-		open := strings.Join(tr.renderLines(th, 80), "\n")
+		open := tr.renderLines(th, 80)
 		before := tr.generation
 
-		tr.apply(turnBoundary(domain.EventBase{}))
+		tr.apply(replyText(top, "Done."))
 
 		if tr.generation == before {
-			t.Error("the boundary did not move the paint generation")
+			t.Error("the reply text did not move the paint generation")
 		}
-		cached := strings.Join(tr.renderLines(th, 80), "\n")
+		cached := tr.renderLines(th, 80)
 		fresh := *tr
 		fresh.paints = nil
-		if uncached := strings.Join(fresh.renderLines(th, 80), "\n"); cached != uncached || cached == open {
-			t.Errorf("the cached paint did not follow the boundary's fold:\ncached:\n%s\nuncached:\n%s", cached, uncached)
+		uncached := fresh.renderLines(th, 80)
+		if strings.Join(cached, "\n") != strings.Join(uncached, "\n") || cached[0] == open[0] {
+			t.Errorf("the cached paint did not follow the text's fold:\ncached:\n%s\nuncached:\n%s",
+				strings.Join(cached, "\n"), strings.Join(uncached, "\n"))
 		}
 	})
 }

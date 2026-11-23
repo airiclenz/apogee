@@ -102,9 +102,10 @@ type transcript struct {
 	toolsAutoCollapse bool
 	// turnLive says the human's own Turn — the watched owner's, while watching — is running: the
 	// whole running Exchange, not one of the loop's Turns inside it. It is the fact that keeps the
-	// LAST umbrella of the top-level run open while nothing follows it yet and the next loop Turn has
-	// not started past it (entry.turnClosed; [transcript.blockSettled]). It mirrors the Model's
-	// stateRunning: [Model.markRunning], the one writer of that state, sets it, and
+	// LAST umbrella of the top-level run open while nothing follows it yet and the run has streamed
+	// no reply text past it (entry.passed; [transcript.blockSettled]) — however many loop Turns
+	// keep adding calls to it. It mirrors the Model's stateRunning: [Model.markRunning], the one
+	// writer of that state, sets it, and
 	// [Model.finishWorker] and [Model.watchIdle] — the two paths a run ends on, a watched Turn never
 	// reaching the first — clear it, through [transcript.setTurnLive]. reset drops it: a reset opens
 	// a conversation with no Turn running in it — the fresh view a watch paints into starts idle
@@ -203,6 +204,12 @@ const streamChunkBytes = 16 << 10
 type streamBuf struct {
 	chunks []string // the text in order; every chunk but the last has reached streamChunkBytes
 	n      int      // total bytes held across chunks
+	// nonBlank says the buffer holds something other than whitespace — the fact that turns a
+	// streamed reply into a follower of the block before it ([transcript.appendToken]). It is set
+	// as the text arrives and never cleared, so it rides a park and unpark with the text; only the
+	// arriving chunk is tested, and only while the buffer is still blank, so the streaming hot path
+	// never re-scans what it already holds.
+	nonBlank bool
 }
 
 // append grows the buffer by s, concatenating into the last chunk while it is still under
@@ -210,6 +217,9 @@ type streamBuf struct {
 func (b *streamBuf) append(s string) {
 	if s == "" {
 		return
+	}
+	if !b.nonBlank && strings.TrimSpace(s) != "" {
+		b.nonBlank = true
 	}
 	b.n += len(s)
 	if last := len(b.chunks) - 1; last >= 0 && len(b.chunks[last]) < streamChunkBytes {
@@ -225,6 +235,7 @@ func (b *streamBuf) append(s string) {
 // makes when a run's parked text is joined back onto the live buffer it was displaced from, at no
 // whole-text copy.
 func (b *streamBuf) appendBuf(other streamBuf) {
+	b.nonBlank = b.nonBlank || other.nonBlank
 	for _, chunk := range other.chunks {
 		b.append(chunk)
 	}
@@ -465,16 +476,16 @@ type entry struct {
 	// Session-only and never persisted for folded's reasons: a replayed umbrella is untouched.
 	foldTouched bool
 	foldOwn     bool
-	// view-only: this entry was its run's LAST own entry when one of that run's Turns reached its
-	// boundary with more Turns to come (a domain.TurnEvent, StatusTurnComplete) — the next Turn has
-	// started past it, which settles the foldable block it belongs to from then on
-	// ([transcript.closeTurn], [transcript.blockSettled]). Session-only and never persisted for
-	// folded's reasons: a replayed block is settled by construction and needs no mark.
-	turnClosed bool
+	// view-only: this entry was its run's LAST own entry, ending a foldable block, when that run's
+	// streamed reply or narration first turned non-blank — text that will follow the block, which
+	// settles it from then on, a stream reset included ([transcript.passBlock],
+	// [transcript.blockSettled]). Session-only and never persisted for folded's reasons: a replayed
+	// block is settled by construction and needs no mark.
+	passed bool
 	// view-only, on a tool call: the engine raised an Approval for it and the human has not decided
 	// it yet ([transcript.holdForApproval]) — a call held on its approval pane, waiting on the user
-	// the way a pending ask_user is, which keeps a Turn-boundary-settled block open while it waits
-	// ([entry.waitsOnUser]). Session-only and never persisted for folded's reasons.
+	// the way a pending ask_user is, which keeps a block its run's text already settled open while
+	// it waits ([entry.waitsOnUser]). Session-only and never persisted for folded's reasons.
 	heldForApproval bool
 	// view-only fold of the TASK this entry's run was handed, as the run's own view paints it
 	// above the child's work (render.go's rooted paint); never persisted
@@ -1425,9 +1436,9 @@ const (
 // the activity line, AuditEvent and WireEvent nothing the transcript draws, and a UsageEvent is a
 // reading rather than a block — it lands ON an entry the run already has, through applyUsage,
 // which foldEvent calls with the window a fill needs and apply cannot see) and fall to the default
-// case with every future variant. A TurnEvent appends none either: a Turn that ends with more
-// Turns to come marks its run's last entry as closed by the boundary, which is the moment the
-// next Turn starts and what settles a finished block under auto-collapse (closeTurn). Each
+// case with every future variant. A TurnEvent appends none either, and settles nothing: a tool
+// burst runs across many Turns, so a Turn boundary says nothing about whether the next Turn will
+// add to the block before it — the reply text that follows it does (appendToken, passBlock). Each
 // case folds its event: tokens grow the in-progress buffer at the depth that emitted them (the
 // routing every other assistant-text case does through its own e.Depth); a StreamReset discards
 // the buffer its own level owns; a
@@ -1498,13 +1509,11 @@ func (t *transcript) apply(e domain.Event) {
 	case domain.SubAgentGroupEvent:
 		t.announceWave(e)
 	case domain.TurnEvent:
-		// Only a Turn with more Turns to come starts a next one past its work. Every other status
-		// ends the run — an Exchange complete (a faulted or capped Turn reports that too), a
-		// cancel — and the run's end already settles its blocks: the human's own Turn through
-		// turnLive, a delegated run through its head's report ([transcript.blockSettled]).
-		if e.Status == domain.StatusTurnComplete {
-			t.closeTurn(runOf(e.EventBase))
-		}
+		// Deliberately nothing, at every status. A next Turn may keep adding calls to the block
+		// the last one ended, so its start settles nothing; what settles a finished block is its
+		// run's non-blank reply text (appendToken), a later entry, or the run's end — the human's
+		// own Turn through turnLive, a delegated run through its head's report
+		// ([transcript.blockSettled]).
 	default:
 		// An unknown future variant: tolerate it. The set is sealed and additively
 		// versioned, so an unrecognised Event is rendered as nothing rather than a panic.
@@ -1683,6 +1692,14 @@ func (t *transcript) openSubAgentHead(run runRef) *entry {
 // through it (ADR 0039), and a switch no longer means the previous streamer is finished. Parking is
 // what keeps each run's answer whole and its own — the text waits for its run's own commit point
 // instead of being committed as a fragment here, or left for another run's event to adopt.
+//
+// The chunk that first makes the run's buffer non-blank is the moment the run's reply or narration
+// becomes a FOLLOWER of the block before it — the text will commit as an entry after that block —
+// so the block is settled from here on ([transcript.passBlock]), and stays settled through a
+// stream reset that discards the text: the fold lands as the text first shows, not as it commits,
+// and does not spring back. Reasoning never reaches this buffer and blank chunks never
+// flip it, so neither settles anything. The walk to the run's last entry runs once per streamed
+// reply, on that one transition, never per token.
 func (t *transcript) appendToken(text string, run runRef) {
 	t.displace(run)
 	if !t.streaming {
@@ -1690,7 +1707,11 @@ func (t *transcript) appendToken(text string, run runRef) {
 	}
 	t.streaming = true
 	t.pendingRun = run
+	wasBlank := !t.pending.nonBlank
 	t.pending.append(stripEscapes(text))
+	if wasBlank && t.pending.nonBlank {
+		t.passBlock(run)
+	}
 	t.touch()
 }
 
@@ -2256,7 +2277,7 @@ const (
 	// foldByNone: the index heads no foldable block — there is no fold to read.
 	foldByNone blockFoldRule = iota
 	// foldBySettled: auto-collapse is on and the block — an umbrella (a group of one included), or
-	// a Sub-agent or Skill group — is settled (its run's next Turn has started past it, or a later
+	// a Sub-agent or Skill group — is settled (its run has streamed reply text past it, or a later
 	// entry follows it, or its run has ended; [transcript.blockSettled]) and untouched — folded.
 	foldBySettled
 	// foldByShared: a LARGE umbrella under the size rule — folded exactly when !toolsOpen.
@@ -2267,8 +2288,8 @@ const (
 )
 
 // blockFoldBy is the ONE statement of how a foldable tool block's fold is resolved, in order: with
-// auto-collapse on (toolsAutoCollapse), a SETTLED block ([transcript.blockSettled] — the next Turn
-// of its run has started past it, or a later entry follows it, or its run is over) the reader
+// auto-collapse on (toolsAutoCollapse), a SETTLED block ([transcript.blockSettled] — its run has
+// streamed reply text past it, or a later entry follows it, or its run is over) the reader
 // has not touched is folded, whatever its size and toolsOpen; a touched one whose reader gave it its
 // own fold (entry.foldOwn) follows its head flag; everything else — a live umbrella, the
 // last entry of a running Turn, a touched one without a fold of its own, and every umbrella with
@@ -2303,8 +2324,9 @@ func (t *transcript) blockFoldBy(head int) blockFoldRule {
 // blockFolded reports whether the umbrella headed by entries[head] stands folded to its header
 // line — the one question the painter asks of a Tools umbrella (render.go's resolveBlock) — as the
 // rule [transcript.blockFoldBy] names answers it: a settled, untouched block under
-// auto-collapse is folded — from the moment the next Turn of its run starts, and through that
-// Turn's extending it, unless a member waits on the human ([transcript.blockSettled]); otherwise a
+// auto-collapse is folded — from the moment its run's reply text first shows past it, and through
+// a call joining it after a stream reset, unless a member waits on the human
+// ([transcript.blockSettled]); otherwise a
 // LARGE one is folded exactly when the shared preference is shut (!toolsOpen), its own head flag
 // ignored, and a SMALL one — or a touched one with a fold of its own — exactly when its head's
 // flag says so (entry.folded). A small umbrella that grows
@@ -2328,20 +2350,21 @@ func (t *transcript) blockFolded(head int) bool {
 // moved on past it. It is derived at paint, like the umbrella's membership (toolSuperGroup), from
 // two facts stored on the members themselves, and it settles by either of two rules.
 //
-// The TURN-BOUNDARY rule comes first, and it is sticky: the block is settled once the next Turn of
-// its own run has STARTED past it — one of its own members carries entry.turnClosed, the mark the
-// boundary leaves on the run's last entry ([transcript.closeTurn]) — and it stays settled when
-// that next Turn extends it with a member of its own (an umbrella or a group grows across Turns
-// while nothing commits between them; toolSuperGroup), so a block the boundary folded does not
-// spring open for every call the next Turn adds. One thing lifts it, and the second rule then
-// decides alone: a member WAITING ON THE HUMAN ([entry.waitsOnUser] — a pending ask_user, a call
-// held on its approval pane), which keeps the block open while that wait lasts. A block the reader
-// touched never reaches this question ([transcript.blockFoldBy] asks the head's foldTouched first),
-// so a group of one the reader opened stays open when the next Turn's call grows it. The rule
-// never has to ask whether the closing Turn's calls returned: the engine answers every call a Turn
-// issues before it emits that Turn's boundary (the dispatch joins its calls before the Step ends),
-// so a marked member always ends a Turn whose calls all reported, and only the next Turn's own
-// members can be in flight.
+// The REPLY-TEXT rule comes first, and it is sticky: the block is settled once its own run has
+// streamed non-blank reply or narration text past it — one of its own members carries
+// entry.passed, the mark that text leaves on the run's last entry ([transcript.passBlock]) — and
+// it stays settled when a stream reset discards that text and the re-stream's call joins the
+// block instead (an umbrella or a group grows while nothing commits between its members;
+// toolSuperGroup), so a block the text folded does not spring open again. A Turn boundary alone
+// marks nothing: a burst of Turns that each add calls, with no text between them, keeps the block
+// open and growing. One thing lifts the mark, and the second rule then decides alone: a member
+// WAITING ON THE HUMAN ([entry.waitsOnUser] — a pending ask_user, a call held on its approval
+// pane), which keeps the block open while that wait lasts. A block the reader touched never
+// reaches this question ([transcript.blockFoldBy] asks the head's foldTouched first). The rule
+// never has to ask whether the marked block's calls returned: a run streams its next reply only
+// after the engine answered every call its last Turn issued (the dispatch joins its calls before
+// the Step ends), so a marked member always ends a block whose calls all reported, and only a
+// call joining it after a reset can be in flight.
 //
 // The COMMITTED-FOLLOWER rule is the one the block always had: every member of it has finished
 // ([entry.reported] — a call returned, a delegation's child reported), AND either a later entry of
@@ -2362,17 +2385,17 @@ func (t *transcript) blockFolded(head int) bool {
 // are that child's; a delegation member is over when its own head says so, whatever its span holds.
 func (t *transcript) blockSettled(head, end int) bool {
 	depth := t.entries[head].depth
-	closed, waiting, finished := false, false, true
+	passed, waiting, finished := false, false, true
 	for i := head; i < end; i++ {
 		e := t.entries[i]
 		if e.depth != depth {
 			continue
 		}
-		closed = closed || e.turnClosed
+		passed = passed || e.passed
 		waiting = waiting || e.waitsOnUser()
 		finished = finished && e.reported()
 	}
-	if closed && !waiting {
+	if passed && !waiting {
 		return true
 	}
 	if !finished {
@@ -2405,7 +2428,7 @@ func (e entry) reported() bool {
 
 // waitsOnUser reports whether e is a call the run is blocked on the human for: an ask_user
 // question not yet answered, or a call held on its approval pane (entry.heldForApproval). Either
-// keeps a block the Turn boundary settled open while the wait lasts ([transcript.blockSettled]),
+// keeps a block its run's reply text settled open while the wait lasts ([transcript.blockSettled]),
 // so the human can see the call they are being asked about.
 func (e entry) waitsOnUser() bool {
 	if e.kind != entryToolCall || e.reported() {
@@ -2414,26 +2437,28 @@ func (e entry) waitsOnUser() bool {
 	return e.heldForApproval || e.tool.name == askUserToolName
 }
 
-// closeTurn marks the boundary of one of run's Turns that has more Turns to come: the run's LAST
-// own entry takes entry.turnClosed, so the foldable block it ends is settled from here on — the
-// next Turn has started past it ([transcript.blockSettled]). It touches only when the mark moves.
-// A run with no entry of its own yet — a delegation whose first Turn committed nothing, a legacy
-// child whose stretch ends behind host notes parked at the tail — marks nothing ([lastOwnEntry]).
+// passBlock marks the moment run's streamed reply or narration first turns non-blank
+// ([transcript.appendToken]): the run's LAST own entry takes entry.passed, so the foldable block it
+// ends is settled from here on — text now follows it ([transcript.blockSettled]). It touches only
+// when the mark moves. A run with no entry of its own yet — a delegation whose first Turn committed
+// nothing, a legacy child whose stretch ends behind host notes parked at the tail — marks nothing
+// ([lastOwnEntry]), and only run's own entries are walked, so a delegate's text never settles its
+// parent's block, nor a sibling's.
 //
 // Only an entry that ends a FOLDABLE block at this moment is marked ([toolBlockAt]) — an umbrella
 // (a group of one included), a Sub-agent or Skill group (a lone delegation or skill fetch is a
-// group of one) — because the mark is what keeps a block the boundary folded folded while the next
-// Turn extends it: a folded "✦ Sub-agents (1)" the next Turn's delegation joins stays folded and
-// counts (2).
-func (t *transcript) closeTurn(run runRef) {
+// group of one) — because the mark is what keeps a block the text folded folded when a stream
+// reset discards that text and the re-stream's call joins the block: a folded "✦ Sub-agents (1)"
+// a re-streamed delegation joins stays folded and counts (2).
+func (t *transcript) passBlock(run runRef) {
 	at, ok := t.lastOwnEntry(run)
-	if !ok || t.entries[at].turnClosed {
+	if !ok || t.entries[at].passed {
 		return
 	}
 	if !toolBlockAt(t.entries, at).foldable() {
 		return
 	}
-	t.entries[at].turnClosed = true
+	t.entries[at].passed = true
 	t.touch()
 }
 

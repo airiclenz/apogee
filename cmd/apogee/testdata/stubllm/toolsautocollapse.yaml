@@ -13,7 +13,8 @@
 #   - "Read the one file." issues ONE read_file call — a lone call, which stands as a group of one.
 #   - "Search for a zebra." issues ONE grep call for a pattern the workspace does not hold — a lone
 #     call whose "No matches found" result tells it from the survey's grep — and its wrap-up is
-#     HELD on the `zebra` gate, so the group of one is shown to fold when that next Turn starts.
+#     HELD on the `zebra` gate, so the group of one is shown to stand open while that next Turn runs
+#     and to fold once its reply lands.
 #   - "Delegate one check." issues ONE sub_agent call — a lone delegation, which stands as a
 #     `✦ Sub-agents (1)` group of one; its child answers with a sentence of its own, so its wrap-up
 #     is told from the two-check group's.
@@ -24,8 +25,8 @@
 #     result (internal/tools LoadSkill), and the row keeps the query it was asked with.
 #   - "Delegate two inspections." issues two sub_agent calls in one reply, like "Delegate two checks."
 #     but with tasks and answers of their own, and its wrap-up is HELD on the `wings` gate: the
-#     request that carries the group's results waits until the test has seen the group fold, so
-#     the fold is shown to land when that next Turn starts, before its reply commits anything.
+#     request that carries the group's results waits until the test has seen the group stand open,
+#     so the group is shown to stay open while that next Turn runs and to fold once its reply lands.
 #   - "Anything else?" is the next reply after a settled block: text only, no call.
 #
 # All calls are harmless reads, or delegations whose children only talk: a driven run boots in
@@ -42,7 +43,7 @@ turns:
       repeat: true
       text: Workspace survey
     # The zebra search's wrap-up, once its lone grep has found nothing — held on the `zebra` gate
-    # until the test has seen the group of one fold (TestE2EToolsAutoCollapseRefoldsALoneCall). It
+    # until the test has seen the group of one stand open (TestE2EToolsAutoCollapseRefoldsALoneCall). It
     # sits AHEAD of the survey's wrap-up, and its `last_message` names a result only a search that
     # found nothing gives, so the survey's wrap-up is never held. The wrap-ups sit AHEAD of the
     # prompt turns so a request carrying results can never be answered as a fresh request.
@@ -72,7 +73,7 @@ turns:
       repeat: true
       text: The one file is read.
     # The inspections' wrap-up, once the south wing's delegation has reported — held on the `wings`
-    # gate until the test has seen the group fold (TestE2EToolsAutoCollapseFoldsAGroupWhenTheNextTurnStarts).
+    # gate until the test has seen the group stand open (TestE2EToolsAutoCollapseFoldsAGroupWhenItsWrapUpArrives).
     # It sits AHEAD of the checks' wrap-up below, and its `last_message` names an answer only the
     # inspections' second child gives, so the checks' wrap-up is never held.
     - when:
