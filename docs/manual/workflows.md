@@ -506,7 +506,8 @@ its id.
 - `⏎` opens one to its stages and their items, each by its short name with its status and
   summary; `⏎` on an item opens it read-only — its receipt, the detail output it wrote and its
   whole conversation. On a background `sub_agent`'s one stage `⏎` opens its one item, whose
-  detail output is the delegation's report.
+  detail output is the delegation's report. In a `failed` workflow the stage whose error ended it
+  reads `failed` and the stages after it stay `pending`.
 - `^a` answers what the workflow waits on: the pane closes and its oldest waiting approval or
   question opens — one `esc` sent back included — only while the agent is idle; mid-turn it says
   so and opens nothing.

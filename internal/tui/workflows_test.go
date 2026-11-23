@@ -292,6 +292,58 @@ func TestWorkflowsViewShowsAnItemByItsShortName(t *testing.T) {
 	}
 }
 
+// failedStageFixture writes one workflow folder whose status.json is the shape a stage error leaves
+// (workflow.Runner): the workflow failed, the stage before the failing one done, the failing stage
+// failed, the one after it pending. It returns the listing Engine.Workflows would read of it.
+func failedStageFixture(t *testing.T) []workflow.Info {
+	t.Helper()
+	store, err := workflow.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := workflow.Plan{Name: "audit", Stages: []workflow.Stage{
+		{Name: "find", Kind: workflow.StageFanout, Task: "look at {item}"},
+		{Name: "report", Kind: workflow.StageMerge, Task: "merge"},
+		{Name: "redo", Kind: workflow.StageRepeat, Repeat: "report", When: "sections < 1", Max: 1},
+	}}
+	status, err := store.Create(plan, "hash", time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	status.Phase = workflow.PhaseFailed
+	status.Stages[0].Phase = workflow.PhaseDone
+	status.Stages[1].Phase = workflow.PhaseFailed
+	status.Stages[2].Phase = workflow.PhasePending
+	if err := store.WriteStatus(status); err != nil {
+		t.Fatal(err)
+	}
+	read, err := store.ReadStatus(status.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := store.Dir(status.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []workflow.Info{{Status: read, Dir: dir}}
+}
+
+// A stage whose error failed its workflow reads failed in the detail, never running: the workflow
+// is over, and the stages after it stay pending.
+func TestWorkflowsViewShowsAFailedStage(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{workflowInfos: failedStageFixture(t)}
+	m := step(t, newTestModelEng(t, eng, testOpts), tea.WindowSizeMsg{Width: 200, Height: 60})
+	m = openWorkflowsLine(t, m)
+
+	m = workflowsKeyStep(t, m, keyEnter())
+
+	assertPaneHas(t, m, "· fanout · done", "· merge · failed", "· repeat · pending")
+	if painted := strip(m.renderWorkflows()); strings.Contains(painted, "running") {
+		t.Errorf("the detail of a failed workflow shows something running:\n%s", painted)
+	}
+}
+
 // setStageOut rewrites the plan.json of the workflow folder dir so the stage named stage writes its
 // items' output to out.
 func setStageOut(t *testing.T, dir, stage, out string) {

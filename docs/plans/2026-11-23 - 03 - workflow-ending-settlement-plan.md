@@ -75,7 +75,11 @@ Depends on item 1.
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestRun' ./internal/workflow/`
 **Commit:** `fix(workflow): a run whose final write fails records failed`
 
-## 3. A failed stage reads failed
+## 3. A failed stage reads failed — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): `settle` gained a stage-index parameter (`settle(result, failed, cause)`, `noStage` for a run no stage error ended) and a helper `runState.failStages`; the plan named the behaviour, not the signature.
+NOTES (2026-11-23): the manual sentence went into the `/workflows` view section, not the transcript block's stage-row list: that block is drawn from Driver events, which this item leaves unchanged, so the claim would not hold there.
+NOTES (2026-11-23): the consumers `workflow.TallyOfStatus` and `workflowStatusResult` are unchanged and got no new test — the item's Tests name only the runner test (which covers `resetStatus` through the re-run) and the TUI test; items left `running` inside the failed stage's `status.json` entry are untouched (pre-existing, outside this item's Goal).
 
 Depends on item 1.
 

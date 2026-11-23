@@ -327,8 +327,8 @@ type Tally struct {
 // writing items.md (Store.WriteItems) into the folder. The error is for a run that
 // could not proceed: an invalid plan, an unreadable item source, a store that cannot be written, a
 // folder Admit refused. A stage that errors once the folder is running ends the run as failed: its
-// status.json phase PhaseFailed and items.md written, best-effort (settle), so no listing shows it
-// running.
+// status.json phase PhaseFailed, that stage's too, and items.md written, best-effort (settle), so
+// no listing shows it or a stage of it running.
 func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 	if r.Spawner == nil || r.Store == nil || r.Workspace == nil {
 		return Result{}, errors.New("workflow: runner needs a Spawner, a Store and a Workspace")
@@ -363,7 +363,7 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 		}
 		stageResult, err := state.runStage(ctx, plan, index, stageItems, &result)
 		if err != nil {
-			err = state.settle(&result, err)
+			err = state.settle(&result, index, err)
 			return result, err
 		}
 		result.Stages = append(result.Stages, stageResult)
@@ -373,7 +373,7 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 		}
 	}
 	// settle writes into result, so it runs before the return reads it.
-	err = state.settle(&result, nil)
+	err = state.settle(&result, noStage, nil)
 	return result, err
 }
 
@@ -1056,17 +1056,23 @@ func (s *runState) notifyStage(stageIndex int, stage Stage, phase Phase, items i
 	}
 }
 
+// noStage is settle's stage index for a run no stage error ended.
+const noStage = -1
+
 // settle ends a run whose folder is open — every exit Run takes from there on: it writes items.md,
 // the listing of what the run reached, whose path result.Listing takes, and then records the
-// workflow's phase in status.json. cause is the stage error that ended the run, nil for a run that
-// ran to done or stopped on a cancel and so ends in the phase result already holds. A run with a
-// cause, and a run whose items.md or phase could not be written, ends failed: the result takes
-// PhaseFailed, status.json is written failed best-effort — the run is over either way — and settle
-// returns the cause, or the write error that stood in for one, joined with any write error after
-// it. So a status.json that reads done or stopped always has its items.md beside it.
-func (s *runState) settle(result *Result, cause error) error {
+// workflow's phase in status.json. cause is the stage error that ended the run and failed the
+// index of the stage that returned it; nil and noStage for a run that ran to done or stopped on a
+// cancel and so ends in the phase result already holds. A run with a cause, and a run whose
+// items.md or phase could not be written, ends failed: the result takes PhaseFailed, status.json is
+// written failed best-effort — the run is over either way — and settle returns the cause, or the
+// write error that stood in for one, joined with any write error after it. A stage error also
+// fails its stage in that write (failStages). So a status.json that reads done or stopped always
+// has its items.md beside it, and one that reads failed shows no stage running.
+func (s *runState) settle(result *Result, failed int, cause error) error {
 	if cause != nil {
 		result.Phase = PhaseFailed
+		s.failStages(failed)
 	}
 	listing, itemsErr := s.runner.Store.WriteItems(result.ID, *result)
 	result.Listing = listing
@@ -1081,6 +1087,22 @@ func (s *runState) settle(result *Result, cause error) error {
 	}
 	result.Phase = PhaseFailed
 	return errors.Join(cause, itemsErr, s.setWorkflowPhase(PhaseFailed))
+}
+
+// failStages records as failed the stage whose error ended the run — the one at index failed — and
+// every stage still recorded running: an error inside a repeat's re-run returns at the repeat's
+// index while the stage it re-ran is the one left running. It writes nothing and tells the
+// Observer nothing: settle's own status write carries the phases, and a StageEvent with
+// PhaseFailed is for a stage the workflow goes on after, which this one is not. The stages after
+// it stay pending.
+func (s *runState) failStages(failed int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.status.Stages {
+		if index == failed || s.status.Stages[index].Phase == PhaseRunning {
+			s.status.Stages[index].Phase = PhaseFailed
+		}
+	}
 }
 
 // setWorkflowPhase records the workflow's final phase in status.json.

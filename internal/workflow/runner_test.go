@@ -1156,6 +1156,117 @@ func TestRunnerRecordsFailedWhenAStageErrors(t *testing.T) {
 	}
 }
 
+// repeatedMergePlan is a fanout over one item, a merge of it, and a repeat that re-runs the merge
+// while its receipt counts no section.
+func repeatedMergePlan() Plan {
+	return countedPlan([]string{"a"},
+		Stage{Name: "report", Kind: StageMerge, Task: "merge", Returns: ReceiptSpec{"sections": "int"}},
+		Stage{Name: "redo", Kind: StageRepeat, Repeat: "report", When: "sections < 1", Max: 1},
+	)
+}
+
+// blockReportClearing puts a non-empty directory where a merge's report goes, so the next merge
+// round's clearing of the stale report fails and the merge stage returns an error.
+func blockReportClearing(t *testing.T, report string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(report, "keep"), 0o755); err != nil {
+		t.Fatalf("make the report a directory: %v", err)
+	}
+}
+
+// recordedStagePhases reads the stage phases status.json records for the workflow id.
+func recordedStagePhases(t *testing.T, runner *Runner, id string) []Phase {
+	t.Helper()
+	status, err := runner.Store.ReadStatus(id)
+	if err != nil {
+		t.Fatalf("ReadStatus: %v", err)
+	}
+	phases := make([]Phase, 0, len(status.Stages))
+	for _, stage := range status.Stages {
+		phases = append(phases, stage.Phase)
+	}
+	return phases
+}
+
+func TestRun_AFailedStageReadsFailed(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the stage whose error ended the run, and a re-run resets it", func(t *testing.T) {
+		t.Parallel()
+		spawner := spawnFunc(func(_ context.Context, spec ItemSpec) (Outcome, error) {
+			if spec.Stage.Kind != StageMerge {
+				return Outcome{Ending: EndCompleted, Receipt: issuesReceipt(spec.Item.Label, 1)}, nil
+			}
+			if err := writeReport(spec); err != nil {
+				return Outcome{}, err
+			}
+			return Outcome{Ending: EndCompleted, Receipt: mergeReceipt(1)}, nil
+		})
+		runner := newTestRunner(t, spawner)
+		observed := &phaseLog{}
+		runner.Observer = observed
+		plan := repeatedMergePlan()
+		opened, err := runner.Open(plan, "")
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		dir, err := runner.Store.Dir(opened.ID)
+		if err != nil {
+			t.Fatalf("Dir: %v", err)
+		}
+		report := filepath.Join(dir, reportName)
+		blockReportClearing(t, report)
+
+		result, err := runner.Run(context.Background(), plan)
+
+		if err == nil || result.Phase != PhaseFailed {
+			t.Fatalf("Run = phase %s, error %v; want the merge stage's error and a failed run", result.Phase, err)
+		}
+		want := []Phase{PhaseDone, PhaseFailed, PhasePending}
+		if got := recordedStagePhases(t, runner, opened.ID); !slices.Equal(got, want) {
+			t.Errorf("stage phases = %v, want %v", got, want)
+		}
+		// The fanout's running and done, then the merge's running: no event says the merge failed.
+		if wantEvents := []Phase{PhaseRunning, PhaseDone, PhaseRunning}; !slices.Equal(observed.stages, wantEvents) {
+			t.Errorf("stage events = %v, want %v — settle tells the Observer of no stage", observed.stages, wantEvents)
+		}
+
+		if err := os.RemoveAll(report); err != nil {
+			t.Fatalf("clear the report directory: %v", err)
+		}
+		rerun := runPlan(t, runner, context.Background(), plan)
+
+		wantRerun := []Phase{PhaseDone, PhaseDone, PhaseDone}
+		if got := recordedStagePhases(t, runner, opened.ID); rerun.ID != opened.ID || !slices.Equal(got, wantRerun) {
+			t.Errorf("re-run = folder %s with stage phases %v, want folder %s with %v", rerun.ID, got, opened.ID, wantRerun)
+		}
+	})
+
+	t.Run("an error in a repeat's re-run leaves no stage running", func(t *testing.T) {
+		t.Parallel()
+		spawner := spawnFunc(func(_ context.Context, spec ItemSpec) (Outcome, error) {
+			if spec.Stage.Kind != StageMerge {
+				return Outcome{Ending: EndCompleted, Receipt: issuesReceipt(spec.Item.Label, 1)}, nil
+			}
+			// Round 0 leaves a report the repeat's round cannot clear, and no section: the repeat runs.
+			blockReportClearing(t, spec.Output)
+			return Outcome{Ending: EndCompleted, Receipt: mergeReceipt(0)}, nil
+		})
+		runner := newTestRunner(t, spawner)
+
+		result, err := runner.Run(context.Background(), repeatedMergePlan())
+
+		if err == nil || result.Phase != PhaseFailed {
+			t.Fatalf("Run = phase %s, error %v; want the re-run merge's error and a failed run", result.Phase, err)
+		}
+		// The repeat returned the error, and the merge it re-ran was the stage recorded running.
+		want := []Phase{PhaseDone, PhaseFailed, PhaseFailed}
+		if got := recordedStagePhases(t, runner, result.ID); !slices.Equal(got, want) {
+			t.Errorf("stage phases = %v, want %v", got, want)
+		}
+	})
+}
+
 func TestRun_AFailedFinalWriteRecordsFailed(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
