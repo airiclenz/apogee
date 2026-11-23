@@ -1,11 +1,13 @@
 ---
 title: Collapsed sub-agent blocks copy every hidden entry to build their paint key
-status: open
+status: done
 type: task
 priority: 3
 labels: [perf, tui]
 plan: 2026-11-23 - 07 - tui-perf-frame-and-local-fixes-plan.md
 created: 2026-11-23T19:29:39Z
+closed: 2026-11-23T21:41:48Z
+reason: item 7 resolved by plan '2026-11-23 - 07 - tui-perf-frame-and-local-fixes-plan' (archived at 2fb94a24b)
 ---
 
 ## Problem

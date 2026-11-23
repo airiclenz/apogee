@@ -1,11 +1,13 @@
 ---
 title: Asking which panes are open heap-copies the Model on every frame
-status: open
+status: done
 type: task
 priority: 3
 labels: [perf, tui]
 plan: 2026-11-23 - 07 - tui-perf-frame-and-local-fixes-plan.md
 created: 2026-11-23T19:29:39Z
+closed: 2026-11-23T21:41:47Z
+reason: item 2 resolved by plan '2026-11-23 - 07 - tui-perf-frame-and-local-fixes-plan' (archived at 2fb94a24b)
 ---
 
 ## Problem
