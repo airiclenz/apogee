@@ -263,7 +263,7 @@ func TestGitStatusNotInsideClearsTheSnapshot(t *testing.T) {
 }
 
 // testRefusal is the refusal a refused host read carries in these tests.
-var testRefusal = GitRefusedError{Sentence: "git refused: this repository's own config names a program git would execute (core.sshcommand)."}
+var testRefusal = GitRefusedError{Sentence: gitexec.CommandConfigRefusal([]string{"core.sshcommand"})}
 
 // TestGitStatusRefusalClearsTheSnapshotAndRecordsTheSentence pins the refused landing: it clears
 // the snapshot like a read that found no work tree but records the refusal sentence, which a

@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -92,7 +91,7 @@ type gitStatusHost struct {
 // and where no usable git is on PATH. Where gitexec refuses the repository for a repo-local
 // command-valued key it is false with a [tui.GitRefusedError] carrying gitexec's refusal sentence,
 // so the footer can tell a refused repository from no repository. None of those runs the status
-// read. "Inside" is decided by `rev-parse --is-inside-work-tree`, never by git's stderr text.
+// read. "Inside" is decided by the kind of gitexec's [gitexec.RepoState], never by git's text.
 //
 // Any other non-nil error means no trustworthy answer this time — a timed-out or wedged call, a
 // failed status, or a command-config probe that could not complete — and the snapshot and inside
@@ -165,30 +164,23 @@ func (h gitStatusHost) transportEnv(ctx context.Context, gitPath, root string) (
 	return env, true, nil
 }
 
-// insideWorkTree asks git whether root is inside a work tree. A non-zero exit is "not inside", with
-// a nil error for no repository and a [tui.GitRefusedError] for a repository gitexec refuses
-// ([gitexec.IsCommandConfigRefusal]); a probe that could not complete, which the next call asks
-// again, is an ordinary error.
+// insideWorkTree reports whether root is inside a work tree, read from gitexec's one answer about
+// a root ([gitexec.Host.State]) and never from git's text. No repository — like no usable git —
+// is "not inside" with a nil error; a repository gitexec refuses is a [tui.GitRefusedError]
+// carrying its sentence. A check that could not complete, or a probe
+// that produced no answer (an ended context, a launch that failed), is the state's own error: the
+// next call asks again.
 func (h gitStatusHost) insideWorkTree(ctx context.Context, gitPath, root string, env []string) (bool, error) {
-	var out bytes.Buffer
-	res, err := h.git.CaptureEnvTo(ctx, gitPath, root, env, gitexec.CaptureOptions{}, gitStatusBackstop, &out,
-		"rev-parse", "--is-inside-work-tree")
-	if err != nil {
-		return false, err
-	}
-	if res.TimedOut || res.DrainWedged {
-		return false, gitOutcomeError("rev-parse", res)
-	}
-	if res.ExitCode != 0 {
-		switch {
-		case gitexec.IsIncompleteRefusal(res.CombinedOutput):
-			return false, errors.New(strings.TrimSpace(res.CombinedOutput))
-		case gitexec.IsCommandConfigRefusal(res.CombinedOutput):
-			return false, tui.GitRefusedError{Sentence: strings.TrimSpace(res.CombinedOutput)}
-		}
+	state := h.git.State(ctx, gitPath, root, env, gitStatusBackstop)
+	switch state.Kind {
+	case gitexec.WorkTree:
+		return true, nil
+	case gitexec.NoRepository, gitexec.Unavailable:
 		return false, nil
+	case gitexec.Refused:
+		return false, tui.GitRefusedError{Sentence: state.Refusal}
 	}
-	return strings.TrimSpace(out.String()) == "true", nil
+	return false, state.Err
 }
 
 // userSSHCommand reports whether the fetch would run an ssh command of the operator's own: a

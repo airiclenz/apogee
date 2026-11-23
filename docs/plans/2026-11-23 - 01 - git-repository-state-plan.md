@@ -74,7 +74,10 @@ Depends on item 1.
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'State|Refus|Incomplete' ./internal/gitexec/`
 **Commit:** `feat(gitexec): report the repository state at a root as one value`
 
-## 3. The status host reads the repository state
+## 3. The status host reads the repository state — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): the `insideWorkTree` helper keeps its name and signature; its body is the one `State` call and the kind mapping, so `Status` itself is unchanged apart from its doc sentence ("Inside" is decided by the RepoState kind).
+NOTES (2026-11-23): `TestGitStatusHostCancelledProbeIsAnError` wraps the fake's `Spawn` with a context check on the host under test rather than adding a context-aware mode to `gitStatusFake`.
 
 Depends on item 2.
 

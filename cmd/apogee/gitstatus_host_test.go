@@ -136,9 +136,9 @@ func gitSubcommand(argv []string) []string {
 }
 
 // gitStatusFake scripts git for the host with no git installed: the probe's own rev-parse finds no
-// repository (so nothing is memoised and nothing refused), rev-parse says inside, the
-// core.sshCommand read answers sshCommand, and status and fetch answer their scripts. Every spec
-// it is handed is recorded.
+// repository (so nothing is memoised and nothing refused), the repository-state rev-parse names a
+// work tree at the launch's own directory, the core.sshCommand read answers sshCommand, and
+// status and fetch answer their scripts. Every spec it is handed is recorded.
 type gitStatusFake struct {
 	mu    sync.Mutex
 	specs []subprocess.SubprocessSpec
@@ -173,7 +173,7 @@ func (f *gitStatusFake) host(t *testing.T, env map[string]string, goos string) g
 	}
 }
 
-// spawn answers the captured launches: the probe and the fetch.
+// spawn answers the captured launches: the probe, the repository-state rev-parse and the fetch.
 func (f *gitStatusFake) spawn(_ context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
 	f.mu.Lock()
 	f.specs = append(f.specs, spec)
@@ -186,13 +186,15 @@ func (f *gitStatusFake) spawn(_ context.Context, spec subprocess.SubprocessSpec)
 			return probe(), nil
 		}
 		return subprocess.SubprocessResult{ExitCode: 128}, nil
+	case len(sub) > 0 && sub[0] == "rev-parse":
+		return subprocess.SubprocessResult{Stdout: "true\n" + spec.Dir + "\n"}, nil
 	case len(sub) > 0 && sub[0] == "fetch":
 		return subprocess.SubprocessResult{}, nil
 	}
 	return subprocess.SubprocessResult{ExitCode: 128}, nil
 }
 
-// spawnTo answers the streamed launches: rev-parse, the core.sshCommand read and status.
+// spawnTo answers the streamed launches: the core.sshCommand read and status.
 func (f *gitStatusFake) spawnTo(_ context.Context, spec subprocess.SubprocessSpec, stdout io.Writer) (subprocess.SubprocessResult, error) {
 	f.mu.Lock()
 	f.specs = append(f.specs, spec)
@@ -200,9 +202,6 @@ func (f *gitStatusFake) spawnTo(_ context.Context, spec subprocess.SubprocessSpe
 	f.mu.Unlock()
 	sub := gitSubcommand(spec.Argv)
 	switch {
-	case len(sub) > 0 && sub[0] == "rev-parse":
-		_, _ = io.WriteString(stdout, "true\n")
-		return subprocess.SubprocessResult{}, nil
 	case len(sub) > 0 && sub[0] == "config":
 		if sshCommand == "" {
 			return subprocess.SubprocessResult{ExitCode: 1}, nil
@@ -598,6 +597,55 @@ func TestGitStatusHostIncompleteProbeIsAnError(t *testing.T) {
 	}
 	if !gitexec.IsIncompleteRefusal(err.Error()) {
 		t.Fatalf("Status error = %q, want the incomplete-probe refusal", err)
+	}
+}
+
+// TestGitStatusHostCancelledProbeIsAnError pins that a poll whose context ended is an error — the
+// caller keeps its last answer — never "not inside" with a nil error, which would clear the
+// footer's snapshot. The fake's launchers ignore their context, so this one fails a launch under a
+// done context with the context's error, as a real cancelled launch does.
+func TestGitStatusHostCancelledProbeIsAnError(t *testing.T) {
+	t.Parallel()
+
+	fake := &gitStatusFake{}
+	host := fake.host(t, nil, "linux")
+	spawn := host.git.Spawn
+	host.git.Spawn = func(ctx context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+		if err := ctx.Err(); err != nil {
+			return subprocess.SubprocessResult{}, err
+		}
+		return spawn(ctx, spec)
+	}
+	root := t.TempDir()
+	if _, inside, err := host.Status(context.Background(), root); err != nil || !inside {
+		t.Fatalf("Status under a live context = inside %v, err %v; want inside, nil", inside, err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, inside, err := host.Status(ctx, root)
+	if err == nil || inside {
+		t.Fatalf("Status under a cancelled context = inside %v, err %v; want not inside with an error", inside, err)
+	}
+	var refused tui.GitRefusedError
+	if errors.As(err, &refused) {
+		t.Fatalf("Status under a cancelled context = %v, a refusal; want an ordinary error", err)
+	}
+}
+
+// TestGitStatusHostUsesNoRefusalPredicate pins that the host decides "refused" and "ask again"
+// from the kind of gitexec's repository state: its source names neither text predicate.
+func TestGitStatusHostUsesNoRefusalPredicate(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("gitstatus_host.go")
+	if err != nil {
+		t.Fatalf("read the host source: %v", err)
+	}
+	for _, predicate := range []string{"IsCommandConfigRefusal", "IsIncompleteRefusal"} {
+		if strings.Contains(string(source), predicate) {
+			t.Errorf("gitstatus_host.go names %s; the host reads gitexec.RepoState instead", predicate)
+		}
 	}
 }
 
