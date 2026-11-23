@@ -54,7 +54,9 @@ type panelGeometry struct {
 	// chrome is the painted column's horizontal chrome around its content ([panelChrome]).
 	chrome panelChrome
 	// isOverlayGapHung reports whether the overlay's blank column hangs left of the painted column —
-	// the window has a column to spare beside it — rather than coming out of its own width.
+	// the window has a column to spare beside it — rather than coming out of its own width
+	// ([panelChrome.inset]). The docked column hangs none: the transcript's right gutter and the
+	// scroll-bar column already stand between its text and the separator.
 	isOverlayGapHung bool
 	// contentWidth is the painted column less its chrome, 0 while it is not painted.
 	contentWidth int

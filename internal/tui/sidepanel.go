@@ -71,7 +71,7 @@ const (
 	// ([Model.panelGripAt]) — fixed, so the lead pin cell is never a grip whatever the gutter yields.
 	sidePanelGripWidth = 2
 	// sidePanelOverlayGap is the blank column the overlay leaves between the transcript's text and
-	// its separator ([Model.panelOverlayGapHung]).
+	// its separator ([panelGeometry.isOverlayGapHung]).
 	sidePanelOverlayGap = " "
 	// sidePanelEmpty is the one dim line an empty column paints, below its blank top row.
 	sidePanelEmpty = "nothing live"
@@ -101,7 +101,7 @@ var subAgentFactsWidth = len(fmt.Sprintf(subAgentFactsFormat, "", "", ""))
 type panelChrome struct {
 	// inset is 1 where the overlay's blank column comes out of the column's own width — the
 	// overlay is as wide as the window, so there is no column left of it to hang the blank in
-	// ([Model.panelOverlayGapHung]) — and 0 otherwise. It is no column cell ([Model.panelCell]).
+	// ([panelGeometry.isOverlayGapHung]) — and 0 otherwise. It is no column cell ([Model.panelCell]).
 	inset int
 	// gutter is the blank cells between the separator and the content.
 	gutter int
@@ -156,14 +156,6 @@ func (m Model) panelLeftChrome() int {
 // ([Model.panelLeadWidth]), the one-cell gap before the facts, and the facts.
 func (m Model) panelFullSubAgentRowWidth() int {
 	return sidePanelBodyIndentWidth + m.panelLeadWidth() + 1 + 1 + subAgentFactsWidth
-}
-
-// panelOverlayGapHung reports whether the overlay's blank column hangs left of the painted column
-// — the window has a column to spare beside it — rather than coming out of the column's own width
-// ([panelChrome.inset]). The docked column hangs none: the transcript's right gutter and the
-// scroll-bar column already stand between its text and the separator.
-func (m Model) panelOverlayGapHung() bool {
-	return m.panelGeometry().isOverlayGapHung
 }
 
 // configuredPanelWidth is `ui.side-panel.width` as every reader of it takes it: the unset width (a
