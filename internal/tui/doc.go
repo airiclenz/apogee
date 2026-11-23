@@ -259,7 +259,8 @@
 // paragraphs where the width cannot give every column its four-cell readable floor (layout.md is
 // the visual contract). filecache.go
 // backs the "@" overlay with a short-TTL, single-walk workspace listing filtered in memory, so a
-// typing burst reuses one os.Root walk instead of re-scanning the disk per keystroke. mouse.go
+// typing burst reuses one os.Root walk instead of re-scanning the disk per keystroke; the walk runs
+// on a Cmd goroutine and lands as a filesListedMsg, never on the Update goroutine. mouse.go
 // implements click-to-position caret and drag-to-select (with OSC52, system-clipboard and tmux copy) in TWO rectangles —
 // apogee captures the mouse for transcript scrolling, which turns off the terminal's own click-drag
 // selection, so both are re-implemented here, the prompt's in rune offsets into the textarea Value

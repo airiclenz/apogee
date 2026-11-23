@@ -1649,6 +1649,12 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.foldSkillsReloaded()
 		return m, nil
 
+	case filesListedMsg:
+		// The workspace walk the "@" region dispatched off the loop has landed: install the listing and
+		// repaint the file menu over it while that region is still open (foldFilesListed).
+		m.foldFilesListed(msg)
+		return m, nil
+
 	case skillsRescannedMsg:
 		// The catalog re-scan /skills dispatched has finished: record the listing over the snapshot
 		// the provider now holds (skills.go). Same walk as the menu's and on the same Cmd goroutine

@@ -64,9 +64,15 @@ type promptEditor struct {
 	// is not a region a walk landing afterwards may paint back.
 	skillRegion bool
 
+	// fileRegion tracks whether the caret stands in an "@" file token (recomputeAutocomplete), the
+	// skillRegion of the file menu: it says whether a workspace walk landing now is owed a repaint
+	// (foldFilesListed). dismissAutocomplete and reset clear it for skillRegion's reason — a menu esc
+	// dismissed is not one a walk landing afterwards may paint back.
+	fileRegion bool
+
 	// files memoises the workspace listing behind the "@" autocomplete so a typing burst reuses
 	// one filesystem walk (filecache.go). A pointer — shared across the value-copied Model so
-	// the cache survives each Update (ADR 0011); nil-safe (fileSuggestions falls back).
+	// the cache survives each Update (ADR 0011); nil-safe (a nil cache holds nothing, walks never).
 	files *fileCache
 
 	// rowCount memoises the draft's wrapped row count on (value, width), so the several readers one
@@ -439,6 +445,7 @@ func (e *promptEditor) reset() {
 	e.input.Reset()
 	e.autocomplete = autocompleteState{}
 	e.skillRegion = false
+	e.fileRegion = false
 }
 
 // rows reports the textarea's height in visual rows for a given text width: the rows its current

@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
@@ -178,7 +177,7 @@ func TestResolvingFileTokenIsAccented(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, "internal", "loop.go"), "package internal")
 
 	m := accentTestModel(t, 80, dir, "look at @internal/loop.go and @internal/gone.go")
-	m.files.suggest(dir, "", maxAutocompleteItems, time.Now()) // the "@" overlay's own warm-up
+	m = warmFiles(t, m) // the "@" overlay's own warm-up
 
 	view := m.inputView()
 	if !strings.Contains(view, m.th.fileToken.Render("@internal/loop.go")) {
@@ -208,7 +207,7 @@ func TestAccentRenderNeverWalksTheWorkspace(t *testing.T) {
 		t.Errorf("an unwarmed cache accented a token it cannot have resolved")
 	}
 	// …and once something else has warmed it, the very same draft lights up.
-	m.files.suggest(dir, "", maxAutocompleteItems, time.Now())
+	m = warmFiles(t, m)
 	if !strings.Contains(m.inputView(), m.th.fileToken.Render("@main.go")) {
 		t.Errorf("the accent did not self-heal after the listing was warmed")
 	}
@@ -222,7 +221,7 @@ func TestAccentedTokenWrapsAcrossRows(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, "internal", "tui", "model.go"), "package tui")
 
 	m := accentTestModel(t, 20, dir, "@internal/tui/model.go") // inner width 16, token 22 cells
-	m.files.suggest(dir, "", maxAutocompleteItems, time.Now())
+	m = warmFiles(t, m)
 
 	view := m.inputView()
 	if rows := rowsWithAccent(view, accentOpener(t, m.th.fileToken)); len(rows) != 2 {

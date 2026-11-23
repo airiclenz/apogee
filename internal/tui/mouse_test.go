@@ -6565,6 +6565,9 @@ func TestApprovalClickOutsideTheBoxLeavesTheCallStanding(t *testing.T) {
 func dropdownPaneModel(t *testing.T, opts Options, draft string) Model {
 	t.Helper()
 	m := modelWithOverlayRoomAt(t, 100, 30, opts)
+	if strings.HasPrefix(draft, "@") {
+		m = warmFiles(t, m) // the "@" menu filters the listing the off-loop walk landed
+	}
 	m.input.SetValue(draft)
 	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 	m.layout()

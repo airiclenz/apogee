@@ -213,6 +213,15 @@ func (m Model) recomputeAutocomplete() (Model, tea.Cmd) {
 		reload = m.reloadSkillsCmd() // region opening: re-scan off the loop, repaint when it lands
 	}
 	m.skillRegion = inMenu
+	// The "@" region's listing is refreshed the same way, off the loop: the menu is derived from the
+	// listing held now, and the walk — dispatched only when that listing is due one and none is in
+	// flight (fileCache.refreshCmd) — repaints it when it lands (foldFilesListed).
+	var listing tea.Cmd
+	_, _, _, inFiles := caretFileToken(value, caret)
+	m.fileRegion = inFiles && !inMenu
+	if m.fileRegion {
+		listing = m.files.refreshCmd(m.opts.Workspace, time.Now())
+	}
 	m.autocomplete = m.computeAutocomplete(caret)
 	// The skill-suggestion band is scheduled from the same edit, here rather than at each caller,
 	// because every caller of this function IS the edit path: a typed key, a paste, a splice, an undo,
@@ -223,7 +232,7 @@ func (m Model) recomputeAutocomplete() (Model, tea.Cmd) {
 	// (scheduleSkillHints), and that tick rides out on the same Cmd as the reload.
 	var hintTick tea.Cmd
 	m, hintTick = m.scheduleSkillHints(value)
-	return m, tea.Batch(reload, hintTick)
+	return m, tea.Batch(reload, listing, hintTick)
 }
 
 // skillsReloadedMsg reports that the catalog re-scan reloadSkillsCmd dispatched has finished and the
@@ -288,6 +297,29 @@ func (m *Model) foldSkillsReloaded() {
 	next := m.computeAutocomplete(m.caretByteOffset())
 	next.selected = reselectRow(prev, next)
 	m.autocomplete = next // the dropdown's rows come out of the viewport, and a fresh catalog may change how many
+}
+
+// foldFilesListed installs the workspace listing a finished walk reports and re-derives the "@" menu
+// over it — the second half of the off-loop listing (fileCache.refreshCmd), foldSkillsReloaded's
+// counterpart for files. On first use it is what OPENS the menu: the keystroke found no listing to
+// filter and showed nothing, and this paints the rows the walk found.
+//
+// It repaints only where a repaint is owed, by foldSkillsReloaded's rule: a menu the human has since
+// closed or typed out of (fileRegion false), or a modal that has taken the frame, leaves the fold
+// inert, so a walk landing late never re-opens a dropdown esc dismissed. The highlighted row
+// survives the repaint (reselectRow). A listing of a root other than the workspace installs nothing
+// and repaints nothing.
+func (m *Model) foldFilesListed(msg filesListedMsg) {
+	if !m.files.install(msg, m.opts.Workspace, time.Now()) {
+		return
+	}
+	if !m.fileRegion || !m.state.live() {
+		return
+	}
+	prev := m.autocomplete
+	next := m.computeAutocomplete(m.caretByteOffset())
+	next.selected = reselectRow(prev, next)
+	m.autocomplete = next
 }
 
 // reselectRow maps the highlighted row of prev onto next by the VALUE it stood on, falling back to
@@ -627,8 +659,9 @@ func skillRow(th theme, sk skills.Skill, rank int, source string) acItem {
 // fileSuggestions lists workspace files matching the typed partial as "@path" rows — quoted
 // rows for paths with spaces (fileRefToken), so the dropdown teaches the syntax before the user
 // ever types a quote — served through the Model's file cache so a typing burst reuses one
-// workspace walk (filecache.go). newModel always installs the cache, so m.files is never nil
-// here. The item's value is the path itself; only the cell carries the sigil and quotes.
+// workspace walk (filecache.go). It filters the listing held now and never walks: the walk runs off
+// the Update goroutine (recomputeAutocomplete → fileCache.refreshCmd), and a cold cache — nil
+// included — yields no rows until it lands. The item's value is the path itself; only the cell carries the sigil and quotes.
 //
 // A path is one thing, not a name and a description, so a file row stays SINGLE-CELL: one column,
 // which the popup module lays out as the plain "@path" it always was.
@@ -664,7 +697,7 @@ func skillRow(th theme, sk skills.Skill, rank int, source string) acItem {
 // could never match a fully-typed token — one flattened string is the row cell, the value and the
 // ref token alike, and it names nothing on disk exactly as the stripped one does not.
 func (m Model) fileSuggestions(partial string) []acItem {
-	paths := m.files.suggest(m.opts.Workspace, partial, maxAutocompleteItems, time.Now())
+	paths := m.files.suggest(m.opts.Workspace, partial, maxAutocompleteItems)
 	items := make([]acItem, 0, len(paths))
 	for _, p := range paths {
 		p = flattenField(stripEscapes(p))
@@ -773,6 +806,7 @@ func (m Model) dropdownWheel(msg tea.MouseWheelMsg) (Model, bool) {
 func (m *Model) dismissAutocomplete() {
 	m.autocomplete = autocompleteState{}
 	m.skillRegion = false
+	m.fileRegion = false
 }
 
 // openSuggestMenu opens the "/" menu over exactly the skills the suggestion band is naming — tab's

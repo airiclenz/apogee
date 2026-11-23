@@ -1012,20 +1012,23 @@ func TestWorkspaceFiles(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, ".env"), "SECRET=1")         // hidden file, must be skipped
 
 	// Exercised through the fileCache (the only surviving path — the standalone workspaceFiles
-	// helper was removed as dead code; newModel always installs the cache).
+	// helper was removed as dead code; newModel always installs the cache), warmed by the walk it
+	// dispatches off the loop.
 	now := time.Now()
-	all := (&fileCache{}).suggest(dir, "", 20, now)
+	c := &fileCache{}
+	walkAndInstall(t, c, dir, now)
+	all := c.suggest(dir, "", 20)
 	want := []string{"README.md", "internal/loop.go", "main.go"}
 	if !reflect.DeepEqual(all, want) {
 		t.Errorf("workspace listing = %v, want %v (.git/.env excluded)", all, want)
 	}
-	if got := (&fileCache{}).suggest(dir, "loop", 20, now); !reflect.DeepEqual(got, []string{"internal/loop.go"}) {
+	if got := c.suggest(dir, "loop", 20); !reflect.DeepEqual(got, []string{"internal/loop.go"}) {
 		t.Errorf("filtered walk = %v, want [internal/loop.go]", got)
 	}
-	if got := (&fileCache{}).suggest(dir, "", 2, now); len(got) != 2 {
+	if got := c.suggest(dir, "", 2); len(got) != 2 {
 		t.Errorf("cap not honoured: got %d, want 2", len(got))
 	}
-	if got := (&fileCache{}).suggest("", "", 20, now); got != nil {
+	if got := c.suggest("", "", 20); got != nil {
 		t.Errorf("empty root = %v, want nil", got)
 	}
 }
@@ -1037,6 +1040,7 @@ func TestComputeAutocompleteFiles(t *testing.T) {
 	opts := testOpts
 	opts.Workspace = dir
 	m := newTestModelEng(t, &fakeEngine{}, opts)
+	m = warmFiles(t, m)
 
 	m.input.SetValue("look at @main")
 	ac := m.computeAutocomplete(m.caretByteOffset())
@@ -1111,6 +1115,7 @@ func TestComputeAutocompleteQuotedFiles(t *testing.T) {
 	opts := testOpts
 	opts.Workspace = dir
 	m := newTestModelEng(t, &fakeEngine{}, opts)
+	m = warmFiles(t, m)
 
 	m.input.SetValue(`look at @"my pl`)
 	ac := m.computeAutocomplete(m.caretByteOffset())
@@ -1140,6 +1145,7 @@ func TestAcceptAutocompleteQuotesSpacedPath(t *testing.T) {
 	opts := testOpts
 	opts.Workspace = dir
 	m := newTestModelEng(t, &fakeEngine{}, opts)
+	m = warmFiles(t, m)
 
 	m.input.SetValue("look at @my")
 	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
@@ -1159,6 +1165,7 @@ func TestAutocompleteQuotedFileEnterExactSubmits(t *testing.T) {
 	opts.Workspace = dir
 	eng := &fakeEngine{stepFn: scriptedSteps()} // immediately ExchangeComplete when driven
 	m := newTestModelEng(t, eng, opts)
+	m = warmFiles(t, m)
 
 	m.input.SetValue("look at @'my plan.md'")
 	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
@@ -1287,6 +1294,7 @@ func TestFileCompletionAtACaretMidBuffer(t *testing.T) {
 	opts := testOpts
 	opts.Workspace = dir
 	m := newTestModelEng(t, &fakeEngine{}, opts)
+	m = warmFiles(t, m)
 
 	m.input.SetValue("read @mai then stop")
 	m = caretAt(t, m, len("read @mai"))

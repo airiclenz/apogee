@@ -74,7 +74,7 @@ func TestAutocompleteCommandAndFileTitles(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, "main.go"), "package main")
 	opts := testOpts
 	opts.Workspace = dir
-	files := newDropdownModel(t, opts)
+	files := warmFiles(t, newDropdownModel(t, opts))
 	files.input.SetValue("@main")
 	files.autocomplete = files.computeAutocomplete(files.caretByteOffset())
 	if got := plain(files.View()); !strings.Contains(got, "files") {
@@ -238,6 +238,9 @@ func TestModalPromptDismissesTheDropdown(t *testing.T) {
 				t.Parallel()
 
 				m := modelWithOverlayRoomAt(t, 80, 30, Options{Workspace: "."})
+				if strings.HasPrefix(d.value, "@") {
+					m = warmFiles(t, m) // the "@" menu filters the listing the off-loop walk landed
+				}
 				startStubWorker(t, &m)
 				m.input.SetValue(d.value)
 				m, _ = m.recomputeAutocomplete()

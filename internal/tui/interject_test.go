@@ -1316,7 +1316,7 @@ func TestAutocompleteOpensWhileRunning(t *testing.T) {
 	opts.Workspace = dir
 	opts.Skills = fakeSkillCatalog{skills: []skills.Skill{{ID: "review", DisplayName: "Review"}}}
 
-	m := newTestModelEng(t, &fakeEngine{}, opts)
+	m := warmFiles(t, newTestModelEng(t, &fakeEngine{}, opts))
 	m.input.SetValue("go")
 	m, _ = stepCmd(t, m, keyEnter()) // → running, with a live mailbox
 

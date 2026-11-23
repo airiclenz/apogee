@@ -132,7 +132,17 @@ NOTES (2026-11-23): the working tree also shows modified files this item never t
 - `go test -run '^$' -bench 'ThinkingPaneUpdateAndView' -benchmem ./internal/tui/` — below 15.87 ms / 9.86 MB per chunk (record before/after)
 **Commit:** `perf(tui): wrap /thinking rows per line and compose them once per frame`
 
-## 5. The @file listing walks the disk off the Update goroutine
+## 5. The @file listing walks the disk off the Update goroutine — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): re-derived from "fileRegion beside skillRegion on the Model" — skillRegion lives on promptEditor (internal/tui/prompteditor.go), so fileRegion sits there and promptEditor.reset clears it with skillRegion.
+
+NOTES (2026-11-23): deviation — suggest does not report whether a walk is due; it only filters the held listing (root-mismatched → empty). The due check and the in-flight mark live in fileCache.refreshCmd(root, now), which recomputeAutocomplete calls while the caret is in a file token; install(msg, workspace, now) clears the in-flight mark and installs only a listing of the workspace root. The in-flight mark is the root being walked, not a bool.
+
+NOTES (2026-11-23): consequential edit — internal/tui/watch.go: made necessary by the new filesListedMsg fold case (TestWatchIsolatesRoutesEveryFoldedMsg requires every folded Msg routed; it routes as the view's, since the input box and file cache are the Model's, not the parked session's).
+
+NOTES (2026-11-23): consequential edit — internal/tui/doc.go: made necessary by filecache.go's walk moving to a Cmd goroutine (the file map's filecache.go line now says so).
+
+NOTES (2026-11-23): no kept benchmark covers the @ path (perfaudit_bench_test.go has none), so there are no before/after numbers for this item; the win is that the first @ keystroke's Update no longer includes an os.Root walk of up to 4096 files.
 
 **What:**
 **Goal:** `walkWorkspaceFiles` never runs on the Update goroutine; typing in an `@` token shows the same file rows once the listing lands; a burst of keys while a walk is in flight starts one walk.
