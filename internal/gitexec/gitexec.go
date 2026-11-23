@@ -371,15 +371,19 @@ func (h Host) runSpec(gitPath, root string, env []string, timeout time.Duration,
 // workspace read. The probe that decides the refusal runs under the SAME env, so a run pointed
 // at apogee's own store is judged by that store's config rather than by the workspace's.
 //
-// Every failure is ONE error: git absent, a fenced binary, a refused repository, a non-zero exit,
-// a timeout, a wedged drain, a stdout past the output cap and a cancelled ctx all mean "no
-// trustworthy answer", which is what a snapshot acts on — the floor's contract is that any failure
-// skips the check silently for that call (ADR 0056 decision 4). One distinction survives for a caller that must tell "no complete
-// answer" from "the answer is no": a timeout, a wedged drain, a stdout that overran the output cap
-// and an incomplete command-config check match [ErrIncomplete], and a cancelled ctx shows on the
-// caller's own ctx (the floor's work-tree probe, ADR 0056 amendment 2026-11-03). A capped stdout is
-// never returned as success: its kept prefix ends in the cap's truncation marker, not in git's
-// answer.
+// Every failure is an error and every one means "no trustworthy answer": git absent, a fenced
+// binary, a refused repository, a non-zero exit, a timeout, a wedged drain, a stdout past the
+// output cap and a cancelled ctx alike, which is what a snapshot acts on — the floor's contract is
+// that any failure skips the check silently for that call (ADR 0056 decision 4). Two outcomes are
+// typed for a caller that must tell them from the rest. A refused repository — a
+// [CommandConfigRefusal] or a [MergeDriverRefusal] — is a [RefusedError] carrying the sentence
+// (errors.As), never a failure of the lookup: an absent git is still [UnavailableMessage] and a
+// fenced one still matches security.ErrExecFromWritablePath. And "no complete answer" is told from
+// "the answer is no": a timeout, a wedged drain, a stdout that overran the output cap and an
+// incomplete command-config check match [ErrIncomplete] and are never a RefusedError, while a
+// cancelled ctx shows on the caller's own ctx (the floor's work-tree probe, ADR 0056 amendment
+// 2026-11-03). A capped stdout is never returned as success: its kept prefix ends in the cap's
+// truncation marker, not in git's answer.
 //
 // It is NOT for tool results. A tool shows the model what git printed, exit code and stderr
 // included, so the git tools take Capture's captured outcome; this returns stdout as DATA, with
@@ -443,7 +447,9 @@ func (h Host) query(ctx context.Context, gitPath, dir string, env []string, time
 // queryDiagnosed is query that also returns the child's standard error, which the split or
 // streamed stdout leaves alone in the result's CombinedOutput. A run that timed out, wedged its
 // drain, overran the output cap or was refused because its command-config check did not complete
-// fails with an error matching [ErrIncomplete]; every other failure is a plain error. A capped
+// fails with an error matching [ErrIncomplete]; a run refused by the repository's command config
+// ([CommandConfigRefusal], [MergeDriverRefusal]) fails with a [RefusedError]; every other failure
+// is a plain error. A capped
 // stdout is checked after the exit status: a non-zero exit is git's own answer whatever it
 // printed, while a zero exit over a cut stdout would hand the caller a prefix as the whole answer.
 func (h Host) queryDiagnosed(ctx context.Context, gitPath, dir string, env []string, timeout time.Duration, stdout io.Writer, args ...string) (string, string, error) {
@@ -458,7 +464,7 @@ func (h Host) queryDiagnosed(ctx context.Context, gitPath, dir string, env []str
 		if IsIncompleteRefusal(refusal) {
 			return "", "", incompleteError{text: refusal}
 		}
-		return "", "", errors.New(refusal)
+		return "", "", RefusedError{Sentence: refusal}
 	}
 
 	spec := h.runSpec(gitPath, dir, env, timeout, stdout == nil, CaptureOptions{}, overrides, args...)
@@ -1097,6 +1103,22 @@ const incompleteRefusalLead = "git refused: the check of this repository's own c
 // caller that needs the whole payload streams it through RunTo instead of asking again. The
 // wrapping error's text is the run's own — the sentinel adds nothing to the message.
 var ErrIncomplete = errors.New("apogee: gitexec: git gave no complete answer")
+
+// RefusedError is the error of a Run, RunTo, RunDiagnosed or Query that apogee refused to launch
+// because of the repository's own command config: a key naming a program git would execute
+// ([CommandConfigRefusal]) or a merge driver an argv that can merge would run
+// ([MergeDriverRefusal]). A caller matches it with errors.As instead of reading the text. It
+// stands while the repository's config does, so it never matches [ErrIncomplete]; a check that
+// did not complete is that sentinel's failure, and a git that is absent or fenced is neither.
+type RefusedError struct {
+	// Sentence is the refusal as the user reads it, byte for byte what the capture path prints.
+	Sentence string
+}
+
+// Error returns the refusal sentence.
+func (e RefusedError) Error() string {
+	return e.Sentence
+}
 
 // incompleteError is a failure that matches [ErrIncomplete] while keeping its own text.
 type incompleteError struct {

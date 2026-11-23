@@ -903,6 +903,111 @@ func TestHost_RefusesAnIncompleteCommandConfigProbe(t *testing.T) {
 	}
 }
 
+// TestDataPathRefusalIsTyped pins what the data path's error says about a refusal: a repo-local
+// command-config key and a merge driver each fail Run with a RefusedError whose Sentence — and
+// whose Error() — is the refusal sentence, while a failed resolution is never one: a planted git
+// still matches the exec fence's sentinel and an absent git is still UnavailableMessage.
+func TestDataPathRefusalIsTyped(t *testing.T) {
+	t.Parallel()
+	nothing := func(string) subprocess.SubprocessResult { return subprocess.SubprocessResult{} }
+
+	refusals := []struct {
+		name    string
+		listing string
+		args    []string
+		want    string
+	}{
+		{
+			name:    "command-config key",
+			listing: "file:.git/config\x00filter.x.clean\ntrue\x00",
+			args:    []string{"status"},
+			want:    gitexec.CommandConfigRefusal([]string{"filter.x.clean"}),
+		},
+		{
+			name:    "merge driver",
+			listing: "file:.git/config\x00" + mergeDriverKey + "\nx %O %A %B\x00",
+			args:    []string{"rebase", "side"},
+			want:    gitexec.MergeDriverRefusal("rebase", []string{mergeDriverKey}),
+		},
+	}
+	for _, tc := range refusals {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			host, _ := fakeHost(outsideGit(t), mergeDriverListing(tc.listing))
+
+			_, err := host.Run(context.Background(), t.TempDir(), nil, testTimeout, tc.args...)
+
+			var refused gitexec.RefusedError
+			if !errors.As(err, &refused) {
+				t.Fatalf("Run err = %v (%T), want a RefusedError", err, err)
+			}
+			if refused.Sentence != tc.want || err.Error() != tc.want {
+				t.Errorf("Sentence = %q, Error() = %q, want both %q", refused.Sentence, err.Error(), tc.want)
+			}
+			if errors.Is(err, gitexec.ErrIncomplete) {
+				t.Errorf("Run err = %v matches ErrIncomplete, want a standing refusal", err)
+			}
+		})
+	}
+
+	t.Run("planted git", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		planted := filepath.Join(root, "bin", "git")
+		if err := os.MkdirAll(filepath.Dir(planted), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(planted, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write planted git: %v", err)
+		}
+		host, _ := fakeHost(planted, cleanRepository(nothing))
+
+		_, err := host.Run(context.Background(), root, nil, testTimeout, "status")
+
+		var refused gitexec.RefusedError
+		if !errors.Is(err, security.ErrExecFromWritablePath) || errors.As(err, &refused) {
+			t.Errorf("Run err = %v (%T), want the exec-fence refusal and no RefusedError", err, err)
+		}
+	})
+
+	t.Run("absent git", func(t *testing.T) {
+		t.Parallel()
+		host, _ := fakeHost("", cleanRepository(nothing))
+		host.Look = func(string) (string, error) { return "", exec.ErrNotFound }
+
+		_, err := host.Run(context.Background(), t.TempDir(), nil, testTimeout, "status")
+
+		var refused gitexec.RefusedError
+		if err == nil || err.Error() != gitexec.UnavailableMessage || errors.As(err, &refused) {
+			t.Errorf("Run err = %v (%T), want %q and no RefusedError", err, err, gitexec.UnavailableMessage)
+		}
+	})
+}
+
+// TestIncompleteIsNotARefusal pins the other side of the typed refusal: a command-config probe
+// that did not complete fails Run with an error matching ErrIncomplete and never a RefusedError,
+// so a caller that latches on a refusal asks again after an unfinished check.
+func TestIncompleteIsNotARefusal(t *testing.T) {
+	t.Parallel()
+	host, _ := fakeHost(outsideGit(t), cleanRepository(func(string) subprocess.SubprocessResult {
+		return subprocess.SubprocessResult{}
+	}))
+	clean := host.Spawn
+	host.Spawn = func(ctx context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+		if strings.Contains(strings.Join(spec.Argv, " "), " config --local ") {
+			return subprocess.SubprocessResult{TimedOut: true, ExitCode: -1}, nil
+		}
+		return clean(ctx, spec)
+	}
+
+	_, err := host.Run(context.Background(), t.TempDir(), nil, testTimeout, "status")
+
+	var refused gitexec.RefusedError
+	if !errors.Is(err, gitexec.ErrIncomplete) || errors.As(err, &refused) {
+		t.Errorf("Run err = %v (%T), want a failure matching ErrIncomplete and no RefusedError", err, err)
+	}
+}
+
 // isIncompleteRefusal reports whether text is the incomplete-probe refusal and names step.
 func isIncompleteRefusal(text, step string) bool {
 	return strings.HasPrefix(text, "git refused:") && strings.Contains(text, "did not complete") &&

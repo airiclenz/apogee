@@ -40,13 +40,24 @@
 // for a run apogee starts on its own that must never prompt — and [Host.CaptureEnvTo] is
 // CaptureEnv with stdout streamed uncapped to the caller's writer, for an answer parsed at any
 // size. [Host.Run] and [Host.Query] return the child's stdout as DATA, with the diagnostics left
-// out of the payload and every failure flattened to one error. [Host.RunTo] is Run with the
+// out of the payload and every failure an error. [Host.RunTo] is Run with the
 // payload streamed uncapped to the caller's writer, for output a truncation would corrupt.
 // [Host.RunDiagnosed] is Run that also hands back the child's stderr on a zero exit, for a
 // command whose warning is the only sign its answer is partial. Every one but Capture takes an
 // env the caller appends — GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, or a captured run's own
 // variables — which redirects the run to an object database of apogee's own without weakening
 // anything the hardening put there, and the probe behind the refusal runs under that same env.
+//
+// The outcomes of each path. The capture path (Capture, CaptureEnv, CaptureEnvTo) takes a git its
+// caller resolved and returns an error only when the probe or the run could not be launched;
+// everything git or the refusal said is a captured result — a refused repository and an
+// unfinished probe are failed results whose output is the refusal sentence, told apart by
+// [IsCommandConfigRefusal] and [IsIncompleteRefusal]. The data path (Run, RunTo, RunDiagnosed,
+// Query) returns stdout or an error, and its errors are: a failed resolution
+// ([UnavailableMessage] for an absent git, security.ErrExecFromWritablePath for a fenced one —
+// Query resolves nothing); a [RefusedError] carrying the sentence for a refused repository or a
+// refused merge driver; an error matching [ErrIncomplete]; and a plain error for a non-zero exit
+// or a launch failure.
 // [IsIncompleteRefusal] tells a probe that could not finish from a repository that is refused, and
 // a data entry point's error matches [ErrIncomplete] when git gave no complete answer (a timeout,
 // a wedged drain, a stdout that overran the output cap, that unfinished probe), so a caller never

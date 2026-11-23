@@ -35,7 +35,7 @@
 - The `GitStatusHost` interface and `tui.GitRefusedError` themselves; `gitOutcomeError`'s flattening of other actions.
 - Changing which keys are refused, neutralised or benign.
 
-## 1. A data-path refusal is a typed error
+## 1. A data-path refusal is a typed error — ✅ DONE (2026-11-23)
 
 **What:**
 **Goal:** every command-config refusal (a `CommandConfigRefusal` or `MergeDriverRefusal` sentence) built in `queryDiagnosed` — so returned by gitexec's data path (`Run`, `RunTo`, `RunDiagnosed`, `Query`) — is a `gitexec.RefusedError` whose `Error()` is the refusal sentence; an incomplete check still matches `gitexec.ErrIncomplete` and never matches `RefusedError`.
