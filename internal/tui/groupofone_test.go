@@ -94,7 +94,9 @@ func foldGroupOfOne(t *testing.T, m Model, way string) Model {
 // TestGroupOfOneFoldsOpensAndRefolds is the lone-call-no-refold defect's fix in every state a lone
 // call stands in: its header folds and opens it on every gesture, by mouse and by ⏎, settled under
 // auto-collapse (where it starts folded), with auto-collapse off and while its call is live (where
-// it starts open) — the touch the first gesture leaves never strands it in either shape.
+// it starts open) — the touch the first gesture leaves never strands it in either shape. The
+// gestures end on an open group, which then settles under auto-collapse: still open, it carries the
+// reader's touch, where an untouched one folds.
 func TestGroupOfOneFoldsOpensAndRefolds(t *testing.T) {
 	t.Parallel()
 
@@ -105,13 +107,15 @@ func TestGroupOfOneFoldsOpensAndRefolds(t *testing.T) {
 
 				m := groupOfOneModel(t, state)
 				startsFolded := state == "settled"
+				gestures := 4
 				if startsFolded {
 					assertGroupOfOneFolded(t, m)
+					gestures = 3
 				} else {
 					assertGroupOfOneOpen(t, m)
 				}
 
-				for gesture := 1; gesture <= 3; gesture++ {
+				for gesture := 1; gesture <= gestures; gesture++ {
 					m = foldGroupOfOne(t, m, way)
 					if folded := startsFolded != (gesture%2 == 1); folded {
 						assertGroupOfOneFolded(t, m)
@@ -119,9 +123,19 @@ func TestGroupOfOneFoldsOpensAndRefolds(t *testing.T) {
 						assertGroupOfOneOpen(t, m)
 					}
 				}
-				if !m.transcript.entries[groupOfOneEntry].foldTouched {
-					t.Error("the group of one the reader folded and opened is not touched")
+
+				if state == "live" { // the lone call's result lands before its Turn ends
+					m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "lone",
+						Content: "[File: a.go, 5 lines total, showing lines 1-5]\n…",
+						Summary: domain.ReadSpan{Start: 1, End: 5, Total: 5}}})
 				}
+				m.transcript.setToolsAutoCollapse(true)
+				m.transcript.setTurnLive(false)
+				m.refreshViewport()
+				if !settledAt(&m.transcript, groupOfOneEntry) {
+					t.Fatal("setup: the group of one is not settled under auto-collapse")
+				}
+				assertGroupOfOneOpen(t, m)
 			})
 		}
 	}

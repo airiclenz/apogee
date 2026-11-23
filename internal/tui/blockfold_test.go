@@ -69,7 +69,7 @@ func TestFoldActHeaderOpensAnAutoCollapsedBlockAlone(t *testing.T) {
 // TestFoldActHeaderOnLargeAsksForTheSharedFlip pins the shared arm: a header act on a LARGE umbrella
 // under the shared preference touches it and hands the flip back — the transcript's preference and
 // the fold stand as they were until the caller makes it, and then the fold is the one the outcome
-// named.
+// named, which the touch keeps once auto-collapse comes back on over the settled umbrella.
 func TestFoldActHeaderOnLargeAsksForTheSharedFlip(t *testing.T) {
 	t.Parallel()
 
@@ -89,14 +89,12 @@ func TestFoldActHeaderOnLargeAsksForTheSharedFlip(t *testing.T) {
 	if tr.toolsOpen || !tr.blockFolded(0) {
 		t.Errorf("before the caller's flip: toolsOpen %v, folded %v; want false, true", tr.toolsOpen, tr.blockFolded(0))
 	}
-	if !tr.entries[0].foldTouched {
-		t.Error("the header act did not mark the large umbrella touched")
-	}
 
 	tr.setToolsOpen(!tr.toolsOpen) // the caller's flip (Model.actOnFold)
 	tr.addNote("saved")            // a follower
+	tr.setToolsAutoCollapse(true)  // an untouched settled umbrella would fold now
 	if got := tr.blockFolded(0); got != outcome.folded {
-		t.Errorf("blockFolded(0) = %v after the flip; want the outcome's %v", got, outcome.folded)
+		t.Errorf("blockFolded(0) = %v after the flip; want the outcome's %v — the touch exempts it", got, outcome.folded)
 	}
 }
 
@@ -198,23 +196,27 @@ func TestFoldActRevealOpensAloneAndItsTypeRow(t *testing.T) {
 		if want := (foldOutcome{acted: true}); outcome != want {
 			t.Errorf("outcome = %+v; want %+v", outcome, want)
 		}
-		if tr.blockFolded(0) || !tr.entries[0].foldOwn || !tr.entries[1].typeExpanded {
-			t.Errorf("after the reveal: folded %v, foldOwn %v, member's type row open %v; want false, true, true",
-				tr.blockFolded(0), tr.entries[0].foldOwn, tr.entries[1].typeExpanded)
+		// Settled, large and under the shut shared preference, it stands open only on a fold of its own.
+		if tr.blockFolded(0) || !tr.entries[1].typeExpanded {
+			t.Errorf("after the reveal: folded %v, member's type row open %v; want false, true",
+				tr.blockFolded(0), tr.entries[1].typeExpanded)
 		}
 	})
 
 	t.Run("open umbrella", func(t *testing.T) {
 		t.Parallel()
 
-		tr := autoCollapseUmbrella(t)
+		tr := autoCollapseUmbrella(t) // open, untouched: the running Turn's last block
 
 		tr.applyFoldAct(foldAct{kind: foldActReveal, index: 1})
-		tr.addNote("saved") // a follower
+		tr.addNote("saved") // a follower: it settles
 
-		if head := tr.entries[0]; !head.foldTouched || head.foldOwn || tr.blockFolded(0) {
-			t.Errorf("after the reveal: touched %v, foldOwn %v, folded %v; want true, false, false",
-				head.foldTouched, head.foldOwn, tr.blockFolded(0))
+		if tr.blockFolded(0) {
+			t.Error("the revealed umbrella folded once settled; want the reveal's touch to keep it open")
+		}
+		tr.setToolsFoldOver(1) // large, under the shut shared preference
+		if !tr.blockFolded(0) {
+			t.Error("the revealed umbrella stands open under the shut shared preference; want no fold of its own")
 		}
 	})
 

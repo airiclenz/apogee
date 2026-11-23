@@ -129,11 +129,19 @@ func TestAutoCollapseExemptsTouchedUmbrellas(t *testing.T) {
 	t.Run("touched folds by size", func(t *testing.T) {
 		t.Parallel()
 
-		tr := autoCollapseUmbrella(t)
+		tr := autoCollapseUmbrella(t) // open, untouched: the running Turn's last block
+		tr.applyFoldAct(foldAct{kind: foldActMember, index: 1})
 		tr.setTurnLive(false)
-		tr.entries[0].foldTouched = true
 		if tr.blockFolded(0) {
 			t.Error("blockFolded(0) = true on a touched, settled small umbrella; want false — touched is exempt")
+		}
+		tr.setToolsFoldOver(1) // large: the shared preference holds it
+		if !tr.blockFolded(0) {
+			t.Error("blockFolded(0) = false on a touched large umbrella under the shut preference; want true")
+		}
+		tr.setToolsOpen(true)
+		if tr.blockFolded(0) {
+			t.Error("blockFolded(0) = true on a touched large umbrella under the open preference; want false")
 		}
 	})
 
@@ -143,15 +151,14 @@ func TestAutoCollapseExemptsTouchedUmbrellas(t *testing.T) {
 		tr := autoCollapseUmbrella(t)
 		tr.setTurnLive(false)
 		tr.setToolsFoldOver(1)
-		tr.entries[0].foldTouched = true
-		tr.entries[0].foldOwn = true
+		tr.applyFoldAct(foldAct{kind: foldActHeader, index: 0}) // the reader opens it alone
 		if got := tr.blockFoldBy(0); got != foldByHead {
 			t.Fatalf("blockFoldBy(0) = %d; want foldByHead", got)
 		}
 		if tr.blockFolded(0) {
 			t.Error("blockFolded(0) = true with the head flag open; want false — the shared shut preference is not read")
 		}
-		tr.setBlockFolded(0, true)
+		tr.applyFoldAct(foldAct{kind: foldActHeader, index: 0})
 		if !tr.blockFolded(0) {
 			t.Error("blockFolded(0) = false with the head flag shut; want true")
 		}
@@ -529,7 +536,7 @@ func TestAutoCollapseFoldsSettledGroups(t *testing.T) {
 			t.Parallel()
 
 			tr := group.build(t)
-			if !tr.markBlockTouched(group.second) || !tr.entries[0].foldTouched {
+			if !tr.markBlockTouched(group.second) {
 				t.Fatal("setup: the second member's row did not mark its group touched")
 			}
 			tr.setTurnLive(false)

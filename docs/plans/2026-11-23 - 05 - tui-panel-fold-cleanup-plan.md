@@ -119,7 +119,11 @@ NOTES (2026-11-23): the shared header arm now touches before the Model's `toggle
 - the Goal's grep prints nothing.
 **Commit:** `refactor(tui): one reader act moves a block's fold`
 
-## 5. Fold gesture tests assert observable fold, not flags
+## 5. Fold gesture tests assert observable fold, not flags — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): no Model test was removed — the touch, group-of-one and Sub-agent families each already hold one mouse, one ⏎ and one panel-jump Model test, and `TestAutoCollapseTouchMarksEveryTargetKind` keeps its per-target-kind matrix (it is the only routing check from a row kind to its act's touch); the bare-transcript unit cases (`TestAutoCollapseTouchWritersMoveTheGeneration`, `TestAutoCollapseExemptsTouchedUmbrellas`) now drive `applyFoldAct`.
+NOTES (2026-11-23): touch is read as "settled, still open" and a fold of its own as "still open once large under the shut shared preference"; the header case of `TestAutoCollapseTouchMarksEveryTargetKind` gestures twice, `TestGroupOfOneFoldsOpensAndRefolds` ends on an open group (4 gestures from open, 3 from folded) and lands the live call's result before settling, and `TestLoneDelegationMemberRowOpensItsRunView` opens the group untouched by turning auto-collapse off rather than by a header click.
+NOTES (2026-11-23): setup calls `markBlockTouched` (`TestAutoCollapseFoldsSettledGroups` "touched stays open") and `openBlockAlone` (`TestAutoCollapseTurnBoundaryAndTouch`) stay as fixture setup with their return checked; only their flag reads were dropped. Mutation check: dropping the touch write in `markBlockTouched`, or the `foldOwn` write in `openBlockAlone`, fails the rewritten tests.
 
 **What:**
 **Goal:** `grep -nE '\.foldTouched|\.foldOwn' internal/tui/*_test.go` prints nothing; the touch, group-of-one and Sub-agent fold cases assert observable fold (settle it, is it still open?). Depends on item 4.

@@ -425,8 +425,8 @@ func TestAutoCollapseTurnBoundaryAndTouch(t *testing.T) {
 		tr.setToolsAutoCollapse(true)
 		tr.setTurnLive(true)
 		readCall(tr, "c1", "a.go", 1, 5, 0)
-		if !tr.openBlockAlone(0) || !tr.entries[0].foldTouched {
-			t.Fatal("setup: opening the group of one did not touch it")
+		if !tr.openBlockAlone(0) {
+			t.Fatal("setup: opening the group of one moved nothing")
 		}
 		tr.apply(turnBoundary(top))
 		tr.apply(callEvent(top, "c2", "grep", `{"pattern":"x"}`))

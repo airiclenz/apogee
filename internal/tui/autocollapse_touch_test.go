@@ -70,8 +70,11 @@ func TestUmbrellaHeadOfFindsTheHeadFromAnyMember(t *testing.T) {
 	}
 }
 
-// TestAutoCollapseTouchWritersMoveTheGeneration pins the two marks' writers to the paint's
-// generation: each moves it when it moves the mark and holds it when there is nothing to move.
+// TestAutoCollapseTouchWritersMoveTheGeneration pins the acts that touch a block to the paint's
+// generation: each moves it when it moves the touch or the fold and holds it when there is nothing
+// to move. What the acts left is read off the fold: both blocks are settled, so an open one is a
+// touched one, and the umbrella opened alone keeps its own fold once it turns large under the shut
+// shared preference.
 func TestAutoCollapseTouchWritersMoveTheGeneration(t *testing.T) {
 	t.Parallel()
 
@@ -79,43 +82,41 @@ func TestAutoCollapseTouchWritersMoveTheGeneration(t *testing.T) {
 	tr.addNote("saved")                 // 2: no umbrella here
 	readCall(tr, "c3", "c.go", 1, 4, 0) // 3: a group of one
 	tr.addNote("read")                  // 4
+	if !tr.blockFolded(0) || !tr.blockFolded(3) {
+		t.Fatal("setup: the settled umbrella and group of one are not both folded")
+	}
 
 	for _, tc := range []struct {
 		name  string
-		act   func() bool
+		act   foldAct
 		moves bool
 	}{
-		{"markBlockTouched from a member", func() bool { return tr.markBlockTouched(1) }, true},
-		{"markBlockTouched again", func() bool { return tr.markBlockTouched(0) }, false},
-		{"markBlockTouched outside an umbrella", func() bool { return tr.markBlockTouched(2) }, false},
-		{"openBlockAlone", func() bool { return tr.openBlockAlone(0) }, true},
-		{"openBlockAlone again", func() bool { return tr.openBlockAlone(0) }, false},
-		{"openBlockAlone on a member", func() bool { return tr.openBlockAlone(2) }, false},
-		{"openBlockAlone on a group of one", func() bool { return tr.openBlockAlone(3) }, true},
-		{"markBlockTouched on that group of one again", func() bool { return tr.markBlockTouched(3) }, false},
+		{"entering a run from the group of one", foldAct{kind: foldActEnterRun, index: 3}, true},
+		{"entering it again", foldAct{kind: foldActEnterRun, index: 3}, false},
+		{"entering a run outside a block", foldAct{kind: foldActEnterRun, index: 2}, false},
+		{"header on the auto-collapsed umbrella", foldAct{kind: foldActHeader, index: 0}, true},
+		{"header on a member past the head", foldAct{kind: foldActHeader, index: 1}, false},
+		{"entering a run from that opened umbrella", foldAct{kind: foldActEnterRun, index: 1}, false},
 	} {
 		before := tr.generation
-		if got := tc.act(); got != tc.moves {
-			t.Errorf("%s reported %v; want %v", tc.name, got, tc.moves)
-		}
+		tr.applyFoldAct(tc.act)
 		if moved := tr.generation != before; moved != tc.moves {
 			t.Errorf("%s moved the generation: %v; want %v", tc.name, moved, tc.moves)
 		}
 	}
-	if head := tr.entries[0]; !head.foldTouched || !head.foldOwn || head.folded {
-		t.Errorf("head after openBlockAlone: touched %v, ownFold %v, folded %v; want true, true, false",
-			head.foldTouched, head.foldOwn, head.folded)
+	if tr.blockFolded(3) {
+		t.Error("the settled group of one the reader entered folded; want the touch to hold it open")
 	}
-	// Opening a group of one gives it a fold of its own, as any umbrella's.
-	if one := tr.entries[3]; !one.foldTouched || !one.foldOwn || one.folded {
-		t.Errorf("group of one after openBlockAlone: foldTouched %v, ownFold %v, folded %v; want true, true, false",
-			one.foldTouched, one.foldOwn, one.folded)
+	tr.setToolsFoldOver(1) // the umbrella turns large under the shut shared preference
+	if tr.blockFolded(0) {
+		t.Error("the umbrella opened alone folded under the shared preference; want its own fold open")
 	}
 }
 
 // TestAutoCollapseTouchMarksEveryTargetKind pins the touch on every level of an umbrella, by mouse
 // and by ⏎: its header, a type row, a member's row and a member's body. The touched umbrella is
-// then exempt — it does not fold when the Turn ends — and the other one is never marked.
+// then exempt — still open when the Turn ends, where an untouched one folds — and the other one is
+// never marked: settled under the open shared preference, it would open if it were.
 func TestAutoCollapseTouchMarksEveryTargetKind(t *testing.T) {
 	t.Parallel()
 	const settled, live = 1, 6
@@ -125,11 +126,12 @@ func TestAutoCollapseTouchMarksEveryTargetKind(t *testing.T) {
 		kind   targetKind
 		entry  int
 		expand bool // open the Terminal run's second call first, so its body is on screen
+		twice  bool // the first gesture shuts the umbrella; a second opens it before the settle
 	}{
-		{"umbrella header", targetUmbrella, live, false},
-		{"type row", targetType, live, false},
-		{"member row", targetHeader, live + 2, false},
-		{"member body", targetHeader, live + 3, true},
+		{"umbrella header", targetUmbrella, live, false, true},
+		{"type row", targetType, live, false, false},
+		{"member row", targetHeader, live + 2, false, false},
+		{"member body", targetHeader, live + 3, true, false},
 	} {
 		for _, way := range []string{"mouse", "enter"} {
 			t.Run(tc.name+" by "+way, func(t *testing.T) {
@@ -143,22 +145,33 @@ func TestAutoCollapseTouchMarksEveryTargetKind(t *testing.T) {
 				}
 				m.refreshViewport()
 
-				if way == "mouse" {
-					m = clickCell(t, m, 4, screenRow(t, m, lastLineMarked(t, m, tc.kind, tc.entry)))
-				} else {
+				gestures := 1
+				if tc.twice {
+					gestures = 2
+				}
+				if way == "enter" {
 					m = cursorOnTarget(t, m, tc.kind, tc.entry)
-					m = step(t, m, keyEnter())
+				}
+				for range gestures {
+					if way == "mouse" {
+						m = clickCell(t, m, 4, screenRow(t, m, lastLineMarked(t, m, tc.kind, tc.entry)))
+					} else {
+						m = step(t, m, keyEnter())
+					}
 				}
 
-				if !m.transcript.entries[live].foldTouched {
-					t.Errorf("the %s gesture left the umbrella untouched", tc.name)
+				if m.transcript.blockFolded(live) {
+					t.Fatalf("setup: the umbrella stands folded after the %s gesture; want it open before the settle", tc.name)
 				}
-				if m.transcript.entries[settled].foldTouched {
-					t.Error("the other umbrella was marked touched by a gesture on this one")
+				if !m.transcript.blockFolded(settled) {
+					t.Error("the other umbrella opened: a gesture on this one marked it touched")
 				}
 				m.transcript.setTurnLive(false)
-				if got := m.transcript.blockFoldBy(live); got == foldBySettled {
-					t.Error("the touched umbrella auto-collapsed once the Turn ended; want it exempt")
+				if !settledAt(&m.transcript, live) {
+					t.Fatal("setup: the umbrella is not settled once the Turn ended")
+				}
+				if m.transcript.blockFolded(live) {
+					t.Errorf("the umbrella folded once the Turn ended; want the %s gesture's touch to keep it open", tc.name)
 				}
 			})
 		}
@@ -253,12 +266,13 @@ func TestAutoCollapsePanelJumpRevealsAFoldedMember(t *testing.T) {
 	next, _ := m.followPanelTarget(panelTarget{kind: panelTargetBlock, entry: member, run: m.viewedRun()})
 	m = next.(Model)
 
+	// Settled, large and under the shut shared preference, the umbrella stands open only on a fold of
+	// its own — touched and opened alone.
 	if m.transcript.blockFolded(head) {
 		t.Error("the jump left the member's umbrella folded")
 	}
-	if !m.transcript.entries[head].foldTouched || !m.transcript.entries[run].typeExpanded {
-		t.Errorf("after the jump: umbrella touched %v, member's type row open %v; want both true",
-			m.transcript.entries[head].foldTouched, m.transcript.entries[run].typeExpanded)
+	if !m.transcript.entries[run].typeExpanded {
+		t.Error("the jump left the member's type row shut")
 	}
 	if !slices.ContainsFunc(m.lineTargets, func(target lineTarget) bool {
 		return target.kind == targetHeader && target.entry == member
@@ -330,11 +344,9 @@ func TestAutoCollapseTouchOpensAFoldedGroupOfOne(t *testing.T) {
 				m = step(t, m, keyEnter())
 			}
 
+			// Settled under auto-collapse, the group of one stands open only once the gesture touched it.
 			if m.transcript.blockFolded(one) {
 				t.Error("the folded group of one is still folded after the gesture")
-			}
-			if !m.transcript.entries[one].foldTouched {
-				t.Error("the opened group of one is not touched")
 			}
 			assertSettledGroupOfOneOpen(t, m, one)
 			if !m.transcript.blockFolded(umbrella) {
@@ -377,9 +389,6 @@ func TestAutoCollapseTouchedGroupOfOneStaysOpenAsItGrows(t *testing.T) {
 	if got := toolSuperGroup(tr.entries, 0).calls(); got != 2 {
 		t.Fatalf("setup: entries[0] heads an umbrella of %d calls after the second call; want 2", got)
 	}
-	if !tr.entries[0].foldTouched {
-		t.Error("the grown group lost the touch its group of one carried")
-	}
 	if got := tr.blockFoldBy(0); got == foldBySettled || tr.blockFolded(0) {
 		t.Errorf("blockFoldBy(0) = %d, folded %v on the settled group; want it open — the touch carries",
 			got, tr.blockFolded(0))
@@ -400,9 +409,9 @@ func TestAutoCollapsePanelJumpRevealsAFoldedGroupOfOne(t *testing.T) {
 	next, _ := m.followPanelTarget(panelTarget{kind: panelTargetBlock, entry: one, run: m.viewedRun()})
 	m = next.(Model)
 
-	if m.transcript.blockFolded(one) || !m.transcript.entries[one].foldTouched {
-		t.Errorf("after the jump: group of one folded %v, touched %v; want false, true",
-			m.transcript.blockFolded(one), m.transcript.entries[one].foldTouched)
+	// Settled under auto-collapse, the group of one stands open only once the jump touched it.
+	if m.transcript.blockFolded(one) {
+		t.Error("the jump left the settled group of one folded; want it opened alone")
 	}
 	assertSettledGroupOfOneOpen(t, m, one)
 	if !m.transcript.blockFolded(umbrella) {
@@ -448,9 +457,6 @@ func TestAutoCollapseEnteringAGroupMemberTouchesItsGroup(t *testing.T) {
 
 			if got, want := m.viewedRun(), m.transcript.entries[secondMember].spawned(); got != want {
 				t.Fatalf("viewed run = %+v after the gesture; want the member's run %+v", got, want)
-			}
-			if !m.transcript.entries[groupHead].foldTouched {
-				t.Error("entering a member's run view did not mark its group touched")
 			}
 
 			m.transcript.setTurnLive(false)

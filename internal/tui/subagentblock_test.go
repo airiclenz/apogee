@@ -3007,20 +3007,31 @@ func TestLoneDelegationAndSkillFetchFoldAsGroupsOfOne(t *testing.T) {
 
 // TestLoneDelegationMemberRowOpensItsRunView pins the run-view click through a group of one: the
 // opened group's member row is still the delegation's row, so a click on it opens the run's view
-// (ADR 0063) and marks the group touched.
+// (ADR 0063) and marks the group touched. The group is opened without a touch — auto-collapse off,
+// its head flag open — so once auto-collapse is back on and settles it, only the click's touch
+// keeps it open.
 func TestLoneDelegationMemberRowOpensItsRunView(t *testing.T) {
 	t.Parallel()
 	const head = 1
 
 	m := loneGroupsModel(t)
-	m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLineOf(t, m, head)))
+	m.transcript.setToolsAutoCollapse(false)
+	m.refreshViewport()
+	if m.transcript.blockFolded(head) {
+		t.Fatal("setup: the lone delegation's group stands folded with auto-collapse off; want it open")
+	}
 	m = clickCell(t, m, 4, screenRow(t, m, lastLineMarked(t, m, targetHeader, head)))
 
 	if got, want := m.viewedRun(), m.transcript.entries[head].spawned(); got != want {
 		t.Fatalf("viewed run = %+v after a click on the member row; want the delegation's run %+v", got, want)
 	}
-	if !m.transcript.entries[head].foldTouched {
-		t.Error("entering the lone delegation's run view did not mark its group touched")
+
+	m = m.upRun()
+	m.transcript.setToolsAutoCollapse(true)
+	m.refreshViewport()
+	if m.transcript.blockFolded(head) {
+		t.Errorf("the settled group whose run view the reader entered folded; want the touch to keep it open:\n%s",
+			strings.Join(m.lines, "\n"))
 	}
 }
 
@@ -3039,9 +3050,9 @@ func TestPanelJumpOpensAFoldedLoneDelegation(t *testing.T) {
 	next, _ := m.followPanelTarget(panelTarget{kind: panelTargetBlock, entry: head, run: m.viewedRun()})
 	m = next.(Model)
 
-	if m.transcript.blockFolded(head) || !m.transcript.entries[head].foldTouched {
-		t.Errorf("after the jump: group folded %v, touched %v; want false, true",
-			m.transcript.blockFolded(head), m.transcript.entries[head].foldTouched)
+	// Settled under auto-collapse, the group stands open only once the jump touched it.
+	if m.transcript.blockFolded(head) {
+		t.Error("the jump left the settled lone delegation's group folded; want it opened alone")
 	}
 	if !slices.ContainsFunc(m.lineTargets, func(target lineTarget) bool {
 		return target.kind == targetHeader && target.entry == head
