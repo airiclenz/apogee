@@ -1031,7 +1031,10 @@
 // that authority — [wrapRowStarts] and [runesWidth], [sanitizeInputLine], [cellToRuneOffset], and
 // [inputContentRows], the row count the prompt box is sized to — beside the line editor's rune and
 // byte offset arithmetic and [cellToRuneOffsetIn], the one painter-measured sibling;
-// transcript.go the append-only scrollback model, entrykind.go the
+// transcript.go the append-only scrollback model, blockfold.go the block-fold rule over it (the
+// reader act each fold gesture states, [foldAct], answered by [transcript.applyFoldAct] alone; the
+// one rule naming the fold that holds a block, [transcript.blockFoldBy]; and the setters under it),
+// entrykind.go the
 // [entryKind] enum beside the behaviour table every kind-keyed rule outside the paint switch reads
 // — what a kind is called on the wire, whether it owns a block state, whether it is a host note,
 // whether it may be cached, whether its header blinks, whether it heads a prompt — so a new kind is
