@@ -1,11 +1,13 @@
 ---
 title: "Repository state is one fact from gitexec (architecture review 2026-11-21 #3)"
-status: open
+status: done
 type: task
 priority: 3
 labels: [security]
 plan: 2026-11-23 - 01 - git-repository-state-plan
 created: 2026-11-21T12:27:13Z
+closed: 2026-11-23T09:51:19Z
+reason: "Resolved by plan '2026-11-23 - 01 - git-repository-state-plan' (archived at bfc8140f): gitexec reports the repository state at a root as one value, a data-path refusal is a typed error, and the config-key catalogue is the leaf internal/gitconfigkeys."
 ---
 
 Found by docs/reviews/architecture-review-2026-11-21.html, verified 2026-11-21 at 171d210f.
