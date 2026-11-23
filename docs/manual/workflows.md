@@ -1,4 +1,4 @@
-# Workflows and recipes
+# Workflows and recipes — fan_out, background runs and `/workflows`
 
 A **workflow** is one piece of work apogee cuts into many small ones: the same brief run over a
 list of items, each item handed to a **fresh helper** — a sub-agent with an empty context window
@@ -76,7 +76,7 @@ not offered, whatever the roster says. A delegate — a `sub_agent` child or a w
 | `out` | Where each helper writes its detail, with `{item}` in the path; unset, each item gets a file in the workflow folder |
 | `verify` | One adversarial check per item: a helper whose job is to *refute* the item's report. `when` picks which items (a [condition](#conditions--when) on the `returns` fields; unset checks every one), `task` says what to look at |
 | `merge` | One helper that reads every item's output and writes the combined report; `task` is its brief |
-| `tools` | Narrows the helpers' tools to these names — it can only remove tools from the agent's own menu, never add one. As on `sub_agent`, `read-only` alone asks for the read-only set (a workflow file's stage `tools: [read-only]` too), and an unknown name refuses the call before any helper runs |
+| `tools` | Narrows the helpers' tools to these names — it can only remove tools from the agent's own menu, never add one. As on `sub_agent`, `read-only` alone asks for the read-only set — bare or as `["read-only"]`, and a workflow file's stage `tools: [read-only]` too — and a JSON array sent as a string is read as that list. An unknown name, or `read-only` mixed with tool names, refuses the call as `fan_out was not run: …` before any helper runs |
 | `recipe`, `inputs` | Run a [recipe](#recipes) by its id instead, with its inputs as `name: value`. Nothing else may be given beside `recipe` |
 | `background` | Start the workflow in the background and answer at once — offered only while `workflow` is on the roster |
 | `run_on` | Where the helpers run, as on `sub_agent` — offered only under [`sub-agents-choice: model`](configuration.md#letting-the-model-pick-the-seat) |
@@ -476,9 +476,9 @@ faulted or stopped one is kept whatever its name (see
 `continue` and `background: true` is refused, nothing runs, and the result says to call again
 without `background`.
 
-In the transcript the call paints as a background-workflow call — the delegation's name over the
-call's answer — never as a `✦ Sub-agent` row with a run view to open, and its finish line names the
-delegation. Where apogee cannot keep a background workflow — a `headless` run, a `daemon` firing,
+In the transcript the call paints as a background-workflow call — a `Sub-agent` row of its own,
+the delegation's name over the call's answer — never as a member of a `✦ Sub-agents (N)` group and
+with no run view to open, and its finish line names the delegation. Where apogee cannot keep a background workflow — a `headless` run, a `daemon` firing,
 a sub-agent's own call — no `background` switch is shown, and a call that carries one anyway runs as
 a plain blocking `sub_agent`.
 
@@ -535,4 +535,6 @@ The full command reference is in [Commands](commands.md).
 | a server entry's `parallel-agents:` | the server's | How many helpers run at once — set under that entry in `servers:`, not at the top level ([servers](configuration.md#the-servers-you-run-models-on)) |
 
 The three `workflow-` keys are file-only and read when the session is built, so an edit applies at
-the next start.
+the next start. A negative `workflow-continuations` or `workflow-retries` is refused when the
+config loads, naming the key and the value; in a project file it skips the project layer, with a
+notice.

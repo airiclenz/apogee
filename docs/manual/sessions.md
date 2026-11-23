@@ -1,4 +1,8 @@
-# Sessions
+# Sessions — saving, resuming, forking and watching
+
+How apogee saves each conversation, and how you resume it (`--continue`, `--resume`, the
+`/sessions` browser), branch it with `/fork`, and follow a session another apogee is running,
+read-only, from a second terminal or another user account.
 
 Every conversation is a session, saved continuously: after each completed turn the
 session is written to `~/.apogee/sessions/` (asynchronously, best-effort), so a
@@ -36,7 +40,10 @@ still remembers.
   until it is restored the status line spins `loading session…` with a clock, so a slow disk
   never looks like a frozen screen.
   If the store holds no sessions, the pane closes again with the note `no saved sessions`; if
-  the list cannot be read, with `could not list sessions: …`. The verbs are chords precisely so
+  the list cannot be read, with `could not list sessions: …`. Listing reads only each record's
+  header, so a record whose header reads but whose body is damaged is still listed: resuming it
+  fails with its load error, and `--continue` reports that error rather than quietly opening the
+  next-newest session. The verbs are chords precisely so
   the letters are free to type with — every pop-up that lists things to search
   (`/sessions`, `/settings`, and the `/model`, `/server`, `/sub-agents-server`,
   `/effort`, `/fork`, `/schedule` and mode pickers) filters as you type. A paste
@@ -247,7 +254,8 @@ that anyone is watching, and nothing flows back to it. The design is
   first reading names its own. `/usage` agrees, and `esc` back brings your own reading back.
   The footer names the watched session's folder and branch, led by a `watching` marker so they are
   never read as your own (the marker alone where that session names no folder); your host, model
-  and effort stay, and a click on the git state opens nothing. `esc` puts your own folder back.
+  and effort stay, and a click on the git state opens no git actions — it raises the same
+  read-only flash, as `/git` does. `esc` puts your own folder back.
   The status line's clocks show how long the watched session has been working, not how long you
   have been watching: the activity clock and `[total …]` count from that session's own times, and
   right after you open a quiet session they can run a little behind the owner's.

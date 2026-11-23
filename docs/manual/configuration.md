@@ -1,4 +1,45 @@
-# Configuration
+# Configuration reference — apogee `config.yaml`
+
+This page is the reference for every apogee setting: the global `~/.apogee/config.yaml`, a
+repository's own `.apogee/config.yaml`, and the flags and `APOGEE_*` environment variables that
+override them. It covers the LLM servers and model profiles, the built-in tools and Floor guards,
+MCP servers, Reactions, the terminal UI, sessions, and what Auto mode may touch.
+
+**On this page:**
+[Floor guards](#floor-guards) ·
+[Built-in tools](#built-in-tools--tools) ·
+[Keys apogee migrates for you](#keys-apogee-migrates-for-you) ·
+[Keys apogee does not recognise](#keys-apogee-does-not-recognise) ·
+[A project's own config](#a-projects-own-config--apogeeconfigyaml) ·
+[Environment overrides](#environment-overrides) ·
+[update-check](#update-check) ·
+[url-safety](#what-the-network-tools-may-reach--url-safety) ·
+[web-search-endpoint](#where-web_search-looks--web-search-endpoint) ·
+[MCP servers](#external-mcp-servers--mcp-servers) ·
+[Reactions](#reactions--reactions) ·
+[Project skills](#skills-a-repository-ships--use-project-skills) ·
+[Shipped skills](#skills-apogee-ships--use-shipped-skills) ·
+[The terminal UI](#the-terminal-ui--ui) ·
+[The side panel](#the-side-panel) ·
+[Compaction and pruning](#keeping-the-window-from-overflowing--compaction-and-pruning) ·
+[Delegated sub-agents](#delegated-sub-agents--what-one-may-spend) ·
+[The context window and the reply stream](#the-context-window-and-the-reply-stream) ·
+[Workflow retries](#workflow-retries) ·
+[Headless run budgets](#headless-run-budgets) ·
+[Effort](#how-hard-a-model-thinks--effort) ·
+[The cursor and the external editor](#the-cursor-and-the-external-editor) ·
+[Model profiles](#model-profiles--model-profiles) ·
+[Session store](#keeping-the-session-store-bounded--sessions) ·
+[Servers](#the-servers-you-run-models-on) ·
+[The upstream API key](#the-upstream-api-key) ·
+[llama-launcher](#local-servers--llama-launcher) ·
+[The system prompt](#the-system-prompt) ·
+[Showing a finished document](#showing-a-finished-document) ·
+[Auto mode's blast radius](#auto-modes-blast-radius) ·
+[The dangerous-action guard](#the-dangerous-action-guard) ·
+[Allow rules](#commands-that-run-without-asking--allow) ·
+[The Console family](#the-console-family) ·
+[The task list](#the-task-list)
 
 Settings resolve by precedence, highest first: a command-line flag overrides an
 `APOGEE_*` environment variable, which overrides `~/.apogee/config.yaml`, which
@@ -91,6 +132,8 @@ says so in the transcript, in one line naming the keys that landed. The watcher 
 file's timestamp and size on a one-second ticker — no daemon, no filesystem-notification
 dependency (ADR 0041).
 
+## Floor guards
+
 Seven **Floor guards** are the help every model gets whatever it is. They are engine behaviour rather
 than settings you switch on: each ships **on**, and each is turned off by exactly one top-level
 boolean named after it.
@@ -178,6 +221,8 @@ reopened session is not told it was at 90 percent an hour ago.
 Separately from all of this, every write tool appends its own in-process syntax verdict to the
 success result it hands the model: always on, not configurable, and neither a Floor guard nor a
 Reaction.
+
+## Built-in tools — `tools:`
 
 The **built-in tools** are all on by default — all but the default-off **Console family**
 (`console_open`, `console_send`, `console_read`, `console_close`;
@@ -322,8 +367,9 @@ A repository can carry settings of its own in a **Project config**: `.apogee/con
 **Project root**, a file meant to be committed so everyone who clones the project shares it. The
 Project root is the nearest folder holding a `.apogee/`, walking up from the workspace to the git
 top-level and never past or onto your home folder; outside a repository, or in one that holds no
-`.apogee/`, it is the workspace itself. So a session started in a subfolder still reads the
-project's file, and the same root is where the project's own `.apogee/skills` is found (see
+`.apogee/`, it is the workspace itself. The walk resolves a symbolic link or a Windows junction
+on the way, so a workspace reached through one finds, reads and writes the `.apogee/` above it. So
+a session started in a subfolder still reads the project's file, and the same root is where the project's own `.apogee/skills` is found (see
 [Skills a repository ships](#skills-a-repository-ships--use-project-skills)). A session whose
 workspace is your home folder has no Project config at all, and neither does one whose project
 `.apogee/` is your apogee home — the global file is never layered over itself.
@@ -479,7 +525,7 @@ sources or runs — a Makefile, a module it imports, the project's code — is n
 without asking. Read the script, and what it calls, before you adopt it.
 
 **What apogee writes there.** apogee writes the project file only on your own act (the list is
-[above](#configuration)), and a new one starts empty rather than from the global starter template,
+[above](#configuration-reference--apogee-configyaml)), and a new one starts empty rather than from the global starter template,
 so it states only what the project set. No `.gitignore` is written and the write's lock lives under
 `~/.apogee/workspaces/`. A `.apogee/` or `config.yaml` that is a symlink, or that resolves outside
 the Project root, is refused rather than followed. The model's file tools are refused the other
@@ -552,7 +598,8 @@ update-check: true     # on each TUI start, ask github.com whether a newer relea
 With this on, each time the interactive TUI starts apogee sends **one** `HEAD` request to
 `https://github.com/airiclenz/apogee/releases/latest` and reads the newest published release's tag
 from the redirect. Nothing about you, your workspace or your sessions is in that request, and only
-published releases count — never a draft or a pre-release. When the release is newer than the binary
+published releases count — never a draft or a pre-release, and never one of the retracted v1.x
+numbers (v1.1.0, v1.7.0, v1.8.0, v1.8.1). When the release is newer than the binary
 you are running, the startup box's version row names it and the upgrade command for the way you
 installed apogee. The check runs in the background, so it never delays the start, and any failure —
 offline, a timeout, an unexpected answer — means simply no notice. Only a clean release build asks:
@@ -632,7 +679,9 @@ same edit: an `sse` or `streamable-http` endpoint your new lists close is discon
 then, and the row names it (`mcp server docs disconnected — its endpoint is denied`). The rest of
 your servers keep their connections, and an edit that closes no endpoint a server is configured or
 connected on leaves every one of them untouched. A server your new lists open again is dialled in the background, and its
-outcome arrives as a transcript note of its own (`mcp docs connected`). A server whose last
+outcome arrives as a transcript note of its own (`mcp docs connected`). A server your lists deny
+stays denied, not failed: the `mcp-servers` row's retry never dials it, and a later edit that
+admits it again dials it once. A server whose last
 reconnect failed is still serving on its kept connection; when your lists close that kept connection
 but still admit the endpoint the server is configured on, it is dialled there in the background too,
 with the same note. Webhook Reactions are the exception: a running session's own webhooks keep
@@ -1169,7 +1218,7 @@ touches: the catalog stays on this side of the wire, and a skill reaches the mod
 invoke it with `/id`
 ([ADR 0061](../../.capcom/knowledge/decisions/adr-0061.md)).
 
-Nineteen more keys live under `ui:`. Nine of them change how the screen looks rather than what it
+Twenty more keys live under `ui:`. Ten of them change how the screen looks rather than what it
 says; the other ten, `ui.notify`, `ui.inspector`, `ui.stall-after`, `ui.git-fetch`, the footer's
 layout and colours, `ui.footer.rows` and `ui.footer.colors`, and the side panel's,
 `ui.side-panel.show`, `ui.side-panel.width`, `ui.side-panel.sections` and `ui.side-panel.folded`,
@@ -1752,7 +1801,9 @@ sub-agent delegate in turn — each level costs a full nested loop and puts the 
 hand-off further from you, so raise it only for work that genuinely needs a middle layer.
 It must be at least `1`: a `0` or a negative value is a startup error naming the key, not a
 quiet return to the default. A session that should not delegate at all disables the
-`sub_agent` tool instead (`tools.disabled`).
+`sub_agent` tool instead (`tools.disabled`). A negative `delegate-max-steps`,
+`delegate-fanout-rounds` or `delegate-max-tokens` is refused at load the same way, naming the key
+and the value; `0` means what its own paragraph says.
 
 Two more file-only keys bound what a **single delegation may spend**, because a turn count
 alone cannot: a sub-agent re-reading a long history costs far more per turn than one that
@@ -1890,7 +1941,7 @@ switch, a scheduled run and a delegation exactly as the two keys above do — an
 exceed that entry's own `context-window:` pin, which is the roof it sits under. At either scope
 it takes a whole number, as `context-window:` does: a fraction, or a whole number written with a
 decimal point or an exponent (`32000.0`, `1e3`), is refused when the config loads rather than
-rounded into a bound you did not write.
+rounded into a bound you did not write, and so is a negative one.
 
 Every reply is **bounded**, and by the same budget: apogee tells the server how many tokens
 one answer may take, using the room it already reserves for the reply — clamped to between
@@ -2609,7 +2660,8 @@ itself — `model`, `messages`, `stream`, `stream_options`, `tools` and `system`
 refused at start-up, `null` included, because overriding them would change what the
 session is rather than add a knob beside it; a nested key of the same name inside
 your own block (`provider: {model: …}`) is yours. A value that is not a mapping is
-refused too. With no `request-extra:` the request is byte-for-byte what it was
+refused too, and so is a key that is not a string — `1:` or `true:`, at any depth and
+inside lists — since a JSON key is text; quote it (`"1": x`) to send it. With no `request-extra:` the request is byte-for-byte what it was
 without the key.
 
 On a `wire: anthropic` server, a thinking effort from `low` up also turns the model's
@@ -3573,7 +3625,12 @@ sanctioned route — where to go instead: the `rm -rf` refusal, for one, says to
 path relative to the workspace or delete through the native tools. The git control-plane
 rule reads a terminal command for what it *writes*: `cat .git/config` or `ls -la .git/hooks`
 passes as the read it is, while `echo x > .git/config`, `rm -rf .git/hooks` or a program the
-guard does not know naming that path still refuses.
+guard does not know naming that path still refuses. A `git config` line that sets or removes, in
+the repository's own config, a key that makes git run a program counts as such a write too —
+`core.sshCommand`, `core.hooksPath`, a merge driver or credential helper, `remote.<name>.uploadPack`
+or `receivePack`, a `protocol.allow` or `protocol.ext.allow` other than `never`, an `ext::`
+`url.<base>.insteadOf`, a `submodule.<name>.update` starting with `!`, and the like; reads,
+`--global` writes and benign values (`submodule.<name>.update rebase`) pass.
 
 The guard judges what a call *does*, not the text it carries: the body `write_file` writes,
 the pattern `grep` searches for, the message `git_commit` records and the body `http_request`

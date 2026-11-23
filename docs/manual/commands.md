@@ -1,5 +1,9 @@
 # In-chat commands, skills, and file references
 
+The reference for apogee's terminal UI: every slash command, the keys and mouse gestures, the
+start-up session log, the status line, approvals, how tool answers read, suggested skills,
+`/undo` and `/redo`, the footer's git actions and the `/settings` screen.
+
 Typing `/` in the prompt opens **one menu of commands and skills**; `@` completes a
 workspace file path, and an `@path` in a message hands that file to the model. A path
 containing spaces is written quoted — `@"docs/my plan.md"` (single quotes are accepted
@@ -166,7 +170,9 @@ protocol — the thing that makes that chord arrive as anything other than a pla
 everywhere else the legend names `⌥⏎` alone, which works on every terminal. Beyond
 the box, `⇧⇥` cycles the autonomy mode — Plan (read-only, except for the session's own
 scratch directory and a recipe's script stages, which run sandboxed into their own workflow
-folder) → Ask-Before → Allow-Edits → Auto — at any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript. Clicking the mode
+folder) → Ask-Before → Allow-Edits → Auto — at any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript. A draft too long for the
+prompt box shows a scroll bar on the box's right edge, and the mouse wheel over the box scrolls the
+draft rather than the transcript. Clicking the mode
 marker in the footer — the glyph, the word, and on Auto its blast-radius word, all one
 target — opens a picker listing the four rungs, so you can name the one you want instead
 of cycling to it; the picker takes the rung through exactly the path `⇧⇥` does. The
@@ -316,6 +322,13 @@ at all rather than as an invented one.
 
 A run that goes silent for longer than `ui.stall-after` adds a `quiet` qualifier to whatever
 phrase the row is holding; see [the effort dial](configuration.md#how-hard-a-model-thinks--effort).
+
+Outside a run the row also speaks for a slow wait, so a slow box never looks frozen: a `/model`
+load (`loading qwen3…`), `/unload-model` or `/stop-server`, a session still `connecting…` to a
+server that has not answered yet, a `/sessions` resume (`loading session…`), a footer git action
+(`git pull…`), a bare `/rename` (`naming this session…`) and an MCP dial (`reconnecting MCP…`)
+each show the `ui.spinner` glyph turning beside the word and a clock counting from when the wait
+began (`⠶ loading qwen3… · 01:04s`).
 
 ## Approving a call — how far an approval reaches
 
@@ -513,6 +526,13 @@ a tool that is not on the menu is answered `unknown tool "read_fil" — did you 
 when a registered name begins with what was written or sits within three edits of it. Nothing is
 re-routed; the model re-issues the call.
 
+**An argument a tool does not take is named, not silently dropped.** A built-in tool called with an
+argument its schema does not declare still runs, and its result ends with one line saying what was
+ignored and what the tool takes —
+`note: ignored unknown argument "line" — read_file takes path, start_line, end_line, max_lines, locate`
+— so the model learns the argument had no effect. MCP tools validate their own arguments and get no
+such line.
+
 **A failed edit says nothing landed.** `single_find_and_replace` and `multi_find_and_replace` apply
 their replacements atomically, and every refusal they give after reading the file — old text not
 found, found more than once, a multi-edit that would push the file past the size cap — is prefixed
@@ -674,7 +694,9 @@ session against a different tree and apogee loads none of it and says so.
 or on a host with no `git` on its PATH, apogee keeps the record of its own file tools'
 writes that it has always kept — this process's alone, held in memory — and `/undo` still
 works on those. When there is nothing to take back it names the reason in the same breath,
-so the narrower answer never reads as a broken one.
+so the narrower answer never reads as a broken one. If an image cannot be taken — a wedged or very
+slow git — apogee warns once for that exchange and tries again at the next, rather than retrying
+before every write.
 
 Both verbs **run at idle** — typed while the model works, they queue and run once it has finished.
 
@@ -785,8 +807,9 @@ block is there, and lands below the whole commented example block when it is not
 key cannot hold is refused before anything is written, with the reason on the row and your text
 still in the buffer. The file is written only on your own act — a pane edit, a verb that records
 its choice such as `/server`, `/sub-agents-server` or `/color-scheme`, the click that folds or
-opens the task-list card (`ui.task-list-open`) or a large Tools umbrella (`ui.tools-open`) — never
-on one you did not ask for.
+opens the task-list card (`ui.task-list-open`) or a large Tools umbrella (`ui.tools-open`), a
+side-panel pin or fold, a drag or double-click of the panel's separator, or a writing `/panel`
+form — never on one you did not ask for.
 
 **And what is saved is applied — to the session you are in.** The `⏎` that persists a key
 also puts it into effect, so as a rule a setting does not wait for a restart: change `mode:`, `bypass:`, the
@@ -803,8 +826,9 @@ the row: the `context-files:` keys are part of the prefix every request is cache
 effect at the next `/clear` — `· applies at next clear`. A few keys are read only while apogee
 starts — `ui.inspector`, `undo-snapshots`, `working-window`, `response-reserve`, the five
 delegation bounds (`delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`,
-`delegate-max-tokens`, `delegate-timeout`), `stream-idle-timeout`, `re-stream-budget`,
-`sessions.max-age` and `sessions.max-count` — so an edit there is written and takes effect at the
+`delegate-max-tokens`, `delegate-timeout`), `stream-idle-timeout`, `re-stream-budget`, the two
+headless run budgets (`headless-max-turns`, `headless-max-wall-time`), `sessions.max-age` and
+`sessions.max-count` — so an edit there is written and takes effect at the
 next start (the three workflow keys and `sub-agents-context` wait for it too, but their rows are read-only; the full list is
 in [configuration.md](configuration.md)); the row's
 `Description:` says so, and the value cell shows what was written. On a key an environment variable or

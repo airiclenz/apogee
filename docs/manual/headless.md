@@ -1,4 +1,8 @@
-# Running one prompt — `apogee headless`
+# apogee headless — run one prompt unattended from scripts and CI
+
+This page covers `apogee headless`: its flags and exit codes, the stderr narration and summary,
+the run budgets, `apogee undo` for putting a run back, and the `--format json` Event lines — the
+JSONL contract a script, CI job or watcher reads.
 
 `apogee headless` runs a single prompt to completion with nobody watching and prints
 the answer to stdout. It is the same unattended run a `/schedule` firing performs, over
@@ -87,7 +91,13 @@ approval, and an unattended run has nobody to approve (see
 need a human are not treated alike when they come from `APOGEE_MODE` or the `mode:` key
 rather than the flag: `ask-before` from either — the interactive ladder's own default, which
 a host that never spelled a mode out would otherwise carry — is silently replaced by `plan`,
-while `allow-edits` from either is refused exactly as the flag is. Whatever the mode, every gated
+while `allow-edits` from either is refused exactly as the flag is. An `auto` run that starts says
+on stderr what its fence leaves open: the same `apogee: auto mode fences terminal commands, but
+<backend> cannot fence:` notice an interactive Auto start gives, one line per write-class access
+the backend discloses (`connect(2) AF_UNIX`, a same-user socket service that can run commands
+outside the fence; `truncate(2)` on an older kernel; `mach-lookup` on macOS — see
+[`apogee probe`](probe.md)), and, under `confine-to-workspace: false`, the unconfined-Auto
+warning. Neither stops the run. Whatever the mode, every gated
 action is refused rather than parked — the refusals are the `denied:` count — `ask_user`
 and `present_document` are not registered, and no MCP server is contacted. An
 [Allow rule](configuration.md#commands-that-run-without-asking--allow) answers an ordinary prompt,
@@ -351,7 +361,7 @@ embedder's own tool. Like every enum here, `kind` is an open set.
 | `search_hits` | `web_search` | `count` of results |
 | `fetched_body` | `web_fetch`, `http_request` | `status`, the status text the result's first line names (`200 OK`); `truncated`, whether the body hit the response cap |
 | `delegation_outcome` | `sub_agent` | `bound` (`step_cap`, `token_budget`, `time_limit`, or `""` when no bound stopped the run), `stopped_by_user`, `has_no_report` and `steered_messages`; `unstarted`, why the delegation never started — `skipped` (pre-empted), `refused` (past the fan-out ceiling), `cancelled` (the turn's cancel reached it while queued) or `stopped_queued` (stopped while queued) — and `""` for a run that started, when the four before it say how it ended (a line from an older apogee may lack the key; read it as `""`) |
-| `process_ending` | the subprocess and console tools | `state` (`running`, `exited` or `killed`); `code`, the exit code the result's exit marker states (`-1` for a killed or timed-out run, `0` when it states none); `timed_out`, a run stopped at its time limit; `denial_stopped`, a run the kill-on-denial watch stopped |
+| `process_ending` | `terminal`, `python_exec`, and `console_open`, `console_send`, `console_read` and `console_close` on a result that shows a Console's tail | `state` (`running`, `exited` or `killed`); `code`, the exit code the result's exit marker states (`-1` for a killed or timed-out run, `0` when it states none); `timed_out`, a run stopped at its time limit; `denial_stopped`, a run the kill-on-denial watch stopped |
 
 ### `--seams` — the seam closures, on request
 

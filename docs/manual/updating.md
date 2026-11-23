@@ -1,4 +1,4 @@
-# Updating apogee — `apogee update`
+# Updating apogee — upgrade commands and `apogee update`
 
 apogee never replaces itself in the background. When the interactive TUI starts it asks
 github.com whether a newer release is out (the [`update-check`](configuration.md#update-check) key
@@ -12,7 +12,10 @@ v0.24.11 → v0.25.0 · brew upgrade apogee
 Running that command is always up to you
 ([ADR 0097](../../.capcom/knowledge/decisions/adr-0097.md)).
 Only a clean release build asks — a `dev` build or one whose version ends `.dirty` never does —
-and headless runs, the daemon, the bench, `apogee probe` and `apogee undo` never check.
+and headless runs, the daemon, the bench, `apogee probe` and `apogee undo` never check. Four v1.x
+numbers are burned and retracted — v1.1.0, v1.7.0, v1.8.0 and v1.8.1, left by an accidental
+early v1.x series ([building](building.md)) — so neither the check nor `apogee update` ever
+offers one of them; any other release above yours, v1.0.0 included, is offered.
 
 ## Which command upgrades your install
 
@@ -59,7 +62,11 @@ it prints `apogee v0.25.0 is up to date` and exits 0. Otherwise it asks
 3. runs the new binary's `--version` and requires it to report the release it asked for;
 4. swaps it into place.
 
-Any failure before the swap leaves your installed binary exactly as it was. Without `--yes` the
+Any failure before the swap leaves your installed binary exactly as it was. A slow link is fine:
+the download has no total time limit and fails only when the server stops sending — no connection,
+no reply, or no data for 60 seconds — with an error saying it stalled. The new binary gets up to
+5 minutes to answer `--version`, so a slow first start on a loaded box is not taken for a broken
+binary. Without `--yes` the
 command needs a terminal to ask on: with stdin piped or redirected it refuses and exits 1, so a
 script states its intent with `--yes`. `--check` reports
 `apogee v0.24.11 → v0.25.0 is available — run: apogee update` and downloads and writes nothing.

@@ -12,6 +12,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **Docs: the README and the manual describe what apogee does today.** The README is rewritten in plain words with an at-a-glance table, a key table and an FAQ, names Splash among the local servers, adds the features shipped since v0.33 (side panel, `/mcp`, server `fallback:`, tool-call summaries, `ui.notify`, headless budgets, `apogee project adopt`), and corrects four overclaims: the background `git fetch` is a second network request of apogee's own, paths open through the terminal's own cmd/ctrl-click, Auto's fence has named residual gaps, and the secret-store offer covers the macOS Keychain and a Linux Secret Service keyring only. Every manual page gains a descriptive title and summary, and each page catches up with the changes since v0.33.0.
+
 ## [0.35.8] — 2026-11-22
 
 - Internal: every screen gesture that saves a `ui.*` setting (task-list and Tools folds, side-panel pin, fold, width drag and reset, `/panel on|off|auto`) now writes it back through one shared path in the TUI; the "not saved" notice and the `/settings` edit marker read exactly as before.

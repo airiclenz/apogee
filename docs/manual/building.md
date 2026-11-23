@@ -1,4 +1,7 @@
-# Building from source
+# Building apogee from source — make targets, tests and releases
+
+This page covers building apogee from a clone with Go and `make`, the `Makefile` targets, setting
+up a clone you commit from, running the test suite, and cutting a release with `cmd/release`.
 
 Not the only way in any more — [Install](../../README.md#install) has Homebrew, Scoop, winget
 (not live yet: its first submission still awaits review in `microsoft/winget-pkgs`) and prebuilt
@@ -28,7 +31,7 @@ A `Makefile` wraps the common Go invocations:
 | `make home-census` | Print the entry counts of the real `~/.apogee` sessions and scratch dirs (what `live-eval` compares) |
 | `make fmt` | `gofmt -w` over the tree |
 | `make vet` | `go vet ./...` |
-| `make lint` | Run `golangci-lint` (the standard linter set, configured by `.golangci.yml`) over the module |
+| `make lint` | Run `golangci-lint` (the standard linter set, configured by `.golangci.yml`) over the module, at the version `GOLANGCI_LINT_VERSION` in the `Makefile` pins |
 | `make vulncheck` | Run `govulncheck` over the dependency graph — needs the network |
 | `make actionlint` | Lint the GitHub workflow files with the pinned `actionlint` |
 | `make cross` | Cross-compile every package for all six release targets (Linux/macOS/Windows × amd64/arm64), as a check |
@@ -294,7 +297,11 @@ The release process lives in this repo and needs nothing outside it
 bucket, and — for winget — `komac`. It runs the same from Linux, macOS or Windows. The work
 is split in two. A Go maintainer program, `cmd/release` (run as `go run ./cmd/release <verb>`,
 never a release asset), does everything deterministic; two committed skills do the judgment —
-which changes shipped, how the notes read, which version to cut.
+which changes shipped, how the notes read, which version to cut. Its verbs are `status`,
+`prepare`, `publish`, `smoke` and `dist` (the last builds the six archives and `SHA256SUMS`;
+`--src` names the source tree, default `.`, and `--out` the output directory, default
+`<src>/dist`, emptied first). Every verb exits `1` when a run that started fails and `2` on a
+bad command line.
 
 **The usual way: run the `release-apogee` skill.** It is canonical under
 `.apogee/skills/release-apogee/`, so apogee loads it as a project skill, and Claude Code
@@ -314,8 +321,9 @@ cutting anything.
    since — and the highest release tag (the burned versions set aside), then probes each
    publish step (tag, release, placeholder, homebrew, scoop, winget, smoke) for the version
    as `done`, `pending`, `setup-pending` or `unknown`. The version defaults to `VERSION`; a
-   bare `X.Y.Z` reads as `vX.Y.Z`. It exits 0 when the gate clears and 1 when it is blocked
-   or a check could not run. The gate is green CI, not a local `make check`. Its gate
+   bare `X.Y.Z` reads as `vX.Y.Z`; `--json` prints the report as JSON, the form the release
+   skills read. It exits 0 when the gate clears and 1 when it is blocked or a check could not
+   run. The gate is green CI, not a local `make check`. Its gate
    commit is `HEAD` with the trailing commits peeled off whose every path is `CHANGELOG.md`,
    `VERSION` or one `ci.yml`'s push `paths` filter skips — a release's own two commits,
    any per-feature micro-bumps, and prose CI never runs on (issues, plans, reviews). A
@@ -424,8 +432,8 @@ it, so a partial run is never mistaken for a pass. A binary built from a modifie
 warns — untracked files flip that flag.
 
 **Cutting v1.0.0.** v1.0.0 is the one release that needs the placeholder
-([ADR 0107](../../.capcom/knowledge/decisions/adr-0107.md); see
-[Burned versions](#building-from-source)), and cutting it stays the owner's act. In order:
+([ADR 0107](../../.capcom/knowledge/decisions/adr-0107.md); see **Burned versions** at the top
+of this page), and cutting it stays the owner's act. In order:
 
 1. **The bridge first.** Every installed release before the list-based update check refuses
    the whole old v1.x range, v1.0.0 included, so it would never announce v1.0.0. Cut and

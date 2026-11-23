@@ -1,4 +1,8 @@
-# Standing schedules — `apogee daemon`
+# apogee daemon — run prompts on a schedule, unattended
+
+This page covers `apogee daemon`: the `schedules.yaml` file it runs, what each firing leaves
+behind, how it binds to a server, starting and stopping it, its log, and `apogee daemon install`
+for running it under systemd, launchd or Task Scheduler.
 
 `/schedule` keeps a prompt on a cycle for as long as apogee is open. `apogee daemon`
 is the same idea with the TUI taken away: a foreground process that reads
@@ -175,6 +179,10 @@ fails visibly in its own record and the next cycle behaves normally.
 
 ## Starting and stopping
 
+`apogee daemon` takes one flag, `--config <dir>`: the apogee home to read (default `~/.apogee`,
+or the one `APOGEE_CONFIG` names). Everything else comes from `config.yaml` and
+`schedules.yaml`.
+
 Only one daemon may run per apogee home. An advisory OS lock on
 `~/.apogee/daemon/schedules.lock` is held for the process's lifetime and a second daemon
 refuses to start, because two daemons over one schedules file would double-fire every
@@ -194,7 +202,10 @@ A daemon that does start says once on stderr, never in its log, what an interact
 offer to fix in `config.yaml`: an `api-key:` stored in plain text (unless the entry carries
 `plaintext-key-ok: true`) and a retired `sub-agents: true` flag. The daemon never prompts, so
 these are notices only — the same ones `apogee headless` prints, described in
-[configuration](configuration.md).
+[configuration](configuration.md). It also says once on stderr what the confinement backend cannot
+fence for an `auto` firing — `apogee: auto mode fences terminal commands, but <backend> cannot
+fence:` with one line per write-class access, such as `connect(2) AF_UNIX` (see
+[`apogee probe`](probe.md)). A second daemon refused by the lock prints none of these.
 
 ```console
 $ apogee daemon

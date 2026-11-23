@@ -1,21 +1,21 @@
-# The apogee manual
+# The apogee manual — reference for the terminal AI coding agent
 
-The reference documentation for [apogee](../../README.md), the terminal coding
-agent for local LLMs. The README is the front door — what apogee is, how to
-install it, what it can do. These pages are the full detail:
+The full reference for [apogee](../../README.md), the open-source AI coding agent for local
+LLMs that runs in your terminal. The README is the front door: what apogee is, how to
+install it, what it can do. These pages hold the detail.
 
 | Page | Covers |
 |---|---|
-| [Commands](commands.md) | Every in-chat command, skills, `@file` references, the keys, `/undo` and `/redo`, and the `/settings` screen |
-| [Sessions](sessions.md) | How conversations are saved, resumed, forked (`/fork`), browsed, renamed |
-| [Configuration](configuration.md) | `~/.apogee/config.yaml` and a project's `.apogee/config.yaml` end to end: servers and their wire (OpenAI-compatible or `wire: anthropic`), API keys, model profiles, tools, the Floor guards, the system prompt, llama-launcher, document presentation, Auto mode's confinement, url-safety, web search, and project skills |
-| [Workflows and recipes](workflows.md) | One brief over many items, each done by a fresh helper: the `fan_out` tool, the result lines, recipes (the header, the seven stage kinds, inputs, conditions), `/bg` and background workflows, a background `sub_agent`, the wake, the `workflow` tool, `/workflows`, and turning it all on per model |
-| [Reactions](reactions.md) | Commands, webhooks and MCP tools apogee runs on what a session did (`run:`), that advise the model on a tool result, at a session's start, after a compaction fold or on the outgoing request (`advise:`) and that gate a tool call (`gate:`): the eighteen Moments (the five seams and the thirteen notices), the payloads, the exec posture, the webhook contract, the MCP call, migrating from `hooks:` |
-| [Diagnosing a host — `apogee probe`](probe.md) | What this machine can enforce, what the model can do, what the terminal really does, what the config file says, what apogee puts in front of the model at Turn 1 (`probe context`) |
-| [Running one prompt — `apogee headless`](headless.md) | Single unattended runs for scripts and pipelines, the `--format json` Event lines, and `apogee undo` to put one back |
-| [Standing schedules — `apogee daemon`](daemon.md) | Prompts on a clock that outlive the session |
-| [Updating apogee — `apogee update`](updating.md) | The update notice on the startup box, the upgrade command for each install channel, and `apogee update` replacing a release-archive install |
-| [Building from source](building.md) | Prerequisites, `Makefile` targets, cross-compilation, and the release runbook |
+| [Commands and keys](commands.md) | Every in-chat command and key, skills, `@file` references, `/undo` and `/redo`, the `/settings` screen, `/git`, `/mcp`, `/panel` |
+| [Sessions](sessions.md) | How conversations are saved, resumed, forked (`/fork`), browsed, renamed, and watched live |
+| [Configuration reference](configuration.md) | `~/.apogee/config.yaml` and a project's `.apogee/config.yaml` end to end: servers and their wire (OpenAI-compatible or `wire: anthropic`), fallback servers, API keys, model profiles, tools, the Floor guards, the system prompt, the UI and side panel, llama-launcher, Auto mode's confinement, url-safety, web search, and project skills |
+| [Workflows and recipes](workflows.md) | One brief over many items, each done by a fresh helper: the `fan_out` tool, recipes, `/bg` and background workflows, a background `sub_agent`, the `workflow` tool, `/workflows` |
+| [Reactions](reactions.md) | Commands, webhooks and MCP tools run on what a session did (`run:`), advice to the model (`advise:`) and gates on tool calls (`gate:`): the eighteen Moments (the five seams and the thirteen notices), the payloads, the webhook contract, migrating from `hooks:` |
+| [`apogee probe`](probe.md) | What this machine can enforce, what the model can do, what the terminal really does, what the config resolves to, and what apogee sends the model at Turn 1 |
+| [`apogee headless`](headless.md) | One unattended prompt for scripts and CI: exit codes, turn and time budgets, the `--format json` Event lines, and `apogee undo` |
+| [`apogee daemon`](daemon.md) | Prompts on a schedule that outlive the session, installed as a system service |
+| [Updating apogee](updating.md) | The update notice, the upgrade command for each install channel, and `apogee update` for a release-archive install |
+| [Building from source](building.md) | Prerequisites, `Makefile` targets, tests, cross-compilation, and the release runbook |
 
 Working on the codebase itself? [`AGENTS.md`](../../AGENTS.md) is the map of
 where knowledge lives; the glossary (`capcom know show glossary`) defines the domain language; the decision

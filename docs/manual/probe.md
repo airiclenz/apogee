@@ -1,4 +1,9 @@
-# Diagnosing a host — `apogee probe`
+# apogee probe — diagnose confinement, config, model and terminal
+
+This page covers the `apogee probe` family: the host report (confinement and Auto eligibility,
+roots, endpoint reachability), `probe model`'s capability battery, `probe terminal`, `probe
+config`, `probe context`'s Turn-1 context cost, and the hidden `--tui-trace` / `--tui-diag` flags
+for rendering bug reports.
 
 `apogee probe` answers "what would Auto do on this machine?" without running an agent.
 It reads `config.yaml` and the `APOGEE_*` environment exactly as a session would, and
@@ -60,7 +65,11 @@ model it probed, and paste-ready as YAML
 model keeps its advertised name — probing never renames it, so `model-profiles:` overrides
 keyed on that name keep matching — and the signature it observed is stored so the next
 `probe model` of the same server and model can compare against it; a signature that differs
-reports that the model behind the label changed since the earlier record's date. That
+reports that the model behind the label changed since the earlier record's date. The signature
+hashes the *set* of top candidate tokens, not their order, so two near-tied tokens swapping rank
+is not reported as a changed model. A record an earlier build wrote under another record schema
+or capability battery version (the battery is v2 today) is skipped with a warning that names the
+re-run, never compared. That
 comparison is all the record buys — nothing reads it at startup and it switches nothing on.
 `--no-save` runs the whole battery and records nothing; when the battery completed, the
 record's path is printed either way, so deleting that file undoes it. A battery that did not

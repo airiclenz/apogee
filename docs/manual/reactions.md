@@ -1,7 +1,12 @@
-# Reactions — commands, webhooks and MCP tools on what a session did
+# Reactions — run commands, webhooks and MCP tools on session events (`reactions:`)
+
+This page is the reference for the `reactions:` list in apogee's `config.yaml` — what other coding
+agents call hooks. It covers the three action keys (`run:`, `advise:`, `gate:`), the Moments each
+fires on, the JSON payload a handler receives, and how timeouts, failures, live reload and a
+repository's own entries behave.
 
 `reactions:` in `~/.apogee/config.yaml` is a list of Reactions apogee runs when something happens
-in a session — what other tools call a hook. Each entry names the moments it fires on and the
+in a session. Each entry names the moments it fires on and the
 action it takes: `run:` — an argv list run directly, a URL the moment is POSTed to as JSON, or a
 tool on one of your MCP servers — after the moment; `advise:` — a command whose standard output, a
 webhook whose reply, or an MCP tool whose answer the model reads inside a fence apogee writes: as a
@@ -134,7 +139,7 @@ passing.
 | `turn-finished` | Every top-level turn boundary, whatever its outcome. A turn that closed its exchange fires **both** this and `exchange-finished`, in that order. | Top-level only |
 | `file-changed` | A workspace write tool succeeded. A delete, copy or move reports its **destination**, because that is the path whose content changed. A refused or failed write fires nothing. | Any, sub-agents included |
 | `approval-requested` | An approval was **raised** and is waiting on you — before you answer, not after. | Any, sub-agents included |
-| `approval-decided` | That same approval reached its verdict, which the payload carries as `decision` — or an [allow rule](configuration.md) answered an ordinary approval in your place, with no `approval-requested` before it. | Any, sub-agents included |
+| `approval-decided` | That same approval reached its verdict, which the payload carries as `decision` — or an [allow rule](configuration.md#commands-that-run-without-asking--allow) answered an ordinary approval in your place, with no `approval-requested` before it. | Any, sub-agents included |
 | `error` | A localised, recovered engine fault. A Reaction's own failure never becomes one of these, because an entry subscribed to `error` would then fire on itself and loop. | Any, sub-agents included |
 | `session-started` | A session started, once per start: a fresh session, a `--resume`, every [`apogee headless`](headless.md), [daemon](daemon.md) or `/schedule` run, `/clear`, `/new`, a `/sessions` resume and `/fork`. The payload's `start` says which — `new`, `resume`, `clear` or `fork`. A sub-agent is not a session start and never fires it. An `advise:` entry on it briefs the session (see [Advising the model](#advising-the-model)). | Top-level only |
 | `compaction-finished` | A [compaction](configuration.md#keeping-the-window-from-overflowing--compaction-and-pruning) fold ran and replaced the conversation, once per fold — whether the context estimate, an emergency (a request that would not fit the window) or `/compact` started it. The payload's `fold` says which — `auto`, `emergency` or `manual`. A fold that failed, was cancelled or replaced nothing fires none, and a sub-agent's fold never fires it. An `advise:` entry on it briefs the model again after the fold. | Top-level only |
