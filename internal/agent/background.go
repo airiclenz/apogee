@@ -188,8 +188,9 @@ type workflowEntryJSON struct {
 // the running ones wait on, the finish notes of the ended ones no one has taken yet, oldest first,
 // every workflow launched since the set was last stopped whole with the store its folder is in (so
 // one kept across a session boundary stays listed after it ends), whether the next session
-// boundary keeps the set (KeepWorkflows), and the retiring runs: the ones a whole-set stop
-// cancelled (stopAllBackground) whose Runner has not settled yet.
+// boundary keeps the set (KeepWorkflows), the retiring runs: the ones a whole-set stop
+// cancelled (stopAllBackground) whose Runner has not settled yet, and the settling runs: the ones
+// taken out of the line before they started (unqueueLocked) whose folder is still being settled.
 // The zero value is ready to use; mu guards every field, and is never held while a workflow runs.
 type backgroundManager struct {
 	mu            sync.Mutex
@@ -204,12 +205,16 @@ type backgroundManager struct {
 	launched []keptRun
 	keep     bool
 	retiring []*backgroundRun
+	// settling keeps a queued run's id taken until its folder is settled (endBackground). Only
+	// startBackground's id check reads it: the run is no longer live, holds no server and is in no
+	// snapshot or listing, but a launch under its id would race the settle's write to its folder.
+	settling []*backgroundRun
 }
 
 // backgroundRun is one live background workflow. Everything but running and cancel is fixed at
 // launch — host is the snapshot of the Agent it runs off (backgroundHost); those two are set when it
 // starts, under the manager's lock. done closes when it has ended — run to its end, stopped, or
-// dropped from the queue.
+// dropped from the queue and its folder settled.
 type backgroundRun struct {
 	id       string
 	recipe   string
@@ -336,9 +341,9 @@ func (a *Agent) stopWorkflow(id string) (workflow.RunEnding, error) {
 		m.mu.Unlock()
 		return workflow.RunEnding{}, nil
 	}
-	m.dropLocked(run)
+	m.unqueueLocked(run)
 	m.mu.Unlock()
-	ending := workflow.UnstartedEnding(run.runner.SettleUnstarted(run.id))
+	ending := a.endBackground(run, workflow.RunEnding{}, endOptions{unstarted: true})
 	return ending, ending.Err
 }
 
@@ -561,7 +566,8 @@ func (a *Agent) startKeyedBackgroundRecipe(recipe workflow.Recipe, given map[str
 // bracketed under the `workflow-<id>` call yet addressable through this Agent, its scripts run
 // through the host's Resolution, its ask stages put through the manager's queue — and gets its
 // width when it starts. A workflow already live under the same id (the same plan launched twice) is
-// refused. It runs where the idle-only mutators cannot (an idle boundary, or a Step), which is what
+// refused, as is one whose id a stopped queued run is still settling (backgroundManager.settling).
+// It runs where the idle-only mutators cannot (an idle boundary, or a Step), which is what
 // lets the host be read off this Agent unguarded.
 func (a *Agent) startBackground(launch workflowLaunch) (string, error) {
 	launch.mode = launchModeBackground
@@ -578,7 +584,7 @@ func (a *Agent) startBackground(launch workflowLaunch) (string, error) {
 	m := &a.background
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.liveLocked(run.id) != nil || m.retiringLocked(run.id) != nil {
+	if m.liveLocked(run.id) != nil || m.retiringLocked(run.id) != nil || m.settlingLocked(run.id) != nil {
 		return "", fmt.Errorf(workflowAlreadyRunningFormat, run.id)
 	}
 	m.runs = append(m.runs, run)
@@ -602,41 +608,77 @@ func (a *Agent) startRunLocked(run *backgroundRun) {
 }
 
 // driveBackground runs one background workflow to its end, reporting its phases through its host as
-// a blocking workflow's are reported, then hands its server to the next in line. The finish note is
-// held before the end is reported, so a Driver that wakes on that event finds it — unless a
-// whole-set stop retired the run, whose note belongs to the session that stop ended (holdFinish).
+// a blocking workflow's are reported, then ends it (endBackground).
 func (a *Agent) driveBackground(ctx context.Context, run *backgroundRun) {
 	result, err := run.runner.Run(ctx, run.plan)
-	ending := workflow.EndingOf(result, err)
-	a.background.holdFinish(run, finishNote(workflow.OriginOf(run.plan), run.plan.Name, result, ending, seatFellBack(run.runner)))
-	run.observer.end(result, ending)
-	a.endBackground(run)
+	a.endBackground(run, workflow.EndingOf(result, err), endOptions{result: result})
 }
 
-// endBackground retires a run that ended — a live one, or one a whole-set stop retired — and starts
-// the next workflow queued on its server.
-func (a *Agent) endBackground(run *backgroundRun) {
+// endOptions is what an ending carries beside its RunEnding (endBackground).
+type endOptions struct {
+	result    workflow.Result // what the run's Runner returned; zero for a run that never started
+	unstarted bool            // the run left the line before it started (unqueueLocked): its ending is settled here
+	clearing  bool            // a whole-set stop ends the run: the session its note would reach is over
+}
+
+// endBackground is the one way a background run ends — one its Runner ran to its end (ending is
+// workflow.EndingOf's, a live run's or one a whole-set stop retired), or one taken out of the line
+// before it started (opts.unstarted, by unqueueLocked; ending is then settled here). It returns the
+// RunEnding the run ended with. The steps, in order, each under the condition stated beside it:
+//
+//  1. Settle the folder — an unstarted run only: no Runner ran it, so none settled it. The run sits
+//     in the settling set meanwhile, so its id cannot be launched again until the write is done,
+//     and the lock is not held across that write.
+//  2. Hold the finish note — not for a run that never started (it has nothing to report), not when
+//     a whole-set stop is clearing, and not for a run such a stop retired (holdFinish): that note
+//     belongs to the session the stop ended.
+//  3. Report the end — not for a run that never started: it reported no start either. After the
+//     note, so a Driver that wakes on the event finds it, and outside the lock, so a sink blocked
+//     on its Driver never holds up a stop.
+//  4. Cancel the run's context — a run that started only; a queued one has none.
+//  5. Drop the run from the manager, which closes its done.
+//  6. Start the next workflow queued on the run's server — only when the run held that server: an
+//     unstarted run held none, so whatever holds it starts the next when it ends.
+func (a *Agent) endBackground(run *backgroundRun, ending workflow.RunEnding, opts endOptions) workflow.RunEnding {
 	m := &a.background
+	if opts.unstarted {
+		ending = workflow.UnstartedEnding(run.runner.SettleUnstarted(run.id))
+	}
+	if !ending.NeverStarted && !opts.clearing {
+		m.holdFinish(run, finishNote(workflow.OriginOf(run.plan), run.plan.Name, opts.result, ending, seatFellBack(run.runner)))
+	}
+	if !ending.NeverStarted {
+		run.observer.end(opts.result, ending)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	run.cancel()
+	heldServer := run.running
+	if run.cancel != nil {
+		run.cancel()
+	}
 	m.dropLocked(run)
+	if !heldServer {
+		return ending
+	}
 	for _, next := range m.runs {
 		if !next.running && next.server == run.server {
 			a.startRunLocked(next)
-			return
+			break
 		}
 	}
+	return ending
 }
 
-// stopAllBackground stops every background workflow — the queued ones dropped and marked stopped,
-// the running ones cancelled and retired (see the file comment) — and returns without waiting for
-// them to end: each retired run's folder reaches Stopped once its Runner settles, and a caller that
-// must outlast them (Close) waits with waitAll. Their finished items are kept.
+// stopAllBackground stops every background workflow — the queued ones taken out of the line and
+// ended at once (endBackground, which marks them stopped), the running ones cancelled and retired
+// (see the file comment), to end when their Runner settles — and returns without waiting for the
+// running ones: each retired run's folder reaches Stopped once its Runner settles, and a caller
+// that must outlast them (Close) waits with waitAll. Their finished items are kept.
 func (a *Agent) stopAllBackground() {
 	m := &a.background
 	m.mu.Lock()
-	var dropped []*backgroundRun
+	var unstarted []*backgroundRun
 	for _, run := range slices.Clone(m.runs) {
 		if run.running {
 			run.cancel()
@@ -644,8 +686,8 @@ func (a *Agent) stopAllBackground() {
 			m.retiring = append(m.retiring, run)
 			continue
 		}
-		m.dropLocked(run)
-		dropped = append(dropped, run)
+		m.unqueueLocked(run)
+		unstarted = append(unstarted, run)
 	}
 	// The whole set stops only when its session ends (Close, and a ClearContext or RestoreSession not
 	// told to keep it), so the notes held for that session have no one left to read them; the notes
@@ -656,8 +698,10 @@ func (a *Agent) stopAllBackground() {
 	m.held.reset()
 	m.launched = nil
 	m.mu.Unlock()
-	for _, run := range dropped {
-		_, _ = run.runner.SettleUnstarted(run.id) // best-effort, like every stop on the way out: nobody is left to tell
+	for _, run := range unstarted {
+		// Its ending is dropped: a folder that could not be settled is best-effort, like every stop
+		// on the way out — nobody is left to tell.
+		a.endBackground(run, workflow.RunEnding{}, endOptions{unstarted: true, clearing: true})
 	}
 }
 
@@ -790,17 +834,35 @@ func (m *backgroundManager) retiringLocked(id string) *backgroundRun {
 	return nil
 }
 
-// dropLocked removes run from the live set, or from the retiring runs, and closes its done. The
-// caller holds the lock.
-func (m *backgroundManager) dropLocked(run *backgroundRun) {
+// settlingLocked returns the settling run id names, or nil. The caller holds the lock.
+func (m *backgroundManager) settlingLocked(id string) *backgroundRun {
+	for _, run := range m.settling {
+		if run.id == id {
+			return run
+		}
+	}
+	return nil
+}
+
+// unqueueLocked takes the queued run out of the line and into the settling set, in the critical
+// section that found it queued — so it can no longer be started, stopped a second time, listed or
+// snapshotted — and leaves the rest of its ending to endBackground. The caller holds the lock.
+func (m *backgroundManager) unqueueLocked(run *backgroundRun) {
 	if index := slices.Index(m.runs, run); index >= 0 {
 		m.runs = slices.Delete(m.runs, index, index+1)
-		close(run.done)
-		return
+		m.settling = append(m.settling, run)
 	}
-	if index := slices.Index(m.retiring, run); index >= 0 {
-		m.retiring = slices.Delete(m.retiring, index, index+1)
-		close(run.done)
+}
+
+// dropLocked removes run from the manager — from the live set, the retiring runs or the settling
+// ones — and closes its done. The caller holds the lock.
+func (m *backgroundManager) dropLocked(run *backgroundRun) {
+	for _, set := range []*[]*backgroundRun{&m.runs, &m.retiring, &m.settling} {
+		if index := slices.Index(*set, run); index >= 0 {
+			*set = slices.Delete(*set, index, index+1)
+			close(run.done)
+			return
+		}
 	}
 }
 

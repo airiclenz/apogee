@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -412,6 +413,79 @@ func TestBackground_StoppingAQueuedWorkflowSaysItNeverStarted(t *testing.T) {
 	}
 	if phase := workflowInfo(t, a, second).Status.Phase; phase != workflow.PhaseStopped {
 		t.Errorf("the stopped queued workflow is %s, want stopped", phase)
+	}
+}
+
+// TestBackground_ARelaunchWaitsForAQueuedStopToSettle pins that a stopped queued run keeps its id
+// until its folder is settled. The settle is held open in the Runner's clock, which
+// workflow.Runner.SettleUnstarted reads between reading the folder and writing it stopped; the
+// server is freed meanwhile, so a relaunch of the same id would start at once rather than wait in
+// line — and the held settle would then write stopped over a running workflow's folder.
+func TestBackground_ARelaunchWaitsForAQueuedStopToSettle(t *testing.T) {
+	t.Parallel()
+
+	cfg := recipeConfig(t, newLockedSink(), sweepRecipe("first", "one"), sweepRecipe("second", "two"))
+	started, release := make(chan struct{}), make(chan struct{})
+	up := (&workflowResponder{}).
+		route("sweep one", signalThenWait(started, release), finishScript("f1", "one is fine")).
+		route("sweep two", nil, finishScript("f2", "two is fine"))
+	a := newBackgroundParent(t, cfg, up)
+
+	launchBackground(t, a, "first")
+	awaitClosed(t, started, "the first workflow's child")
+
+	// The clock every later launch's Runner takes: once armed, its next reading blocks until the
+	// test lets the settle through.
+	var armed atomic.Bool
+	var letThrough sync.Once
+	settling, settle := make(chan struct{}), make(chan struct{})
+	finishSettle := func() { letThrough.Do(func() { close(settle) }) }
+	t.Cleanup(finishSettle)
+	a.now = func() time.Time {
+		if armed.CompareAndSwap(true, false) {
+			close(settling)
+			<-settle
+		}
+		return time.Now()
+	}
+
+	second := launchBackground(t, a, "second")
+	if info := workflowInfo(t, a, second); !info.Queued {
+		t.Fatalf("second = %+v, want it queued behind the first", info)
+	}
+	armed.Store(true)
+	stopped := make(chan error, 1)
+	go func() { stopped <- a.StopWorkflow(second) }()
+	awaitClosed(t, settling, "the queued stop to reach its settle")
+
+	close(release)
+	a.background.waitAll() // the first workflow has ended: its server is free
+
+	want := fmt.Sprintf(workflowAlreadyRunningFormat, second)
+	relaunched, err := a.StartRecipe(context.Background(), RecipeLaunch{SkillID: "second", Background: true})
+	if err == nil || err.Error() != want {
+		t.Fatalf("a relaunch while the queued stop settles = %q, %v; want it refused with %q", relaunched, err, want)
+	}
+
+	finishSettle()
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("StopWorkflow(%s): %v", second, err)
+		}
+	case <-time.After(testtime.Budget(5 * time.Second)):
+		t.Fatal("timed out waiting for the queued stop to return")
+	}
+	if phase := workflowInfo(t, a, second).Status.Phase; phase != workflow.PhaseStopped {
+		t.Fatalf("the stopped queued workflow is %s, want stopped", phase)
+	}
+
+	if again := launchBackground(t, a, "second"); again != second {
+		t.Fatalf("the relaunch after the settle is %s, want the same folder %s", again, second)
+	}
+	a.background.waitAll()
+	if phase := workflowInfo(t, a, second).Status.Phase; phase != workflow.PhaseDone {
+		t.Errorf("the relaunched workflow is %s, want done", phase)
 	}
 }
 

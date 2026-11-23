@@ -138,7 +138,14 @@ Depends on item 4.
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestEndingOf' ./internal/workflow/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestFinishNote|TestRenderWorkflowNotes|TestWorkflowControl|TestAgentReadsAWorkflowEndingInOnePlace' ./internal/agent/`
 **Commit:** `refactor(workflow): one ending value feeds the note, the event and the answer`
 
-## 6. The background manager ends a run through one path
+## 6. The background manager ends a run through one path — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): the one end function is `(*Agent).endBackground(run, ending workflow.RunEnding, opts endOptions) workflow.RunEnding`, not a new `(*backgroundManager).end` — it must call `(*Agent).startRunLocked`, so it stays on the Agent under the existing name; `driveBackground` calls it directly (the old `endBackground` body is its last three steps).
+NOTES (2026-11-23): `endBackground` returns the RunEnding it ended the run with, and an unstarted run is passed the zero ending plus `endOptions.unstarted` — `workflow.UnstartedEnding` (item 5's sole setter of NeverStarted) needs the settle's result, which exists only inside the end function.
+NOTES (2026-11-23): the queued run is moved from `m.runs` into the new `m.settling` set by `unqueueLocked`, called by `stopWorkflow` and by `stopAllBackground`'s first loop inside the critical section that found it queued (otherwise a second stop, or the run ahead ending and starting it, could fall between the lookup and the end); only `stopAllBackground`'s second loop calls `endBackground` — its first loop still cancels and retires the running runs, which end later through `driveBackground`.
+NOTES (2026-11-23): a relaunch during the settle is REFUSED with `workflowAlreadyRunningFormat` (the plan allowed "refused or waits"); the new test asserts the refusal, then that a relaunch after the settle reuses the folder and ends done.
+NOTES (2026-11-23): `endOptions.clearing` is stated in the note condition as the plan asks, but is not reachable on its own today: stop-all ends only unstarted runs through `endBackground`, and those already hold no note (NeverStarted).
+NOTES (2026-11-23): a queued run's `done` now closes after its folder is settled, not when it leaves the line; `waitAll` does not wait on settling runs (both callers that settle do so synchronously before returning).
 
 Depends on item 5.
 
