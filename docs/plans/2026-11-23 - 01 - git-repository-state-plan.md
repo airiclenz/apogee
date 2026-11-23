@@ -117,7 +117,13 @@ Depends on item 2.
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestTreeSnapshot' ./internal/agent/ && go vet ./internal/tools/ && ! grep -rn 'RunGitQuery' --include='*.go' internal`
 **Commit:** `refactor(agent): the tree snapshot reads gitexec's repository state`
 
-## 5. The git config-key catalogue is one leaf package
+## 5. The git config-key catalogue is one leaf package — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): the Acceptance step `go test -run 'Git' ./internal/security/` matches no test in that package ("no tests to run") — the shell-write git cases live in `TestWriteTargetsOf` and `TestShellWriteViewJudgesWhatTheCommandWrites`; ran `-run 'TestShellWriteView|TestWriteTargetsOf|TestProjectConfig' ./internal/security/` in addition, which passes.
+NOTES (2026-11-23): the leaf exports `Source`, `WriteViewSuffix`, `WriteViewSource` (`Source` + `|` + suffix), `MergeDriverSource`, `Anchored` and `ValueIsBenign`; `gitBooleans` moved with `ValueIsBenign` and stays unexported. `Source` is composed from `MergeDriverSource` so the merge-driver key is spelled once; `TestSourceIsUnchanged` pins the composed string byte for byte against the base literal.
+NOTES (2026-11-23): gitexec's unexported `mergeDriverName` is now compiled through `gitconfigkeys.Anchored`, so its text is `^(merge\..*\.driver)$` instead of `^merge\..*\.driver$` — the same language; `CommandConfigName.String()` and `security.GitCommandConfigName.String()` are byte-identical to the base.
+NOTES (2026-11-23): the key-by-key rationale that documented `security.GitCommandConfigName` and `gitConfigValueIsBenign` moved to the leaf's `WriteViewSuffix` and `ValueIsBenign` docs; the import lists in `internal/security/doc.go` and `internal/gitexec/doc.go` name the new leaf.
+NOTES (2026-11-23): older decision Notes (`adr-0049-amend-1103`, `adr-0049-amend-1114`, `adr-0012-amend-1118`) still spell `GitCommandConfigNameSource`; left as written (point-in-time records) — `adr-0049-amend-1123` says how to read them.
 
 Depends on item 2 (same files in gitexec).
 

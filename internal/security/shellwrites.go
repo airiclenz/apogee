@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+
+	"github.com/airiclenz/apogee/internal/gitconfigkeys"
 )
 
 // ----------------------------------------------------------------------------
@@ -981,46 +983,17 @@ var gitReadSubcommands = map[string]bool{
 	"check-attr": true, "help": true, "version": true, "--version": true, "--help": true,
 }
 
-// GitCommandConfigNameSource is the one source string behind every "config name whose VALUE is
-// a program git executes" pattern: an sshCommand, an editor, a pager, an askpass, a filter or
-// merge or diff driver, a credential helper, a gpg.program, an ssh signing-key command, a proxy
-// command, a remote helper (remote.<name>.vcs). internal/gitexec anchors it as its CommandConfigName — the repo-local probe that refuses
-// a repository's git calls, or for a merge.<x>.driver alone neutralises it and refuses only a
-// content merge — and hands that string to git's --get-regexp verbatim, so it must
-// stay POSIX-ERE compatible: plain ( ) groups, no (?: and no (?i). It lives here because gitexec
-// imports security, never the reverse; a name it matches is spelled lowercase, so a caller lowers
-// what it matches first.
-const GitCommandConfigNameSource = `core\.(sshcommand|editor|pager|askpass|gitproxy|alternaterefscommand)|sequence\.editor|diff\.external|diff\..*\.(command|textconv)|merge\..*\.driver|mergetool\..*\.cmd|difftool\..*\.cmd|filter\..*\.(clean|smudge|process)|credential\.helper|credential\..*\.helper|gpg\.program|gpg\..*\.program|gpg\.ssh\.defaultkeycommand|uploadpack\.packobjectshook|remote\..*\.(proxy|vcs)|pager\..*`
-
 // GitCommandConfigName is the shell write view's superset of gitexec's CommandConfigName: the
-// same names plus the keys git runs, or reads more config through, without being asked — the
-// hooks directory (core.hookspath), the fsmonitor hook (core.fsmonitor), the interactive diff
-// filter (interactive.difffilter) and the include paths (include.path, includeif.<cond>.path).
-// The probe leaves them out on purpose — gitexec's hardening options neutralise the first two on
-// every call and its --includes listing already reads what an include names, so refusing them
-// there would cost a repository its git tools for a key that reaches no program of apogee's —
-// but a `git config` line that SETS one is a write into the repository's control plane all the
-// same, run by the operator's next ordinary git, and that is what this pattern judges. alias.*
-// stays out: git runs an alias only when it is typed. A git-boolean core.fsmonitor value is
-// exempt in gitConfigWritesCommandKey, which reads the value this pattern cannot see.
-//
-// The suffix also names the remote, url, protocol and submodule keys that reach a program on a
-// transport or a submodule run: remote.<n>.uploadpack and remote.<n>.receivepack (the program
-// run on the far side of a local or ssh transport), protocol.allow and protocol.ext.allow (which
-// open the ext:: transport, whose URL is a command line), a url.<base>.insteadof or
-// url.<base>.pushinsteadof whose base is an ext:: URL (the only rewrite that names a program —
-// a URL-form helper name cannot carry a slash), and submodule.<n>.update (a `!` value is a
-// command). They stay out of the probe source because the git hosts neutralise each per verb —
-// `-c protocol.ext.allow=never`, `--upload-pack=git-upload-pack`, `--receive-pack=git-receive-pack`,
-// `-c submodule.recurse=false` with `--recurse-submodules=no` — but the operator's next ordinary
-// git honours them. Benign values stay clear in gitConfigWritesCommandKey: a protocol.allow or
-// protocol.ext.allow of `never` hardens rather than opens, and a submodule.<n>.update mode that
-// does not start with `!` (none, rebase, merge, checkout) names no program. Other
-// protocol.<x>.allow names and non-ext:: rewrites never match.
-var GitCommandConfigName = regexp.MustCompile(`^(` + GitCommandConfigNameSource +
-	`|core\.hookspath|core\.fsmonitor|interactive\.difffilter|include\.path|includeif\..*\.path` +
-	`|remote\..*\.(uploadpack|receivepack)|url\.ext::.*\.(insteadof|pushinsteadof)` +
-	`|protocol\.allow|protocol\.ext\.allow|submodule\..*\.update)$`)
+// names the repo-local probe refuses plus the keys git runs, or reads more config through,
+// without being asked, and the remote, url, protocol and submodule keys that reach a program on
+// a transport or a submodule run. A `git config` line that SETS one is a write into the
+// repository's control plane, run by the operator's next ordinary git, and that is what this
+// pattern judges. The key list and the reason each key sits on its side are
+// internal/gitconfigkeys' ([gitconfigkeys.WriteViewSource]), the one catalogue this package and
+// internal/gitexec both compile from; the values that name no program after all
+// ([gitconfigkeys.ValueIsBenign]) stay clear in gitConfigWritesCommandKey, which reads the value
+// this pattern cannot see.
+var GitCommandConfigName = regexp.MustCompile(gitconfigkeys.Anchored(gitconfigkeys.WriteViewSource))
 
 // gitConfigReadForms are the `git config` options under which the invocation only reads a
 // value and writes no config file.
@@ -1448,7 +1421,7 @@ func gitConfigWritesCommandKey(operands []string) bool {
 		if !GitCommandConfigName.MatchString(name) {
 			continue
 		}
-		if i+1 < len(operands) && gitConfigValueIsBenign(name, operands[i+1], removal) {
+		if i+1 < len(operands) && gitconfigkeys.ValueIsBenign(name, operands[i+1], removal) {
 			continue
 		}
 		matched = true
@@ -1456,36 +1429,10 @@ func gitConfigWritesCommandKey(operands []string) bool {
 	return matched
 }
 
-// gitConfigValueIsBenign reports whether setting the command-valued key name to value names no
-// program: a git-boolean core.fsmonitor, a protocol.allow or protocol.ext.allow of `never`, or a
-// submodule.<n>.update mode without a leading `!`. Under a removal form value is a value-pattern,
-// so only the core.fsmonitor exemption — which predates the removal rule — still reads it.
-func gitConfigValueIsBenign(name, value string, removal bool) bool {
-	if name == "core.fsmonitor" {
-		return gitBooleans[strings.ToLower(value)]
-	}
-	if removal {
-		return false
-	}
-	if name == "protocol.allow" || name == "protocol.ext.allow" {
-		return strings.ToLower(value) == "never"
-	}
-	if strings.HasPrefix(name, "submodule.") && strings.HasSuffix(name, ".update") {
-		return !strings.HasPrefix(strings.TrimSpace(value), "!")
-	}
-	return false
-}
-
 // gitConfigRemovalForms are the `git config` words that remove a key rather than set it: the
 // --unset options and the `unset` subcommand. A word after the key is then a value-pattern.
 var gitConfigRemovalForms = map[string]bool{
 	"--unset": true, "--unset-all": true, "unset": true,
-}
-
-// gitBooleans are the value spellings git reads as a boolean (git-config(1), "boolean"), lowered:
-// git compares them case-insensitively.
-var gitBooleans = map[string]bool{
-	"true": true, "false": true, "yes": true, "no": true, "on": true, "off": true, "1": true, "0": true,
 }
 
 // ddTargets keeps only what dd writes: the values of its `of=` operands.

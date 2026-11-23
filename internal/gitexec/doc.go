@@ -27,8 +27,8 @@
 //     root no repository reaches is never memoised, so a mid-session `git init` is seen. A probe
 //     that could not complete — a call that timed out, wedged its drain or overran the output
 //     cap — refuses the call too ([CommandConfigIncompleteRefusal]) and is never memoised. The
-//     pattern's source string is internal/security's
-//     ([security.GitCommandConfigNameSource]), which the shell write view widens with
+//     pattern's source string is internal/gitconfigkeys'
+//     ([gitconfigkeys.Source]), which the shell write view widens with
 //     core.hooksPath, core.fsmonitor, interactive.diffFilter, the include paths and the
 //     program-reaching remote/url/protocol/submodule keys (remote.<n>.uploadPack/receivePack,
 //     protocol.allow, protocol.ext.allow, ext:: url rewrites, submodule.<n>.update) to name
@@ -77,7 +77,8 @@
 // no git installed, and its answers still pass the exec fence, the hardening and the
 // command-config refusal.
 //
-// The package is a LEAF over internal/subprocess: it imports internal/domain, internal/platform,
+// The package is a LEAF over internal/subprocess: it imports internal/domain,
+// internal/gitconfigkeys (the config-key catalogue, itself a leaf), internal/platform,
 // internal/security and internal/subprocess, and nothing else in the tree — never internal/tools,
 // never internal/agent (ADR 0010). Everything tool-shaped — the tool structs, the ref guards, the
 // result rendering — stays in internal/tools/git.go, which reaches this package through thin

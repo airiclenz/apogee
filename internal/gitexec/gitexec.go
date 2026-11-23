@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/gitconfigkeys"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/subprocess"
@@ -668,15 +669,16 @@ func subcommandAt(args []string) int {
 // The source string must stay POSIX-ERE-compatible — plain ( ) groups, no (?: — because the
 // tools tests hand it to git verbatim (`git config --get-regexp`, internal/tools/git_test.go's
 // global-scope guards), where git compiles it with regcomp; the probe itself lists every key and
-// re-checks each against this compiled form. That source is [security.GitCommandConfigNameSource]: the
-// shell write view builds its own [security.GitCommandConfigName] from it — the same names PLUS
+// re-checks each against this compiled form. That source is [gitconfigkeys.Source], the one
+// catalogue in internal/gitconfigkeys: the shell write view builds its own
+// [security.GitCommandConfigName] from the same package — the same names PLUS
 // core.hookspath, core.fsmonitor, interactive.difffilter, the include paths and the
 // program-reaching remote/url/protocol/submodule keys (remote.<n>.uploadpack/receivepack,
 // protocol.allow, protocol.ext.allow, ext:: url rewrites, submodule.<n>.update), because a
 // `git config` line that sets one is a write into .git/config whatever the hardening options do
-// to it afterwards — and this package imports security, never
-// the reverse, so the one string lives there.
-var CommandConfigName = regexp.MustCompile(`^(` + security.GitCommandConfigNameSource + `)$`)
+// to it afterwards. The string is in internal/gitconfigkeys, a leaf both packages import,
+// because this package imports security and security could never import this one.
+var CommandConfigName = regexp.MustCompile(gitconfigkeys.Anchored(gitconfigkeys.Source))
 
 // FilterConfigScopes are the config scopes a command-valued key is refused from — the
 // REPOSITORY's own files, which is what the workspace bytes can carry. --local is .git/config
@@ -840,8 +842,9 @@ func judgeCommandConfig(names, args []string) (overrides []string, refusal strin
 }
 
 // mergeDriverName matches a merge.<x>.driver key as the probe's listing spells it (section and
-// variable lowercased, subsection kept).
-var mergeDriverName = regexp.MustCompile(`^merge\..*\.driver$`)
+// variable lowercased, subsection kept). The pattern is internal/gitconfigkeys'; which of its
+// names can be neutralised is this package's rule (neutralisableMergeDriver).
+var mergeDriverName = regexp.MustCompile(gitconfigkeys.Anchored(gitconfigkeys.MergeDriverSource))
 
 // neutralisableMergeDriver reports whether name is a merge driver a `-c` override can empty. git
 // splits a `-c` argument at its FIRST `=`, so a subsection holding one (merge.a=b.driver) would

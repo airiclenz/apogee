@@ -72,7 +72,8 @@
 //
 // Guards bundles the executor-facing always-on set (dangerous-action + breaker) the tool
 // executor threads around every call so all tools — and a sub-agent (D2) — inherit them. The package imports internal/domain, internal/realpath (a leaf
-// that imports nothing internal; the one resolver EvalRealPath delegates to), the standard library and
+// that imports nothing internal; the one resolver EvalRealPath delegates to), internal/gitconfigkeys
+// (a leaf too; the git config-key catalogue shellwrites.go compiles), the standard library and
 // exactly one third-party module — golang.org/x/net/idna, the IDNA mapping urlsafety.go's
 // NormalizeURL applies so the guard's verdict names the host net/http will actually
 // dial. ADR 0010's direction rule is untouched: this package is imported BY
@@ -106,7 +107,10 @@
 // option or verb writes (`--output=file`, `uniq in out`, `sed 'w file'`) and drops what a
 // read leader names, for the rule that opted in (Rule.ShellWriteView) on a tool that declared
 // its command-line argument (domain.ArgRoleShellCommand) — plus projectConfigTargetsOf, the same
-// reading with git commands and a cp's sources as reads, for Rule.ProjectConfigView. Its
+// reading with git commands and a cp's sources as reads, for Rule.ProjectConfigView. The git
+// config keys whose `git config` write it names .git/config for (GitCommandConfigName) are not
+// spelled here: the pattern is compiled from internal/gitconfigkeys, the one catalogue
+// internal/gitexec's repo-local probe reads too. Its
 // tokenizer's heredoc reading is exported as WithoutHeredocBodies, the line with every heredoc
 // body removed, for the terminal / console_open pre-flight to parse.
 // allowmatch.go reads the same lines for the opposite question — may a persisted yes answer
