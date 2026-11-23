@@ -5,7 +5,6 @@ package platform
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"sync"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform/winlabel"
+	"github.com/airiclenz/apogee/internal/realpath"
 )
 
 // Windows token Confiner backend (Phase 5 item 8 — ADR 0020;
@@ -379,7 +379,9 @@ func (c *tokenConfiner) resolveBoxRoot(root string) (string, error) {
 	if root == "" {
 		return "", nil
 	}
-	if info, err := os.Lstat(root); err == nil && info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
+	// A root IsLink cannot read is not known to be a link: it falls through to the finalPath
+	// seam below, which refuses whatever it cannot resolve.
+	if isLink, err := realpath.IsLink(root); err == nil && isLink {
 		return "", fmt.Errorf("%w: refusing to label %q — a box root that is itself a reparse point (a junction or symlink) would be labelled through to its target",
 			domain.ErrConfinementUnavailable, root)
 	}

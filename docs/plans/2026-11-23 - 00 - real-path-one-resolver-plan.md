@@ -89,7 +89,11 @@ internal/tools/path_read.go — matchRoot (EvalRealPath vs Clean: holds because 
 **Acceptance:** `go build ./... && GOOS=windows go vet ./internal/security/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'RealPath|ResolveInRoot|WorkspaceRelative|PathSafety' ./internal/security/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestResolveLenient' ./internal/realpath/ && grep -A2 '^func EvalRealPath' internal/security/pathsafety.go | grep -q 'return realpath.ResolveLenient(p)' && GOMEMLIMIT=2GiB go test -race -count=1 -run 'Announced' ./cmd/apogee/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestProjectConfigControlPlane' ./internal/security/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestProjectConfigControlPlane' ./internal/agent/ && capcom check`
 **Commit:** `fix(security): a junction leaving the workspace reads as a path escape`
 
-## 3. Sandbox backends resolve roots through the leaf
+## 3. Sandbox backends resolve roots through the leaf — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): both new tests live in `internal/platform/confine_posix_test.go` (`!windows`), the only test file the item lists, so `TestBoxRootsSkipsEmptyKeepsOrder` does not run on Windows CI although `boxRoots` is untagged; it also asserts that the returned slice is the caller's own (seatbelt rewrites it in place).
+NOTES (2026-11-23): the now-redundant `root == ""` skips at the landlock root loop, `namespaceArgv` and `windowsBoxRoots` are removed, since `boxRoots` drops empty roots; `namespaceArgv` now hands `planUnixSockets` the list without empties, which that function dropped itself.
+NOTES (2026-11-23): the Windows half (`confiner_windows.go`) is compile-checked only (`GOOS=windows go vet ./internal/platform/`); `TestWindowsGuardrailSeesReparseRootsAndTrailingDotSpellings` is unproven until the `test-windows` CI job runs.
 
 Depends on item 1.
 

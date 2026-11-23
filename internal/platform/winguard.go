@@ -114,6 +114,24 @@ func windowsJournalFence(r hostRules, home string) string {
 	return dir
 }
 
+// boxRoots returns the roots box lets a child write beneath — WorkspaceRoot, then each
+// WritablePaths entry, in that order — leaving out the empty ones, which name nothing. The
+// slice is the caller's own. It is the one reading of "workspace root plus writable paths"
+// every backend starts from, and it lives in this untagged file because that is the only
+// place all of them compile it.
+func boxRoots(box domain.ConfinementBox) []string {
+	roots := make([]string, 0, 1+len(box.WritablePaths))
+	if box.WorkspaceRoot != "" {
+		roots = append(roots, box.WorkspaceRoot)
+	}
+	for _, path := range box.WritablePaths {
+		if path != "" {
+			roots = append(roots, path)
+		}
+	}
+	return roots
+}
+
 // windowsBoxRoots resolves box to the minimal set of non-overlapping roots the backend
 // labels, or an error wrapping ErrConfinementUnavailable when the box cannot be expressed
 // on this disk (ADR 0020 §2/§3 — a per-run labelling refusal is a routine Windows outcome
@@ -140,15 +158,11 @@ func windowsBoxRoots(r hostRules, box domain.ConfinementBox, protected []string)
 		}
 	}
 
-	kept := make([]string, 0, 1+len(box.WritablePaths))
-	for _, root := range append([]string{box.WorkspaceRoot}, box.WritablePaths...) {
-		if root == "" {
-			continue
-		}
+	kept := boxRoots(box)
+	for _, root := range kept {
 		if err := windowsLabelGuardrail(r, root, protected); err != nil {
 			return nil, err
 		}
-		kept = append(kept, root)
 	}
 	if len(kept) == 0 {
 		return nil, fmt.Errorf("%w: box names no writable root to label", domain.ErrConfinementUnavailable)

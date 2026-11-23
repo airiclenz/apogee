@@ -179,14 +179,9 @@ func seatbeltProfile(box domain.ConfinementBox) string {
 	// overrides an earlier one.
 	b.WriteString("(allow file-write* (literal \"/dev/null\"))\n")
 
-	roots := make([]string, 0, 1+len(box.WritablePaths))
-	if box.WorkspaceRoot != "" {
-		roots = append(roots, canonicalWritableRoot(box.WorkspaceRoot))
-	}
-	for _, p := range box.WritablePaths {
-		if p != "" {
-			roots = append(roots, canonicalWritableRoot(p))
-		}
+	roots := boxRoots(box)
+	for i, root := range roots {
+		roots[i] = canonicalWritableRoot(root)
 	}
 	if len(roots) > 0 {
 		b.WriteString("(allow file-write*\n")

@@ -3,10 +3,14 @@
 package platform
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"syscall"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // These tests are hermetic and host-agnostic: the argv wrap and the process-group flag are
@@ -168,4 +172,88 @@ func TestSetConfinedPgid(t *testing.T) {
 			t.Error("a second setConfinedPgid must be a no-op on an already-grouped cmd")
 		}
 	})
+}
+
+// TestBoxRootsSkipsEmptyKeepsOrder pins the one reading of "workspace root plus writable
+// paths" every backend starts from: the workspace first, the writable paths in their own
+// order, and no empty entry — an empty root names nothing a backend could mount or label.
+func TestBoxRootsSkipsEmptyKeepsOrder(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		box  domain.ConfinementBox
+		want []string
+	}{
+		{
+			name: "workspace then writable paths in order",
+			box:  domain.ConfinementBox{WorkspaceRoot: "/work", WritablePaths: []string{"/b", "/a"}},
+			want: []string{"/work", "/b", "/a"},
+		},
+		{
+			name: "empty writable entries are dropped",
+			box:  domain.ConfinementBox{WorkspaceRoot: "/work", WritablePaths: []string{"", "/b", "", "/a"}},
+			want: []string{"/work", "/b", "/a"},
+		},
+		{
+			name: "empty workspace is dropped",
+			box:  domain.ConfinementBox{WritablePaths: []string{"/b", "/a"}},
+			want: []string{"/b", "/a"},
+		},
+		{
+			name: "duplicates are kept",
+			box:  domain.ConfinementBox{WorkspaceRoot: "/work", WritablePaths: []string{"/work", "/work"}},
+			want: []string{"/work", "/work", "/work"},
+		},
+		{
+			name: "nothing named yields no roots",
+			box:  domain.ConfinementBox{WritablePaths: []string{""}},
+			want: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			writable := append([]string(nil), tt.box.WritablePaths...)
+
+			got := boxRoots(tt.box)
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("boxRoots = %q, want %q", got, tt.want)
+			}
+			// The result is the caller's own slice: a backend that rewrites it in place (the
+			// seatbelt profile canonicalizes each entry) must not reach the box.
+			for i := range got {
+				got[i] = "rewritten"
+			}
+			if !reflect.DeepEqual(tt.box.WritablePaths, writable) {
+				t.Errorf("box.WritablePaths = %q after the result was rewritten, want %q", tt.box.WritablePaths, writable)
+			}
+		})
+	}
+}
+
+// TestCanonicalWritableRootMissingIsLexical pins the fallback for a root that is not there
+// yet: its cleaned spelling, with no ancestor resolved — even when an ancestor is a symlink.
+func TestCanonicalWritableRootMissingIsLexical(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	target := filepath.Join(base, "target")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	missing := filepath.Join(link, "not-created")
+
+	got := canonicalWritableRoot(missing + string(filepath.Separator) + "." + string(filepath.Separator))
+
+	if got != missing {
+		t.Errorf("canonicalWritableRoot(missing) = %q, want the cleaned spelling %q", got, missing)
+	}
 }

@@ -423,11 +423,7 @@ func applyLandlock(box domain.ConfinementBox) error {
 	// Allow writes beneath the workspace root and each extra writable path. The box's
 	// in-child semantics: handle the write-class accesses globally, then re-grant them
 	// only under these roots — anything else is denied.
-	roots := append([]string{box.WorkspaceRoot}, box.WritablePaths...)
-	for _, root := range roots {
-		if root == "" {
-			continue
-		}
+	for _, root := range boxRoots(box) {
 		if err := allowWriteBeneath(fd, root, abi); err != nil {
 			return err
 		}
@@ -558,8 +554,7 @@ type landlockRule struct {
 // sockets re-opened. bwrap masks the same plan (namespaceArgv), so the two Linux rungs close one
 // set (ADR 0112).
 func unixSocketClosure(host unixSocketHost, box domain.ConfinementBox) domain.UnixSocketClosure {
-	roots := append([]string{box.WorkspaceRoot}, box.WritablePaths...)
-	plan := planUnixSockets(host, roots)
+	plan := planUnixSockets(host, boxRoots(box))
 	closed := make([]string, 0, len(plan.RuntimeDirs)+len(plan.ContainerSockets))
 	closed = append(closed, plan.RuntimeDirs...)
 	closed = append(closed, plan.ContainerSockets...)

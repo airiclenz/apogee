@@ -383,9 +383,7 @@ func (c *namespaceConfiner) Confine(_ context.Context, box domain.ConfinementBox
 //
 // Never `--new-session` (see the file header for why).
 func namespaceArgv(box domain.ConfinementBox, exists func(string) bool, sockets unixSocketHost) []string {
-	roots := make([]string, 0, 1+len(box.WritablePaths))
-	roots = append(roots, box.WorkspaceRoot)
-	roots = append(roots, box.WritablePaths...)
+	roots := boxRoots(box)
 
 	argv := make([]string, 0, 10+3*len(roots))
 	argv = append(argv, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--die-with-parent", "--unshare-pid")
@@ -398,9 +396,6 @@ func namespaceArgv(box domain.ConfinementBox, exists func(string) bool, sockets 
 	}
 
 	for _, root := range roots {
-		if root == "" {
-			continue
-		}
 		canonical := canonicalWritableRoot(root)
 		if !exists(canonical) {
 			continue
