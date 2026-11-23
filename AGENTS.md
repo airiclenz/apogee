@@ -5,6 +5,7 @@
 ## Where knowledge lives
 
 - **The glossary — the `glossary` Note tree in capcom Knowledge** (`.capcom/knowledge/glossary/`, plain markdown, edited in place) — the domain language and concept map (Floor guards, Reactions, Moments, Bypass, Drivers, Steps, Turns, …). Every term used in code and docs is one Note, found by its name: `capcom know show "<Term>"` reads its definition, and `capcom know tree glossary --depth 1` lists the sections; a code comment's `CONTEXT: <Term>` citation resolves the same way. Read the terms that bear on a change before design work — one Note at a time, never the whole tree.
+- **The baseline — the `baseline` Note tree in capcom Knowledge** (`.capcom/knowledge/baseline/`) — rules that hold in any repository: secrets, destructive and outward actions, guards, untrusted text, dependencies, scope, writing Notes, and what "done" means. Each Note's title states its rule and when it applies. Before your first change in a session, read the titles (`capcom know tree baseline`; the Claude Code SessionStart hook in `.claude/settings.json` prints them), and read a Note in full (`capcom know show <id>`) before you do what its title names. Brief a sub-agent that will commit, delete, push or add a dependency with the Notes that bear on it. Where a baseline Note and this guide or another Note disagree, the house rule wins; `baseline-scope` already defers to ADR 0101 on regressions. The Notes were seeded by `capcom know seed` and are now the repo's own: edit or retire one only when the owner asks.
 - `docs/manual/` — the user-facing reference manual (commands, sessions, configuration, reactions, workflows, probe, headless, daemon, updating, building). `README.md` is the plain-language front door; detail lives here, not there.
 - **The decision records — the `decisions` Note tree in capcom Knowledge** — architectural decision records, one `adr-NNNN` Note per record with each of its sections as a child Note. Settled questions live here; check for one before re-opening a question: `capcom know show "ADR NNNN"` reads a record, and a new record takes the next number (`capcom know add --parent decisions`). A record that has drifted from the code is corrected by a dated amendment, not by rewriting its Decision text: a child Note `adr-NNNN-amend-MMDD` (`capcom know add --id adr-NNNN-amend-MMDD --parent adr-NNNN`; a second one that day takes a letter, `-amend-1021b`) or, for a one-paragraph fix, a dated `> **Amended YYYY-MM-DD (<source>).**` blockquote under the paragraph it corrects. Either way, name it on the record's Status line, and add a child Note to the record's reading-order list: `capcom know show "ADR NNNN"` prints only the record unless `--with-children`, so an amendment the record does not name is never read.
 - `docs/design/` — design contracts (confinement execution contract, MCP client, the `reaction-core-greenfield.md` collapse) plus the `tool-surface-findings.md` and `hook-talkback-findings.md` records and the `workflow-bench-experiment.md` design (its runs live in `apogee-sim`); the mechanism catalogue under `docs/design/archived/` carries the retirement wave's per-row verdicts (ADR 0071) — historical, since the Reaction core superseded that surface (ADR 0076).
@@ -32,7 +33,7 @@
 - Tests that need a live LLM are gated by `APOGEE_LIVE_ENDPOINT`; without it they skip. `make live-eval` drives the live path.
 - Early-development stance: prefer the best long-term architecture over lowest churn; the owner reshapes now to get it right.
 - **Public docs speak the shipped vocabulary.** `reactions:` (never `hooks:`, except in the migration notes), `wire: anthropic`, the four modes `plan | ask-before | allow-edits | auto`. The counts the public docs state (tools, Floor guards, Moments) are pinned by drift tests against the live code, so a change to either side fails until the other follows.
-- **What capcom owns — and what it does not.** capcom is the issue and task register and, in its Knowledge tree, the home of the glossary and the decision records (see *Where knowledge lives*); the managed capcom block at the foot of this file is capcom's own guidance. It does **not** displace the house documents: `docs/plans/` keeps the numbered What/Tests/Acceptance/commit format (a plan is a design artefact, not a TODO list), `docs/handoffs/` keeps work-in-flight handoffs, and `CHANGELOG.md` keeps the closed trail. Where the block's blanket wording — "track work there and nowhere else" — appears to contradict those, this section wins.
+- **What capcom owns — and what it does not.** capcom is the issue and task register and, in its Knowledge tree, the home of the glossary, the decision records and the baseline (see *Where knowledge lives*); the managed capcom block at the foot of this file is capcom's own guidance. It does **not** displace the house documents: `docs/plans/` keeps the numbered What/Tests/Acceptance/commit format (a plan is a design artefact, not a TODO list), `docs/handoffs/` keeps work-in-flight handoffs, and `CHANGELOG.md` keeps the closed trail. Where the block's blanket wording — "track work there and nowhere else" — appears to contradict those, this section wins.
 - **Every issue id is a chosen slug: `capcom create --id <slug>`.** capcom refuses a create without `--id`, so every id is one you pick: two to four kebab-case words naming the defect or the work, never the fix (`net-deny-egress-gap`) — `capcom show <slug>` first if it might collide. A bad id is renamed with `capcom mv <id> <new-id>`, which keeps the old id as an alias. Old beads ids (`apogee-qi3`, `apogee-t57.10`) are aliases too: an old id in a plan, a changelog or a commit is correct as written, not a stale reference to fix.
 - **An issue a plan has designed names that plan, never a status** ([ADR 0102](.capcom/knowledge/decisions/adr-0102.md)): `capcom update <id> --plan '<plan basename>'`. `capcom ready --planned` lists designed issues (hand to `/implement-plan`), `capcom ready --unplanned` lists issues still needing design. Read ownership from a plan's item sections, never from a grep for ids.
 - **Be context-greedy, and spend that context through sub-agents.** Never act on a guess where the answer is readable: before you design, edit or judge, read the glossary terms, the decision record, the plan, the handoff and the neighbouring code that bear on the change, and read enough of each file to see how the surrounding code already does it. Thin context is the failure mode here, not slow work. But the main agent's own window is the scarce resource, so buy that breadth with **sub-agents**: any task whose reading would fill much of your own window — a repo-wide sweep, "find every call site", "does this pattern exist anywhere", a multi-file audit, a survey of docs before a design — is dispatched to a sub-agent that reads widely and returns only its conclusion. Do the reading inline only when you already know the file and want one fact from it. Brief a sub-agent with the same discipline you would want yourself: name the paths and documents it must read, state the house facts it cannot derive (see *Stack facts* above), and ask for the finding, not a transcript.
@@ -55,7 +56,7 @@ Without a `capcom` binary, install it from https://github.com/airiclenz/capcom#i
 
 - `capcom next`: the most urgent ready issue, in full
 - `capcom ready`: the issues ready to work on, most urgent first
-- `capcom show <id>`: one issue in full, with what blocks it
+- `capcom show <id>`: one issue in full, with what blocks it; `capcom show <id> --section acceptance` reads one section
 - `capcom context <id>`: the issue with its deps, plan and the Notes that apply; run it before you start
 - `capcom start <id>`: claim it and take the Tree lock before you start
 - `capcom log <id> <text>`: note progress as work lands
@@ -65,8 +66,11 @@ Without a `capcom` binary, install it from https://github.com/airiclenz/capcom#i
 - `capcom create --id <slug> --title <title> [--dep <id>]`: file a new issue
 - `capcom apply <file>`: file a linked set of issues in one call, all or none
 - `capcom dep add <id> <dep-id>`: make an issue wait for another; `capcom dep list <id>` shows both sides
+- `capcom list <id>...`: the status of several issues in one call; `not found` means the id is free
 - `capcom list --tree --depth 2`: the outline of the issues
-- `capcom know tree`: the outline of the Knowledge tree; `capcom know show <id>` reads a Note
+- `capcom search <word>... --excerpt`: find issues by words in the id, title or body
+- `capcom know tree`: the outline of the Knowledge tree; `capcom know show <id>...` reads one Note or several in one call
+- `capcom know search <word>... --excerpt`: find Notes by words in the id, title or body
 
 Each command's flags are in `capcom <cmd> --help`.
 
@@ -75,7 +79,8 @@ readable on its own; a plan says how and in what order.
 
 Where things are: an issue is `.capcom/issues/<id>.md`, and its children sit in the directory
 `.capcom/issues/<id>/` beside it; Notes follow the same shape under `.capcom/knowledge/`.
-Prefer capcom commands; after a hand edit run `capcom check`.
+Prefer capcom commands: a capcom write is already validated, so `capcom check` is for after a
+hand edit or a merge.
 
 A standing issue (`standing: true` in its file) only groups its children: never claim or close it.
 
@@ -84,15 +89,16 @@ worktree with `capcom lock acquire --purpose <text>`. capcom keeps the Lock toke
 running the same acquire again resumes the lock after a restart or compaction and prints the token
 again (or pass `--token <token>`).
 `capcom start <id>` takes the lock for an issue, and running the same start again resumes it too.
-`capcom lock touch --token <token>` renews it during long work,
-`capcom lock release --token <token>` frees it when done. When `capcom lock check --token <token>` exits 3, or
-`capcom lock check` does while you hold no token, another session holds this worktree: ask the user
-before editing it. The lock is signalled, not enforced: a capcom write is never refused, but it
-warns, naming the holder, while the lock is held for a purpose other than the issue it writes; if
-the lock is yours, carry on.
+Every capcom write you make under the lock renews it, so run `capcom lock touch` only when work
+outlasts the lock's TTL (two hours by default) without one, and `capcom lock release` when done; in
+the session that holds the lock neither needs a token. When `capcom lock check` exits 3, another
+session holds this worktree: ask the user before editing it. The lock is signalled, not enforced: a
+capcom write is never refused, and your own writes under your lock are silent. A write that warns,
+naming the holder, means another session holds this worktree: ask the user before writing more.
 
 Knowledge tree, top level:
 
+- `baseline`: Before your first change in a session: rules for every repository on secrets, destructive and outward actions, guards, untrusted text, dependencies and done
 - `decisions`: apogee's decision records: one Note per record, with each of its sections as a child
 - `glossary`: apogee's domain glossary: the terms to use in code, docs and messages, one Note per term
 <!-- END CAPCOM -->
