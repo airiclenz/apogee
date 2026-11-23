@@ -9,12 +9,15 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/realpath"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -473,5 +476,41 @@ func assertBackgroundPair(t *testing.T, a *Agent, when string, want bool) {
 	}
 	if got := fanOut.OffersBackground(); got != want {
 		t.Errorf("%s: fan_out publishes background = %v, want %v", when, got, want)
+	}
+}
+
+// TestProjectConfigControlPlanePathsAreTheLeafsSpellings pins projectRootPaths as a pure mapping:
+// each spelling realpath.Spellings finds for a Project root and its workspace — here a workspace
+// reached through a symlinked parent, so the linked and resolved spellings are both set — arrives
+// in the security.ProjectRootPaths field of the same name, and none is added or lost.
+func TestProjectConfigControlPlanePathsAreTheLeafsSpellings(t *testing.T) {
+	t.Parallel()
+	base := security.EvalRealPath(t.TempDir())
+	root := filepath.Join(base, "real", "proj")
+	if err := os.MkdirAll(filepath.Join(root, "ws"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(filepath.Join(base, "real"), link); err != nil {
+		t.Skipf("no symbolic links here: %v", err)
+	}
+	workspace := filepath.Join(link, "proj", "ws")
+	spellings := realpath.Spellings(root, workspace)
+	if spellings.LinkedRoot == "" || spellings.RealWorkspace == "" {
+		t.Fatalf("realpath.Spellings(%q, %q) = %+v; the fixture needs a linked root and a resolved workspace",
+			root, workspace, spellings)
+	}
+
+	got := projectRootPaths(root, workspace)
+
+	want := security.ProjectRootPaths{
+		Root:          spellings.Root,
+		LinkedRoot:    spellings.LinkedRoot,
+		FinalRoot:     spellings.FinalRoot,
+		Workspace:     spellings.Workspace,
+		RealWorkspace: spellings.RealWorkspace,
+	}
+	if got != want {
+		t.Errorf("projectRootPaths(%q, %q) = %+v; want the leaf's spellings %+v", root, workspace, got, want)
 	}
 }

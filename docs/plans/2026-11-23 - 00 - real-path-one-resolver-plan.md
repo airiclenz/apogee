@@ -133,7 +133,11 @@ internal/config/layer.go — readProjectLayer's projectRealPath use; internal/ag
 **Acceptance:** `go build ./... && GOOS=windows go vet ./internal/projectroot/ ./internal/adoption/ ./internal/config/ ./internal/platform/ ./internal/agent/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestNoProductionFileNamesPlatformRealPath' ./internal/realpath/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'DocMap' ./internal/platform/ && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/projectroot/ && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/adoption/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'ProjectWrite|ReadProjectLayer|ProjectLayer' ./internal/config/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestProjectConfigControlPlane' ./internal/agent/`
 **Commit:** `refactor(realpath): project root, adoption and config call the leaf directly`
 
-## 5. The Project root's spellings come from the leaf
+## 5. The Project root's spellings come from the leaf — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): consequential edit — internal/realpath/doc.go: made necessary by the new spellings.go (the package doc's Files map and entry-point prose now name Spellings).
+NOTES (2026-11-23): the exported struct the plan left unnamed is `realpath.RootSpellings`, with the same five field names as `security.ProjectRootPaths`; `agent.projectRootPaths` maps it field by field.
+NOTES (2026-11-23): `AGENTS.md` carries an uncommitted edit (a new "Miscellaneous" section) that this item did not make; it is left untouched and is not in FILES.
 
 Depends on item 4.
 

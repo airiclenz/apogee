@@ -294,49 +294,18 @@ func projectConfigRule(cfg domain.Config) (security.Rule, bool) {
 	return security.ProjectConfigRule(projectRootPaths(cfg.ProjectRoot, cfg.WorkspaceDir))
 }
 
-// projectRootPaths spells the symlink-resolved Project root root and the workspace as the session
-// names it, for the guard that reads no disk: the workspace resolved through a link or junction
-// (realpath.Resolve) when that differs, and the root spelled through the workspace's own
-// unresolved prefix — the folder the workspace climbs to as many levels as its resolved form climbs
-// to root — kept only when the file system resolves it to root. A workspace that is itself a link
-// climbs to some other folder (its link's parent), which keeps no spelling, so a home above it is
-// never mistaken for the Project root. A workspace that cannot be resolved adds no spelling.
-//
-// The root is also spelled the way path safety resolves every path (realpath.ResolveLenient, which
-// security.EvalRealPath returns) when that differs: on Windows a root on a subst or mapped drive
-// keeps its drive letter in root while a resolved tool path names the underlying location, and
-// the refusal must hold for that spelling too (ADR 0096 §5).
+// projectRootPaths is the Project root root and the workspace in every spelling the file system
+// vouches for (realpath.Spellings, which reads the disk), mapped field for field into the value
+// the guard — which reads no disk — builds its refusal from (ADR 0096 §5).
 func projectRootPaths(root, workspace string) security.ProjectRootPaths {
-	paths := security.ProjectRootPaths{Root: root, Workspace: workspace}
-	if root == "" {
-		return paths
+	spellings := realpath.Spellings(root, workspace)
+	return security.ProjectRootPaths{
+		Root:          spellings.Root,
+		LinkedRoot:    spellings.LinkedRoot,
+		FinalRoot:     spellings.FinalRoot,
+		Workspace:     spellings.Workspace,
+		RealWorkspace: spellings.RealWorkspace,
 	}
-	if final := realpath.ResolveLenient(root); final != root {
-		paths.FinalRoot = final
-	}
-	if workspace == "" {
-		return paths
-	}
-	realWorkspace, err := realpath.Resolve(workspace)
-	if err != nil || realWorkspace == workspace {
-		return paths
-	}
-	paths.RealWorkspace = realWorkspace
-	linked := workspace
-	for realWorkspace != root {
-		parent := filepath.Dir(realWorkspace)
-		if parent == realWorkspace {
-			return paths
-		}
-		realWorkspace, linked = parent, filepath.Dir(linked)
-	}
-	if linked == root {
-		return paths
-	}
-	if resolved, err := realpath.Resolve(linked); err == nil && resolved == root {
-		paths.LinkedRoot = linked
-	}
-	return paths
 }
 
 // projectConfigDirName and configFileName spell where a config file lives under a Project root
