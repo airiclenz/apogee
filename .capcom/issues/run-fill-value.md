@@ -3,6 +3,7 @@ title: "One context-fill value for every run (architecture review 2026-11-02 #9)
 status: open
 type: task
 priority: 3
+plan: 2026-11-23 - 06 - architecture-review-cleanups-plan.md
 created: 2026-11-02T20:02:19Z
 ---
 

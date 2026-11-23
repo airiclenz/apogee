@@ -3,6 +3,7 @@ title: "A publish step is one row (architecture review 2026-10-14 #11)"
 status: open
 type: task
 priority: 3
+plan: 2026-11-23 - 06 - architecture-review-cleanups-plan.md
 created: 2026-11-05T19:56:22Z
 ---
 

@@ -3,6 +3,7 @@ title: "Seating a session is one operation (architecture review 2026-10-14 #14)"
 status: open
 type: task
 priority: 3
+plan: 2026-11-23 - 06 - architecture-review-cleanups-plan.md
 created: 2026-11-05T19:56:22Z
 ---
 

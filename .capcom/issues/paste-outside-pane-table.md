@@ -3,6 +3,7 @@ title: "Paste walks the pane table, one draft edit door (architecture review 202
 status: open
 type: task
 priority: 3
+plan: 2026-11-23 - 06 - architecture-review-cleanups-plan.md
 created: 2026-11-05T19:56:22Z
 ---
 
