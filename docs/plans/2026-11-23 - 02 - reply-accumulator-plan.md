@@ -48,7 +48,7 @@ Rows, both wires unless noted: terminator ends cleanly; bare EOF with a pending 
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestTerminalPaths' ./internal/provider/`
 **Commit:** `test(provider): pin every stream ending on both wires`
 
-## 2. The reply accumulator
+## 2. The reply accumulator — ✅ DONE (2026-11-23)
 
 **What:**
 **Goal:** `internal/provider/reply_accumulator.go` defines the unexported `replyAccumulator`, unit-tested on its own; no codec uses it yet and no other file's behaviour changes.

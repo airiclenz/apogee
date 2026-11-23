@@ -30,6 +30,10 @@
 //     interface every wire implements.
 //   - stream.go — Stream and the Delta it yields: the streaming round-trip, the idle-timeout
 //     body that bounds a silent stream, and the SSE scanner both codecs read through.
+//   - reply_accumulator.go — replyAccumulator, the one place a streamed reply ends: the scan
+//     loop, the text and tool-call caps, the malformed count, the pending finish reason, usage
+//     and model, and every terminal path. A codec keeps its dialect — the event vocabulary,
+//     the terminator, the stop-reason mapping, the usage and served-model rules, its epilogue.
 //   - attempt.go — the Attempt measurement of one HTTP attempt (ADR 0085), the server identity
 //     a Client is stamped with, endpoint redaction and the per-call request id.
 //   - fault.go — classify: the one place an upstream failure is sorted into its fault class
