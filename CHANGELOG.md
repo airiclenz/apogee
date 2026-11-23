@@ -12,6 +12,11 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **Tests:** a new test, `TestPanelWriterTargetArgsCoverEveryWriter`, pins the side panel's resume map of writer tools (`panelWriterTargetArgs`) to the tools' own writers. It finds every built-in tool that writes to the workspace, default-off tools included, through the engine's own write-target check, and fails when a writer is missing from the map, when the map names a tool that writes nothing, or when the map names the wrong argument for a writer's target. A resumed session rebuilds its changed-files rows from that map, so a writer it missed would drop out of the panel after a resume (`panel-resume-tui-fold`).
+- **A tool's grouping class is one registry column.** Each tool's row in the TUI's tool registry now states whether its calls fold into the mixed `✦ Tools` umbrella, group with their own kind (`sub_agent`, `load_skill`) or stand alone (`fan_out`, `task_list`, a background sub-agent call), and the live presenter and the session decoder both read that one column. Nothing changes on screen; a new `task_list` record in a saved session now carries `"solo":true`, and an older one is re-derived the same way on resume.
+- **Changed (internal):** a tool's own-kind grouping (the `✦ Sub-agents (N)` and `✦ Skill (N)` lists) now follows its registry row's grouping class instead of a hard-coded tool name; nothing changes on screen.
+- **Changed (internal):** navigation mode's keys walk one rule over two region adapters, the transcript and the side panel, and the run view's esc and `^x` ask that same resolved navigation instead of a per-region verb pair; nothing changes on screen (`nav-verbs-per-region`).
+
 ## [0.35.9] — 2026-11-23
 
 - **Fixed: a tool group no longer folds after its first call.** With `ui.tools-auto-collapse` on, a group folded as soon as the model's next Turn started, so a burst of calls made over several Turns collapsed after the first one and the later calls landed in a folded group. The group now stays open while the model keeps adding calls, and folds when something that will not join it follows: the reply or narration text (as soon as it starts to show), a sub-agent group, a note, a user message, or the end of the run. A group that grows past `ui.tools-fold-over` still folds by the size rule, and reasoning never folds a group.
