@@ -595,8 +595,8 @@ func TestGitStatusHostIncompleteProbeIsAnError(t *testing.T) {
 	if err == nil {
 		t.Fatal("Status under an incomplete probe = nil error; want an error that keeps the last counts")
 	}
-	if !gitexec.IsIncompleteRefusal(err.Error()) {
-		t.Fatalf("Status error = %q, want the incomplete-probe refusal", err)
+	if !errors.Is(err, gitexec.ErrIncomplete) {
+		t.Fatalf("Status error = %q, want a failure matching gitexec.ErrIncomplete", err)
 	}
 }
 
@@ -634,7 +634,8 @@ func TestGitStatusHostCancelledProbeIsAnError(t *testing.T) {
 }
 
 // TestGitStatusHostUsesNoRefusalPredicate pins that the host decides "refused" and "ask again"
-// from the kind of gitexec's repository state: its source names neither text predicate.
+// from the kind of gitexec's repository state: its source names no text predicate over a refusal
+// sentence — neither gitexec's exported one nor the incomplete-probe one gitexec keeps to itself.
 func TestGitStatusHostUsesNoRefusalPredicate(t *testing.T) {
 	t.Parallel()
 
@@ -642,7 +643,7 @@ func TestGitStatusHostUsesNoRefusalPredicate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the host source: %v", err)
 	}
-	for _, predicate := range []string{"IsCommandConfigRefusal", "IsIncompleteRefusal"} {
+	for _, predicate := range []string{"IsCommandConfigRefusal", "IncompleteRefusal("} {
 		if strings.Contains(string(source), predicate) {
 			t.Errorf("gitstatus_host.go names %s; the host reads gitexec.RepoState instead", predicate)
 		}

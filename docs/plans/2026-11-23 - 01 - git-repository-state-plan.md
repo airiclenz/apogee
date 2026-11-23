@@ -141,7 +141,11 @@ Depends on item 2 (same files in gitexec).
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/gitconfigkeys/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'Git' ./internal/security/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'CommandConfig|MergeDriver|Refus|Neutralis' ./internal/gitexec/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestGit_Refuses|TestGitCommit_Refuses' ./internal/tools/ && ! grep -n 'core\\\.hookspath\|merge\\\.\.\*\\\.driver' internal/gitexec/gitexec.go internal/security/shellwrites.go && capcom check`
 **Commit:** `refactor(gitconfigkeys): one catalogue of program-naming git config keys`
 
-## 6. Retire the predicates nothing reads
+## 6. Retire the predicates nothing reads — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): chose unexport over delete — `queryDiagnosed` still sorts a refusal sentence into `ErrIncomplete` or `RefusedError` with it, so `IsIncompleteRefusal` became `isIncompleteRefusal` and its table moved to the new `package gitexec` file `internal/gitexec/refusal_internal_test.go`.
+NOTES (2026-11-23): `TestGitStatusHostUsesNoRefusalPredicate` (`cmd/apogee/gitstatus_host_test.go`) listed the string `"IsIncompleteRefusal"`, which the item's Acceptance grep forbids outside `internal/gitexec`; the list entry is now `"IncompleteRefusal("`, which still fails the test if the host source calls any incomplete-refusal predicate or sentence builder (the host source names none today).
+NOTES (2026-11-23): the prose grep found no "by its text" / "by prefix" line about git refusals left outside gitexec (items 3 and 4 already removed them from `cmd/apogee/gitstatus_host.go`; `cmd/apogee/gitactions_host.go`'s `Rebase` doc needed no change); the corrected prose is `IsCommandConfigRefusal`'s doc, `incompleteRefusalLead`'s doc and two passages of `internal/gitexec/doc.go`.
 
 Depends on items 3, 4 and 5.
 

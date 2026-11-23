@@ -54,14 +54,15 @@
 // The outcomes of each path. The capture path (Capture, CaptureEnv, CaptureEnvTo) takes a git its
 // caller resolved and returns an error only when the probe or the run could not be launched;
 // everything git or the refusal said is a captured result — a refused repository and an
-// unfinished probe are failed results whose output is the refusal sentence, told apart by
-// [IsCommandConfigRefusal] and [IsIncompleteRefusal]. The data path (Run, RunTo, RunDiagnosed,
-// Query) returns stdout or an error, and its errors are: a failed resolution
+// unfinished probe are failed results whose output is the refusal sentence;
+// [IsCommandConfigRefusal] recognises the standing one for cmd/apogee's Rebase, its one caller.
+// The data path (Run, RunTo, RunDiagnosed, Query) returns stdout or an error, and its errors are:
+// a failed resolution
 // ([UnavailableMessage] for an absent git, security.ErrExecFromWritablePath for a fenced one —
 // Query resolves nothing); a [RefusedError] carrying the sentence for a refused repository or a
 // refused merge driver; an error matching [ErrIncomplete]; and a plain error for a non-zero exit
 // or a launch failure.
-// [IsIncompleteRefusal] tells a probe that could not finish from a repository that is refused, and
+// A probe that could not finish is never a [RefusedError]:
 // a data entry point's error matches [ErrIncomplete] when git gave no complete answer (a timeout,
 // a wedged drain, a stdout that overran the output cap, that unfinished probe), so a caller never
 // caches a "no" it was not given: it asks again after a timeout, a wedge or an unfinished probe,

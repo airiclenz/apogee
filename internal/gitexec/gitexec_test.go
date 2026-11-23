@@ -1259,25 +1259,6 @@ func TestCaptureEnv_JudgesTheRepositoryTheEnvReaches(t *testing.T) {
 	}
 }
 
-// TestIsIncompleteRefusal_TellsAnUnfinishedProbeFromARefusedRepository pins the predicate a caller
-// keeps its last answer by: true for the incomplete-probe sentence whatever its reason, false for
-// the command-config refusal and for anything else git might print.
-func TestIsIncompleteRefusal_TellsAnUnfinishedProbeFromARefusedRepository(t *testing.T) {
-	t.Parallel()
-	cases := map[string]bool{
-		gitexec.CommandConfigIncompleteRefusal("git config --local timed out after 15s"): true,
-		gitexec.CommandConfigIncompleteRefusal(""):                                       true,
-		gitexec.CommandConfigRefusal([]string{"core.sshcommand"}):                        false,
-		"fatal: not a git repository (or any of the parent directories): .git":           false,
-		"": false,
-	}
-	for text, want := range cases {
-		if got := gitexec.IsIncompleteRefusal(text); got != want {
-			t.Errorf("IsIncompleteRefusal(%q) = %v, want %v", text, got, want)
-		}
-	}
-}
-
 // ----------------------------------------------------------------------------
 // Repo-local merge drivers: neutralised on every call, refused only for a merge
 // ----------------------------------------------------------------------------

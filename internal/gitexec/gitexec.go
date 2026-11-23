@@ -462,7 +462,7 @@ func (h Host) queryDiagnosed(ctx context.Context, gitPath, dir string, env []str
 		return "", "", err
 	}
 	if refusal != "" {
-		if IsIncompleteRefusal(refusal) {
+		if isIncompleteRefusal(refusal) {
 			return "", "", incompleteError{text: refusal}
 		}
 		return "", "", RefusedError{Sentence: refusal}
@@ -1195,8 +1195,10 @@ func namedKeys(names []string) string {
 // IsCommandConfigRefusal reports whether text is a refusal that stands while the repository's own
 // config does — a [CommandConfigRefusal] or a [MergeDriverRefusal] — rather than a
 // [CommandConfigIncompleteRefusal], which the next call asks again, or anything git itself
-// printed. A caller that must tell a refused repository from a failed git call tells them apart
-// here, never by matching the sentences itself.
+// printed. Its one production caller is cmd/apogee's Rebase, which reads a captured run's output
+// for a merge-driver refusal: that refusal is per argv, not a state of the repository. A caller
+// asking what is at a root reads a [RepoState] from [Host.State] or [Host.StateAt] instead, and a
+// data-path caller matches [RefusedError] with errors.As.
 func IsCommandConfigRefusal(text string) bool {
 	if strings.HasPrefix(text, commandConfigRefusalLead) {
 		return true
@@ -1221,7 +1223,7 @@ func CommandConfigIncompleteRefusal(reason string) string {
 }
 
 // incompleteRefusalLead opens every [CommandConfigIncompleteRefusal] sentence, up to the reason.
-// It is what [IsIncompleteRefusal] matches, so the sentence and its predicate cannot drift apart.
+// It is what isIncompleteRefusal matches, so the sentence and its predicate cannot drift apart.
 const incompleteRefusalLead = "git refused: the check of this repository's own config for programs git would execute did not complete ("
 
 // ErrIncomplete is matched (errors.Is) by the error of a Run, RunTo, RunDiagnosed or Query whose
@@ -1266,11 +1268,11 @@ func (e incompleteError) Unwrap() error {
 	return ErrIncomplete
 }
 
-// IsIncompleteRefusal reports whether text is a [CommandConfigIncompleteRefusal] — a probe that
+// isIncompleteRefusal reports whether text is a [CommandConfigIncompleteRefusal] — a probe that
 // could not finish, which the next call asks again — rather than a [CommandConfigRefusal], which
-// stands while the repository's config does. A caller that keeps its last answer through a slow
-// probe but drops it for a refused repository tells the two apart here, never by matching the
-// sentences itself.
-func IsIncompleteRefusal(text string) bool {
+// stands while the repository's config does. It sorts the data path's refusals into an error
+// matching [ErrIncomplete] and a [RefusedError]; a caller outside the package reads those, or a
+// [RepoState]'s kind, never the sentence.
+func isIncompleteRefusal(text string) bool {
 	return strings.HasPrefix(text, incompleteRefusalLead)
 }
