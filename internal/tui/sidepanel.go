@@ -1127,9 +1127,10 @@ type panelTarget struct {
 // of the window's right edge ([Model.panelPaintWidth] — right of the transcript slot while docked,
 // over the transcript's right edge while overlaid), on a row above the session-name rule — the row
 // bound of the frame m composes ([Model.frameSpans]). The column is checked first, so a cell off it
-// composes no frame.
+// composes no frame. It reads the geometry alone and never paints a section: the wheel asks it
+// rather than the hit-test ([Model.panelHitAt]), so a notch over the column paints nothing.
 func (m Model) panelCell(x, y int) bool {
-	geometry := m.panelGeometry()
+	geometry := m.framedPanelGeometry()
 	return geometry.onColumn(x) && geometry.cell(x, y, m.frameSpans().slotBottom)
 }
 
@@ -1145,22 +1146,13 @@ func (m Model) panelPinX() int {
 // the click chain, which carries that frame's spans), and whether (x, y) is a column cell at all. A
 // cell is claimed whether or not it targets anything, so no click on the column falls through to
 // the panes or the transcript under it; the hover shape asks the same question (pointershape.go),
-// so the pointer promises a click exactly where one acts. A row resolves through the column's stops
-// ([Model.panelStops]): a body row to its stop's target, and a header row — two stops on one row —
-// to the stop x falls in: its pin stop's toggle on the lead pin glyph's cell ([Model.panelPinX]),
-// its title stop's fold toggle on every other cell. A row no stop spans resolves to nothing.
+// so the pointer promises a click exactly where one acts. It is the panel hit-test's target and
+// cell ([Model.panelHitAt], [panelFrame.at]): a body row resolves to its stop's target, a header row
+// to its pin stop's toggle on the lead pin glyph's cell and its title stop's fold toggle on every
+// other cell, and a row no stop spans to nothing.
 func (m Model) panelTargetAt(x, y int) (panelTarget, bool) {
-	if !m.panelCell(x, y) {
-		return panelTarget{}, false
-	}
-	isPinCell := x == m.panelPinX()
-	for _, stop := range m.panelStops(m.frameSpans().slotBottom) {
-		if !stop.spans(y) || (stop.id.isHeader && stop.id.isPin != isPinCell) {
-			continue
-		}
-		return stop.target, true
-	}
-	return panelTarget{}, true
+	hit := m.panelHitAt(x, y)
+	return hit.target, hit.isCell
 }
 
 // panelRunHeadAt is where the delegation heading run sits in the transcript, −1 where none does.
@@ -1216,22 +1208,23 @@ func (m Model) panelWriteAt(row sidepanel.FileRow) (int, bool) {
 // resize drag ([panelDrag]) and follows no target, unless it is the second press of a double-click
 // ([Model.panelDoubleClicked]), which resets the width instead and starts nothing; elsewhere a
 // target acts on the press (followPanelTarget), and a cell that targets nothing is claimed and does
-// nothing. pre is the pre-click frame the chain reads geometry off.
+// nothing. pre is the pre-click frame the chain reads geometry off; the cell, the grip and the
+// target are its one hit-test's answer ([Model.panelHitAt]).
 func (m Model) handleSidePanelClick(pre Model, msg tea.MouseClickMsg) (tea.Model, tea.Cmd, bool) {
-	target, isPanel := pre.panelTargetAt(msg.X, msg.Y)
-	if !isPanel {
+	hit := pre.panelHitAt(msg.X, msg.Y)
+	if !hit.isCell {
 		return m, nil, false
 	}
 	m.sel, m.transcriptSel = fieldSel{}, transcriptSel{}
-	if grab, isGrip := pre.panelGripAt(msg.X); isGrip {
+	if hit.isGrip {
 		at := m.now()
 		if m.panelDoubleClicked(at) {
 			m.panelDrag = panelDrag{}
 			return m.resetPanelWidth(), nil, true
 		}
-		return m.startPanelDrag(grab, at), nil, true
+		return m.startPanelDrag(hit.grab, at), nil, true
 	}
-	next, cmd := m.followPanelTarget(target)
+	next, cmd := m.followPanelTarget(hit.target)
 	return next, cmd, true
 }
 
@@ -1738,23 +1731,23 @@ func (m Model) runPanelCommand(args panelArgs) (tea.Model, tea.Cmd) {
 // remembers for ← is the transcript's last stop, where ⌥↑ would have entered. Where the column docks,
 // where `off` or the zero UIPrefs' empty mode never draws it, while a decision owns the keys, or
 // while the column has no stop, it parks no cursor: one standing in a panel nobody can see would
-// swallow the arrows for nothing.
+// swallow the arrows for nothing. The stops are the overlay's frame's ([Model.panelFrameAs]), read
+// before any cursor moves.
 func (m Model) openPanelOverlay() Model {
-	entered := m
-	entered.cursor = blockCursor{active: true, region: regionPanel}
+	if !m.blockCursorOwnsKeys() {
+		return m
+	}
+	frame := m.panelFrameAs(true)
+	if !frame.geometry.isOverlaid || len(frame.stops) == 0 {
+		return m
+	}
+	cursor := blockCursor{active: true, region: regionPanel}
 	if stops := cursorStops(m.lineTargets, m.pads); len(stops) > 0 {
-		entered.cursor.line = stops[len(stops)-1]
+		cursor.line = stops[len(stops)-1]
 	}
-	if !entered.panelOverlaid() {
-		return m
-	}
-	stops := entered.navPanelStops()
-	if len(stops) == 0 {
-		return m
-	}
-	entered.transcriptSel = transcriptSel{}
-	entered.cursor = entered.cursor.standOnPanel(stops[0])
-	return entered
+	m.transcriptSel = transcriptSel{}
+	m.cursor = cursor.standOnPanel(frame.stops[0])
+	return m
 }
 
 // setPanelShow sets `ui.side-panel.show` and writes it back through the gestures' one door

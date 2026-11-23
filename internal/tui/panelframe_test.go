@@ -446,3 +446,118 @@ func TestPanelSectionsPaintOncePerView(t *testing.T) {
 		})
 	}
 }
+
+// TestPanelFrameAtAnswersCellGripPinTarget pins the panel's one hit-test: off the column and below
+// its rows it answers no cell; the separator and the cell right of it are the grip; on a header row
+// the pin glyph's cell is the pin stop's and every other cell the title stop's; a body row is its
+// stop's. The Model's hit-test and the click's target delegate answer the frame's, and a click hands
+// Bubble Tea back no snapshot of the panel's geometry.
+func TestPanelFrameAtAnswersCellGripPinTarget(t *testing.T) {
+	t.Parallel()
+	m := panelModel(t, domain.DefaultSidePanelSections, 30, panelStopEvents(t)...)
+	pre := m.withFrameSpans()
+	rows := pre.frameSpans().slotBottom
+	frame := pre.newPanelFrame(pre.panelGeometry(), rows)
+	if len(frame.stops) == 0 {
+		t.Fatal("setup: the frame lays out no stops")
+	}
+	separator, pin := frame.geometry.slotWidth, frame.geometry.pinX
+	inside := pin + 2 // a title cell on a header row, a body cell on a body row: neither pin nor grip
+
+	if got := frame.at(separator-1, 0); got != (panelHit{}) {
+		t.Errorf("the cell left of the separator hits %+v, want no cell", got)
+	}
+	if got := frame.at(inside, rows); got != (panelHit{}) {
+		t.Errorf("the session-name rule's row hits %+v, want no cell", got)
+	}
+	for grab := range sidePanelGripWidth {
+		got := frame.at(separator+grab, frame.stops[0].y)
+		if !got.isCell || !got.isGrip || got.grab != grab {
+			t.Errorf("column %d (grab %d) hits %+v, want the grip grabbed %d right of the separator",
+				separator+grab, grab, got, grab)
+		}
+	}
+	for _, stop := range frame.stops {
+		x := inside
+		if stop.id.isHeader && stop.id.isPin {
+			x = pin
+		}
+		want := panelHit{isCell: true, isPin: x == pin, target: stop.target}
+		if got := frame.at(x, stop.y); got != want {
+			t.Errorf("stop %+v at (%d, %d) hits %+v, want %+v", stop.id, x, stop.y, got, want)
+		}
+		for _, cellX := range []int{separator, pin, inside} {
+			hit := frame.at(cellX, stop.y)
+			if got := pre.panelHitAt(cellX, stop.y); got != hit {
+				t.Errorf("panelHitAt(%d, %d) = %+v, want the frame's %+v", cellX, stop.y, got, hit)
+			}
+			if target, isCell := pre.panelTargetAt(cellX, stop.y); target != hit.target || isCell != hit.isCell {
+				t.Errorf("panelTargetAt(%d, %d) = (%+v, %v), want the hit's (%+v, %v)",
+					cellX, stop.y, target, isCell, hit.target, hit.isCell)
+			}
+		}
+	}
+
+	if after := step(t, m, leftClick(inside, frame.stops[0].y)); after.panelSnap.isComposed {
+		t.Error("the model returned to Bubble Tea carries the click's panel geometry onward")
+	}
+}
+
+// TestPanelFrameAtOffTheColumnPaintsNoSection pins the hit-test's cost: a hover or a click off the
+// column, and a wheel notch over it, paint no panel section — only a pointer landing on the column
+// builds the frame its target resolves through. It reads the process-wide panelSectionPaints
+// counter, so it does not run in parallel.
+func TestPanelFrameAtOffTheColumnPaintsNoSection(t *testing.T) {
+	m := panelModel(t, domain.DefaultSidePanelSections, 30, panelStopEvents(t)...)
+	pre := m.withFrameSpans()
+	geometry := pre.panelGeometry()
+	off, on := geometry.slotWidth-1, geometry.pinX+2
+	panelSectionPaints.Store(0)
+
+	_ = pre.panelHitAt(off, 0)
+	_ = m.pointerShapeAt(pre, off, 0)
+	_, _ = m.foldMouseWheel(tea.MouseWheelMsg{X: on, Y: 0, Button: tea.MouseWheelDown})
+
+	if got := panelSectionPaints.Load(); got != 0 {
+		t.Errorf("a hover and a click off the column and a notch over it painted the sections %d times, want none", got)
+	}
+	_ = pre.panelHitAt(on, 0)
+	if panelSectionPaints.Load() == 0 {
+		t.Error("a hit on the column painted no section: the counter cannot see the hit-test")
+	}
+}
+
+// TestBarePanelParksNoCursorWhileADecisionIsPending pins the ways into the overlay to a reader who
+// owns the keys: while an approval waits, bare /panel and → on a window under the gate park no
+// cursor in a panel nobody can see, as bare /panel parks none where the column docks.
+func TestBarePanelParksNoCursorWhileADecisionIsPending(t *testing.T) {
+	t.Parallel()
+	bare := func(m Model) Model {
+		next, _ := m.runPanelCommand(panelArgs{action: panelReport})
+		return next.(Model)
+	}
+	m := overlayModel(t, domain.SidePanelShowAuto, 100, domain.SidePanelWidth{}, panelStopEvents(t)...)
+	if opened := bare(m); !opened.cursor.inPanel() || !opened.panelOverlaid() {
+		t.Fatal("setup: bare /panel does not open the overlay while no decision is pending")
+	}
+
+	pending := m
+	pending.state = stateAwaitingApproval
+	if got := bare(pending); got.cursor.active || got.panelOverlaid() {
+		t.Errorf("bare /panel under a pending approval parked the cursor %+v (overlaid %v), want none",
+			got.cursor, got.panelOverlaid())
+	}
+	inTranscript := step(t, m, keyAltUp())
+	if !inTranscript.cursor.inTranscript() {
+		t.Fatal("setup: ⌥↑ does not stand the cursor in the transcript")
+	}
+	inTranscript.state = stateAwaitingApproval
+	if got := inTranscript.enterPanelRegion(); !got.cursor.inTranscript() {
+		t.Errorf("→ under a pending approval moved the cursor to %+v, want it left in the transcript", got.cursor)
+	}
+
+	docked := panelModel(t, domain.DefaultSidePanelSections, 30, panelStopEvents(t)...)
+	if got := bare(docked); got.cursor.active {
+		t.Errorf("bare /panel on a docked column parked the cursor %+v, want none", got.cursor)
+	}
+}

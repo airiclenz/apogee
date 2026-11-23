@@ -195,7 +195,12 @@ NOTES (2026-11-23): consequential edit — internal/tui/doc.go: made necessary b
 - `go test -race -count=1 -run 'TestPanel|TestSidePanel|TestOverlay|TestNavMode' ./internal/tui/`
 **Commit:** `refactor(tui): one panel frame per view for paint and stops`
 
-## 9. One panel hit-test, no speculative cursor copies
+## 9. One panel hit-test, no speculative cursor copies — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): the hit is `panelHit{isCell, isGrip, grab, isPin, target}` and the snapshot flag is `panelSnap.isComposed` (not `cell`/`grip`/`composed`), per the house boolean-prefix rule; `isPin` means the cell is on the pin glyph's column (`geometry.pinX`), which is how a header row picks its pin stop over its title stop.
+NOTES (2026-11-23): `panelFrame` already carries `stops` as a field (item 8), and Go forbids a method of the same name, so the way-in paths read `panelFrameAs(true).stops` (the field), not `.stops()`. `panelFrameAs(isOverlaid)` reads the row bound from `m.frameSpans().slotBottom` (the key/command paths hold none of their own, as `navPanelStops` did) and returns an empty frame where the column is not painted; the decision gate (`blockCursorOwnsKeys`) is checked by `openPanelOverlay` and, for the overlay case, `enterPanelRegion`.
+NOTES (2026-11-23): `panelFrame.at` does the hit itself; the "sections only once `cell` holds" gate lives in the Model-level `panelHitAt(x, y)`, which reads the snapshot geometry (`framedPanelGeometry`) and builds the frame only on a column cell. The wheel keeps asking the geometry-only `panelCell` (now also snapshot-aware), which never paints a section. Added `TestPanelFrameAtOffTheColumnPaintsNoSection` (counter-based, not parallel) for the off-column/wheel guarantee.
+NOTES (2026-11-23): consequential edit — internal/tui/doc.go: made necessary by the panel hit-test landing in panelframe.go (the file map's panelframe.go role now names it).
 
 **What:**
 **Goal:** `panelFrame.at(x, y)` returns a `panelHit{cell, grip, grab, isPin, target}`; click (`handleSidePanelClick`) and hover (`pointerShapeAt`) ask it on `pre`, and the wheel (`foldMouseWheel`) asks geometry only; `enterPanelRegion` and `openPanelOverlay` read `panelFrameAs(true).stops()` instead of mutating a copy's cursor; `grep -nE 'entered\.(panelOverlaid|navPanelStops)\(' internal/tui/` prints nothing. Depends on item 8.

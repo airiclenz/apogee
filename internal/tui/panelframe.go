@@ -188,3 +188,98 @@ func (m Model) newPanelFrame(geometry panelGeometry, rows int) panelFrame {
 	frame.stops = m.layPanelStops(frame.sections, frame.layout)
 	return frame
 }
+
+// panelHit is what a pointer at one cell of the window lands on in the side panel ([panelFrame.at]):
+// whether the cell is one of the column's at all, the grip and how far right of the separator it is,
+// whether it is the column a header's pin glyph paints on, and the target a click there follows. The
+// zero value is a cell off the column, which the click chain passes on and the pointer shape reads
+// past. The click ([Model.handleSidePanelClick]) and the hover ([Model.pointerShapeAt]) both read it,
+// so the pointer promises a click exactly where one acts.
+type panelHit struct {
+	// isCell reports whether the cell is one of the column's ([panelGeometry.cell]): the column
+	// claims it whether or not it targets anything, so nothing under it is reached through it.
+	isCell bool
+	// isGrip reports whether the cell is the column's grip ([panelGeometry.gripAt]): a press there
+	// starts a resize drag instead of following the target.
+	isGrip bool
+	// grab is how far right of the separator the grip cell is: 0 on the separator, 1 right of it.
+	grab int
+	// isPin reports whether the cell is on the column a header's pin glyph paints on
+	// ([panelGeometry.pinX]): a header row resolves to its pin stop there, its title stop elsewhere.
+	isPin bool
+	// target is what a click on the cell does: the target of the stop spanning its row — on a header
+	// row the pin stop's or the title stop's, as isPin says — and nothing on a row no stop spans.
+	target panelTarget
+}
+
+// at answers what a pointer at window cell (x, y) lands on in this frame. A row resolves through
+// the frame's stops: a body row to its stop's target, and a header row — two stops on one row — to
+// the stop x falls in: its pin stop on the lead pin glyph's cell, its title stop on every other cell.
+func (f panelFrame) at(x, y int) panelHit {
+	if !f.geometry.cell(x, y, f.rows) {
+		return panelHit{}
+	}
+	hit := panelHit{isCell: true, isPin: x == f.geometry.pinX}
+	hit.grab, hit.isGrip = f.geometry.gripAt(x)
+	for _, stop := range f.stops {
+		if !stop.spans(y) || (stop.id.isHeader && stop.id.isPin != hit.isPin) {
+			continue
+		}
+		hit.target = stop.target
+		break
+	}
+	return hit
+}
+
+// panelSnap is the side panel's horizontal geometry of the frame a pointer gesture was aimed at,
+// published onto the pre-gesture snapshot beside its vertical spans ([Model.withFrameSpans]), so the
+// click's or the hover's hit-test reads one geometry. It holds the geometry alone, never the painted
+// sections: those are painted only once a pointer lands on the column ([Model.panelHitAt]). The zero
+// value carries no geometry and derives it on demand ([Model.framedPanelGeometry]). Plain values, so
+// it rides the value-copied Model (ADR 0011).
+type panelSnap struct {
+	// isComposed reports whether geometry was published by [Model.withFrameSpans].
+	isComposed bool
+	// geometry is the published geometry.
+	geometry panelGeometry
+}
+
+// framedPanelGeometry is the side panel's geometry of the frame m composes: the one a pointer
+// gesture's snapshot carries ([Model.withFrameSpans]), else this frame's ([Model.panelGeometry]).
+func (m Model) framedPanelGeometry() panelGeometry {
+	if m.panelSnap.isComposed {
+		return m.panelSnap.geometry
+	}
+	return m.panelGeometry()
+}
+
+// panelHitAt is the side panel's one hit-test: what a pointer at window cell (x, y) lands on in the
+// frame m composes — pre in the click and hover chains, which carries that frame's geometry and row
+// bound. The geometry is asked first, so a pointer off the column composes no frame and paints no
+// section; only a cell on the column builds the panel frame ([Model.newPanelFrame]) its target
+// resolves through.
+func (m Model) panelHitAt(x, y int) panelHit {
+	geometry := m.framedPanelGeometry()
+	if !geometry.onColumn(x) {
+		return panelHit{}
+	}
+	rows := m.frameSpans().slotBottom
+	if !geometry.cell(x, y, rows) {
+		return panelHit{}
+	}
+	return m.newPanelFrame(geometry, rows).at(x, y)
+}
+
+// panelFrameAs is the side panel's frame with the overlay asked for as isOverlaid says
+// ([Model.panelGeometryAs]), over the rows above the session-name rule of the frame m composes. A way
+// into the panel region judges its stops by it before any cursor stands there, so no copy of the
+// Model has its cursor moved to ask what the column would show. A column that is not painted — `off`,
+// the zero UIPrefs' empty mode, or under the gate with the overlay not asked for — is an empty frame:
+// no sections painted and no stops.
+func (m Model) panelFrameAs(isOverlaid bool) panelFrame {
+	geometry := m.panelGeometryAs(isOverlaid)
+	if !geometry.isShown && !geometry.isOverlaid {
+		return panelFrame{geometry: geometry}
+	}
+	return m.newPanelFrame(geometry, m.frameSpans().slotBottom)
+}

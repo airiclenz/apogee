@@ -610,6 +610,10 @@ type Model struct {
 	// and a fixed-size array of plain ints, so it rides the value-copied Model with no exception to
 	// ADR 0011's copy rule.
 	spans frameSpans
+	// panelSnap is the side panel's horizontal geometry of that same frame, published beside spans
+	// onto the pre-gesture snapshot only ([Model.withFrameSpans]), so a click's or a hover's panel
+	// hit-test reads one geometry ([Model.panelHitAt]). The zero value derives it on demand.
+	panelSnap panelSnap
 	// watch is watch mode's slot (watch.go, ADR 0103 decision 5): while isActive, m.eng is the inert
 	// engine and the watcher's own engine and session view are parked here. Plain values only, so
 	// it rides the value-copied Model under ADR 0011's copy rule.
@@ -3704,6 +3708,7 @@ func (m Model) frameSpans() frameSpans {
 // geometry of a frame the human is no longer looking at.
 func (m Model) withFrameSpans() Model {
 	m.spans = m.frameSpans()
+	m.panelSnap = panelSnap{isComposed: true, geometry: m.panelGeometry()}
 	return m
 }
 

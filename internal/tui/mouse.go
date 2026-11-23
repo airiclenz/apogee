@@ -2175,7 +2175,9 @@ func (m Model) highlightTranscript(view string) string {
 // wheel into a scroll.
 func (m Model) foldMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	// Nothing scrolls inside the side panel in v1 (docs/layout/side-panel-layout.md), and a notch
-	// over it reaches no pane and no transcript beside it: the panes' wheels are y-only.
+	// over it reaches no pane and no transcript beside it: the panes' wheels are y-only. The notch
+	// asks the column's geometry alone, never the click's hit-test ([Model.panelHitAt]), so it paints
+	// no section.
 	if m.panelCell(msg.X, msg.Y) {
 		return m, nil
 	}

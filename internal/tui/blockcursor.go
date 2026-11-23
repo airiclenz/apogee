@@ -371,15 +371,18 @@ func (m Model) blockCursorKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 // enterPanelRegion is → : the cursor moves into the side panel, onto the stop it remembers there or,
 // on the first visit this mode, the stop nearest the transcript row it leaves. On a window under the
 // column's gate the move opens it as the overlay (ADR 0111 D7), so the stops are judged as the panel
-// region would see them — the overlay's, which are the docked column's laid out over the same rows. A
-// panel with no stop to stand on — or a column `off` hides — leaves the cursor where it is.
+// region would see them — the overlay's, which are the docked column's laid out over the same rows
+// ([Model.panelFrameAs]), read before the cursor moves. A panel with no stop to stand on — a column
+// `off` hides, or an overlay while a decision owns the keys — leaves the cursor where it is.
 func (m Model) enterPanelRegion() Model {
 	if !m.cursor.inTranscript() {
 		return m
 	}
-	entered := m
-	entered.cursor.region = regionPanel
-	stops := entered.navPanelStops()
+	frame := m.panelFrameAs(true)
+	if frame.geometry.isOverlaid && !m.blockCursorOwnsKeys() {
+		return m
+	}
+	stops := frame.stops
 	if len(stops) == 0 {
 		return m
 	}
@@ -387,8 +390,9 @@ func (m Model) enterPanelRegion() Model {
 	if !ok {
 		at, _ = nearestPanelStop(stops, m.blockCursorRow(), anyPanelStop)
 	}
-	entered.cursor = entered.cursor.standOnPanel(stops[at])
-	return entered
+	m.cursor.region = regionPanel
+	m.cursor = m.cursor.standOnPanel(stops[at])
+	return m
 }
 
 // activatePanelCursor is ⏎ on the panel stop the cursor stands on (ADR 0111 D4, adr-0111-amend-1109b):

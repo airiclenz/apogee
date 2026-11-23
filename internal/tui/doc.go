@@ -1070,7 +1070,9 @@
 // the show mode, the width setting and the overlay request, never from the Model, which the
 // sidepanel.go width helpers delegate to ([Model.panelGeometry]), and the column's one frame per
 // View ([Model.newPanelFrame]) — that geometry, the sections painted once at its content width, their
-// layout and the stops over it, which the paint and the cursor's row both read; panelstops.go the column's stops ([Model.panelStops]) —
+// layout and the stops over it, which the paint and the cursor's row both read, and the column's one
+// hit-test ([Model.panelHitAt], [panelFrame.at]) — cell, grip, pin and target — which the click and
+// the hover ask off the gesture's snapshot; panelstops.go the column's stops ([Model.panelStops]) —
 // the rows a click acts on, in paint order, each with its row span, its target and an identity
 // (header, run, path, task card, usage, mcp) — through which the pointer resolves a body row and which
 // navigation mode's cursor walks in the panel region (blockcursor.go);

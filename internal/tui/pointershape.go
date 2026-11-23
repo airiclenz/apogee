@@ -36,7 +36,7 @@ func (s pointerShape) name() string {
 // handler decides by, geometry and state gate together, so the pointer can never promise a click the
 // handler would refuse:
 //
-//   - a side-panel cell ([Model.panelTargetAt]): pointer where a click there acts, default elsewhere;
+//   - a side-panel cell ([Model.panelHitAt]): pointer where a click there acts, default elsewhere;
 //   - a pane whose hover answers for the point: that pane's shape;
 //   - the mode marker, where [Model.footerModeHit] holds: pointer;
 //   - the git segment, where [Model.footerGitHit] holds: pointer;
@@ -48,9 +48,10 @@ func (s pointerShape) name() string {
 // It has no side effects: the Model is a value (ADR 0011) and nothing here writes to it.
 func (m Model) pointerShapeAt(pre Model, x, y int) pointerShape {
 	// The side panel's column first, as the click chain asks it (handleSidePanelClick): the hand
-	// only where a click acts — never under a modal pane, nor on the pin while watching.
-	if target, isPanel := pre.panelTargetAt(x, y); isPanel {
-		if !m.panelTargetLive(target) {
+	// only where a click acts — never under a modal pane, nor on the pin while watching. The click's
+	// own hit-test answers, off pre's snapshot, so a hover off the column paints no section.
+	if hit := pre.panelHitAt(x, y); hit.isCell {
+		if !m.panelTargetLive(hit.target) {
 			return shapeDefault
 		}
 		return shapePointer
