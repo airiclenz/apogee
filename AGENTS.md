@@ -38,6 +38,12 @@
 - **Be context-greedy, and spend that context through sub-agents.** Never act on a guess where the answer is readable: before you design, edit or judge, read the glossary terms, the decision record, the plan, the handoff and the neighbouring code that bear on the change, and read enough of each file to see how the surrounding code already does it. Thin context is the failure mode here, not slow work. But the main agent's own window is the scarce resource, so buy that breadth with **sub-agents**: any task whose reading would fill much of your own window — a repo-wide sweep, "find every call site", "does this pattern exist anywhere", a multi-file audit, a survey of docs before a design — is dispatched to a sub-agent that reads widely and returns only its conclusion. Do the reading inline only when you already know the file and want one fact from it. Brief a sub-agent with the same discipline you would want yourself: name the paths and documents it must read, state the house facts it cannot derive (see *Stack facts* above), and ask for the finding, not a transcript.
 - **North star (ADR 0031, tiebreaker force):** the embeddable engine must stay sufficient for any **Driver** (the TUI, `apogee daemon`, `apogee headless`, the bench, and any future one — `capcom know show "Driver"`). Its door-keeping invariants — wire-silent engine, wait-tolerant Approver, no first-party connectors, benchable-all-the-way-up — bind design work; a change that closes one of those doors must supersede ADR 0031 explicitly.
 
+## Miscellaneous
+
+Do not over- or under-explain / do not assume the user knows what you are talking about. You might have read a document or code file that the user does not know or remember. Explain issues in simple terms and to the point so that it is always clear to the user as well what your context is. 
+
+Use the question tool if you have any questions for the user.
+
 <!-- BEGIN CAPCOM -->
 <!-- Managed by capcom: run "capcom agents" to refresh. Edits inside these markers are overwritten. -->
 ## Issues and knowledge: capcom
