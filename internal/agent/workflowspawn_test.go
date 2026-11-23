@@ -319,7 +319,7 @@ func observedRun(t *testing.T, a *Agent, sink *recordingSink, plan workflow.Plan
 	observer := a.observeWorkflow(runner, 0, plan)
 	observer.call = fanOutCall.ID
 	result, err := runner.Run(context.Background(), plan)
-	observer.end(result, err)
+	observer.end(result, workflow.EndingOf(result, err))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

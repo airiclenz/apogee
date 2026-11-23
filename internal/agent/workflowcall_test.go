@@ -1363,7 +1363,7 @@ func TestWorkflowObserver_ReportsAWaitingQuestionAndAFailure(t *testing.T) {
 	observer := a.observeWorkflow(runner, 3, workflow.Plan{Name: "audit"})
 
 	answer, err := runner.Asker.Ask(context.Background(), workflow.Question{Workflow: "wf-1", Stage: "confirm", Text: "Go on?"})
-	observer.end(workflow.Result{ID: "wf-1"}, errors.New("disk full"))
+	observer.end(workflow.Result{ID: "wf-1"}, workflow.EndingOf(workflow.Result{ID: "wf-1"}, errors.New("disk full")))
 
 	if answer != "yes" || err != nil {
 		t.Errorf("Ask = %q, %v; want the wrapped Asker's answer", answer, err)
@@ -1387,7 +1387,7 @@ func TestWorkflowObserver_ReportsAWaitingQuestionAndAFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	b.observeWorkflow(&workflow.Runner{}, 1, workflow.Plan{Name: "audit"}).end(workflow.Result{}, errors.New("invalid plan"))
+	b.observeWorkflow(&workflow.Runner{}, 1, workflow.Plan{Name: "audit"}).end(workflow.Result{}, workflow.EndingOf(workflow.Result{}, errors.New("invalid plan")))
 	if got := workflowPhaseEvents(quiet.events); len(got) != 0 {
 		t.Errorf("a run that failed before it had an id emitted %v, want nothing", phaseNames(got))
 	}
@@ -1428,7 +1428,7 @@ func TestWorkflowCall_EndPhaseCarriesTheNotesTally(t *testing.T) {
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
-			a.observeWorkflow(&workflow.Runner{}, 1, workflow.Plan{Name: "audit"}).end(tc.result, tc.err)
+			a.observeWorkflow(&workflow.Runner{}, 1, workflow.Plan{Name: "audit"}).end(tc.result, workflow.EndingOf(tc.result, tc.err))
 
 			phases := workflowPhaseEvents(sink.events)
 			want := []domain.WorkflowPhase{domain.WorkflowStarted, tc.wantPhase}

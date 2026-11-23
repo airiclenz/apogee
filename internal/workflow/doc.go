@@ -38,6 +38,8 @@
 // starts; it writes nothing to a found folder and refuses a moved one (ErrFolderMoved).
 // settle.go is Runner.SettleUnstarted: the settling of a run that never started — dropped from a
 // queue before any Run took it — whose folder is recorded stopped unless it is already done or failed.
+// ending.go is RunEnding, EndingOf and UnstartedEnding: how a whole run ended — done, stopped or failed, with
+// its cause, and whether it never started — the one value a host words its note, event and answer from.
 // stages.go is every stage kind beyond the fanout. verify and merge work over a fanout's results on
 // runner.go's wave path: verify runs one adversarial child per item its `when:` selects, the
 // engine's briefs/verify.txt leading the stage's brief, and folds each verdict into the item; merge

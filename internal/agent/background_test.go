@@ -3,6 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"maps"
 	"os"
 	"path/filepath"
@@ -1810,5 +1813,51 @@ func TestAgentWritesNoWorkflowStatus(t *testing.T) {
 		if strings.Contains(string(source), "WriteStatus") {
 			t.Errorf("%s names WriteStatus; a workflow's status is written by internal/workflow alone", path)
 		}
+	}
+}
+
+// TestAgentReadsAWorkflowEndingInOnePlace pins workflow.EndingOf as the one reading of how a run
+// ended: in this package's shipped files only workflowAnswer, the blocking answer, still asks a
+// Result whether it Stopped — the finish note, the end event and the stop answer read a
+// workflow.RunEnding instead of re-deriving finished, stopped or failed.
+func TestAgentReadsAWorkflowEndingInOnePlace(t *testing.T) {
+	t.Parallel()
+
+	const exempt = "workflowAnswer"
+	paths, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("list the package's files: %v", err)
+	}
+	found := 0
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			ast.Inspect(fn, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Stopped" {
+					found++
+					if fn.Name.Name != exempt {
+						t.Errorf("%s: %s calls .Stopped(); read the run's workflow.RunEnding (workflow.EndingOf) instead", path, fn.Name.Name)
+					}
+				}
+				return true
+			})
+		}
+	}
+	if found == 0 {
+		t.Errorf("found no .Stopped() call in %s; the scan no longer sees what it guards", exempt)
 	}
 }

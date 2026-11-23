@@ -112,7 +112,14 @@ NOTES (2026-11-23): consequential edit — internal/workflow/doc.go: made necess
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSettleUnstarted' ./internal/workflow/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestBackground_Stopping|TestAgentWritesNoWorkflowStatus' ./internal/agent/`
 **Commit:** `refactor(workflow): the library settles a run that never started`
 
-## 5. One Ending value for the note, the event and the answer
+## 5. One Ending value for the note, the event and the answer — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): the new type is `workflow.RunEnding`, not `workflow.Ending` as the Goal names it — `workflow.Ending` already exists (runner.go: how one child's run ended, `EndCompleted`/`EndCapped`/`EndFaulted`/`EndStopped`, used by `Outcome.Ending` and `internal/agent/childending.go`), and renaming an existing identifier is outside this item. Fields (`Phase`, `Err`, `NeverStarted`) and `EndingOf(result, err)` are as planned; items 6 and 7 name `workflow.Ending` and should read `workflow.RunEnding`.
+NOTES (2026-11-23): added `workflow.UnstartedEnding(phase, err) RunEnding`, the only constructor that sets `NeverStarted`, so `stopWorkflow` builds the queued ending as `workflow.UnstartedEnding(run.runner.SettleUnstarted(run.id))`; `SettleUnstarted` keeps its `(Phase, error)` signature (writer's call).
+NOTES (2026-11-23): `stopWorkflow` now returns `(workflow.RunEnding, error)` in place of `(queued, kept, err)`: a running workflow's is the zero RunEnding (its end is not known yet), a queued one's has `NeverStarted` set; the error is unchanged (unknown id, or the settle error, which is also `ending.Err`).
+NOTES (2026-11-23): `finishNote`, `subAgentFinishNote`, `finishPhase` and `workflowObserver.end` take a `RunEnding` (the guard's second option); their seven test call sites in wake_test.go, workflowcall_test.go and workflowspawn_test.go pass `workflow.EndingOf(result, err)`, every assertion unchanged. `endBackground` needed no change in this item (it reads no ending yet).
+NOTES (2026-11-23): consequential edit — internal/workflow/doc.go: made necessary by the new ending.go, which the package's file map (TestDocMapNamesEveryFile) must name
+NOTES (2026-11-23): `TestAgentReadsAWorkflowEndingInOnePlace` scans with go/ast (a `.Stopped()` call inside any function declaration other than `workflowAnswer` fails it), so a comment naming `Stopped()` does not trip it; `TestWorkflowBlockNamesHowItEnded` (internal/tui) was not run here — the events it reads are emitted unchanged.
 
 Depends on item 4.
 

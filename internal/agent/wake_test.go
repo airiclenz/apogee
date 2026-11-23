@@ -312,7 +312,7 @@ func TestFinishNote_SaysHowTheWorkflowEnded(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := finishNote("", "audit\n", tc.result, tc.err, tc.fellBack)
+			got := finishNote("", "audit\n", tc.result, workflow.EndingOf(tc.result, tc.err), tc.fellBack)
 
 			if got != tc.want {
 				t.Errorf("finishNote = %q\nwant         %q", got, tc.want)
@@ -406,7 +406,7 @@ func TestFinishNote_ASubAgentNoteCarriesItsReport(t *testing.T) {
 			t.Parallel()
 			result, transcript := subAgentNoteItem(t, tc.phase, tc.report, tc.withTranscript)
 
-			got := finishNote(workflow.OriginSubAgent, "surveyor\n", result, tc.err, tc.fellBack)
+			got := finishNote(workflow.OriginSubAgent, "surveyor\n", result, workflow.EndingOf(result, tc.err), tc.fellBack)
 
 			if want := tc.want(transcript); got != want {
 				t.Errorf("finishNote = %q\nwant         %q", got, want)
@@ -422,7 +422,7 @@ func TestFinishNote_ASubAgentReportOverTheCapIsCutLikeABlockingResult(t *testing
 	report := strings.Repeat("a", delegateResultMaxBytes) + strings.Repeat("z", delegateResultMaxBytes)
 	result, transcript := subAgentNoteItem(t, workflow.PhaseDone, report, true)
 
-	got := finishNote(workflow.OriginSubAgent, "surveyor", result, nil, false)
+	got := finishNote(workflow.OriginSubAgent, "surveyor", result, workflow.EndingOf(result, nil), false)
 
 	want := "sub_agent surveyor finished — transcript: " + transcript + "\n" + capDelegateResult(report)
 	if got != want {

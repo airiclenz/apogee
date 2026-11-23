@@ -893,11 +893,11 @@ func (o *workflowObserver) waitingOn(id, stage, detail string) {
 	o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowWaiting, Stage: stage, Detail: detail})
 }
 
-// end reports how the run Run returned ended: failed when it returned an error after the Workflow
-// started, else stopped or finished by the result's phase, carrying the result's item tally — the
-// one the model's note reports. A run that failed before its Workflow had an id started nothing
-// and reports nothing.
-func (o *workflowObserver) end(result workflow.Result, err error) {
+// end reports how the run Run returned ended, read off ending (workflow.EndingOf): failed with its
+// cause when it could not proceed after the Workflow started, else stopped or finished, carrying
+// the result's item tally — the one the model's note reports. A run that failed before its
+// Workflow had an id started nothing and reports nothing.
+func (o *workflowObserver) end(result workflow.Result, ending workflow.RunEnding) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.startLocked(result.ID)
@@ -905,9 +905,9 @@ func (o *workflowObserver) end(result workflow.Result, err error) {
 		return
 	}
 	switch {
-	case err != nil:
-		o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowFailed, Detail: err.Error()})
-	case result.Stopped():
+	case ending.Err != nil:
+		o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowFailed, Detail: ending.Err.Error()})
+	case ending.Phase == workflow.PhaseStopped:
 		o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowStopped, Tally: eventTally(result)})
 	default:
 		o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowFinished, Tally: eventTally(result)})
@@ -1057,14 +1057,14 @@ func (a *Agent) workflowStopResult(callID, id string) domain.ToolResult {
 	if id == "" {
 		return errorToolResult(callID, workflowControlNeedsID)
 	}
-	queued, kept, err := a.stopWorkflow(id)
+	ending, err := a.stopWorkflow(id)
 	if err != nil {
 		return errorToolResult(callID, fmt.Sprintf(workflowControlStopFailed, id, err))
 	}
-	if queued && kept != workflow.PhaseStopped {
-		return domain.ToolResult{CallID: callID, Content: fmt.Sprintf(workflowControlStoppedQueuedRerun, id, kept)}
+	if ending.NeverStarted && ending.Phase != workflow.PhaseStopped {
+		return domain.ToolResult{CallID: callID, Content: fmt.Sprintf(workflowControlStoppedQueuedRerun, id, ending.Phase)}
 	}
-	if queued {
+	if ending.NeverStarted {
 		return domain.ToolResult{CallID: callID, Content: fmt.Sprintf(workflowControlStoppedQueued, id)}
 	}
 	return domain.ToolResult{CallID: callID, Content: fmt.Sprintf(workflowControlStopped, id)}

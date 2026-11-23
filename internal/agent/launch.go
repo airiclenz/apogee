@@ -258,7 +258,7 @@ func (a *Agent) runBlocking(ctx context.Context, launch workflowLaunch) (result 
 		return workflow.Result{}, false, err
 	}
 	result, err = built.runner.Run(ctx, built.plan)
-	built.observer.end(result, err)
+	built.observer.end(result, workflow.EndingOf(result, err))
 	return result, seatFellBack(built.runner), err
 }
 

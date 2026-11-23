@@ -311,33 +311,35 @@ func (m *backgroundManager) storesElsewhere(root string) []keptRun {
 // RerunFailed's, which stays as it was (workflow.Runner.SettleUnstarted). An id this Agent neither
 // runs nor queues is an error.
 func (a *Agent) StopWorkflow(id string) error {
-	_, _, err := a.stopWorkflow(id)
+	_, err := a.stopWorkflow(id)
 	return err
 }
 
-// stopWorkflow is StopWorkflow, also reporting whether the workflow was still queued — dropped from
-// the line before it ever started, so no Runner ran it, no finish note is held for it and no
-// WorkflowPhaseEvent will report its end — and, for a queued one, the phase its folder is left in
-// (workflow.Runner.SettleUnstarted): stopped for a queued first run, the kept done or failed for a
-// queued RerunFailed's.
-// The workflow tool's stop answer reads both to tell the model so (workflowStopResult).
-func (a *Agent) stopWorkflow(id string) (queued bool, kept workflow.Phase, err error) {
+// stopWorkflow is StopWorkflow, also returning the RunEnding of a workflow that was still queued —
+// dropped from the line before it ever started (NeverStarted), so no Runner ran it, no finish note
+// is held for it and no WorkflowPhaseEvent will report its end. Its Phase is the one its folder is
+// left in (workflow.Runner.SettleUnstarted): stopped for a queued first run, the kept done or
+// failed for a queued RerunFailed's; its Err, a folder that could not be settled, is the error
+// returned too. A running workflow has not ended yet — its Runner settles it once its children
+// stop — so its RunEnding is the zero one.
+// The workflow tool's stop answer reads the RunEnding to tell the model so (workflowStopResult).
+func (a *Agent) stopWorkflow(id string) (workflow.RunEnding, error) {
 	m := &a.background
 	m.mu.Lock()
 	run := m.liveLocked(id)
 	if run == nil {
 		m.mu.Unlock()
-		return false, "", fmt.Errorf(unknownWorkflowFormat, id)
+		return workflow.RunEnding{}, fmt.Errorf(unknownWorkflowFormat, id)
 	}
 	if run.running {
 		run.cancel()
 		m.mu.Unlock()
-		return false, "", nil
+		return workflow.RunEnding{}, nil
 	}
 	m.dropLocked(run)
 	m.mu.Unlock()
-	kept, err = run.runner.SettleUnstarted(run.id)
-	return true, kept, err
+	ending := workflow.UnstartedEnding(run.runner.SettleUnstarted(run.id))
+	return ending, ending.Err
 }
 
 // RerunFailed runs the finished workflow id again, in the background and in its own folder, as a new
@@ -605,8 +607,9 @@ func (a *Agent) startRunLocked(run *backgroundRun) {
 // whole-set stop retired the run, whose note belongs to the session that stop ended (holdFinish).
 func (a *Agent) driveBackground(ctx context.Context, run *backgroundRun) {
 	result, err := run.runner.Run(ctx, run.plan)
-	a.background.holdFinish(run, finishNote(workflow.OriginOf(run.plan), run.plan.Name, result, err, seatFellBack(run.runner)))
-	run.observer.end(result, err)
+	ending := workflow.EndingOf(result, err)
+	a.background.holdFinish(run, finishNote(workflow.OriginOf(run.plan), run.plan.Name, result, ending, seatFellBack(run.runner)))
+	run.observer.end(result, ending)
 	a.endBackground(run)
 }
 
@@ -1172,20 +1175,20 @@ func (a *Agent) Wake(ctx context.Context) (bool, error) {
 // line (ADR 0089 D3) — its name and how it ended, its items counted by status across its fan-outs
 // (with the unfinished ones and the verify verdicts when there are any), and where to read more —
 // the report a merge wrote, else the full item listing. A run that could not proceed says so with
-// its cause instead. When any item child asked for the Sub-agent server and ran on the session one
+// its cause instead. How it ended is read off ending (workflow.EndingOf), never re-derived here. When any item child asked for the Sub-agent server and ran on the session one
 // (fellBack, seatFellBack), a finished or stopped run's note ends on SeatFallbackNote, once — the
 // answer-level line a blocking workflow's call gets from workflowAnswer, since this note is what the
 // model reads of a background run (ADR 0069 decision 9). It joins as one more part, so the note
 // stays one line.
-func finishNote(origin, name string, result workflow.Result, runErr error, fellBack bool) string {
+func finishNote(origin, name string, result workflow.Result, ending workflow.RunEnding, fellBack bool) string {
 	if origin == workflow.OriginSubAgent {
-		return subAgentFinishNote(name, result, runErr, fellBack)
+		return subAgentFinishNote(name, result, ending, fellBack)
 	}
 	name = oneLine(name)
-	if runErr != nil {
-		return fmt.Sprintf(finishFailedFormat, name, oneLine(runErr.Error()))
+	if ending.Err != nil {
+		return fmt.Sprintf(finishFailedFormat, name, oneLine(ending.Err.Error()))
 	}
-	parts := []string{fmt.Sprintf(finishLeadFormat, name, finishPhase(result)), workflow.TallyOf(result).Line()}
+	parts := []string{fmt.Sprintf(finishLeadFormat, name, finishPhase(ending)), workflow.TallyOf(result).Line()}
 	switch {
 	case result.Report != "":
 		parts = append(parts, finishReportPrefix+result.Report)
@@ -1206,12 +1209,12 @@ func finishNote(origin, name string, result workflow.Result, runErr error, fellB
 // one carries SeatFallbackNote once: its report already ends on it when the delegation wrote it, and
 // the note adds it only when it did not. A run that could not proceed is the one line naming its
 // cause, as a fan_out's is.
-func subAgentFinishNote(name string, result workflow.Result, runErr error, fellBack bool) string {
+func subAgentFinishNote(name string, result workflow.Result, ending workflow.RunEnding, fellBack bool) string {
 	name = oneLine(name)
-	if runErr != nil {
-		return fmt.Sprintf(subAgentFailedFormat, name, oneLine(runErr.Error()))
+	if ending.Err != nil {
+		return fmt.Sprintf(subAgentFailedFormat, name, oneLine(ending.Err.Error()))
 	}
-	lead := fmt.Sprintf(subAgentLeadFormat, name, finishPhase(result))
+	lead := fmt.Sprintf(subAgentLeadFormat, name, finishPhase(ending))
 	item, ok := soleItem(result)
 	if !ok {
 		return lead
@@ -1231,10 +1234,10 @@ func subAgentFinishNote(name string, result workflow.Result, runErr error, fellB
 	return strings.Join(lines, workflowNoteLineBreak)
 }
 
-// finishPhase is the word a finish note says a run ended with: stopped when a cancel ended it before
-// every item finished, else finished.
-func finishPhase(result workflow.Result) string {
-	if result.Stopped() {
+// finishPhase is the word a finish note says a run that could proceed ended with: stopped when a
+// cancel ended it before every item finished, else finished.
+func finishPhase(ending workflow.RunEnding) string {
+	if ending.Phase == workflow.PhaseStopped {
 		return finishPhaseStopped
 	}
 	return finishPhaseFinished
