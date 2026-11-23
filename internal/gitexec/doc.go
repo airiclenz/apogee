@@ -34,7 +34,7 @@
 //     protocol.allow, protocol.ext.allow, ext:: url rewrites, submodule.<n>.update) to name
 //     .git/config for a `git config` line that sets such a key.
 //
-// Seven entry points, one funnel. [Host.Capture] returns the captured outcome — exit code and
+// The entry points, one funnel. [Host.Capture] returns the captured outcome — exit code and
 // output — for a caller rendering what git printed to the model. [Host.CaptureEnv] is Capture
 // with a caller's env and [CaptureOptions] — NoTerminal starts git with no controlling terminal,
 // for a run apogee starts on its own that must never prompt — and [Host.CaptureEnvTo] is
@@ -43,7 +43,10 @@
 // out of the payload and every failure an error. [Host.RunTo] is Run with the
 // payload streamed uncapped to the caller's writer, for output a truncation would corrupt.
 // [Host.RunDiagnosed] is Run that also hands back the child's stderr on a zero exit, for a
-// command whose warning is the only sign its answer is partial. Every one but Capture takes an
+// command whose warning is the only sign its answer is partial. [Host.State] and [Host.StateAt]
+// answer what git is at a root as one [RepoState] — a work tree with its top level, no
+// repository, refused, incomplete, unavailable or unknown — from one rev-parse on the data path,
+// so no caller reads that from an error's text. Every one but Capture takes an
 // env the caller appends — GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, or a captured run's own
 // variables — which redirects the run to an object database of apogee's own without weakening
 // anything the hardening put there, and the probe behind the refusal runs under that same env.

@@ -483,13 +483,141 @@ func (h Host) queryDiagnosed(ctx context.Context, gitPath, dir string, env []str
 	case res.DrainWedged:
 		return "", res.CombinedOutput, incompleteError{text: fmt.Sprintf("git %s: output drain wedged", subcommand(args))}
 	case res.ExitCode != 0:
-		return "", res.CombinedOutput, fmt.Errorf("git %s: exit %d: %s", subcommand(args), res.ExitCode, strings.TrimSpace(res.CombinedOutput))
+		return "", res.CombinedOutput, exitError{
+			subcommand: subcommand(args), code: res.ExitCode, output: strings.TrimSpace(res.CombinedOutput),
+		}
 	case res.Truncated:
 		return "", res.CombinedOutput, incompleteError{text: fmt.Sprintf(
 			"git %s: output exceeded %d bytes", subcommand(args), subprocess.MaxSubprocessOutputBytes,
 		)}
 	}
 	return res.Stdout, res.CombinedOutput, nil
+}
+
+// exitError is the data path's error for a git that ran to completion and exited non-zero. It is
+// unexported: a caller outside the package sees a plain error with the text it always had, while
+// State reads the exit from the type instead of from that text.
+type exitError struct {
+	subcommand string
+	code       int
+	output     string
+}
+
+// Error returns the failure as the data path has always worded it.
+func (e exitError) Error() string {
+	return fmt.Sprintf("git %s: exit %d: %s", e.subcommand, e.code, e.output)
+}
+
+// RepoStateKind names what [Host.State] found at a root. The zero value is [Unknown], so a
+// RepoState nobody filled in never reads as an answer.
+type RepoStateKind int
+
+const (
+	// Unknown is no answer: the probe could not be launched or its context ended (a spawn,
+	// confinement or admission failure). Err holds the cause.
+	Unknown RepoStateKind = iota
+	// WorkTree is a root inside a git work tree; TopLevel names the tree's top level.
+	WorkTree
+	// NoRepository is a root git answered for and that is not inside a work tree: a plain
+	// directory, a bare repository, or a directory outside a foreign core.worktree.
+	NoRepository
+	// Refused is a repository whose own command config apogee refuses to run git in; Refusal
+	// is the standing sentence and Err the [RefusedError] carrying it.
+	Refused
+	// Incomplete is a probe git did not finish answering; Err matches [ErrIncomplete], and the
+	// next call may well answer.
+	Incomplete
+	// Unavailable is a git that could not be resolved — absent, or fenced as one the model could
+	// have written. Err is the [Host.Resolve] failure. Only [Host.StateAt] reports it.
+	Unavailable
+)
+
+// String names the kind for test output and logs. No user-facing sentence is derived from it.
+func (k RepoStateKind) String() string {
+	switch k {
+	case Unknown:
+		return "Unknown"
+	case WorkTree:
+		return "WorkTree"
+	case NoRepository:
+		return "NoRepository"
+	case Refused:
+		return "Refused"
+	case Incomplete:
+		return "Incomplete"
+	case Unavailable:
+		return "Unavailable"
+	}
+	return fmt.Sprintf("RepoStateKind(%d)", int(k))
+}
+
+// RepoState is what git is at a root, as one value: [Host.State] and [Host.StateAt] return
+// exactly one kind, and the other fields are set as that kind's comment says. Err is non-nil for
+// exactly Unknown, Refused, Incomplete and Unavailable.
+type RepoState struct {
+	// Kind is the answer.
+	Kind RepoStateKind
+	// TopLevel is the work tree's top level in the host's path spelling, as git printed it;
+	// set for WorkTree only.
+	TopLevel string
+	// Refusal is the refusal sentence as the user reads it; set for Refused only.
+	Refusal string
+	// Err is the cause of a kind that is not an answer about the repository's shape.
+	Err error
+}
+
+// repoStateArgs is the one git call State makes: whether root is inside a work tree, and that
+// tree's top level.
+var repoStateArgs = []string{"rev-parse", "--is-inside-work-tree", "--show-toplevel"}
+
+// State reports what git is at root, for a caller that has already resolved (and fenced) its
+// git. It runs one rev-parse on the data path under the caller's env — the command-config check
+// is keyed on that env, so the caller's later runs are judged by the same check — and classifies
+// the outcome: a refused repository is Refused, a check or run git did not finish is Incomplete,
+// a non-zero exit or an exit 0 that does not name a work tree is NoRepository, and a probe that
+// could not be launched or whose context ended is Unknown.
+func (h Host) State(ctx context.Context, gitPath, root string, env []string, timeout time.Duration) RepoState {
+	out, _, err := h.queryDiagnosed(ctx, gitPath, root, env, timeout, nil, repoStateArgs...)
+	var (
+		refused RefusedError
+		exited  exitError
+	)
+	switch {
+	case err == nil:
+		return workTreeState(out)
+	case errors.As(err, &refused):
+		return RepoState{Kind: Refused, Refusal: refused.Sentence, Err: err}
+	case errors.Is(err, ErrIncomplete):
+		return RepoState{Kind: Incomplete, Err: err}
+	case errors.As(err, &exited):
+		return RepoState{Kind: NoRepository}
+	}
+	return RepoState{Kind: Unknown, Err: err}
+}
+
+// StateAt is State for a caller that has not resolved git: it resolves through [Host.Resolve]
+// and reports Unavailable, with the resolution failure in Err, when that finds no usable git.
+func (h Host) StateAt(ctx context.Context, root string, env []string, timeout time.Duration) RepoState {
+	gitPath, err := h.Resolve(ctx, root)
+	if err != nil {
+		return RepoState{Kind: Unavailable, Err: err}
+	}
+	return h.State(ctx, gitPath, root, env, timeout)
+}
+
+// workTreeState reads a zero-exit answer to repoStateArgs. Only `true` followed by a non-empty
+// path is a work tree; anything else — `false` with a top level under a foreign core.worktree, or
+// no output at all — is no repository to work in.
+func workTreeState(out string) RepoState {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 2 || strings.TrimSpace(lines[0]) != "true" {
+		return RepoState{Kind: NoRepository}
+	}
+	topLevel := strings.TrimSuffix(lines[1], "\r")
+	if topLevel == "" {
+		return RepoState{Kind: NoRepository}
+	}
+	return RepoState{Kind: WorkTree, TopLevel: filepath.FromSlash(topLevel)}
 }
 
 // subcommand names the git subcommand an argument list runs, for a failure message: the first

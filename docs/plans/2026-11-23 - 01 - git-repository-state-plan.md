@@ -50,7 +50,11 @@
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'Refus|Incomplete|CommandConfig|MergeDriver' ./internal/gitexec/`
 **Commit:** `refactor(gitexec): a data-path refusal is a typed error`
 
-## 2. gitexec reports the repository state at a root
+## 2. gitexec reports the repository state at a root — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): doc.go's "Seven entry points, one funnel" now reads "The entry points, one funnel" (no number to go stale) and gains one sentence naming State and StateAt.
+NOTES (2026-11-23): the non-zero exit is the unexported typed `exitError` (text byte-identical `git %s: exit %d: %s`) — the second of the two forms the approach allows.
+NOTES (2026-11-23): tests beyond the listed table — StateAt also covers a fenced git (ErrExecFromWritablePath → Unavailable) and a resolved git; the kind String() names are pinned; gitexec_test.go imports internal/realpath to spell the temp root as git does.
 
 Depends on item 1.
 

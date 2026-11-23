@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/gitexec"
+	"github.com/airiclenz/apogee/internal/realpath"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/subprocess"
 	"github.com/airiclenz/apogee/internal/testtime"
@@ -1577,6 +1578,242 @@ func TestIsCommandConfigRefusal_TellsAStandingRefusalFromEverythingElse(t *testi
 	for text, want := range cases {
 		if got := gitexec.IsCommandConfigRefusal(text); got != want {
 			t.Errorf("IsCommandConfigRefusal(%q) = %v, want %v", text, got, want)
+		}
+	}
+}
+
+// TestStateKinds pins the one value State reports for a root: a work tree with its top level, no
+// repository, refused, incomplete or unknown — with Err set for exactly the kinds that are not an
+// answer about the repository's shape.
+func TestStateKinds(t *testing.T) {
+	t.Parallel()
+	refusedNames := []string{"filter.x.clean"}
+
+	// repository builds a real repository and returns its root as git spells it.
+	repository := func(t *testing.T, gitPath string) string {
+		t.Helper()
+		root, err := realpath.Resolve(t.TempDir())
+		if err != nil {
+			t.Fatalf("resolve the temp dir: %v", err)
+		}
+		runRealGit(t, gitPath, root, "init", "-b", "main")
+		return root
+	}
+	// live is a fixture on the host's git; scripted is one whose git never runs.
+	type fixture struct {
+		host     gitexec.Host
+		gitPath  string
+		root     string
+		topLevel string
+		ctx      context.Context
+	}
+	live := func(root, topLevel string, gitPath string) fixture {
+		return fixture{host: gitexec.OS(), gitPath: gitPath, root: root, topLevel: topLevel, ctx: context.Background()}
+	}
+	scripted := func(t *testing.T, answer gitAnswer) fixture {
+		t.Helper()
+		gitPath := outsideGit(t)
+		host, _ := fakeHost(gitPath, answer)
+		return fixture{host: host, gitPath: gitPath, root: t.TempDir(), ctx: context.Background()}
+	}
+
+	cases := []struct {
+		name    string
+		fixture func(t *testing.T) fixture
+		want    gitexec.RepoStateKind
+		check   func(t *testing.T, state gitexec.RepoState)
+	}{
+		{
+			name: "repository root",
+			fixture: func(t *testing.T) fixture {
+				gitPath := realGit(t)
+				root := repository(t, gitPath)
+				return live(root, root, gitPath)
+			},
+			want: gitexec.WorkTree,
+		},
+		{
+			name: "subdirectory of a repository",
+			fixture: func(t *testing.T) fixture {
+				gitPath := realGit(t)
+				root := repository(t, gitPath)
+				sub := filepath.Join(root, "a", "b")
+				if err := os.MkdirAll(sub, 0o755); err != nil {
+					t.Fatalf("mkdir: %v", err)
+				}
+				return live(sub, root, gitPath)
+			},
+			want: gitexec.WorkTree,
+		},
+		{
+			name: "plain directory",
+			fixture: func(t *testing.T) fixture {
+				return live(t.TempDir(), "", realGit(t))
+			},
+			want: gitexec.NoRepository,
+		},
+		{
+			name: "bare repository",
+			fixture: func(t *testing.T) fixture {
+				gitPath := realGit(t)
+				root := t.TempDir()
+				runRealGit(t, gitPath, root, "init", "--bare", ".")
+				return live(root, "", gitPath)
+			},
+			want: gitexec.NoRepository,
+		},
+		{
+			name: "exit 0 outside a foreign work tree",
+			fixture: func(t *testing.T) fixture {
+				return scripted(t, cleanRepository(func(string) subprocess.SubprocessResult {
+					return subprocess.SubprocessResult{Stdout: "false\n/elsewhere/tree\n"}
+				}))
+			},
+			want: gitexec.NoRepository,
+		},
+		{
+			name: "refused command-config key",
+			fixture: func(t *testing.T) fixture {
+				gitPath := realGit(t)
+				root := repository(t, gitPath)
+				appendToConfig(t, root, "[filter \"x\"]\n\tclean = true\n")
+				return live(root, "", gitPath)
+			},
+			want: gitexec.Refused,
+			check: func(t *testing.T, state gitexec.RepoState) {
+				var refused gitexec.RefusedError
+				want := gitexec.CommandConfigRefusal(refusedNames)
+				if state.Refusal != want || !errors.As(state.Err, &refused) || refused.Sentence != want {
+					t.Errorf("Refusal = %q, Err = %v (%T), want %q carried by a RefusedError", state.Refusal, state.Err, state.Err, want)
+				}
+			},
+		},
+		{
+			name: "incomplete command-config probe",
+			fixture: func(t *testing.T) fixture {
+				return scripted(t, func(argv string) subprocess.SubprocessResult {
+					if strings.Contains(argv, " config --local ") {
+						return subprocess.SubprocessResult{TimedOut: true, ExitCode: -1}
+					}
+					return cleanRepository(func(string) subprocess.SubprocessResult {
+						return subprocess.SubprocessResult{Stdout: "true\n/never/read\n"}
+					})(argv)
+				})
+			},
+			want: gitexec.Incomplete,
+			check: func(t *testing.T, state gitexec.RepoState) {
+				if !errors.Is(state.Err, gitexec.ErrIncomplete) || !isIncompleteRefusal(state.Err.Error(), "git config --local timed out") {
+					t.Errorf("Err = %v, want the incomplete-probe sentence matching ErrIncomplete", state.Err)
+				}
+			},
+		},
+		{
+			name: "cancelled context",
+			fixture: func(t *testing.T) fixture {
+				gitPath := realGit(t)
+				root := repository(t, gitPath)
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				f := live(root, "", gitPath)
+				f.ctx = ctx
+				return f
+			},
+			want: gitexec.Unknown,
+			check: func(t *testing.T, state gitexec.RepoState) {
+				if !errors.Is(state.Err, context.Canceled) {
+					t.Errorf("Err = %v, want the context's cancellation", state.Err)
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := tc.fixture(t)
+
+			state := f.host.State(f.ctx, f.gitPath, f.root, nil, testTimeout)
+
+			if state.Kind != tc.want {
+				t.Fatalf("Kind = %v (Err %v), want %v", state.Kind, state.Err, tc.want)
+			}
+			if state.TopLevel != f.topLevel {
+				t.Errorf("TopLevel = %q, want %q", state.TopLevel, f.topLevel)
+			}
+			wantsErr := tc.want != gitexec.WorkTree && tc.want != gitexec.NoRepository
+			if (state.Err != nil) != wantsErr {
+				t.Errorf("Err = %v for %v, want set = %t", state.Err, tc.want, wantsErr)
+			}
+			if tc.want != gitexec.Refused && state.Refusal != "" {
+				t.Errorf("Refusal = %q for %v, want none", state.Refusal, tc.want)
+			}
+			if tc.check != nil {
+				tc.check(t, state)
+			}
+		})
+	}
+}
+
+// TestStateAt_ReportsAnUnresolvableGitAsUnavailable pins the resolving entry point: a git that
+// cannot be resolved is Unavailable with the Resolve failure in Err and nothing launched, and a
+// git that resolves is State's own answer.
+func TestStateAt_ReportsAnUnresolvableGitAsUnavailable(t *testing.T) {
+	t.Parallel()
+	workTree := cleanRepository(func(string) subprocess.SubprocessResult {
+		return subprocess.SubprocessResult{Stdout: "true\n/some/tree\n"}
+	})
+
+	t.Run("absent git", func(t *testing.T) {
+		t.Parallel()
+		host, spawned := fakeHost("", workTree)
+		host.Look = func(string) (string, error) { return "", exec.ErrNotFound }
+
+		state := host.StateAt(context.Background(), t.TempDir(), nil, testTimeout)
+
+		if state.Kind != gitexec.Unavailable || state.Err == nil || state.Err.Error() != gitexec.UnavailableMessage || len(*spawned) != 0 {
+			t.Errorf("StateAt = %+v after %d launches, want Unavailable with %q and none", state, len(*spawned), gitexec.UnavailableMessage)
+		}
+	})
+
+	t.Run("fenced git", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		host, spawned := fakeHost(filepath.Join(root, "git"), workTree)
+
+		state := host.StateAt(context.Background(), root, nil, testTimeout)
+
+		if state.Kind != gitexec.Unavailable || !errors.Is(state.Err, security.ErrExecFromWritablePath) || len(*spawned) != 0 {
+			t.Errorf("StateAt = %+v after %d launches, want Unavailable with the exec-fence refusal and none", state, len(*spawned))
+		}
+	})
+
+	t.Run("resolved git", func(t *testing.T) {
+		t.Parallel()
+		host, _ := fakeHost(outsideGit(t), workTree)
+
+		state := host.StateAt(context.Background(), t.TempDir(), nil, testTimeout)
+
+		want := gitexec.RepoState{Kind: gitexec.WorkTree, TopLevel: filepath.FromSlash("/some/tree")}
+		if state != want {
+			t.Errorf("StateAt = %+v, want %+v", state, want)
+		}
+	})
+}
+
+// TestRepoState_ZeroValueIsUnknown pins that a RepoState nobody filled in is no answer, and that
+// every kind names itself for test output.
+func TestRepoState_ZeroValueIsUnknown(t *testing.T) {
+	t.Parallel()
+	var zero gitexec.RepoState
+	if zero.Kind != gitexec.Unknown {
+		t.Errorf("zero RepoState kind = %v, want Unknown", zero.Kind)
+	}
+	names := map[gitexec.RepoStateKind]string{
+		gitexec.Unknown: "Unknown", gitexec.WorkTree: "WorkTree", gitexec.NoRepository: "NoRepository",
+		gitexec.Refused: "Refused", gitexec.Incomplete: "Incomplete", gitexec.Unavailable: "Unavailable",
+	}
+	for kind, want := range names {
+		if got := kind.String(); got != want {
+			t.Errorf("RepoStateKind(%d).String() = %q, want %q", int(kind), got, want)
 		}
 	}
 }
