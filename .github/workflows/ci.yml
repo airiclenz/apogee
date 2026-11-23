@@ -254,8 +254,8 @@ jobs:
         # link here, drop -race from this one job and say so in this comment — the C-20
         # race test then rests on its own iteration count alone.
         #
-        # The eight trees run as two steps; a third runs `internal/session`'s Windows tests
-        # and a fourth `internal/config`'s junction tests. `internal/platform` and
+        # The eight trees run as two steps; a third runs `internal/session`'s Windows tests,
+        # a fourth `internal/config`'s junction tests and a fifth `internal/security`'s. `internal/platform` and
         # `internal/console` are the ConPTY-heavy packages: each runs 50-iteration
         # cmd.exe/conhost loops, and run side by side they share the runner's 4 vCPU and
         # starve each other's pseudoconsoles. This
@@ -289,3 +289,14 @@ jobs:
         # matches. `!cancelled()` runs this step even when an earlier step failed.
         if: ${{ !cancelled() }}
         run: go test -race -count=1 -run 'Junction|ProjectWrite|ReadProjectLayer' ./internal/config/
+      - name: go test (race, security junction tests)
+        # `internal/security`'s path-safety tests under a real junction: a junction leaving the
+        # workspace reads as an escape, one staying inside resolves, a junctioned root contains
+        # its own files, and a root spelled through a subst drive contains a junctioned file
+        # (that last one fails here rather than skips when `subst` maps no drive). Every
+        # `//go:build windows` test in the package carries `Junction` in its name. Only those
+        # run, because the rest of `internal/security` has never been proven on Windows. A new
+        # Windows-tagged test here takes a name this filter matches. `!cancelled()` runs this
+        # step even when an earlier step failed.
+        if: ${{ !cancelled() }}
+        run: go test -race -count=1 -run 'Junction' ./internal/security/

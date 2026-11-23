@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/realpath"
 )
 
 // ----------------------------------------------------------------------------
@@ -69,32 +71,10 @@ func WorkspaceRelative(path, root string) string {
 	return rel
 }
 
-// EvalRealPath resolves p through symlinks. When p does not exist, it climbs to the
-// nearest existing ancestor, resolves that, and re-joins the remainder — so a path to a
-// file about to be created still resolves to a real, escape-checkable location even when
-// the root itself is reached through a symlink (e.g. macOS /tmp).
+// EvalRealPath returns p with every link resolved, never failing: a symlink and, on Windows, a
+// junction are both crossed, and a path that does not exist yet resolves through its nearest
+// existing ancestor. It is realpath.ResolveLenient under the name this package's callers know;
+// both sides of a containment comparison must come from it, so they share one spelling.
 func EvalRealPath(p string) string {
-	p = filepath.Clean(p)
-	if real, err := filepath.EvalSymlinks(p); err == nil {
-		return real
-	}
-
-	remaining := ""
-	current := p
-	for {
-		parent := filepath.Dir(current)
-		if parent == current {
-			break // reached the filesystem root without finding an existing ancestor
-		}
-		remaining = filepath.Join(filepath.Base(current), remaining)
-		if real, err := filepath.EvalSymlinks(parent); err == nil {
-			return filepath.Join(real, remaining)
-		}
-		current = parent
-	}
-
-	if abs, err := filepath.Abs(p); err == nil {
-		return abs
-	}
-	return p
+	return realpath.ResolveLenient(p)
 }

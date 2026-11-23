@@ -8,7 +8,7 @@
 // The guards, all reusable and tighten-only:
 //
 //   - Path-safety (ResolveInRoot / EvalRealPath, ErrPathEscape): the consolidated,
-//     symlink-aware, traversal-rejecting workspace boundary the file tools call —
+//     symlink- and junction-aware, traversal-rejecting workspace boundary the file tools call —
 //     one guard instead of a copy per tool. The actual read/write the write tools then
 //     perform goes through the TOCTOU-safe SafeReadFile (safeio.go) / Fence.WriteFile
 //     (fence.go), which operate via an os.Root pinned at the workspace root so the validated
@@ -71,7 +71,8 @@
 //     a domain.AuditEvent, and the event stream is the call / decision trail.
 //
 // Guards bundles the executor-facing always-on set (dangerous-action + breaker) the tool
-// executor threads around every call so all tools — and a sub-agent (D2) — inherit them. The package imports internal/domain, the standard library and
+// executor threads around every call so all tools — and a sub-agent (D2) — inherit them. The package imports internal/domain, internal/realpath (a leaf
+// that imports nothing internal; the one resolver EvalRealPath delegates to), the standard library and
 // exactly one third-party module — golang.org/x/net/idna, the IDNA mapping urlsafety.go's
 // NormalizeURL applies so the guard's verdict names the host net/http will actually
 // dial. ADR 0010's direction rule is untouched: this package is imported BY
@@ -134,11 +135,13 @@
 // refusal is never recorded, so it changes nothing.
 //
 // The filesystem boundary, split check-from-use because the gap between them is the race.
-// pathsafety.go is the CHECK — ResolveInRoot (symlink-aware, traversal-rejecting, validating a
-// not-yet-existing write target against its nearest existing ancestor), ErrPathEscape,
+// pathsafety.go is the CHECK — ResolveInRoot (symlink- and junction-aware, traversal-rejecting,
+// validating a not-yet-existing write target against its nearest existing ancestor), ErrPathEscape,
 // ErrRootInaccessible (the root itself deleted, renamed or not a directory — deliberately not an
 // escape, so the caller blames the root and not the argument), and the EvalRealPath /
 // WorkspaceRelative helpers every surface that prints a path goes through.
+// The resolution itself is not this package's: EvalRealPath is internal/realpath's ResolveLenient
+// under the name the callers know, the one resolver every real-path question goes to.
 // fence.go is the USE on the write side — security.Fence, the workspace Root and the typed
 // approved-escape Permit (domain.WriteEscapePermit) as one value, with the mutating verbs
 // WriteFile, Remove, CopyFile, CopyFileFrom and Rename as its methods, each performed through an

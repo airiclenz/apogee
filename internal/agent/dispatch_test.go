@@ -3631,6 +3631,30 @@ func TestProjectConfigControlPlaneGuardsALinkedRoot(t *testing.T) {
 	}
 }
 
+// TestProjectConfigControlPlaneSpellsTheFinalNameRoot pins the spelling projectRootPaths adds for
+// path safety's one-spelling rule: a root whose resolved form differs from the spelling it was
+// given by (a link here; a subst or mapped drive on Windows) also carries that resolved form, and
+// a root that is already its own resolved form carries none.
+func TestProjectConfigControlPlaneSpellsTheFinalNameRoot(t *testing.T) {
+	t.Parallel()
+	base := security.EvalRealPath(t.TempDir())
+	root := filepath.Join(base, "proj")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(base, "link")
+	if err := os.Symlink(root, linked); err != nil {
+		t.Skipf("no symbolic links here: %v", err)
+	}
+
+	if got := projectRootPaths(linked, "").FinalRoot; got != root {
+		t.Errorf("projectRootPaths(%q).FinalRoot = %q; want the resolved root %q", linked, got, root)
+	}
+	if got := projectRootPaths(root, "").FinalRoot; got != "" {
+		t.Errorf("projectRootPaths(%q).FinalRoot = %q; want none for a root that is its own resolved form", root, got)
+	}
+}
+
 // TestProjectConfigControlPlaneIsBuiltOnlyForAProjectConfig pins when the engine builds no refusal:
 // no Project root, a Project root whose `.apogee/` links to the apogee home, and one whose
 // `config.yaml` links to the global config file — the last two are the global file under another

@@ -62,7 +62,15 @@ internal/security/pathsafety.go — EvalRealPath (the contract ResolveLenient co
 **Acceptance:** `go build ./... && GOOS=windows go vet ./internal/realpath/ ./internal/platform/ && GOOS=darwin go vet ./internal/realpath/ && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/realpath/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'RealPath|Confine|DocMap' ./internal/platform/ && grep -A2 '^func RealPath' internal/platform/realpath.go | grep -q 'realpath.Resolve(p)'`
 **Commit:** `refactor(realpath): one leaf package resolves a path's real location`
 
-## 2. security.EvalRealPath crosses junctions
+## 2. security.EvalRealPath crosses junctions — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): the new field is named `security.ProjectRootPaths.FinalRoot`; `agent.projectRootPaths` now sets it before its empty-workspace return, so a root with no workspace still carries its final-name spelling.
+NOTES (2026-11-23): `internal/security/pathsafety_test.go` is in the item's Files but needed no edit — its symlink and missing-path tests pass unchanged, as the Tests line requires.
+NOTES (2026-11-23): beyond the item's test list, `internal/agent/dispatch_test.go` gains `TestProjectConfigControlPlaneSpellsTheFinalNameRoot` (any OS, through a symlink), the only test of the `agent.projectRootPaths` half; the file is not in the item's Files.
+NOTES (2026-11-23): consequential edit — docs/manual/building.md: made necessary by the new `test-windows` step (the manual states the job's `-run`-filtered sets: two → three, `internal/security` added)
+NOTES (2026-11-23): the consumers the Approach lists were read (`ResolveInRoot`, `WorkspaceRelative`, `execsafety.go`, `fence.go`, `writepermit.go`, `tools/workspace_scoped.go`, `tools/path_read.go`, `tui/workspacepath.go`, `tui/sidepanel.go`, `agent/dispatch.go`, `reactions/scope/scope.go`, `skills/load.go`, `cmd/apogee/toolchain_roots.go`): each compares two `EvalRealPath` results (or an `EvalRealPath` result against a root that is itself one), so none needed a change.
+NOTES (2026-11-23): the four Windows tests are compile-checked only (`GOOS=windows go vet`); they are unproven until the `test-windows` CI job runs. `makeJunctionOrSkip` skips when `mklink /J` fails, on CI too — only the `subst` failure is fatal under `GITHUB_ACTIONS`, as the item says.
+NOTES (2026-11-23): `capcom know add` warned that the tree lock is held by this plan's run; the write went through and `capcom check` exits 0.
 
 Depends on item 1.
 

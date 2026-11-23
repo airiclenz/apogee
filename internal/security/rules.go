@@ -294,7 +294,8 @@ const ProjectConfigRuleID = "write-project-config"
 // The pattern is built from the absolute root rather than spelled once, because RE2 has no
 // lookbehind and a static `\.apogee/config\.yaml` would capture `~/.apogee` too. It matches a
 // whole token (whitespace on both sides, an optional trailing `/`) spelled from the absolute root
-// — resolved, and through the workspace's own link or junction when paths.LinkedRoot names it —
+// — resolved, through the workspace's own link or junction when paths.LinkedRoot names it, and in
+// the final-name spelling path safety resolves to when paths.FinalRoot names it —
 // or, relative to the workspace, bare or `./`-led when the root is the workspace and as the `../`
 // chain that climbs to it when the root is above (the Project root is the workspace or one of its
 // ancestors), that climb counted from the workspace as written and as resolved — so a nested
@@ -333,6 +334,10 @@ type ProjectRootPaths struct {
 	// workspace's spelling climbs to — when that differs from Root and resolves to it; empty
 	// otherwise.
 	LinkedRoot string
+	// FinalRoot is Root in the one spelling path safety resolves every path to
+	// (realpath.ResolveLenient: on Windows the volume's final name, so the underlying location of
+	// a subst or mapped drive), when that differs from Root; empty otherwise.
+	FinalRoot string
 	// Workspace is the workspace as the session spells it; empty is no relative spelling.
 	Workspace string
 	// RealWorkspace is Workspace symlink-resolved, when that differs from Workspace; empty
@@ -354,7 +359,7 @@ func projectRootSpellings(paths ProjectRootPaths) []string {
 			}
 		}
 	}
-	for _, root := range []string{paths.Root, paths.LinkedRoot} {
+	for _, root := range []string{paths.Root, paths.LinkedRoot, paths.FinalRoot} {
 		if root != "" {
 			add(regexp.QuoteMeta(strings.TrimRight(normalize(root), "/")) + "/")
 		}

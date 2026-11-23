@@ -805,6 +805,47 @@ func TestProjectConfigControlPlaneSpellsALinkedRoot(t *testing.T) {
 	}
 }
 
+// TestProjectConfigControlPlaneRefusesTheFinalNameRoot pins the spelling path safety resolves to
+// (ADR 0096 §5): when the root's final-name spelling differs from Root — a subst or mapped drive
+// on Windows — a write that names the config through it is refused like one through Root, and a
+// sibling folder that merely shares the final name's prefix is not.
+func TestProjectConfigControlPlaneRefusesTheFinalNameRoot(t *testing.T) {
+	t.Parallel()
+	guard := projectConfigGuard(t, ProjectRootPaths{
+		Root:      "/subst/proj",
+		FinalRoot: "/volume/users/u/proj",
+		Workspace: "/subst/proj",
+	})
+	withoutFinal := projectConfigGuard(t, ProjectRootPaths{Root: "/subst/proj", Workspace: "/subst/proj"})
+	fileTool := stubTool{name: "write_file", payloadKeys: []string{"content"}}
+
+	cases := []struct {
+		name     string
+		guard    *DangerousActionGuard
+		path     string
+		wantTier Tier
+		wantRule string
+	}{
+		{"the root as given", guard, "/subst/proj/.apogee/config.yaml", TierHardRefuse, ProjectConfigRuleID},
+		{"the final-name root", guard, "/volume/users/u/proj/.apogee/config.yaml", TierHardRefuse, ProjectConfigRuleID},
+		{"the final-name root's .apogee folder", guard, "/volume/users/u/proj/.apogee", TierHardRefuse, ProjectConfigRuleID},
+		{"a sibling of the final-name root", guard, "/volume/users/u/proj-old/.apogee/config.yaml", TierNone, ""},
+		{"no final-name spelling, no refusal through it", withoutFinal, "/volume/users/u/proj/.apogee/config.yaml", TierNone, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := tc.guard.Inspect(writeCall(tc.path), fileTool, nil)
+
+			if d.Tier != tc.wantTier || d.RuleID != tc.wantRule {
+				t.Errorf("Inspect(%q) = tier %d rule %q; want tier %d rule %q", tc.path, d.Tier, d.RuleID, tc.wantTier, tc.wantRule)
+			}
+		})
+	}
+}
+
 // TestProjectConfigControlPlaneNeedsAProjectRoot pins the empty-root half: no Project root, no rule.
 func TestProjectConfigControlPlaneNeedsAProjectRoot(t *testing.T) {
 	t.Parallel()
