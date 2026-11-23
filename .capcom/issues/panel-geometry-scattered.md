@@ -1,10 +1,12 @@
 ---
 title: "The side panel's frame is one computed value (architecture review 2026-11-10 #1)"
-status: open
+status: done
 type: task
 priority: 3
 labels: [tui]
 created: 2026-11-10T19:36:32Z
+closed: 2026-11-23T18:02:39Z
+reason: "Resolved by items 7-9 of tui-panel-fold-cleanup-plan (2026-11-23 - 05), archived at 3ea1e3ad: one pure panel geometry, one panel frame per View, one panel hit-test"
 ---
 
 Found by docs/reviews/architecture-review-2026-11-10.html, verified 2026-11-10 at a5c4f2db. Verified PARTLY: the structural claims hold, but the churn is overstated — 41 commits since 11-02, 30 of which touch only one of sidepanel.go, panelstops.go and blockcursor.go, not 47 co-edits; the "15 methods" are 13 Model methods plus 2 free functions.

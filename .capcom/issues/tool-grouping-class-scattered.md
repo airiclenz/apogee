@@ -1,10 +1,12 @@
 ---
 title: "A tool's grouping class is one registry column (architecture review 2026-11-21 #7)"
-status: open
+status: done
 type: task
 priority: 3
 labels: [tui]
 created: 2026-11-21T12:27:13Z
+closed: 2026-11-23T18:02:38Z
+reason: "Resolved by items 2-3 of tui-panel-fold-cleanup-plan (2026-11-23 - 05), archived at 3ea1e3ad: each registry row declares its grouping class and own groups key on it, not tool names"
 ---
 
 Found by docs/reviews/architecture-review-2026-11-21.html, verified 2026-11-21 at 171d210f.

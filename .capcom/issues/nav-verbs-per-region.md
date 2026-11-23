@@ -1,10 +1,12 @@
 ---
 title: "Navigation mode over two region adapters (architecture review 2026-11-10 #6)"
-status: open
+status: done
 type: task
 priority: 3
 labels: [tui]
 created: 2026-11-10T19:37:32Z
+closed: 2026-11-23T18:02:39Z
+reason: "Resolved by items 10-11 of tui-panel-fold-cleanup-plan (2026-11-23 - 05), archived at 3ea1e3ad: navigation mode over two region adapters, the run view asks the resolved navigation"
 ---
 
 Found by docs/reviews/architecture-review-2026-11-10.html, verified 2026-11-10 at a5c4f2db. Verified VALID: every navigation verb is written twice, once per region (internal/tui/blockcursor.go: `moveBlockCursor`/`movePanelCursor`, `toggleAtBlockCursor`/`activatePanelCursor`, `cursorRunHead`/`panelCursorRunHead`, `seatBlockCursor`/`reseatPanelCursor`). The panel cursor holds a stale identity until `reseatPanelCursor` runs, so a caller asking before `blockCursorKey` must reseat first (internal/tui/runview.go:467, :472). About 20 region branches (the review said 23).

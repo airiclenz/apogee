@@ -1,10 +1,12 @@
 ---
 title: "Reader fold gestures live in the fold module (architecture review 2026-11-21 #6)"
-status: open
+status: done
 type: task
 priority: 3
 labels: [tui]
 created: 2026-11-21T12:27:13Z
+closed: 2026-11-23T18:02:38Z
+reason: "Resolved by items 4-6 of tui-panel-fold-cleanup-plan (2026-11-23 - 05), archived at 3ea1e3ad: gestures go through one fold act (applyFoldAct), tests assert observable fold, the rule lives in blockfold.go"
 ---
 
 Found by docs/reviews/architecture-review-2026-11-21.html, verified 2026-11-21 at 171d210f.
