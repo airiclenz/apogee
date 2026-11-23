@@ -73,3 +73,4 @@ A review-and-refactor task, not a feature change:
 ## Log
 
 - 2026-11-22 Airic Lenz: Filed from owner request, 2026-11-22: review and improve the TUI for performance and responsiveness as a refactoring task.
+- 2026-11-23 Airic Lenz: TUI performance audit 2026-11-23 (docs/reviews/tui-perf-audit-2026-11-23.md) filed 13 child issues: footer-spend-walks-transcript, at-file-walk-blocks, thinking-pane-rebuilds-rows, panel-drag-cold-repaints, panel-sections-every-frame, delegation-key-copies-span, reserve-overrun-recut, viewport-remeasures-lines, keystroke-repaints-transcript, delta-repaints-transcript, open-panes-heap-copies, resize-cold-repaint-cost, view-recompose-floor.
