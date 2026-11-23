@@ -21,16 +21,6 @@ import (
 	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
-// engineGitHost returns the real OS gitexec.Host with its lookup answering path — the host a test
-// hands the ENGINE's own git (RunGitQuery), as fakeLookHost is the one it hands a git TOOL. It
-// fakes the LOOK alone — the fence security.ResolveProgram applies to what the look answers is
-// the real one, which is what makes the planted-git refusal a genuine assertion.
-func engineGitHost(path string) gitexec.Host {
-	host := gitexec.OS()
-	host.Look = fakeLook(true, path)
-	return host
-}
-
 // gitRepo creates an initialized git repository in a fresh temp dir with a committed
 // file on a known branch, skipping the test when git is unavailable (the tool's
 // graceful contract — the live behaviour is only assertable where git exists).
@@ -2125,98 +2115,6 @@ func TestGitCommit_PassesNoGpgSign(t *testing.T) {
 	}
 	if !strings.Contains(string(logged), "commit --no-verify --no-gpg-sign -m a commit") {
 		t.Errorf("argv = %q, want --no-gpg-sign beside --no-verify", string(logged))
-	}
-}
-
-// ----------------------------------------------------------------------------
-// RunGitQuery — the engine's own read-side git
-// ----------------------------------------------------------------------------
-
-// TestRunGitQuery_ReturnsStdoutAloneAndAppliesHardening pins the funnel entry the tracked-file
-// mutation floor takes: the caller gets the child's STDOUT as data — the diagnostics it printed
-// stay out of the payload — and the invocation carries the same hardening every git tool's does.
-// A fake git outside the workspace records what it was launched with, so the assertion is about
-// the real argv and environment rather than a proxy for them.
-func TestRunGitQuery_ReturnsStdoutAloneAndAppliesHardening(t *testing.T) {
-	posixScriptHost(t)
-
-	fakeDir := t.TempDir()
-	record := filepath.Join(fakeDir, "record")
-	fakeGit := filepath.Join(fakeDir, "fake-git")
-	script := "#!/bin/sh\n" +
-		"{ echo \"argv: $*\"; echo \"nosystem: ${GIT_CONFIG_NOSYSTEM-unset}\"; echo \"apikey: ${APOGEE_API_KEY-unset}\"; } >> \"" + record + "\"\n" +
-		"echo diagnostic >&2\n" +
-		"echo PAYLOAD\n"
-	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake git: %v", err)
-	}
-	host := engineGitHost(fakeGit)
-	t.Setenv("APOGEE_API_KEY", "shhh-secret")
-
-	out, err := RunGitQuery(context.Background(), host, t.TempDir(), gitTimeout, "status", "--porcelain")
-	if err != nil {
-		t.Fatalf("RunGitQuery err = %v", err)
-	}
-
-	if strings.TrimSpace(out) != "PAYLOAD" {
-		t.Errorf("stdout = %q, want the child's stdout alone (no stderr diagnostic)", out)
-	}
-	logged, err := os.ReadFile(record)
-	if err != nil {
-		t.Fatalf("read record: %v", err)
-	}
-	got := string(logged)
-	if !strings.Contains(got, "argv: -c core.hooksPath= -c core.fsmonitor=false status --porcelain") {
-		t.Errorf("argv = %q, want the hardening option ahead of the subcommand", got)
-	}
-	if !strings.Contains(got, "nosystem: 1") {
-		t.Errorf("env = %q, want GIT_CONFIG_NOSYSTEM=1", got)
-	}
-	if strings.Contains(got, "shhh-secret") || !strings.Contains(got, "apikey: unset") {
-		t.Errorf("env = %q, want the allowlist to have dropped APOGEE_API_KEY", got)
-	}
-}
-
-// TestRunGitQuery_RefusesAPlantedGit pins the exec fence on the engine's own git: a git that
-// resolves INSIDE the workspace is bytes the model may have written, and the funnel refuses to
-// run it — with the fence's sentinel intact, so a caller can tell a refusal from an absence.
-func TestRunGitQuery_RefusesAPlantedGit(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	planted := plantExecutable(t, root, "node_modules/.bin/git")
-	host := engineGitHost(planted)
-
-	_, err := RunGitQuery(context.Background(), host, root, gitTimeout, "status", "--porcelain")
-
-	if !errors.Is(err, security.ErrExecFromWritablePath) {
-		t.Fatalf("err = %v, want the exec-fence refusal", err)
-	}
-	if !strings.Contains(err.Error(), "node_modules") {
-		t.Errorf("err = %q, want the refusal to name the resolved path", err)
-	}
-}
-
-// TestRunGitQuery_NonZeroExitIsAnError pins the deliberate flattening: the engine's git has one
-// caller, which treats every failure as "skip this check", so a clean non-zero exit is an error
-// here rather than the captured outcome a TOOL would show the model.
-func TestRunGitQuery_NonZeroExitIsAnError(t *testing.T) {
-	t.Parallel()
-	posixScriptHost(t)
-
-	fakeDir := t.TempDir()
-	fakeGit := filepath.Join(fakeDir, "fake-git")
-	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\necho 'fatal: not a git repository' >&2\nexit 128\n"), 0o755); err != nil {
-		t.Fatalf("write fake git: %v", err)
-	}
-	host := engineGitHost(fakeGit)
-
-	_, err := RunGitQuery(context.Background(), host, t.TempDir(), gitTimeout, "rev-parse", "--is-inside-work-tree")
-
-	if err == nil {
-		t.Fatal("RunGitQuery err = nil, want a non-zero exit reported as an error")
-	}
-	if !strings.Contains(err.Error(), "exit 128") {
-		t.Errorf("err = %q, want the exit status named", err)
 	}
 }
 

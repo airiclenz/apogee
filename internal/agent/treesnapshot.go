@@ -19,7 +19,6 @@ import (
 	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/subprocess"
-	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // The tracked-file mutation floor: git-status snapshots taken around every subprocess
@@ -48,7 +47,7 @@ import (
 // files are read, through security.SafeOpen (non-blocking open, no escape from the repository);
 // a symlink's identity is its target string, so a link to /dev/zero is never opened. Since
 // 2026-08-26 the floor's git goes through the hardened git funnel (gitexec.Host, the runner
-// tools.RunGitQuery wraps) rather than a bare exec, so its own git is fenced, hardened,
+// the git tools spawn through) rather than a bare exec, so its own git is fenced, hardened,
 // environment-scrubbed and torn down exactly as a git TOOL's git is.
 
 // treeSnapshotTimeout bounds each git invocation the floor makes, and each whole snapshot —
@@ -113,6 +112,7 @@ const (
 	treeProbeUnknown  treeProbeState = iota // no run has answered yet; the next call probes
 	treeProbeWorkTree                       // the root is a git work tree; the floor applies
 	treeProbeNone                           // not a work tree, no usable git, or too many unanswered runs
+	treeProbeRefused                        // the repository's command config is refused; off as treeProbeNone is
 )
 
 // treeSnapshot is one pre- or post-call picture of the work tree: every path the status listing
@@ -150,8 +150,8 @@ func newTreeSnapshotter(workspaceRoot string, host gitexec.Host) *treeSnapshotte
 // active reports whether the floor applies at all: a workspace root is set and it is a
 // git work tree. A definitive answer latches for the Agent's life — a repo created or deleted
 // mid-session is picked up at the next Agent, not the next call: a work tree, or "no" for a git
-// that exited non-zero (not a work tree), is absent, is fenced (a planted git) or refused the
-// repository's command config. A run that gave no answer — it timed out, wedged its drain, was
+// that exited non-zero (not a work tree), is absent or is fenced (a planted git), and a "no" of
+// its own kind (treeProbeRefused) for a git that refused the repository's command config. A run that gave no answer — it timed out, wedged its drain, was
 // cancelled with the call, or its command-config check did not complete — latches nothing, so the
 // next subprocess call probes again, until treeProbeTransientLimit such runs in a row latch "no".
 // The same probe learns the repository's top directory, since status paths are relative to it
@@ -169,13 +169,14 @@ func (t *treeSnapshotter) active(ctx context.Context) bool {
 	return t.probe == treeProbeWorkTree
 }
 
-// runProbe runs the work-tree probe once under treeProbeTimeout and records its outcome: a latched
-// answer, or one more unanswered run — a failure matching gitexec.ErrIncomplete, or any failure
-// once the run's ctx is done (the call's cancelled Turn, or the probe's own deadline). Every other
-// failure — git absent, a fenced or refused git, not a repo — is a definitive "no", never a failed
-// tool call. The caller holds probeMu.
+// runProbe runs the work-tree probe once under treeProbeTimeout and records its outcome from
+// gitexec's RepoState: a latched answer, or one more unanswered run — an Incomplete state, or an
+// Unknown one once the run's ctx is done (the call's cancelled Turn, or the probe's own deadline).
+// A refused repository latches treeProbeRefused; everything else that is not a work tree — git
+// absent or fenced, not a repo, a probe that could not be launched — latches treeProbeNone. None
+// of them is ever a failed tool call. The caller holds probeMu.
 //
-// It runs through the tools package's git funnel (tools.RunGitQuery), not a bare exec: the
+// It asks the gitexec.Host (StateAt), the hardened git funnel, not a bare exec: the
 // floor fires around EVERY subprocess tool call in EVERY mode, so its own git is the most
 // frequently spawned program apogee runs and must carry the same hardening as a git tool's —
 // the exec fence on the resolved binary, core.hooksPath=, GIT_CONFIG_NOSYSTEM, the allowlisted
@@ -191,30 +192,33 @@ func (t *treeSnapshotter) active(ctx context.Context) bool {
 func (t *treeSnapshotter) runProbe(ctx context.Context) {
 	runCtx, cancel := context.WithTimeout(ctx, treeProbeTimeout)
 	defer cancel()
-	out, err := tools.RunGitQuery(runCtx, t.host, t.root, treeProbeTimeout,
-		"rev-parse", "--is-inside-work-tree", "--show-toplevel")
-	if err != nil {
-		if errors.Is(err, gitexec.ErrIncomplete) || runCtx.Err() != nil {
-			t.transient++
-			if t.transient >= treeProbeTransientLimit {
-				t.probe = treeProbeNone
-			}
+	state := t.host.StateAt(runCtx, t.root, nil, treeProbeTimeout)
+	switch state.Kind {
+	case gitexec.WorkTree:
+		t.toplevel = state.TopLevel
+		t.probe = treeProbeWorkTree
+	case gitexec.Refused:
+		t.probe = treeProbeRefused
+	case gitexec.Incomplete:
+		t.noteUnansweredProbe()
+	case gitexec.Unknown:
+		if runCtx.Err() != nil {
+			t.noteUnansweredProbe()
 			return
 		}
 		t.probe = treeProbeNone
-		return
+	default:
+		t.probe = treeProbeNone
 	}
-	t.probe = treeProbeNone
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) != 2 || strings.TrimSpace(lines[0]) != "true" {
-		return
+}
+
+// noteUnansweredProbe counts one probe run that gave no answer and latches the floor off at
+// treeProbeTransientLimit of them in a row. The caller holds probeMu.
+func (t *treeSnapshotter) noteUnansweredProbe() {
+	t.transient++
+	if t.transient >= treeProbeTransientLimit {
+		t.probe = treeProbeNone
 	}
-	toplevel := strings.TrimSuffix(lines[1], "\r")
-	if toplevel == "" {
-		return
-	}
-	t.toplevel = filepath.FromSlash(toplevel)
-	t.probe = treeProbeWorkTree
 }
 
 // beforeCall takes the pre-call snapshot. ok=false means the floor is off for this call —

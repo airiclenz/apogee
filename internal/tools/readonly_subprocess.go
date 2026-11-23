@@ -22,7 +22,7 @@ import "github.com/airiclenz/apogee/internal/domain"
 // instead, and refuses only a content merge, which none of these reads runs), the argv[0] fence, --no-textconv and
 // --no-ext-diff on every diff-producing path (gitexec.DiffHardeningArgs), and the two-part ref
 // guard (validRef plus looksLikeOption). The engine already runs that same hardened
-// read-side git unattended in every mode for its tree-snapshot floor (tools.RunGitQuery,
+// read-side git unattended in every mode for its tree-snapshot floor (gitexec.Host.StateAt and RunTo,
 // internal/agent/treesnapshot.go), so refusing the model the identical read in Plan was a
 // rule outliving its reason.
 //

@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -75,37 +74,6 @@ func runGit(ctx context.Context, h execHost, gitPath, root string, timeout time.
 // runGit.
 func runGitUnchecked(ctx context.Context, h execHost, gitPath, root string, timeout time.Duration, gitArgs ...string) (subprocess.SubprocessResult, error) {
 	return h.git().CaptureUnchecked(ctx, gitPath, root, nil, timeout, gitArgs...)
-}
-
-// RunGitQuery runs one read-side git command in root for the ENGINE itself and returns its
-// standard output alone. It is the funnel entry for apogee's own bookkeeping git — today the
-// tracked-file mutation floor (internal/agent/treesnapshot.go), which snapshots the tree around
-// every subprocess tool call — so that git gets everything a git TOOL's git gets: the exec fence
-// on the resolved binary, the hardening options, GIT_CONFIG_NOSYSTEM, the allowlisted
-// workspace-scoped environment (no APOGEE_API_KEY, no inherited config redirection), the
-// repo-local command-config refusal, and the §2.4 process-tree teardown.
-//
-// It is h.Run under this package's name: the engine's git resolves and runs through the
-// gitexec.Host its caller passes — gitexec.OS() in production — while the git TOOLS resolve
-// through the execHost they were built with. A test that plants a git for the tools hands it to
-// their host; one that plants it for the engine passes a fake gitexec.Host here. The empty-args
-// check stays here so the sentence is this funnel's own.
-//
-// Every failure is an error and every one means "no trustworthy answer": git absent, a fenced
-// binary, a refused repository, a non-zero exit, a timeout, a wedged drain, a stdout past the
-// output cap and a cancelled ctx alike, which is precisely what the caller acts on — the floor's
-// contract is that any failure skips the check silently for that call (ADR 0056 decision 4). The
-// errors are h.Run's own, so a caller that must tell them apart can: a refused repository is a
-// [gitexec.RefusedError] and an incomplete answer matches [gitexec.ErrIncomplete].
-//
-// It is NOT for tool results. A tool shows the model what git printed, exit code and stderr
-// included, so the git tools keep runGit's captured outcome; this returns stdout as DATA, with
-// the diagnostics left out of the payload.
-func RunGitQuery(ctx context.Context, h gitexec.Host, root string, timeout time.Duration, args ...string) (string, error) {
-	if len(args) == 0 {
-		return "", errors.New("apogee: RunGitQuery: no git subcommand")
-	}
-	return h.Run(ctx, root, nil, timeout, args...)
 }
 
 // gitResultText renders a captured git outcome as text the model reads: the

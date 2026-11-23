@@ -95,7 +95,12 @@ Depends on item 2.
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'GitStatus|E2EGitActionsRefusedRepository' ./cmd/apogee/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestGitStatus' ./internal/tui/`
 **Commit:** `refactor(gitstatus): the status host reads gitexec's repository state`
 
-## 4. The tree snapshot reads the repository state
+## 4. The tree snapshot reads the repository state — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): `TestTreeSnapshot_IncompleteConfigCheckIsRetried` and `treeProbeCommand` needed no edit: `StateAt` runs the same `rev-parse --is-inside-work-tree --show-toplevel` argv the probe ran before.
+NOTES (2026-11-23): the test helper `engineGitHost` (internal/tools/git_test.go) is deleted with the three `TestRunGitQuery_*` tests, its only callers; the `errors` import in internal/tools/git.go and the `tools` import in internal/agent/treesnapshot.go go with `RunGitQuery`.
+NOTES (2026-11-23): outcomes that were transient at the base only because the run's ctx had ended while the failure was a refusal, a `Resolve` failure or a non-zero exit now latch (`Refused` -> `treeProbeRefused`, `Unavailable`/`NoRepository` -> `treeProbeNone`), as the item's kind mapping states; only `Incomplete`, and `Unknown` with the run ctx ended, stay transient.
+NOTES (2026-11-23): `docs/design/confinement-execution-contract.md` still names `tools.RunGitQuery` twice (lines 677, 737), both inside dated amendment blockquotes; left as point-in-time records, and outside the item's `--include='*.go' internal` grep.
 
 Depends on item 2.
 

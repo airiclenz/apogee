@@ -254,9 +254,9 @@
 // whole git family: git_branch, git_commit, git_diff_range, git_status, git_log and git_show, with the
 // ref guards they share and gitRead, the one read call the four
 // RO-subproc tools spawn through (a gitRef, minted by the guard alone, is the only revision it
-// takes) — plus RunGitQuery, the package's one exported non-tool entry, which lends the same
-// hardened funnel to the ENGINE's own read-side git (the tracked-file mutation floor,
-// internal/agent/treesnapshot.go) so no bookkeeping git of apogee's has to spawn outside it.
+// takes). The ENGINE's own read-side git (the tracked-file mutation floor,
+// internal/agent/treesnapshot.go) does not come through this package: it asks the same
+// gitexec.Host directly, so no bookkeeping git of apogee's spawns outside the funnel either.
 // The funnel itself is not here: the exec fence on git, the
 // allowlisted environment, the per-invocation hardening and the repo-local command-config
 // refusal (which neutralises a repo-local merge driver rather than refusing it) live in

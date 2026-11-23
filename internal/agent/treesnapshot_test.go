@@ -928,6 +928,39 @@ func TestTreeSnapshot_CommandConfigRefusalLatchesOff(t *testing.T) {
 	if got := countCommand(log, treeProbeCommand); got != 0 {
 		t.Errorf("the work-tree probe ran %d times past the refusal, want 0", got)
 	}
+	if got := probeOutcome(a.tree); got != treeProbeRefused {
+		t.Errorf("probe outcome = %d, want treeProbeRefused (%d): a refusal is its own outcome", got, treeProbeRefused)
+	}
+}
+
+// TestTreeSnapshot_NoRepositoryIsNotRefused pins the line between the two latched "no" answers: a
+// root git says is no work tree records treeProbeNone, never the refusal's own outcome.
+func TestTreeSnapshot_NoRepositoryIsNotRefused(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	host, _ := scriptedGit(filepath.Join(t.TempDir(), "git"), func(command string) subprocess.SubprocessResult {
+		if command == treeProbeCommand {
+			return subprocess.SubprocessResult{ExitCode: 128, CombinedOutput: "fatal: not a git repository"}
+		}
+		return subprocess.SubprocessResult{}
+	})
+	a := probeFloorAgent(t, root, host)
+	fake := mutatingSubprocessTool{subprocess: true, result: domain.ToolResult{Content: "ok"}}
+
+	if result := executeFake(t, a, fake); result.Content != "ok" {
+		t.Fatalf("call = %q, want the bare result where there is no repository", result.Content)
+	}
+
+	if got := probeOutcome(a.tree); got != treeProbeNone {
+		t.Errorf("probe outcome = %d, want treeProbeNone (%d): no repository is not a refusal", got, treeProbeNone)
+	}
+}
+
+// probeOutcome reads the work-tree probe's recorded answer under the snapshotter's own lock.
+func probeOutcome(t *treeSnapshotter) treeProbeState {
+	t.probeMu.Lock()
+	defer t.probeMu.Unlock()
+	return t.probe
 }
 
 // TestTreeSnapshot_CancelledProbeIsRetried pins the cancelled-Turn case: a probe whose call's ctx
