@@ -175,7 +175,11 @@ cmd/apogee/wire_update.go — readInstallInputs; internal/config/configsplice.go
 **Acceptance:** `go build ./... && GOOS=windows go vet ./internal/security/ ./internal/config/ && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/realpath/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'AllowMatch|Allow' ./internal/security/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'ExecPin|ExecLayer' ./internal/config/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'UnixSocket' ./internal/platform/ && grep -q 'filepath.EvalSymlinks(exePath)' cmd/apogee/wire_update.go`
 **Commit:** `refactor(realpath): the last raw EvalSymlinks callers use the leaf`
 
-## 7. One junction helper for the Windows tests
+## 7. One junction helper for the Windows tests — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): security's private `makeJunctionOrSkip` (pathsafety_windows_test.go, used by allowmatch_windows_test.go) is a sixth private copy the item's list did not name; it is deleted too and its six callers use `junctiontest.MakeOrSkip` — the Acceptance grep requires it.
+NOTES (2026-11-23): `MakeOrSkip` keeps `Make`'s Lstat reparse-point assertion ("same" in the item text): a failed mklink skips, but a junction that was made and does not register as a reparse point now fails, where config's and security's old skip helpers asserted nothing. The skip message is one wording for all callers ("junctions are not available here: mklink /J ...").
+NOTES (2026-11-23): `junctiontest.go` carries no build constraint, so the package exists on every platform and `go build ./...` / `go vet` see it here; its helpers only work on Windows. No Windows test ran locally — compile-checked with `GOOS=windows go vet`, proven on the `test-windows` CI job.
 
 Depends on item 1.
 

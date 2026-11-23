@@ -3,15 +3,13 @@
 package projectroot_test
 
 import (
-	"io/fs"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/projectroot"
 	"github.com/airiclenz/apogee/internal/realpath"
+	"github.com/airiclenz/apogee/internal/realpath/junctiontest"
 )
 
 // longTempDir is a fresh temporary folder in its long-name spelling. CI's t.TempDir is the 8.3
@@ -26,22 +24,6 @@ func longTempDir(t *testing.T) string {
 	return dir
 }
 
-// makeJunction creates an NTFS junction at link pointing at target. A junction needs no privilege,
-// unlike a symbolic link, so the test never skips.
-func makeJunction(t *testing.T, link, target string) {
-	t.Helper()
-	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
-		t.Fatalf("mklink /J %q %q: %v (%s)", link, target, err, out)
-	}
-	info, err := os.Lstat(link)
-	if err != nil {
-		t.Fatalf("lstat the junction %q: %v", link, err)
-	}
-	if info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) == 0 {
-		t.Fatalf("lstat %q mode = %v; the junction did not register as a reparse point", link, info.Mode())
-	}
-}
-
 // junction-project-root: a workspace reached through a junction resolves like one reached through
 // a symlink — the walk climbs from the junction target to the `.apogee/` above it, where it used to
 // fail to resolve the workspace and silently drop the project layer.
@@ -52,7 +34,7 @@ func TestResolveThroughJunction(t *testing.T) {
 	repo := filepath.Join(base, "repo")
 	mkdirs(t, repo, ".git", ".apogee", "pkg/sub")
 	link := filepath.Join(base, "link")
-	makeJunction(t, link, repo)
+	junctiontest.Make(t, link, repo)
 
 	tests := []struct {
 		name      string

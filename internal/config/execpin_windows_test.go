@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/realpath/junctiontest"
 )
 
 // An exec pin's file named through a junction inside the Project root that points outside it is
@@ -15,7 +17,7 @@ func TestExecPinJunctionLeavingTheRootPinsNothing(t *testing.T) {
 	outside := longTempDir(t)
 	writeProjectFile(t, root, "scripts/fmt.sh", "fmt\n")
 	writeProjectFile(t, outside, "evil.sh", "evil\n")
-	junctionOrSkip(t, filepath.Join(root, "j"), outside)
+	junctiontest.MakeOrSkip(t, filepath.Join(root, "j"), outside)
 
 	entry := reactionPin(t, root, "id: fmt\nrun: [sh, scripts/fmt.sh, j/evil.sh]\n")
 
@@ -29,7 +31,7 @@ func TestExecPinJunctionLeavingTheRootPinsNothing(t *testing.T) {
 func TestExecPinJunctionInsideTheRootKeepsPinning(t *testing.T) {
 	root := longTempDir(t)
 	writeProjectFile(t, root, "real/fmt.sh", "fmt\n")
-	junctionOrSkip(t, filepath.Join(root, "j"), filepath.Join(root, "real"))
+	junctiontest.MakeOrSkip(t, filepath.Join(root, "j"), filepath.Join(root, "real"))
 
 	entry := reactionPin(t, root, "id: fmt\nrun: [sh, j/fmt.sh]\n")
 

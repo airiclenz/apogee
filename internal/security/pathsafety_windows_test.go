@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/realpath"
+	"github.com/airiclenz/apogee/internal/realpath/junctiontest"
 )
 
 // TestJunctionEscapeIsRefused is the defect the one resolver closes: a junction inside the root
@@ -22,7 +23,7 @@ func TestJunctionEscapeIsRefused(t *testing.T) {
 	root := finalTempDir(t)
 	outside := finalTempDir(t)
 	writeTestFile(t, filepath.Join(outside, "file"))
-	makeJunctionOrSkip(t, filepath.Join(root, "j"), outside)
+	junctiontest.MakeOrSkip(t, filepath.Join(root, "j"), outside)
 
 	for _, input := range []string{`j\file`, `j\missing\leaf`, filepath.Join(root, "j", "file")} {
 		got, err := ResolveInRoot(input, root)
@@ -42,7 +43,7 @@ func TestJunctionInsideRootResolves(t *testing.T) {
 	realDir := filepath.Join(root, "real")
 	mkdirTest(t, realDir)
 	writeTestFile(t, filepath.Join(realDir, "file"))
-	makeJunctionOrSkip(t, filepath.Join(root, "j"), realDir)
+	junctiontest.MakeOrSkip(t, filepath.Join(root, "j"), realDir)
 
 	got, err := ResolveInRoot(`j\file`, root)
 
@@ -64,7 +65,7 @@ func TestJunctionedRootContainsItsFiles(t *testing.T) {
 	mkdirTest(t, target)
 	writeTestFile(t, filepath.Join(target, "file"))
 	root := filepath.Join(base, "root")
-	makeJunctionOrSkip(t, root, target)
+	junctiontest.MakeOrSkip(t, root, target)
 
 	got, err := ResolveInRoot("file", root)
 
@@ -89,7 +90,7 @@ func TestSubstSpelledRootContainsAJunctionedFile(t *testing.T) {
 	realDir := filepath.Join(dir, "real")
 	mkdirTest(t, realDir)
 	writeTestFile(t, filepath.Join(realDir, "file"))
-	makeJunctionOrSkip(t, filepath.Join(dir, "j"), realDir)
+	junctiontest.MakeOrSkip(t, filepath.Join(dir, "j"), realDir)
 	root := substDriveOrSkip(t, dir)
 
 	got, err := ResolveInRoot(`j\file`, root)
@@ -127,15 +128,6 @@ func writeTestFile(t *testing.T, path string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
 		t.Fatalf("write %q: %v", path, err)
-	}
-}
-
-// makeJunctionOrSkip creates a directory junction at link pointing to target, skipping the test
-// where the box cannot make one. A junction needs no administrator rights and no developer mode.
-func makeJunctionOrSkip(t *testing.T, link, target string) {
-	t.Helper()
-	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
-		t.Skipf("mklink /J %q %q unavailable: %v (%s)", link, target, err, out)
 	}
 }
 

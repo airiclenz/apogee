@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/realpath/junctiontest"
 )
 
 // junctionedGlobalHome makes a global config home under dir/real-home holding body as its
@@ -20,7 +22,7 @@ func junctionedGlobalHome(t *testing.T, dir, body string) (globalPath, realHome 
 	}
 	writeLayerFile(t, filepath.Join(realHome, "config.yaml"), body)
 	home := filepath.Join(dir, "home")
-	junctionOrSkip(t, home, realHome)
+	junctiontest.MakeOrSkip(t, home, realHome)
 	return filepath.Join(home, "config.yaml"), realHome
 }
 
@@ -69,7 +71,7 @@ func TestSameConfigFileSeesAJunctionedGlobalHome(t *testing.T) {
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	junctionOrSkip(t, filepath.Join(root, projectConfigDirName), realHome)
+	junctiontest.MakeOrSkip(t, filepath.Join(root, projectConfigDirName), realHome)
 
 	resolved, err := projectRealPath(projectFilePath(root))
 	if err != nil {

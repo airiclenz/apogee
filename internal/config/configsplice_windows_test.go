@@ -4,7 +4,6 @@ package config
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/realpath/junctiontest"
 )
 
 // junctionConfigOrSkip makes dir/real/config.yaml holding old and an NTFS junction dir/home
@@ -29,9 +29,7 @@ func junctionConfigOrSkip(t *testing.T, old string) (underJunction, target strin
 		t.Fatal(err)
 	}
 	junction := filepath.Join(dir, "home")
-	if out, err := exec.Command("cmd", "/c", "mklink", "/J", junction, realDir).CombinedOutput(); err != nil {
-		t.Skipf("junctions are not available here: %v (%s)", err, out)
-	}
+	junctiontest.MakeOrSkip(t, junction, realDir)
 	return filepath.Join(junction, "config.yaml"), target
 }
 

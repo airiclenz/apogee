@@ -4,9 +4,10 @@ package config
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/realpath/junctiontest"
 )
 
 // longTempDir is a fresh temp folder in the long-name spelling the resolver reports: a runner's
@@ -20,15 +21,6 @@ func longTempDir(t *testing.T) string {
 	return dir
 }
 
-// junctionOrSkip makes link an NTFS junction pointing at the existing folder target. A filesystem
-// that refuses junctions skips the test: there is no junction to write under.
-func junctionOrSkip(t *testing.T, link, target string) {
-	t.Helper()
-	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
-		t.Skipf("junctions are not available here: %v (%s)", err, out)
-	}
-}
-
 // junctionedProjectRoot makes dir/real and a junction dir/link pointing at it, returning the
 // Project root as the junction spells it and the folder it resolves to.
 func junctionedProjectRoot(t *testing.T) (underJunction, realDir string) {
@@ -39,7 +31,7 @@ func junctionedProjectRoot(t *testing.T) (underJunction, realDir string) {
 		t.Fatal(err)
 	}
 	underJunction = filepath.Join(dir, "link")
-	junctionOrSkip(t, underJunction, realDir)
+	junctiontest.MakeOrSkip(t, underJunction, realDir)
 	return underJunction, realDir
 }
 
@@ -76,7 +68,7 @@ func TestProjectWriteUnderAJunctionedRootRefusesAPathOutside(t *testing.T) {
 	if err := os.WriteFile(target, []byte("mode: plan\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	junctionOrSkip(t, filepath.Join(realDir, ".apogee"), elsewhere)
+	junctiontest.MakeOrSkip(t, filepath.Join(realDir, ".apogee"), elsewhere)
 
 	resolvedRoot, err := projectRealPath(root)
 	if err != nil {

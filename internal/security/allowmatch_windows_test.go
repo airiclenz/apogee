@@ -5,6 +5,8 @@ package security
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/realpath/junctiontest"
 )
 
 // TestAllowRuleJunctionLeavingTheRootDoesNotMatch pins the escape the one resolver closes for
@@ -15,7 +17,7 @@ func TestAllowRuleJunctionLeavingTheRootDoesNotMatch(t *testing.T) {
 
 	root := finalTempDir(t)
 	outside := finalTempDir(t)
-	makeJunctionOrSkip(t, filepath.Join(root, "j"), outside)
+	junctiontest.MakeOrSkip(t, filepath.Join(root, "j"), outside)
 	site := AllowSite{Root: root, IsPOSIXShell: true}
 
 	used, isAllowed := MatchAllowRules("cd j && go test", []string{"go"}, site)
@@ -33,7 +35,7 @@ func TestAllowRuleJunctionInsideTheRootKeepsMatching(t *testing.T) {
 	root := finalTempDir(t)
 	realDir := filepath.Join(root, "real")
 	mkdirTest(t, realDir)
-	makeJunctionOrSkip(t, filepath.Join(root, "j"), realDir)
+	junctiontest.MakeOrSkip(t, filepath.Join(root, "j"), realDir)
 	site := AllowSite{Root: root, IsPOSIXShell: true}
 
 	used, isAllowed := MatchAllowRules("cd j && go test", []string{"go"}, site)

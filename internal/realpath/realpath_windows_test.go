@@ -3,12 +3,12 @@
 package realpath
 
 import (
-	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/realpath/junctiontest"
 )
 
 // TestResolveCrossesJunction is the defect the resolver exists for: a path beneath an NTFS
@@ -28,7 +28,7 @@ func TestResolveCrossesJunction(t *testing.T) {
 		t.Fatalf("write a file beneath the target: %v", err)
 	}
 	link := filepath.Join(root, "link")
-	makeJunction(t, link, target)
+	junctiontest.Make(t, link, target)
 
 	tests := []struct {
 		name string
@@ -69,7 +69,7 @@ func TestResolveLenientCrossesJunction(t *testing.T) {
 		t.Fatalf("mkdir the junction target: %v", err)
 	}
 	link := filepath.Join(root, "link")
-	makeJunction(t, link, target)
+	junctiontest.Make(t, link, target)
 
 	tests := []struct {
 		name string
@@ -107,7 +107,7 @@ func TestIsLinkSeesAJunction(t *testing.T) {
 		t.Fatalf("mkdir the junction target: %v", err)
 	}
 	link := filepath.Join(root, "link")
-	makeJunction(t, link, target)
+	junctiontest.Make(t, link, target)
 
 	for path, want := range map[string]bool{link: true, target: false} {
 		got, err := IsLink(path)
@@ -130,20 +130,4 @@ func tempDir(t *testing.T) string {
 		return final
 	}
 	return dir
-}
-
-// makeJunction creates a directory junction at link pointing to target. Unlike a symlink, a
-// junction needs no administrator rights and no developer mode.
-func makeJunction(t *testing.T, link, target string) {
-	t.Helper()
-	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
-		t.Fatalf("mklink /J %q %q: %v (%s)", link, target, err, out)
-	}
-	info, err := os.Lstat(link)
-	if err != nil {
-		t.Fatalf("lstat the junction %q: %v", link, err)
-	}
-	if info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) == 0 {
-		t.Fatalf("lstat %q mode = %v; the junction did not register as a reparse point", link, info.Mode())
-	}
 }

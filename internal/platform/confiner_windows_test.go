@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +21,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform/confinetest"
 	"github.com/airiclenz/apogee/internal/platform/winlabel"
+	"github.com/airiclenz/apogee/internal/realpath/junctiontest"
 )
 
 // The Windows counterpart of landlock_linux_test.go / seatbelt_darwin_test.go. Unlike those
@@ -270,7 +270,7 @@ func TestWindowsGuardrailSeesReparseRootsAndTrailingDotSpellings(t *testing.T) {
 		t.Fatalf("mkdir %q: %v", innocent, err)
 	}
 	junction := filepath.Join(base, "junc")
-	makeJunction(t, junction, innocent)
+	junctiontest.Make(t, junction, innocent)
 	refused(junction, "reparse point")
 	if label, readErr := winlabel.ReadSDDL(innocent); readErr != nil || label != "" {
 		t.Errorf("label of %q = %q (err %v); the junction's target must stay untouched", innocent, label, readErr)
@@ -280,7 +280,7 @@ func TestWindowsGuardrailSeesReparseRootsAndTrailingDotSpellings(t *testing.T) {
 	// runs: door\sub IS real\sub, which contains the stand-in — a containment the lexical
 	// check alone could never connect.
 	door := filepath.Join(base, "door")
-	makeJunction(t, door, filepath.Join(base, "real"))
+	junctiontest.Make(t, door, filepath.Join(base, "real"))
 	refused(filepath.Join(door, "sub"), "protected location")
 
 	// The trailing-dot spelling Win32 canonicalization strips: guarded. IS guarded.
@@ -302,23 +302,6 @@ func TestWindowsGuardrailSeesReparseRootsAndTrailingDotSpellings(t *testing.T) {
 	}
 	if label, _ := winlabel.ReadSDDL(plain); label != "" {
 		t.Errorf("%q still carries a mandatory label after teardown: %q", plain, label)
-	}
-}
-
-// makeJunction creates a directory junction at link pointing to target. Unlike a symlink, a
-// junction needs no administrator rights and no developer mode — which is exactly why the
-// guardrail must see through one: it is the reparse point any user can plant.
-func makeJunction(t *testing.T, link, target string) {
-	t.Helper()
-	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
-		t.Fatalf("mklink /J %q %q: %v (%s)", link, target, err, out)
-	}
-	info, err := os.Lstat(link)
-	if err != nil {
-		t.Fatalf("lstat the junction %q: %v", link, err)
-	}
-	if info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) == 0 {
-		t.Fatalf("lstat %q mode = %v; the junction did not register as a reparse point", link, info.Mode())
 	}
 }
 
