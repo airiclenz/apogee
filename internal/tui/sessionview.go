@@ -84,6 +84,11 @@ type sessionView struct {
 	// stored is the only thing left that knows a delegate spent anything at all.
 	delegateUsage domain.Usage
 
+	// delegateSpend memoises the transcript's delegate spend by its generation (delegateSpendMemo,
+	// usage.go), so the footer reads it without a walk per frame. It lives here, beside the
+	// transcript it sums, so a swapped view carries its own memo and never inherits another's.
+	delegateSpend delegateSpendMemo
+
 	// servedModels is every distinct model id the upstream has answered with in this session, in
 	// the order first seen — the ServedModel each UsageEvent carries, at EVERY depth (a routed
 	// delegation's own model, ADR 0045, is one the session was answered by), folded as a set

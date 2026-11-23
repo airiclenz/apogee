@@ -37,6 +37,7 @@ func delegate(t *testing.T, m Model, id, task string, totals domain.Usage, used 
 	if used > 0 {
 		head.ctxUsed, head.ctxLimit = used, m.opts.ContextWindow
 	}
+	m.transcript.touch() // a direct write past the transcript's writers moves the paint's input too
 	return m
 }
 
@@ -577,6 +578,7 @@ func TestUsageRestoredDelegateKeepsItsCachedShare(t *testing.T) {
 
 	m := usageModel(t, mainTotals, 8192) // the main agent itself reported no share
 	m.transcript.entries = entries
+	m.transcript.touch()
 	rows := m.usageRows()
 
 	if len(rows) != 4 {
@@ -625,6 +627,7 @@ func TestUsageRestoredDelegateKeepsItsCost(t *testing.T) {
 
 	m := usageModel(t, mainTotals, 8192)
 	m.transcript.entries = entries
+	m.transcript.touch()
 
 	if got := m.delegateUsageTotal(); got != child {
 		t.Errorf("restored delegate usage = %+v, want %+v — the cost and the call split came back with the record", got, child)
@@ -1176,4 +1179,148 @@ func TestUsagePaneIsSettledByTheTail(t *testing.T) {
 		t.Fatal("precondition: /usage did not open the report")
 	}
 	assertSettled(t, m)
+}
+
+// ----------------------------------------------------------------------------
+// The footer's delegate spend, memoised by transcript generation (delegateSpendMemo)
+// ----------------------------------------------------------------------------
+
+// walkedDelegateUsageTotal is the delegate total as the walk states it, with no memo to read: the
+// sum of every delegateUsageHeads entry, falling back to the resumed record's sum where none
+// reported. It is the reference the memo must never part from.
+func walkedDelegateUsageTotal(m Model) domain.Usage {
+	var total domain.Usage
+	for _, head := range m.delegateUsageHeads() {
+		total = domain.Sum(total, head.usage)
+	}
+	if total.Calls <= 0 {
+		return m.delegateUsage
+	}
+	return total
+}
+
+// assertSpendMemoMatchesTheWalk fails unless a settled model's memo is current, sums exactly what
+// the transcript walk sums, and the total read through it is the walk's own.
+func assertSpendMemoMatchesTheWalk(t *testing.T, m Model, want domain.Usage) {
+	t.Helper()
+	memo := m.delegateSpend
+	if !memo.valid || memo.gen != m.transcript.generation {
+		t.Fatalf("memo = %+v at generation %d; want one current after Update's tail", memo, m.transcript.generation)
+	}
+	if walked := sumTranscriptDelegateSpend(m.transcript.entries); memo.sum != walked {
+		t.Errorf("memo sum = %+v, want the walk's %+v", memo.sum, walked)
+	}
+	if got, walked := m.delegateUsageTotal(), walkedDelegateUsageTotal(m); got != walked {
+		t.Errorf("delegateUsageTotal = %+v, want the walk's %+v", got, walked)
+	}
+	if got := m.delegateUsageTotal(); got != want {
+		t.Errorf("delegateUsageTotal = %+v, want %+v", got, want)
+	}
+}
+
+// TestFooterSpendMemoMatchesTheWalk pins the memo the footer reads the delegate spend from against
+// the walk it replaces, over every path a delegate's spend reaches the total by: a sub-agent's
+// readings folded by applyUsage, a Workflow's item runs folded into its block, a live background
+// workflow's spend added at read time, a resumed record's fallback, and /clear dropping it all. A
+// model that never settled has no memo, and must walk rather than serve an empty sum.
+func TestFooterSpendMemoMatchesTheWalk(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a sub-agent's readings", func(t *testing.T) {
+		t.Parallel()
+		m := newTestModel(t)
+		first := domain.Usage{Calls: 1, PromptTokens: 1000, TotalTokens: 1000}
+		m = foldEvents(t, m,
+			domain.ToolCallEvent{Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"task":"survey"}`)}},
+			childUsage("s1", 1, first.TotalTokens, first),
+		)
+		assertSpendMemoMatchesTheWalk(t, m, first)
+
+		m = foldEvents(t, m, childUsage("s1", 1, childTotals.TotalTokens, childTotals)) // latest-wins
+		assertSpendMemoMatchesTheWalk(t, m, childTotals)
+	})
+
+	t.Run("a Workflow's item runs and a live background workflow", func(t *testing.T) {
+		t.Parallel()
+		m := runningWorkflowModel(t, &fakeEngine{})
+		m = foldEvents(t, m,
+			fanOutCall(),
+			startedUnder("f1"),
+			workflowRunUsage(itemBase("f1", "run.1"), 2, 2500, 300),
+			workflowRunUsage(bgChildBase("bg.1"), 1, 1000, 100),
+		)
+		want := domain.Usage{Calls: 3, PromptTokens: 3500, CompletionTokens: 400, TotalTokens: 3900}
+		assertSpendMemoMatchesTheWalk(t, m, want)
+		items := domain.Usage{Calls: 2, PromptTokens: 2500, CompletionTokens: 300, TotalTokens: 2800}
+		if got := m.transcriptDelegateSpend(); got != items {
+			t.Errorf("the transcript half = %+v, want the item runs' %+v alone — the live workflow is added at read time",
+				got, items)
+		}
+	})
+
+	t.Run("a resumed record's fallback", func(t *testing.T) {
+		t.Parallel()
+		m := resumedUsageModel(t, session.Usage{})
+		m.delegateUsage = childTotals
+		m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+		assertSpendMemoMatchesTheWalk(t, m, childTotals)
+	})
+
+	t.Run("/clear drops the spend", func(t *testing.T) {
+		t.Parallel()
+		m := newTestModel(t)
+		m = foldEvents(t, m,
+			domain.ToolCallEvent{Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"task":"survey"}`)}},
+			childUsage("s1", 1, childTotals.TotalTokens, childTotals),
+		)
+		assertSpendMemoMatchesTheWalk(t, m, childTotals)
+
+		m, _ = typeCommand(t, m, "/clear")
+		assertSpendMemoMatchesTheWalk(t, m, domain.Usage{})
+	})
+
+	t.Run("a model that never settled walks", func(t *testing.T) {
+		t.Parallel()
+		m := newModel(context.Background(), &fakeEngine{}, testOpts, nil)
+		subAgentCall(&m.transcript, "s1", "survey the tests", 0)
+		m.transcript.applyUsage(childUsage("s1", 1, childTotals.TotalTokens, childTotals), 32768, "")
+
+		if m.delegateSpend.valid {
+			t.Fatalf("memo = %+v, want none before any Update's tail", m.delegateSpend)
+		}
+		if got := m.delegateUsageTotal(); got != childTotals {
+			t.Errorf("delegateUsageTotal = %+v, want the walk's %+v — no memo is not an empty sum", got, childTotals)
+		}
+	})
+}
+
+// TestViewDoesNotWalkForFooterSpend pins that drawing the footer of a settled model reads the
+// delegate spend from the memo rather than walking the transcript: a run head's usage rewritten
+// behind the transcript's writers (no touch) leaves the footer as it was, and the same write made
+// the writers' way — the generation moved — reaches it on Update's tail.
+func TestViewDoesNotWalkForFooterSpend(t *testing.T) {
+	t.Parallel()
+
+	m := footerFactsModel(t)
+	m.opts.Currency = "EUR"
+	m = delegate(t, m, "s1", "survey the tests", domain.Usage{
+		Calls: 1, PromptTokens: 800, TotalTokens: 800, CostMicros: 200_000, PricedCalls: 1,
+	}, 0)
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	before := footerLeftRun(t, m, 120)
+	if !strings.HasSuffix(before, "0.20 EUR") {
+		t.Fatalf("footer's left run = %q, want it to state the sub-agent's 0.20 EUR", before)
+	}
+
+	head := &m.transcript.entries[len(m.transcript.entries)-1]
+	head.usage.CostMicros = 900_000 // behind the writers: no touch, so no walk may see it
+	if got := footerLeftRun(t, m, 120); got != before {
+		t.Errorf("footer's left run = %q, want %q — a View of an unchanged model walked the transcript", got, before)
+	}
+
+	m.transcript.touch()
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	if got := footerLeftRun(t, m, 120); !strings.HasSuffix(got, "0.90 EUR") {
+		t.Errorf("footer's left run = %q, want the moved spend 0.90 EUR once the generation moved", got)
+	}
 }

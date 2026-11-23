@@ -3132,10 +3132,15 @@ func (m *Model) freshenTranscriptClamp() {
 // The exemption's one exception is a held-button motion that moved an active side-panel separator
 // drag's width ([Model.panelDragResized], adr-0110-amend-1108 (e)): the panel and the transcript
 // re-wrap live on every column the separator moves (TestMouseMotionRepaintsADraggedSeparator).
+//
+// Before either question it refreshes the footer's delegate-spend memo where the transcript's
+// generation has moved ([Model.freshenDelegateSpend]), so View reads the sum without walking the
+// transcript per frame.
 func (m *Model) settle() {
 	if !m.ready {
 		return
 	}
+	m.freshenDelegateSpend()
 	if m.frameKey() != m.painted {
 		m.layout()
 		return

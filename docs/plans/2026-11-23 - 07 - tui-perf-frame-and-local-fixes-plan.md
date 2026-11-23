@@ -82,7 +82,15 @@ NOTES (2026-11-23): consequential edit — internal/tui/doc.go: made necessary b
 - `go test -run '^$' -bench 'PerfAuditBlocks/view' -benchmem ./internal/tui/` — B/op roughly halves (record before/after)
 **Commit:** `perf(tui): ask about open panes without heap-copying the Model`
 
-## 3. Footer spend without a transcript walk per frame
+## 3. Footer spend without a transcript walk per frame — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): benchmark `go test -run '^$' -bench 'PerfAuditBlocks/view' -benchmem -count=3 ./internal/tui/` (Pi 5, no -race) before → after: N=48 1.84 ms 172 KB/op 5233 allocs → 1.83 ms 172 KB/op 5233 allocs; N=300 1.92 ms 168 KB/op 5232 allocs → 1.81 ms 166 KB/op 5232 allocs; N=900 2.31 ms 164 KB/op 5229 allocs → 1.77 ms 164 KB/op 5229 allocs — N=900 is no longer above N=48.
+
+NOTES (2026-11-23): the memo field (`delegateSpend delegateSpendMemo`) sits on `sessionView` (internal/tui/sessionview.go, embedded in Model) rather than directly on Model: `swapSessionView` (watch.go) swaps the whole view, transcript included, so a Model-level memo could survive a swap and match the incoming transcript's generation by coincidence; beside the transcript it travels with the view it sums.
+
+NOTES (2026-11-23): the shared predicate is `delegateSpendOf(*entry)` (usage.go), asked by both `delegateUsageHeads` (now an index walk) and the memo's `sumTranscriptDelegateSpend`; `-gcflags=-m` shows it and the entry methods it calls inlined, so the walk copies no entry. The memo is refreshed in `settle` after its `!m.ready` guard (an unsized model reads the walk); `settle`'s doc comment gained a sentence saying so.
+
+NOTES (2026-11-23): besides the two named usage_test.go sites, the `delegate` test helper (usage_test.go) now calls `m.transcript.touch()` after its direct `head.usage` write, per the item's rule for test sites writing transcript fields directly. `TestViewDoesNotWalkForFooterSpend` proves the no-walk claim behaviourally (a head's usage rewritten without touch leaves the footer unchanged; after touch + an Update it moves) instead of with a call counter in shipped code.
 
 **What:**
 **Goal:** a `View` of an unchanged model walks no transcript entries for the footer's spend segment, and the footer's bytes are unchanged; the segment still moves when a sub-agent's usage lands.

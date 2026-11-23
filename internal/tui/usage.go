@@ -270,39 +270,114 @@ func (m Model) usageSubAgentRows(cols usageColumns) []popupRow {
 // lines of background workflows that ended, in transcript order, then the live background
 // workflows (backgroundWorkflows.spendEntries). A Workflow item's run head is never listed: its
 // spend is its Workflow's, which the block heading it reports (applyUsage folds it there too).
-// It is the one walk both readers of a delegate's spend take — the pane's rows and the session
-// record's delegate sum — so a run that appears on the /usage pane is exactly a run the record
-// counts. A reading reaches one of them only (applyUsage
+// It is the one selection both readers of a delegate's spend take — the pane's rows here and the
+// session record's delegate sum through [delegateSpendOf], the predicate this walk and
+// [sumTranscriptDelegateSpend] share — so a run that appears on the /usage pane is exactly a run
+// the record counts. A reading reaches one of them only (applyUsage
 // folds a Workflow's run into its block only where no open sub_agent head takes it), so nothing is
 // counted twice.
 func (m Model) delegateUsageHeads() []entry {
 	var heads, workflows []entry
 	for i := range m.transcript.entries {
-		head := m.transcript.entries[i]
-		switch {
-		case head.headsRun() && head.kind != entryWorkflowItem && head.usage.Calls > 0:
-			heads = append(heads, head)
-		case head.carriesWorkflowSpend():
-			workflows = append(workflows, head)
+		switch delegateSpendOf(&m.transcript.entries[i]) {
+		case runHeadSpend:
+			heads = append(heads, m.transcript.entries[i])
+		case workflowSpend:
+			workflows = append(workflows, m.transcript.entries[i])
 		}
 	}
 	heads = append(heads, workflows...)
 	return append(heads, m.workflows.spendEntries()...)
 }
 
+// delegateSpendSlot is where an entry stands among the transcript's delegate spend: not at all, as
+// a sub-agent run head that reported a count, or as a Workflow's spend (delegateUsageHeads).
+type delegateSpendSlot uint8
+
+const (
+	notDelegateSpend delegateSpendSlot = iota // no delegate spend of its own to count
+	runHeadSpend                              // a sub-agent run head that reported a count
+	workflowSpend                             // a Workflow's block or a background workflow's finish line
+)
+
+// delegateSpendOf is the one predicate that selects the transcript's delegate spend: the run heads
+// that reported a count, save a Workflow item's (its spend is its Workflow's), and the entries that
+// carry a Workflow's spend. The /usage pane's rows (delegateUsageHeads) and the session's delegate
+// sum (sumTranscriptDelegateSpend) both ask it, so the footer and the pane can never count
+// different runs. It takes the entry by pointer so a walk over the transcript copies none.
+func delegateSpendOf(e *entry) delegateSpendSlot {
+	switch {
+	case e.headsRun() && e.kind != entryWorkflowItem && e.usage.Calls > 0:
+		return runHeadSpend
+	case e.carriesWorkflowSpend():
+		return workflowSpend
+	}
+	return notDelegateSpend
+}
+
+// sumTranscriptDelegateSpend is the transcript half of [Model.delegateUsageTotal]: the sum of every
+// entry [delegateSpendOf] selects, walked by index so no entry is copied and no slice is built.
+func sumTranscriptDelegateSpend(entries []entry) domain.Usage {
+	var total domain.Usage
+	for i := range entries {
+		if delegateSpendOf(&entries[i]) != notDelegateSpend {
+			total = domain.Sum(total, entries[i].usage)
+		}
+	}
+	return total
+}
+
+// delegateSpendMemo is [sumTranscriptDelegateSpend] as of one transcript generation: what lets the
+// footer, which states the session's spend on every frame, read the delegate half without walking
+// the transcript per View. It is refreshed on Update's tail ([Model.freshenDelegateSpend]) and
+// trusted only while gen still equals the transcript's generation — every write to an entry's usage
+// goes through a transcript writer that touches ([transcript.touch]), so an unmoved generation is an
+// unmoved sum. The zero value is no memo at all (valid false), so a model that never settled walks
+// rather than serving an empty sum. It rides the session view beside the transcript it sums, by
+// value (ADR 0011): a swapped-in view brings its own memo, never one whose gen merely collides.
+type delegateSpendMemo struct {
+	valid bool
+	gen   uint64
+	sum   domain.Usage
+}
+
+// freshenDelegateSpend refreshes the delegate-spend memo when the transcript's generation has moved
+// since it was taken: one walk per transcript write, never one per frame.
+func (m *Model) freshenDelegateSpend() {
+	if memo := m.delegateSpend; memo.valid && memo.gen == m.transcript.generation {
+		return
+	}
+	m.delegateSpend = delegateSpendMemo{
+		valid: true,
+		gen:   m.transcript.generation,
+		sum:   sumTranscriptDelegateSpend(m.transcript.entries),
+	}
+}
+
+// transcriptDelegateSpend is the transcript's delegate spend: the memo while it is current, the
+// walk otherwise ([delegateSpendMemo]).
+func (m Model) transcriptDelegateSpend() domain.Usage {
+	if memo := m.delegateSpend; memo.valid && memo.gen == m.transcript.generation {
+		return memo.sum
+	}
+	return sumTranscriptDelegateSpend(m.transcript.entries)
+}
+
 // delegateUsageTotal is what this session's DELEGATES have spent: the sum of the latest reading of
 // every run head that reported one, and of every Workflow's spend (delegateUsageHeads). It is what
 // the session record stores beside the main agent's accounting (savePayload) and what the pane's
-// session row adds to it, so the two never disagree about the same session.
+// session row adds to it, so the two never disagree about the same session. The transcript's half
+// is read from its memo where current (transcriptDelegateSpend); the live background workflows'
+// spend is added at read time, since it moves outside the transcript.
 //
 // Where no live head reports a count it falls back to the delegate sum a RESUMED record carried
 // (Model.delegateUsage), which is the only reading left when a record's scrollback could not be
 // repainted — a legacy or undecodable blob replays no run blocks at all. A live head replaces it
 // the moment one reports, so the fallback never adds to the runs it is standing in for.
 func (m Model) delegateUsageTotal() domain.Usage {
-	var total domain.Usage
-	for _, head := range m.delegateUsageHeads() {
-		total = domain.Sum(total, head.usage)
+	total := m.transcriptDelegateSpend()
+	for _, live := range m.workflows.spendEntries() {
+		total = domain.Sum(total, live.usage)
 	}
 	if total.Calls <= 0 {
 		return m.delegateUsage
