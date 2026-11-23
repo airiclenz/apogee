@@ -13,9 +13,10 @@ import (
 // composes out of the thinking board (thinking.go, which retains and paints nothing) and the
 // [reportContent] it hands the shared report module (reportpane.go). The row LIST keeps no state —
 // it is derived for the frame that asks for it, so a chunk arriving between two paints can never
-// leave the pane showing a list nobody folded. What is remembered between frames is only each
-// record's wrapped text ([thinkingRowCache]), validated on the text itself, so a remembered wrap
-// can never outlive the text it was wrapped from.
+// leave the pane showing a list nobody folded. What is remembered between frames ([thinkingRowCache])
+// is each record's wrapped text, line by line, and the composed list of the last frame, each
+// validated on what it was built from — a line's text, a record's text, every record's heading — so
+// a remembered row can never outlive the text it was wrapped from or the heading it was named by.
 //
 // What the pane is FOR is what its rendering rules follow from: reading the model's own reasoning
 // as prose. So the rows carry NO prefixes, no JSON, no tool-call passages, no per-record elision
@@ -146,36 +147,53 @@ func (m Model) thinkingHeading(rec thinkingRecord) string {
 // is a heading because of where it was put, and a line of reasoning that happened to read like one
 // would be styled as a section label by any rule read back off the text.
 //
-// The text rows come through the board's wrap memo ([thinkingRowCache]), so a frame re-wraps only
-// the records whose text moved since the last one at this column and scope. The HEADING never does:
-// it is composed fresh on every call, because [Model.runLabel] reads the transcript, and a
-// delegate's record that arrives before its run's head entry must go on from the fallback label to
-// the real one without its text changing by a byte.
+// The rows come through the board's memo ([thinkingRowCache]) twice over. The composed list is
+// served whole while every record's text and HEADING are what it was built from, so the frame's
+// height query and its paint ([Model.reportHeight], [Model.renderReport]) share one build. The
+// headings are computed fresh on every call and are part of that check — [Model.runLabel] reads the
+// transcript, and a delegate's record that arrives before its run's head entry must go on from the
+// fallback label to the real one without its text changing by a byte. Where the list is rebuilt,
+// the text rows come through the wrap memo, which re-wraps only the lines that moved.
 func (m Model) thinkingRows(column int) ([]popupRow, []popupRowKind) {
 	records := m.scopedThinking()
 	if len(records) == 0 {
 		return []popupRow{{thinkingEmptyRow}}, []popupRowKind{popupRowPlain}
 	}
-	wrapped := m.thinking.rows.wrapRecords(records, column, m.viewedRun())
-	total := len(records)
+	headings := make([]string, len(records))
+	for i, rec := range records {
+		headings[i] = m.thinkingHeading(rec)
+	}
+	return m.thinking.rows.compose(records, headings, column, m.viewedRun())
+}
+
+// composeThinkingRows lays out the pane's list: each record's heading row, then its wrapped text
+// rows. Every row's one cell is cut out of a single backing array, capped to its own length, rather
+// than allocated one by one — a board at its ceiling is tens of thousands of rows.
+func composeThinkingRows(headings []string, wrapped [][]string) ([]popupRow, []popupRowKind) {
+	total := len(headings)
 	for _, text := range wrapped {
 		total += len(text)
 	}
-	rows := make([]popupRow, 0, total)
+	cells := make([]string, 0, total)
 	kinds := make([]popupRowKind, 0, total)
-	for i, rec := range records {
-		rows = append(rows, popupRow{m.thinkingHeading(rec)})
+	for i, heading := range headings {
+		cells = append(cells, heading)
 		kinds = append(kinds, popupRowHeading)
-		for _, row := range wrapped[i] {
-			rows = append(rows, popupRow{row})
+		cells = append(cells, wrapped[i]...)
+		for range wrapped[i] {
 			kinds = append(kinds, popupRowPlain)
 		}
+	}
+	rows := make([]popupRow, len(cells))
+	for i := range cells {
+		rows[i] = popupRow(cells[i : i+1 : i+1])
 	}
 	return rows, kinds
 }
 
 // wrapThinkingText is one record's text as the pane's plain rows at column: split on the text's own
-// newlines first and each line wrapped on its own ([Model.thinkingRows] says why).
+// newlines first and each line wrapped on its own ([Model.thinkingRows] says why). It is the cold
+// reference the wrap memo's per-line reuse must agree with.
 func wrapThinkingText(text string, column int) []string {
 	var rows []string
 	for _, line := range strings.Split(text, "\n") {
@@ -195,32 +213,128 @@ type thinkingRowKey struct {
 	ordinal int
 }
 
-// thinkingRowEntry is one memoised record: the text it was wrapped from and the rows that wrap
-// made. The rows are handed out read-only — [Model.thinkingRows] copies them into its own list.
+// thinkingRowEntry is one memoised record: the text it was wrapped from, that text's lines (split on
+// its own newlines, as [wrapThinkingText] splits it), each line's wrapped rows, and those rows
+// flattened in order. Everything is handed out read-only — a re-wrap builds a fresh entry and never
+// writes into one a frame may still be reading.
 type thinkingRowEntry struct {
-	text string
-	rows []string
+	text     string
+	lines    []string
+	lineRows [][]string
+	rows     []string
 }
 
-// thinkingRowCache is the /thinking pane's wrap memo: each scoped record's wrapped text rows, for
-// the one column and scope the last render used. It lives behind a pointer on the board (thinking.go
-// says why) and is nil-receiver-safe, so a board built without one renders uncached.
+// rewrap is the entry for text at column, reusing this entry's rows for every line it already
+// wrapped. A line's rows depend on nothing but the line and the column, so a line served from the
+// memo is one whose text is == the line it was wrapped from — wherever it now sits. Where it sits is
+// what [thinkingRowEntry.lineShift] works out, so that a chunk landing on the record costs only the
+// lines it changed: the trailing one it grew (and any it added), and — once the record is at
+// [thinkingRecordCap] and the board cut its front ([keepLastBytes]) — the first one, which the cut
+// shortened. lineWraps on c counts every line actually wrapped.
+func (e thinkingRowEntry) rewrap(c *thinkingRowCache, text string, column int) thinkingRowEntry {
+	lines := strings.Split(text, "\n")
+	shift := e.lineShift(text)
+	lineRows := make([][]string, len(lines))
+	total := 0
+	for i, line := range lines {
+		if j := i + shift; j < len(e.lines) && e.lines[j] == line {
+			lineRows[i] = e.lineRows[j]
+		} else {
+			lineRows[i] = wrapReadable("", line, column)
+			c.lineWraps++
+		}
+		total += len(lineRows[i])
+	}
+	rows := make([]string, 0, total)
+	for _, wrapped := range lineRows {
+		rows = append(rows, wrapped...)
+	}
+	return thinkingRowEntry{text: text, lines: lines, lineRows: lineRows, rows: rows}
+}
+
+// lineShift is how many of this entry's lines the new text dropped off its front: the board only
+// ever GROWS a record at its tail and, at the cap, cuts bytes off its head, so the new text is this
+// entry's text with some prefix gone and something appended. With nothing gone the shift is 0. With a
+// prefix gone, the new text's second line is one of this entry's later lines, and the one whose
+// alignment leaves the old text's remainder a prefix of the new is the shift — checked in full, so a
+// shift is only ever reported for an alignment the bytes bear out. Where none does (a record the
+// memo met under a different text altogether) the answer is 0 and the line comparison in
+// [thinkingRowEntry.rewrap] decides alone: a wrong guess costs wraps, never rows.
+func (e thinkingRowEntry) lineShift(text string) int {
+	if strings.HasPrefix(text, e.text) {
+		return 0
+	}
+	firstBreak := strings.IndexByte(text, '\n')
+	if firstBreak < 0 || len(e.lines) == 0 {
+		return 0
+	}
+	next := 0 // where this entry's line j+1 starts in its text
+	for j, line := range e.lines[:len(e.lines)-1] {
+		next += len(line) + 1
+		cut := next - (firstBreak + 1) // the bytes dropped, if the new second line is line j+1
+		if cut < 0 {
+			continue
+		}
+		if strings.HasPrefix(text, e.text[cut:]) {
+			return j
+		}
+	}
+	return 0
+}
+
+// thinkingComposed is the composed list the last build made — rows and kinds — with the headings and
+// texts it was built from, one per record in order. It is served whole only when every one of those
+// is == what the frame asks for now ([thinkingComposed.holds]); the column and scope it was built at
+// are the cache's own, and a change to either drops it.
+type thinkingComposed struct {
+	headings []string
+	texts    []string
+	rows     []popupRow
+	kinds    []popupRowKind
+}
+
+// holds says whether the composed list was built from exactly these records under exactly these
+// headings. A zero value holds nothing: there is always at least one record when this is asked.
+func (p thinkingComposed) holds(records []thinkingRecord, headings []string) bool {
+	if len(p.texts) != len(records) || len(p.headings) != len(headings) {
+		return false
+	}
+	for i, rec := range records {
+		if p.texts[i] != rec.text || p.headings[i] != headings[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// thinkingRowCache is the /thinking pane's memo, for the one column and scope the last render used:
+// each scoped record's wrapped text rows, kept line by line, and the composed list of the last build.
+// It lives behind a pointer on the board (thinking.go says why) and is nil-receiver-safe, so a board
+// built without one renders uncached.
 //
-// It is a VALIDATION memo, like the transcript's paint cache (paintcache.go): an entry is served only
-// when the record's text is == the text it was wrapped from. Length is not enough — at
-// [thinkingRecordCap] an ASCII record holds exactly that many bytes however many more chunks land,
-// so a length key would freeze the pane on the first full record. The comparison costs nothing in
-// the steady state, since an unchanged record is the SAME string on both sides. A column or scope
-// change drops every entry; each render keeps only the entries it used, so a dropped, trimmed-away
-// or out-of-scope record's rows are released on the next frame.
+// It is a VALIDATION memo, like the transcript's paint cache (paintcache.go): a record's entry is
+// served only when the record's text is == the text it was wrapped from, a line's rows only when the
+// line is == the line they were wrapped from, and the composed list only when every record's text
+// and heading are == the ones it was built from. Length is not enough — at [thinkingRecordCap] an
+// ASCII record holds exactly that many bytes however many more chunks land, so a length key would
+// freeze the pane on the first full record. Nor is any generation counter: the memo is shared by
+// every copy of the Model (ADR 0011), and a copy whose transcript moved without a word to the memo
+// must still be served the heading its own transcript names. The comparisons cost nothing in the
+// steady state, since an unchanged record is the SAME string on both sides. A column or scope change
+// drops everything; each build keeps only the entries it used, so a dropped, trimmed-away or
+// out-of-scope record's rows are released on the next build.
 //
-// wraps counts records actually wrapped over the memo's life — a diagnostic the tests pin the reuse
-// property on. Nothing in production reads it.
+// wraps counts records re-wrapped over the memo's life, lineWraps the lines actually wrapped inside
+// them, and composes the composed lists built — diagnostics the tests pin the reuse properties on.
+// Nothing in production reads them.
 type thinkingRowCache struct {
-	column  int
-	scope   runRef
-	entries map[thinkingRowKey]thinkingRowEntry
-	wraps   int
+	column    int
+	scope     runRef
+	entries   map[thinkingRowKey]thinkingRowEntry
+	composed  thinkingComposed
+	wraps     int
+	lineWraps int
+	composes  int
 }
 
 // newThinkingRowCache returns an empty memo. Production builds exactly one, in newModel.
@@ -228,9 +342,40 @@ func newThinkingRowCache() *thinkingRowCache {
 	return &thinkingRowCache{entries: make(map[thinkingRowKey]thinkingRowEntry)}
 }
 
+// at points the memo at column and scope, dropping everything it holds for any other.
+func (c *thinkingRowCache) at(column int, scope runRef) {
+	if c.column != column || c.scope != scope {
+		clear(c.entries)
+		c.composed = thinkingComposed{}
+		c.column, c.scope = column, scope
+	}
+}
+
+// compose returns the pane's composed list for records under headings at column: the last build's
+// when it still holds ([thinkingComposed.holds]), a fresh build through the wrap memo otherwise. A nil
+// memo builds every time and remembers nothing.
+func (c *thinkingRowCache) compose(records []thinkingRecord, headings []string, column int, scope runRef) ([]popupRow, []popupRowKind) {
+	if c == nil {
+		return composeThinkingRows(headings, c.wrapRecords(records, column, scope))
+	}
+	c.at(column, scope)
+	if c.composed.holds(records, headings) {
+		return c.composed.rows, c.composed.kinds
+	}
+	rows, kinds := composeThinkingRows(headings, c.wrapRecords(records, column, scope))
+	texts := make([]string, len(records))
+	for i, rec := range records {
+		texts[i] = rec.text
+	}
+	c.composed = thinkingComposed{headings: headings, texts: texts, rows: rows, kinds: kinds}
+	c.composes++
+	return rows, kinds
+}
+
 // wrapRecords returns each record's wrapped text rows at column, in the order given, re-wrapping
-// only the records whose text the memo does not hold for this column and scope. A nil memo wraps
-// every record and remembers nothing.
+// only the records whose text the memo does not hold for this column and scope — and inside those,
+// only the lines that moved ([thinkingRowEntry.rewrap]). A nil memo wraps every record and remembers
+// nothing.
 func (c *thinkingRowCache) wrapRecords(records []thinkingRecord, column int, scope runRef) [][]string {
 	wrapped := make([][]string, len(records))
 	if c == nil {
@@ -239,10 +384,7 @@ func (c *thinkingRowCache) wrapRecords(records []thinkingRecord, column int, sco
 		}
 		return wrapped
 	}
-	if c.column != column || c.scope != scope {
-		clear(c.entries)
-		c.column, c.scope = column, scope
-	}
+	c.at(column, scope)
 	kept := make(map[thinkingRowKey]thinkingRowEntry, len(records))
 	for i, rec := range records {
 		key := thinkingRowKey{run: rec.run, turn: rec.turn}
@@ -251,7 +393,7 @@ func (c *thinkingRowCache) wrapRecords(records []thinkingRecord, column int, sco
 		}
 		entry, ok := c.entries[key]
 		if !ok || entry.text != rec.text {
-			entry = thinkingRowEntry{text: rec.text, rows: wrapThinkingText(rec.text, column)}
+			entry = entry.rewrap(c, rec.text, column)
 			c.wraps++
 		}
 		kept[key] = entry

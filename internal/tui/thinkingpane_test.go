@@ -608,9 +608,9 @@ func TestThinkingRowsRewrapARecordAtTheCap(t *testing.T) {
 	}
 }
 
-// TestThinkingHeadingFollowsTheRunHead pins that the memo holds text rows only: a delegate's heading
-// reads the fallback label until the run's head entry lands and the real one after, with the
-// record's text unchanged and so not re-wrapped.
+// TestThinkingHeadingFollowsTheRunHead pins that the composed list is validated on the headings and
+// not on the text alone: a delegate's heading reads the fallback label until the run's head entry
+// lands and the real one after, with the record's text unchanged and so not re-wrapped.
 func TestThinkingHeadingFollowsTheRunHead(t *testing.T) {
 	t.Parallel()
 
@@ -635,6 +635,95 @@ func TestThinkingHeadingFollowsTheRunHead(t *testing.T) {
 	}
 	if got := m.thinking.rows.wraps - before; got != 0 {
 		t.Errorf("the heading change re-wrapped %d records, want 0", got)
+	}
+}
+
+// TestThinkingRowsRewrapOnlyTheChangedLine pins the wrap memo's per-line reuse on one record of
+// distinct lines: a chunk appended under the cap re-wraps only the trailing line, a chunk that makes
+// the board cut the record's front mid-line re-wraps only the cut first line and the trailing one,
+// and a cut that lands on a line boundary only the trailing one — each time with rows a cold
+// [wrapThinkingText] agrees with.
+func TestThinkingRowsRewrapOnlyTheChangedLine(t *testing.T) {
+	t.Parallel()
+
+	m := newTestModel(t)
+	column := m.thinkingWrapColumn()
+	var text strings.Builder
+	for i := 0; text.Len() < thinkingRecordCap-400; i++ {
+		text.WriteString("line " + strconv.Itoa(i) + " " + strings.Repeat("word ", 20) + "\n")
+	}
+	m = m.foldEvent(reasoningAt(runRef{}, 1, text.String()))
+	thinkingWraps(t, m)
+
+	steps := []struct {
+		name          string
+		chunk         func(live string) string
+		wantLineWraps int
+	}{
+		{"an append under the cap", func(string) string { return "a partial tail" }, 1},
+		{"a front cut mid-line", func(live string) string {
+			return strings.Repeat("z", thinkingRecordCap-len(live)+10)
+		}, 2},
+		{"a front cut on a line boundary", func(live string) string {
+			return strings.Repeat("y", strings.IndexByte(live, '\n')+1)
+		}, 1},
+	}
+	for _, step := range steps {
+		m = m.foldEvent(reasoningAt(runRef{}, 1, step.chunk(m.thinking.live[0].text)))
+		live := m.thinking.live[0].text
+		lineBefore := m.thinking.rows.lineWraps
+		if got := thinkingWraps(t, m); got != 1 {
+			t.Errorf("%s: the render re-wrapped %d records, want 1", step.name, got)
+		}
+		if got := m.thinking.rows.lineWraps - lineBefore; got != step.wantLineWraps {
+			t.Errorf("%s: the render wrapped %d lines, want %d", step.name, got, step.wantLineWraps)
+		}
+		rows, _ := m.thinkingRows(column)
+		if got, want := thinkingRowText(rows[1:]), wrapThinkingText(live, column); !slices.Equal(got, want) {
+			t.Errorf("%s: warm rows differ from the cold wrap (%d rows, want %d)", step.name, len(got), len(want))
+		}
+	}
+	if got := len(m.thinking.live[0].text); got != thinkingRecordCap {
+		t.Errorf("precondition: the record holds %d bytes after the cuts, want the cap %d", got, thinkingRecordCap)
+	}
+}
+
+// TestThinkingRowsComposeOncePerFrame pins the composed-list memo: one reasoning chunk landing under
+// an open pane costs ONE composed build across the Update that folds it and the View that draws it —
+// the height query and the paint share it — a frame over an unchanged board builds none, and the
+// shared rows are the ones a cold build gives.
+func TestThinkingRowsComposeOncePerFrame(t *testing.T) {
+	t.Parallel()
+
+	m := newTestModel(t)
+	for turn := range 4 {
+		m = m.foldEvent(reasoningAt(runRef{}, turn, "reasoning for turn "+strconv.Itoa(turn)+"\nand its second line"))
+		m = m.foldEvent(domain.MessageEvent{EventBase: eventBaseAt(runRef{}, turn)})
+	}
+	next, _ := m.runThinkingCommand()
+	m = next.(Model)
+	m.View()
+
+	composes := func() int { return m.thinking.rows.composes }
+	before := composes()
+	m = step(t, m, eventMsg{Event: reasoningAt(runRef{}, 4, "a chunk under the open pane")})
+	m.View()
+	if got := composes() - before; got != 1 {
+		t.Errorf("one chunk's Update and View composed the list %d times, want 1", got)
+	}
+
+	before = composes()
+	m.View()
+	if got := composes() - before; got != 0 {
+		t.Errorf("a frame over an unchanged board composed the list %d times, want 0", got)
+	}
+
+	warm, warmKinds := m.thinkingRows(m.thinkingWrapColumn())
+	cold := m
+	cold.thinking = thinkingBoardWith(m.thinking.done, m.thinking.live)
+	uncached, coldKinds := cold.thinkingRows(cold.thinkingWrapColumn())
+	if !slices.Equal(thinkingRowText(warm), thinkingRowText(uncached)) || !slices.Equal(warmKinds, coldKinds) {
+		t.Errorf("warm rows = %q, want the cold build's %q", thinkingRowText(warm), thinkingRowText(uncached))
 	}
 }
 

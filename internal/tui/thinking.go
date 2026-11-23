@@ -88,13 +88,14 @@ type thinkingRecord struct {
 // and by every session boundary ([Model.resetSessionBoards]: /clear, /new, a /sessions resume and
 // /fork), which empties it, because the thinking it holds was the closed conversation's.
 //
-// rows is the pane's wrap memo (thinkingpane.go, [thinkingRowCache]) and the one field here the
-// pane writes. It is a POINTER for the reason the transcript's paint cache is (paintcache.go): the
+// rows is the pane's memo (thinkingpane.go, [thinkingRowCache]) — each record's wrapped text rows,
+// line by line, and the composed list of the last frame — and the one field here the pane writes. It is a POINTER for the reason the transcript's paint cache is (paintcache.go): the
 // Model is copied by value on every Update (ADR 0011), so a memo held by value would be a fresh,
 // empty one in every copy and would never hit. newModel (model.go) allocates it; a board built any
 // other way — every test's thinkingBoardWith — carries nil and renders uncached. None of the
-// mutators below touch it: the memo validates each entry on the record's text, so it needs no word
-// from them, and the records themselves carry no key for it.
+// mutators below touch it: the memo validates each entry on the record's text and the composed
+// list on every record's text and heading, so it needs no word from them, and the records
+// themselves carry no key for it.
 type thinkingBoard struct {
 	done []thinkingRecord
 	live []thinkingRecord

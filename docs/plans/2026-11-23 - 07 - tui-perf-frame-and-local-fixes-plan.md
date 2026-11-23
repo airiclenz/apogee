@@ -106,7 +106,17 @@ NOTES (2026-11-23): besides the two named usage_test.go sites, the `delegate` te
 - `go test -run '^$' -bench 'PerfAuditBlocks/view' -benchmem ./internal/tui/` — N=900 no longer above N=48 by the walk's share
 **Commit:** `perf(tui): memoise the footer's sub-agent spend by transcript generation`
 
-## 4. /thinking pane: per-line wrap memo and one composed build per frame
+## 4. /thinking pane: per-line wrap memo and one composed build per frame — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): benchmarks (arm64 Pi 5, -count=3, no -race) — BenchmarkThinkingPaneUpdateAndView before 15.15–15.79 ms/op, 8.41–8.43 MB/op, 130,750 allocs/op; after 10.38–10.46 ms/op, 6.39 MB/op, 46,892 allocs/op. BenchmarkThinkingPaneRender before 10.97–11.13 ms/op, 6.05 MB/op, 88,220 allocs/op; after 8.05–8.23 ms/op, 5.68 MB/op, 43,925 allocs/op. Put these in the commit body.
+
+NOTES (2026-11-23): the composed-list memo is validated on the computed headings plus every record's text (the column and scope reset it), never on a generation; the per-line reuse is decided by line equality, with `lineShift` only choosing the alignment (verified by HasPrefix on the bytes), so a wrong alignment costs wraps, never rows. Composed rows now share one backing cell array (each `popupRow` a capped one-cell slice of it) instead of one allocation per row — same rows, fewer allocations.
+
+NOTES (2026-11-23): the remaining per-chunk cost (~89% of allocations) is the painter's `popupRowBlocks` over the whole row list in `renderPopupPlaced` — View composition, plan 08 territory, not touched here.
+
+NOTES (2026-11-23): thinking_test.go (listed in Files) needed no change — TestThinkingBoardMutatorsInvalidateOnlyWhatTheyTouch passes unchanged with `wraps` keeping its record-level meaning.
+
+NOTES (2026-11-23): the working tree also shows modified files this item never touched (.capcom/issues/*, docs/plans/archived/*, internal/agent|floor testdata, internal/prompt/prompt_test.go); they appeared mid-run from elsewhere and were left exactly as found — not part of this item.
 
 **What:**
 **Goal:** one reasoning chunk re-wraps only the lines it changed (including a front cut at the record cap), and the pane's composed rows are built once per frame state; rows equal a cold build.
