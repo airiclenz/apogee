@@ -3,6 +3,8 @@ package platform
 import (
 	"os"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/realpath"
 )
 
 // hostRules is the per-OS behaviour table behind Host: the shell argv prefix, the
@@ -359,7 +361,7 @@ func (r hostRules) split(p string) (anchor string, parts []string, ok bool) {
 		sep = `\`
 		p = strings.ReplaceAll(p, "/", sep)
 		var stripped bool
-		if p, stripped = stripLongPathPrefix(p); !stripped && strings.HasPrefix(p, `\\.\`) {
+		if p, stripped = realpath.StripLongPathPrefix(p); !stripped && strings.HasPrefix(p, `\\.\`) {
 			return "", nil, false // a device namespace path is not a filesystem location
 		}
 		if hasShortName(p, sep) {
@@ -414,21 +416,6 @@ func (r hostRules) split(p string) (anchor string, parts []string, ok bool) {
 		}
 	}
 	return anchor, parts, true
-}
-
-// stripLongPathPrefix removes the Windows \\?\ extended-length prefix, mapping the UNC
-// form (`\\?\UNC\server\share`) back to its ordinary spelling so the two forms of one path
-// compare equal. It reports whether a prefix was present.
-func stripLongPathPrefix(p string) (string, bool) {
-	const prefix = `\\?\`
-	if !strings.HasPrefix(p, prefix) {
-		return p, false
-	}
-	rest := p[len(prefix):]
-	if unc := `UNC\`; len(rest) >= len(unc) && strings.EqualFold(rest[:len(unc)], unc) {
-		return `\\` + rest[len(unc):], true
-	}
-	return rest, true
 }
 
 // hasShortName reports whether any component of p is shaped like an 8.3 short name, the

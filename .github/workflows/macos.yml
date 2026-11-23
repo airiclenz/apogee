@@ -41,16 +41,18 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - name: go test (race, platform and gitexec)
-        # These two trees rather than `./...`: they hold the darwin-tagged tests (the
+      - name: go test (race, platform, realpath and gitexec)
+        # These three trees rather than `./...`: they hold the darwin-tagged tests (the
         # seatbelt live battery in internal/platform/seatbelt_darwin_test.go, plus its
         # /dev/null exemption probe, the twin of the loud skip in
         # seatbelt_notdarwin_test.go) and the darwin paths of tests every OS runs (the
         # single-instance lock's holder test in lock_holder_test.go, and gitexec's ctime
-        # fileprint via ctime_darwin.go). The rest of the suite is Linux-shaped and runs in
+        # fileprint via ctime_darwin.go, and realpath's resolver, which platform's seatbelt
+        # roots go through, on a host whose temp dir sits behind a link: /var is
+        # /private/var). The rest of the suite is Linux-shaped and runs in
         # ci.yml.
         #
-        # `-p 1` keeps the sandbox-exec batteries serial, so the two trees never contend
+        # `-p 1` keeps the sandbox-exec batteries serial, so the three trees never contend
         # for the runner's CPUs; `-timeout 30m` covers that serial wall time on a slow
         # runner.
-        run: go test -race -count=1 -p 1 -timeout 30m ./internal/platform/... ./internal/gitexec/...
+        run: go test -race -count=1 -p 1 -timeout 30m ./internal/platform/... ./internal/realpath/... ./internal/gitexec/...

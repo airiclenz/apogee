@@ -38,7 +38,13 @@
 - `config.resolveWriteTarget` / `followFinalLinks` (`internal/config/configsplice.go`): it answers which file to replace without replacing a link, not a real location; it keeps its own `evalSymlinks` seam.
 - Changing what any sandbox backend mounts or labels; the `planUnixSockets` raw-versus-canonical difference in `namespace_linux.go`; running `internal/tools`, `internal/agent` or `internal/tui` on Windows CI.
 
-## 1. The realpath leaf package
+## 1. The realpath leaf package — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): consequential edit — docs/manual/building.md: made necessary by adding `./internal/realpath/...` to the test-windows and macOS workflow package lists (the manual states both lists: seven trees → eight, macOS two → three)
+NOTES (2026-11-23): `finalPathName` and `stripLongPathPrefix` were moved, not duplicated: the leaf exports `FinalPathName` (realpath_windows.go) and `StripLongPathPrefix` (untagged realpath.go); platform's copies are deleted and `currentRules` / `hostRules.split` call the leaf. `isJunction` had no platform user outside the moved file, so it stays unexported in the leaf.
+NOTES (2026-11-23): `ResolveLenient` uses the existing `realPathFallback` seam as its final-path call (nil off Windows, so POSIX takes the `Resolve` climb); no new seam was added.
+NOTES (2026-11-23): moved tests renamed for `Resolve` (`TestResolveMatchesEvalSymlinks`, `TestResolveFallback`, `TestResolveThroughAJunction`, `TestResolveCrossesJunction`); beyond the plan's list the leaf also gains `TestResolveLenientNeverFails`, `TestStripLongPathPrefix` and the Windows-only `TestResolveLenientCrossesJunction` and `TestIsLinkSeesAJunction` (compile-checked here, unproven until test-windows CI). The import test is named `TestPackageImportsNothingFromApogee`.
+NOTES (2026-11-23): no CHANGELOG entry — an internal move with no user-visible change (`ResolveLenient` has no production caller until item 2).
 
 **What:** Recast at the regression check (2026-11-23).
 **Goal:** `internal/realpath` exists, imports nothing internal, and exports `Resolve(p string) (string, error)`, `ResolveLenient(p string) string` and `IsLink(p string) (bool, error)`; `platform.RealPath` returns `realpath.Resolve`'s result; the Windows final-path code lives only in the leaf.
