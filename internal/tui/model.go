@@ -3231,8 +3231,7 @@ func (m Model) transcriptBudget() int {
 // unset key to `auto` before it reaches the renderer (domain.DefaultUIPrefs), and the renderer
 // draws a zero UIPrefs as the classic frame rather than special-casing it into a default.
 func (m Model) panelShown() bool {
-	least, ok := sidePanelLeastWindow(m.opts.UI.SidePanelShow)
-	return ok && m.width >= least
+	return m.panelGeometry().isShown
 }
 
 // slotWidth is the transcript slot's column budget: the window less the side panel's painted
@@ -3240,7 +3239,7 @@ func (m Model) panelShown() bool {
 // The slot is every row above the session-name rule; the rule, the status line, the prompt box and
 // the footer below it keep the window's width whatever this says.
 func (m Model) slotWidth() int {
-	return m.width - m.panelWidth()
+	return m.panelGeometry().slotWidth
 }
 
 // transcriptWidth is the column budget the transcript body wraps to: the viewport's own width

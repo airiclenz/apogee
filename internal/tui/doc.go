@@ -1064,7 +1064,11 @@
 // rows above the session-name rule by View: docked beside the transcript slot, or, on a window under
 // the gate, painted over the slot's right edge as the overlay ([Model.panelOverlaid], ADR 0111 D7)
 // that navigation mode's panel region opens — by → or bare /panel — and every way out of that
-// region closes; panelstops.go the column's stops ([Model.panelStops]) —
+// region closes; panelframe.go the column's horizontal geometry as one pure value
+// ([newPanelGeometry]) — shown, overlayable or overlaid, docked and painted width, chrome, the
+// slot's width, the cells a click and the grip land on and the width clamp — built from the window,
+// the show mode, the width setting and the overlay request, never from the Model, which the
+// sidepanel.go width helpers delegate to ([Model.panelGeometry]); panelstops.go the column's stops ([Model.panelStops]) —
 // the rows a click acts on, in paint order, each with its row span, its target and an identity
 // (header, run, path, task card, usage, mcp) — through which the pointer resolves a body row and which
 // navigation mode's cursor walks in the panel region (blockcursor.go);

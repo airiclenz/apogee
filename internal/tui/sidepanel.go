@@ -118,24 +118,30 @@ func (c panelChrome) left() int {
 	return c.inset + sidePanelSeparatorWidth + c.gutter
 }
 
-// panelChrome is the painted column's chrome this frame. Where the content holds a full sub-agent
-// row ([Model.panelFullSubAgentRowWidth]) the gutter, the margin and the body indent are bodyIndent
-// wide; narrower, they yield a cell at a time before any fact is cut: the right margin first, then
-// the gutter's extra cell, down to the one cell the cursor's ▌ stands in, then the body indent,
-// down to nothing.
+// panelGeometryAs is the side panel's geometry this frame ([newPanelGeometry]) with the overlay
+// asked for as isOverlaid says, built from the window, the show mode, the width setting and the
+// width a full sub-agent row needs — never from the frame's composed rows.
+func (m Model) panelGeometryAs(isOverlaid bool) panelGeometry {
+	return newPanelGeometry(panelGeometryInput{
+		window:       m.width,
+		show:         m.opts.UI.SidePanelShow,
+		width:        m.opts.UI.SidePanelWidth,
+		isOverlaid:   isOverlaid,
+		fullRowWidth: m.panelFullSubAgentRowWidth(),
+	})
+}
+
+// panelGeometry is the side panel's geometry this frame: the one place the overlay request is read
+// off the cursor — navigation mode stands in the panel region with the keys its own
+// ([Model.blockCursorOwnsKeys]). There is no flag of its own: the overlay lives exactly while the
+// cursor stands there, so whatever moves the cursor out of the region, or ends the mode, closes it.
+func (m Model) panelGeometry() panelGeometry {
+	return m.panelGeometryAs(m.cursor.inPanel() && m.blockCursorOwnsKeys())
+}
+
+// panelChrome is the painted column's chrome this frame ([newPanelChrome]).
 func (m Model) panelChrome() panelChrome {
-	width := m.panelPaintWidth()
-	chrome := panelChrome{gutter: sidePanelGutterWidth, margin: sidePanelMarginWidth, indent: sidePanelBodyIndentWidth}
-	if m.panelOverlaid() && !m.panelOverlayGapHung() {
-		chrome.inset = 1
-	}
-	short := m.panelFullSubAgentRowWidth() - (width - chrome.left() - chrome.margin)
-	marginYield := min(max(0, short), sidePanelMarginWidth)
-	chrome.margin -= marginYield
-	gutterYield := min(max(0, short-marginYield), sidePanelGutterWidth-sidePanelGutterLeast)
-	chrome.gutter -= gutterYield
-	chrome.indent -= min(max(0, short-marginYield-gutterYield), sidePanelBodyIndentWidth)
-	return chrome
+	return m.panelGeometry().chrome
 }
 
 // panelLeftChrome is the columns the painted column spends before its content
@@ -156,7 +162,7 @@ func (m Model) panelFullSubAgentRowWidth() int {
 // ([panelChrome.inset]). The docked column hangs none: the transcript's right gutter and the
 // scroll-bar column already stand between its text and the separator.
 func (m Model) panelOverlayGapHung() bool {
-	return m.panelOverlaid() && m.width-m.panelPaintWidth() >= 1
+	return m.panelGeometry().isOverlayGapHung
 }
 
 // configuredPanelWidth is `ui.side-panel.width` as every reader of it takes it: the unset width (a
@@ -173,42 +179,27 @@ func (m Model) configuredPanelWidth() int {
 // the show mode's gate floor. The clamp is the layout's alone — it never writes the setting back,
 // so a window grown again paints the width the user chose.
 func (m Model) panelWidth() int {
-	if !m.panelShown() {
-		return 0
-	}
-	return m.clampPanelWidth(m.configuredPanelWidth(), m.opts.UI.SidePanelWidth.IsStated())
+	return m.panelGeometry().dockedWidth
 }
 
-// clampPanelWidth is width held to the column's limits in this window (adr-0110-amend-1108 (a)):
-// at least [domain.MinSidePanelWidth], at most the window less the transcript it leaves and the
-// scroll-bar column. A set width — one the user dragged or wrote — leaves the transcript
-// [sidePanelTranscriptLeast]; an unset one leaves the show mode's gate floor
-// ([sidePanelTranscriptFloor]), so the default width docks as it did before a width could be set
-// narrower than the gate. The layout ([Model.panelWidth]) and a separator drag
-// ([Model.dragPanelSeparator]), which always clamps as set, read it, so the drag stops exactly
-// where the paint does.
+// clampPanelWidth is width held to the docked column's limits in this window ([panelGeometry.clamp]).
+// The layout ([Model.panelWidth]) and a separator drag ([Model.dragPanelSeparator]), which always
+// clamps as set, read it, so the drag stops exactly where the paint does.
 func (m Model) clampPanelWidth(width int, isSet bool) int {
-	least := sidePanelTranscriptLeast
-	if !isSet {
-		least, _ = sidePanelTranscriptFloor(m.opts.UI.SidePanelShow)
-	}
-	return min(max(width, domain.MinSidePanelWidth), m.width-least-scrollbarWidth)
+	return m.panelGeometry().clamp(width, isSet)
 }
 
 // panelOverlayable reports whether the column can open as the narrow-window overlay (ADR 0111 D7):
 // the window is under the show mode's gate ([Model.panelShown] is false), and the mode is one that
 // draws the column at all — `off`, and the zero UIPrefs' empty mode, never overlay it.
 func (m Model) panelOverlayable() bool {
-	least, ok := sidePanelLeastWindow(m.opts.UI.SidePanelShow)
-	return ok && m.width < least
+	return m.panelGeometry().isOverlayable
 }
 
 // panelOverlaid reports whether the column is painted as the overlay this frame: it is overlayable
-// and navigation mode stands in the panel region with the keys its own ([Model.blockCursorOwnsKeys]).
-// There is no flag of its own — the overlay lives exactly while the cursor stands in the panel
-// region, so whatever moves the cursor out of it, or ends the mode, closes it.
+// and navigation mode stands in the panel region with the keys its own ([Model.panelGeometry]).
 func (m Model) panelOverlaid() bool {
-	return m.panelOverlayable() && m.cursor.inPanel() && m.blockCursorOwnsKeys()
+	return m.panelGeometry().isOverlaid
 }
 
 // panelPaintWidth is the columns the column is painted across, its separator included: the docked
@@ -219,18 +210,14 @@ func (m Model) panelOverlaid() bool {
 // column read it. [Model.panelWidth] stays 0 under the overlay, so the slot, the layout and the
 // frame key never move and the transcript is not re-wrapped (ADR 0110 D6).
 func (m Model) panelPaintWidth() int {
-	if m.panelOverlaid() {
-		return min(m.configuredPanelWidth(), m.width)
-	}
-	return m.panelWidth()
+	return m.panelGeometry().paintWidth
 }
 
 // panelContentWidth is the columns the panel's content has: the painted column
 // ([Model.panelPaintWidth]) less its chrome ([Model.panelChrome]) — the left chrome and the right
 // margin — 0 while it is not painted.
 func (m Model) panelContentWidth() int {
-	chrome := m.panelChrome()
-	return max(0, m.panelPaintWidth()-chrome.left()-chrome.margin)
+	return m.panelGeometry().contentWidth
 }
 
 // panelSection is one section the column shows: which it is, what its header says and its body
@@ -1072,11 +1059,12 @@ type panelTarget struct {
 
 // panelCell reports whether (x, y) is one of the column's cells: within the painted column's width
 // of the window's right edge ([Model.panelPaintWidth] — right of the transcript slot while docked,
-// over the transcript's right edge while overlaid), on a row above the session-name rule.
+// over the transcript's right edge while overlaid), on a row above the session-name rule — the row
+// bound of the frame m composes ([Model.frameSpans]). The column is checked first, so a cell off it
+// composes no frame.
 func (m Model) panelCell(x, y int) bool {
-	width := m.panelPaintWidth()
-	left := m.width - width + m.panelChrome().inset
-	return width > 0 && x >= left && x < m.width && y >= 0 && y < m.frameSpans().slotBottom
+	geometry := m.panelGeometry()
+	return geometry.onColumn(x) && geometry.cell(x, y, m.frameSpans().slotBottom)
 }
 
 // panelPinX is the window column of a header's pin glyph: the painted column's first content cell,
@@ -1084,7 +1072,7 @@ func (m Model) panelCell(x, y int) bool {
 // the painted column, never the slot: under the overlay the slot is the whole window, and the pin
 // sits over the transcript's right edge.
 func (m Model) panelPinX() int {
-	return m.width - m.panelPaintWidth() + m.panelLeftChrome()
+	return m.panelGeometry().pinX
 }
 
 // panelTargetAt answers what a click at (x, y) does on the column of the frame m composes (pre in
@@ -1228,11 +1216,7 @@ func (m Model) panelDoubleClicked(at time.Time) bool {
 // The overlay has no grip at all (ADR 0111 D7): the separator belongs to the docked column, and an
 // overlay the window cannot dock has no width a drag could set.
 func (m Model) panelGripAt(x int) (grab int, isGrip bool) {
-	grab = x - m.slotWidth()
-	if m.panelOverlaid() || grab < 0 || grab >= sidePanelGripWidth {
-		return 0, false
-	}
-	return grab, true
+	return m.panelGeometry().gripAt(x)
 }
 
 // startPanelDrag arms a separator drag grabbed grab columns right of the separator at time at,

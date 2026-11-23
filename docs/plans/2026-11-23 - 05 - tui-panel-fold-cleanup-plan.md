@@ -156,7 +156,12 @@ NOTES (2026-11-23): blockfold.go already existed (item 4 created it for applyFol
 **Closes:** fold-gesture-setters-leak
 **Commit:** `refactor(tui): the block-fold rule lives in blockfold.go`
 
-## 7. The side panel's horizontal geometry is one pure value
+## 7. The side panel's horizontal geometry is one pure value — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): the input's overlay field is `isOverlaid` (not `overlaid`), per the house boolean-prefix rule; `panelGeometryAs(isOverlaid)` and `panelGeometry()` live in sidepanel.go beside the delegates, and the chrome's yield rule is `newPanelChrome` in panelframe.go (the `panelChrome` type stays in sidepanel.go).
+NOTES (2026-11-23): added `panelGeometry.onColumn(x)` (the horizontal half of `cell`), so the zero-arg `Model.panelCell` delegate checks the column before passing `m.frameSpans().slotBottom` — the old body short-circuited before composing the frame, and an eager `frameSpans()` would render every overlay pane on each wheel notch off the column.
+NOTES (2026-11-23): consequential edit — internal/tui/doc.go: made necessary by the new panelframe.go (TestDocMapNamesEveryFile requires every file in the package map).
+NOTES (2026-11-23): TestDocMapNamesEveryFile fails at HEAD f3ce72dc because item 6's blockfold.go is not named in internal/tui/doc.go — not this item's file; reported as FOLLOW-UP.
 
 **What:** Recast at the regression check (2026-11-23).
 **Goal:** `newPanelGeometry(panelGeometryInput) panelGeometry` in new `internal/tui/panelframe.go` takes no `Model` and answers shown, overlayable, overlaid, docked width, paint width, chrome, overlay gap, content width, pin x, slot width, `cell(x, y, slotBottom)`, `gripAt(x)` and `clamp`; the gate and clamp rules are covered by table tests.
