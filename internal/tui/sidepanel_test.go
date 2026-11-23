@@ -4544,3 +4544,175 @@ func TestSidePanelDiskGoneSetFallsWithWritesAndBoundaries(t *testing.T) {
 		}
 	})
 }
+
+// panelBenchEdits and panelBenchPaths size BenchmarkSidePanelView's session: 300 landed edits over
+// 150 distinct paths, so every path is written twice and the write log is twice the section's rows.
+const (
+	panelBenchEdits = 300
+	panelBenchPaths = 150
+)
+
+// sidePanelBenchModel is a ready 160×40 model under show with the default sections, after
+// panelBenchEdits finished edit calls — each a call, then its landed write with a diffstat — over
+// panelBenchPaths paths, then one View.
+func sidePanelBenchModel(tb testing.TB, show domain.SidePanelShow) Model {
+	tb.Helper()
+
+	opts := testOpts
+	opts.UI.SidePanelShow = show
+	opts.UI.SidePanelSections = domain.DefaultSidePanelSections
+	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = next.(Model)
+	for i := range panelBenchEdits {
+		id, path := "e"+strconv.Itoa(i), fmt.Sprintf("internal/pkg%d/file%d.go", i%panelBenchPaths%10, i%panelBenchPaths)
+		m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{
+			ID: id, Tool: "single_find_and_replace", Arguments: []byte(`{"path":"` + path + `"}`),
+		}})
+		edit := landedEdit(domain.EventBase{}, path, 3, 1)
+		edit.Tool, edit.Result.CallID = "single_find_and_replace", id
+		m = m.foldEvent(edit)
+	}
+	_ = m.View()
+	if show != domain.SidePanelShowOff && m.panelContentWidth() == 0 {
+		tb.Fatal("setup: the side panel is not painted at 160 columns")
+	}
+	return m
+}
+
+// BenchmarkSidePanelView measures View alone over sidePanelBenchModel's session, the panel shown
+// (`auto` at 160 columns) against off. Run it alone, without -race:
+//
+//	go test -run '^$' -bench 'SidePanelView' -benchmem ./internal/tui/
+func BenchmarkSidePanelView(b *testing.B) {
+	for _, show := range []domain.SidePanelShow{domain.SidePanelShowAuto, domain.SidePanelShowOff} {
+		b.Run("panel="+string(show), func(b *testing.B) {
+			m := sidePanelBenchModel(b, show)
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = m.View()
+			}
+		})
+	}
+}
+
+// filesMemoModel is a ready 160×40 model showing the default sections, with a scheme host that
+// switches to the built-in light scheme, after three landed writes — one by a delegated run, so the
+// glyph set shows on a changed-files row — and one View, so the panel's memo holds the section.
+func filesMemoModel(t *testing.T) Model {
+	t.Helper()
+
+	opts := colorSchemeOpts(nil, []string{"dark", "light"},
+		func(string) (scheme.Scheme, []string) { return lightScheme(t), nil }, nil)
+	opts.UI.SidePanelShow = domain.SidePanelShowAuto
+	opts.UI.SidePanelSections = domain.DefaultSidePanelSections
+	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	m = step(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
+	m.panel = sidepanel.New(func() time.Time { return panelNow })
+	for _, e := range []domain.Event{
+		landedEdit(domain.EventBase{}, "src/a.go", 3, 1),
+		landedEdit(domain.EventBase{}, "src/b.go", 1, 0),
+		landedEdit(delegationBase("d1"), "src/c.go", 2, 2),
+	} {
+		m = m.foldEvent(e)
+	}
+	_ = m.View()
+	return m
+}
+
+// filesSectionBody is the changed-files section's painted rows as m paints them: through its memo,
+// or cold — no memo — where isCold.
+func filesSectionBody(t *testing.T, m Model, isCold bool) []string {
+	t.Helper()
+	if isCold {
+		m.panelMemo = nil
+	}
+	section, isLive := m.panelSection(domain.SidePanelChangedFiles)
+	if !isLive {
+		t.Fatal("the changed-files section is not live")
+	}
+	return section.body
+}
+
+// TestPanelChangedFilesMemoHitsOnAnUnchangedFrame pins the memo's point: once a View has painted the
+// changed-files section, two more Views with nothing changed walk no write log and paint the same
+// frame. It reads the process-wide panelChangedFilesWalks counter, so it does not run in parallel.
+func TestPanelChangedFilesMemoHitsOnAnUnchangedFrame(t *testing.T) {
+	m := filesMemoModel(t)
+	panelChangedFilesWalks.Store(0)
+
+	first, second := m.View().Content, m.View().Content
+
+	if got := panelChangedFilesWalks.Load(); got != 0 {
+		t.Errorf("two unchanged Views walked the write log %d times, want none", got)
+	}
+	if first != second {
+		t.Error("two unchanged Views painted different frames")
+	}
+	cold := m
+	cold.panelMemo = nil
+	if want := cold.View().Content; first != want {
+		t.Errorf("the memoised frame differs from a cold one:\n%s\n--- cold ---\n%s", first, want)
+	}
+}
+
+// TestPanelChangedFilesFollowWrites pins the memo against a cold paint after each input it is keyed
+// on, or cleared by, moves: a landed write, a disk re-check hiding a row, a narrower column, a
+// colour-scheme switch (applyColorScheme) and a glyph-set switch (tellGlyphs). Each change repaints
+// the section — its rows differ from the warm paint before it — and the memoised rows equal a cold
+// paint's.
+func TestPanelChangedFilesFollowWrites(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		change func(t *testing.T, m Model) Model
+	}{
+		{"a write lands", func(t *testing.T, m Model) Model {
+			return m.foldEvent(landedEdit(domain.EventBase{}, "src/d.go", 4, 0))
+		}},
+		{"a disk re-check finds a file gone", func(t *testing.T, m Model) Model {
+			m, _ = m.foldPanelGone(panelGoneMsg{gen: m.panelDisk.gen, gone: map[string]bool{"src/a.go": true}})
+			return m
+		}},
+		{"the column narrows", func(t *testing.T, m Model) Model {
+			before := m.panelContentWidth()
+			m = step(t, m, tea.WindowSizeMsg{Width: 138, Height: 40})
+			if m.panelContentWidth() >= before {
+				t.Fatalf("setup: the content width moved %d → %d, want narrower", before, m.panelContentWidth())
+			}
+			return m
+		}},
+		{"the colour scheme switches", func(t *testing.T, m Model) Model {
+			if _, _, err := m.applyColorScheme("light"); err != nil {
+				t.Fatalf("applyColorScheme: %v", err)
+			}
+			return m
+		}},
+		{"the glyph set switches", func(t *testing.T, m Model) Model {
+			m.opts.UI.Glyphs = domain.GlyphsSafe
+			m, _, _, err := tellGlyphs(m, string(domain.GlyphsSafe))
+			if err != nil {
+				t.Fatalf("tellGlyphs: %v", err)
+			}
+			return m
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := filesMemoModel(t)
+			warm := filesSectionBody(t, m, false)
+
+			m = tc.change(t, m)
+			got := filesSectionBody(t, m, false)
+
+			if slices.Equal(got, warm) {
+				t.Fatalf("setup: the change left the section's rows as they were:\n%s", strings.Join(got, "\n"))
+			}
+			if want := filesSectionBody(t, m, true); !slices.Equal(got, want) {
+				t.Errorf("the memoised rows differ from a cold paint:\n%s\n--- cold ---\n%s",
+					strings.Join(got, "\n"), strings.Join(want, "\n"))
+			}
+		})
+	}
+}

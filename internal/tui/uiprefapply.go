@@ -111,11 +111,13 @@ func (m Model) applyUIPref(key, value string) (Model, string, tea.Cmd, bool, err
 }
 
 // tellGlyphs swaps the drawn marks. Every memoised block paint holds the outgoing set's marks and its
-// key does not name the set (paintcache.go), so the cache is cleared as a scheme switch clears it;
+// key does not name the set (paintcache.go), so the cache is cleared as a scheme switch clears it,
+// and the side panel's paint memo with it (panelframe.go);
 // the set is in the frame key, so the repaint tail lays the transcript out again in the new marks.
 func tellGlyphs(m Model, _ string) (Model, string, tea.Cmd, error) {
 	m.th.glyphs = glyphsFor(m.opts.UI.Glyphs)
 	m.transcript.paints.clear()
+	m.panelMemo.clear()
 	return m, "", nil, nil
 }
 

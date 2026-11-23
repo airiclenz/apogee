@@ -157,7 +157,19 @@ NOTES (2026-11-23): no kept benchmark covers the @ path (perfaudit_bench_test.go
 - `go test -race -count=1 -run 'TestE2EAtFile' ./cmd/apogee/`
 **Commit:** `perf(tui): list @file candidates off the Update goroutine`
 
-## 6. Side panel: memoised changed-files section and section parse
+## 6. Side panel: memoised changed-files section and section parse — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): benchmark `go test -run '^$' -bench 'SidePanelView' -benchmem ./internal/tui/` (Pi 5, no -race) before → after: panel=auto 4.24 ms 244 KB/op 5437 allocs → 1.76 ms 152 KB/op 3611 allocs; panel=off 1.68 ms 141 KB/op 3911 allocs → 1.67 ms 140 KB/op 3910 allocs.
+
+NOTES (2026-11-23): the memo (`panelMemo`, panelframe.go) is keyed on the `*sidepanel.State` pointer, scope, `panelDisk.goneSerial`, content width plus the whole `panelChrome` (the body indent the row lead reads is in the chrome, not the content width), glyphs, measure, padPrompts, spinner style and the `workspaceRoot`. `goneSerial` is a new `panelDiskCheck` field bumped in foldPanelGone and notePanelWrite and carried +1 through resetPanelDisk, so a reset never moves it back.
+
+NOTES (2026-11-23): `panelFoldedSections` now returns the memo's shared slice; its callers (panelSectionsIn, toggleSidePanelFold, withSectionFolded) only read it. withSectionMode and panelReportNote keep a fresh parse, as the plan says.
+
+NOTES (2026-11-23): `TestPanelChangedFilesFollowWrites` was checked by mutation: a memo that ignores its key fails the write, disk-gone and width cases; dropping the applyColorScheme clear fails the scheme case. The glyph case passes either way, because the glyph set is both in the key and cleared by tellGlyphs.
+
+NOTES (2026-11-23): consequential edit — internal/tui/doc.go: made necessary by the new panelMemo in panelframe.go (the package map's panelframe.go entry names it).
+
+NOTES (2026-11-23): `capcom update panel-sections-every-frame` reworded the second Acceptance bullet to "no ChangedFiles walk and no changed-files repaint", naming tasks, sub-agents, usage and MCP as repainted every frame. The issue file had no foreign change before this item. The issue's Suggested-fix line "Paint only the body rows panelLayout keeps" was left as written: it is a suggestion, and the plan's recast drops that clause.
 
 **What:** Recast at the regression check (2026-11-23).
 **Goal:** a `View` whose panel inputs did not change performs no `ChangedFiles` walk and no changed-files repaint; panel rows still update when a write lands; output byte-identical.

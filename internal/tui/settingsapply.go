@@ -522,8 +522,9 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 //   - the prompt textarea is re-filled, because its four background slots belong to a Bubble Tea
 //     widget the theme cannot reach from a style (fillInput) — the same posture steadyCursor takes
 //     for the caret;
-//   - the block paint cache is cleared, because every memoised paint in it is in the previous
-//     palette and its key does not name the theme (paintcache.go);
+//   - the block paint cache and the side panel's paint memo are cleared, because every memoised
+//     paint in them is in the previous palette and their keys do not name the theme (paintcache.go,
+//     panelframe.go);
 //   - the Options' own record of the scheme is updated, so a report that names the scheme in force
 //     names this one.
 //
@@ -550,6 +551,7 @@ func (m *Model) applyColorScheme(name string) (string, tea.Cmd, error) {
 	m.th.measure, m.th.padPrompts, m.th.glyphs = measure, padPrompts, glyphs
 	fillInput(&m.input, m.th.surface)
 	m.transcript.paints.clear()
+	m.panelMemo.clear()
 	m.opts.ColorScheme, m.opts.UI.ColorScheme = s, name
 	for _, w := range warnings {
 		m.transcript.addEphemeralNote(w)

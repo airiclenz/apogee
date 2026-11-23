@@ -301,6 +301,10 @@ type panelDiskCheck struct {
 	// ([Model.panelWriteKey]). It is replaced whole or cloned before a delete, never written in
 	// place, so a Model copy that shares it never sees it change (ADR 0011).
 	gone map[string]bool
+	// goneSerial numbers the gone sets: it moves wherever gone is replaced — a landed check, an
+	// unhiding write, a reset — and never moves back, so the changed-files paint memo keys on it
+	// ([panelFilesKey]) in place of the set itself.
+	goneSerial int
 	// gen numbers the panel state the checks read: it moves only where that state is replaced
 	// ([Model.resetPanelDisk]), never per launch, and a reply stamped with any other is dropped.
 	gen int
@@ -324,6 +328,7 @@ type panelGoneMsg struct {
 // navigation mode's stops and the click targets all read the section this builds, so a hidden row
 // is hidden from all three alike. It reads the gone set only: no paint stats the disk.
 func (m Model) changedFileRows(scope sidepanel.RunKey) sidepanel.View[sidepanel.FileRow] {
+	panelChangedFilesWalks.Add(1)
 	view := m.panel.ChangedFiles(scope)
 	if len(m.panelDisk.gone) == 0 {
 		return view
@@ -395,6 +400,7 @@ func (m Model) foldPanelGone(msg panelGoneMsg) (Model, tea.Cmd) {
 	}
 	m.panelDisk.isInFlight = false
 	m.panelDisk.gone = msg.gone
+	m.panelDisk.goneSerial++
 	if !m.panelDisk.isDirty {
 		return m, nil
 	}
@@ -412,6 +418,7 @@ func (m *Model) notePanelWrite(key string) {
 		gone := maps.Clone(m.panelDisk.gone)
 		delete(gone, key)
 		m.panelDisk.gone = gone
+		m.panelDisk.goneSerial++
 	}
 	if m.panelDisk.isInFlight {
 		m.panelDisk.isDirty = true
@@ -422,7 +429,7 @@ func (m *Model) notePanelWrite(key string) {
 // boundaries and a rebuild from a resumed record — and opens a fresh generation, so a check still in
 // flight against the replaced state is dropped on landing.
 func (m *Model) resetPanelDisk() {
-	m.panelDisk = panelDiskCheck{gen: m.panelDisk.gen + 1}
+	m.panelDisk = panelDiskCheck{gen: m.panelDisk.gen + 1, goneSerial: m.panelDisk.goneSerial + 1}
 }
 
 // sidePanelColumn paints the column's rows rows as the frame at this geometry lays them out
@@ -609,6 +616,12 @@ func panelTier(section panelSection) int {
 // paints from parallel tests, and that test reads it only when running alone.
 var panelSectionPaints atomic.Int64
 
+// panelChangedFilesWalks counts the changed-files section's walks of the write log
+// ([Model.changedFileRows]). It exists for the test that pins no walk on a frame whose panel inputs
+// did not move (TestPanelChangedFilesMemoHitsOnAnUnchangedFrame), is read by nothing else, and is
+// atomic for panelSectionPaints' reason.
+var panelChangedFilesWalks atomic.Int64
+
 // panelSections is the sections the column shows, painted at this frame's geometry
 // ([Model.panelSectionsIn]).
 func (m Model) panelSections() []panelSection {
@@ -618,15 +631,11 @@ func (m Model) panelSections() []panelSection {
 // panelSectionsIn is the sections the column shows, in list order, painted at geometry's content
 // width: every entry of `ui.side-panel.sections` that is pinned, or auto while its live rule holds,
 // each folded where `ui.side-panel.folded` lists it. Both are read off the Options on every frame,
-// so a fold landed by a click, a `/settings` apply or a re-read of the file paints on the next one.
+// so a fold landed by a click, a `/settings` apply or a re-read of the file paints on the next one;
+// the parse is memoised by the setting's string ([panelMemo.sectionEntries]).
 func (m Model) panelSectionsIn(geometry panelGeometry) []panelSection {
 	panelSectionPaints.Add(1)
-	entries, err := domain.ParseSidePanelSections(string(m.opts.UI.SidePanelSections))
-	if err != nil {
-		// Unreachable from a running session: the config loader and /settings both refuse a list
-		// this parse refuses, so a bad one never reaches the Options. The default list still paints.
-		entries, _ = domain.ParseSidePanelSections("")
-	}
+	entries := m.panelMemo.sectionEntries(string(m.opts.UI.SidePanelSections), parsePanelSections)
 	folded := m.panelFoldedSections()
 	shown := make([]panelSection, 0, len(entries))
 	for _, entry := range entries {
@@ -643,6 +652,18 @@ func (m Model) panelSectionsIn(geometry panelGeometry) []panelSection {
 		shown = append(shown, section)
 	}
 	return shown
+}
+
+// parsePanelSections is `ui.side-panel.sections` source read into its entries, the default list
+// standing in for one the parse refuses.
+func parsePanelSections(source string) []domain.SidePanelEntry {
+	entries, err := domain.ParseSidePanelSections(source)
+	if err != nil {
+		// Unreachable from a running session: the config loader and /settings both refuse a list
+		// this parse refuses, so a bad one never reaches the Options. The default list still paints.
+		entries, _ = domain.ParseSidePanelSections("")
+	}
+	return entries
 }
 
 // panelSection paints one section at this frame's geometry ([Model.panelSectionIn]), and reports
@@ -673,11 +694,7 @@ func (m Model) panelSectionIn(geometry panelGeometry, section domain.SidePanelSe
 		return panelSection{title: "Tasks", summary: view.Summary, body: paintPanelRows(view.Rows, func(row sidepanel.TaskRow) string { return m.panelTaskRow(geometry, row) })},
 			view.IsLive
 	case domain.SidePanelChangedFiles:
-		view := m.changedFileRows(scope)
-		return panelSection{
-			title: "Changed files", summary: view.Summary, body: paintPanelRows(view.Rows, func(row sidepanel.FileRow) string { return m.panelFileRowIn(geometry, row) }),
-			files: view.Rows,
-		}, view.IsLive
+		return m.panelFilesSectionIn(geometry, scope)
 	case domain.SidePanelUsage:
 		view := m.panel.Usage(scope).WithFill(m.panelFill())
 		return panelSection{title: "Usage", summary: view.Summary, body: m.panelUsageRows(geometry, view)}, view.IsLive
@@ -688,6 +705,27 @@ func (m Model) panelSectionIn(geometry panelGeometry, section domain.SidePanelSe
 	default:
 		return panelSection{}, false
 	}
+}
+
+// panelFilesSectionIn is the changed-files section for scope painted at geometry's content width, and
+// whether its live rule holds: the memo's paint while none of its inputs moved
+// ([panelMemo.filesSection]), a fresh walk and paint otherwise — so a frame with no new write, no
+// disk re-check landed, and no width, theme or workspace change walks no write log and repaints no
+// row.
+func (m Model) panelFilesSectionIn(geometry panelGeometry, scope sidepanel.RunKey) (panelSection, bool) {
+	key := panelFilesKey{
+		state: m.panel, scope: scope, goneSerial: m.panelDisk.goneSerial,
+		width: geometry.contentWidth, chrome: geometry.chrome,
+		glyphs: m.th.glyphs, measure: m.th.measure, padPrompts: m.th.padPrompts,
+		spinner: m.opts.UI.Spinner, root: m.transcript.ws,
+	}
+	return m.panelMemo.filesSection(key, func() (panelSection, bool) {
+		view := m.changedFileRows(scope)
+		paint := func(row sidepanel.FileRow) string { return m.panelFileRowIn(geometry, row) }
+		return panelSection{
+			title: "Changed files", summary: view.Summary, body: paintPanelRows(view.Rows, paint), files: view.Rows,
+		}, view.IsLive
+	})
 }
 
 // panelRunKey is ref as the side panel keys the Events of its run: [sidepanel.RunOf] over the same
@@ -1473,9 +1511,16 @@ func sidePanelDelta(section domain.SidePanelSection, state string) string {
 	return string(section) + ": " + state
 }
 
-// panelFoldedSections is `ui.side-panel.folded` read into the sections it folds.
+// panelFoldedSections is `ui.side-panel.folded` read into the sections it folds, memoised by the
+// setting's string ([panelMemo.foldedSections]): the list is shared, so a caller never writes it.
 func (m Model) panelFoldedSections() []domain.SidePanelSection {
-	folded, err := domain.ParseSidePanelFolded(string(m.opts.UI.SidePanelFolded))
+	return m.panelMemo.foldedSections(string(m.opts.UI.SidePanelFolded), parsePanelFolded)
+}
+
+// parsePanelFolded is `ui.side-panel.folded` source read into the sections it folds, none for one
+// the parse refuses.
+func parsePanelFolded(source string) []domain.SidePanelSection {
+	folded, err := domain.ParseSidePanelFolded(source)
 	if err != nil {
 		// Unreachable from a running session, for panelSections' reason: nothing folds.
 		return nil

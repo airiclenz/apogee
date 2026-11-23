@@ -1078,7 +1078,8 @@
 // View ([Model.newPanelFrame]) — that geometry, the sections painted once at its content width, their
 // layout and the stops over it, which the paint and the cursor's row both read, and the column's one
 // hit-test ([Model.panelHitAt], [panelFrame.at]) — cell, grip, pin and target — which the click and
-// the hover ask off the gesture's snapshot; panelstops.go the column's stops ([Model.panelStops]) —
+// the hover ask off the gesture's snapshot, and the panel's paint memo ([panelMemo]) — the
+// changed-files section and the two section settings' parses, held across frames; panelstops.go the column's stops ([Model.panelStops]) —
 // the rows a click acts on, in paint order, each with its row span, its target and an identity
 // (header, run, path, task card, usage, mcp) — through which the pointer resolves a body row and which
 // navigation mode's cursor walks in the panel region (blockcursor.go); navmode.go that walk as one

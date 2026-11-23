@@ -495,6 +495,10 @@ type Model struct {
 	// and before the auto ones; folding one drops it. Session-only — never written to config — and
 	// replaced, never written in place ([withPanelOpened]), so it rides the value-copied Model (ADR 0011).
 	panelOpened []domain.SidePanelSection
+	// panelMemo is the side panel's paint memo (panelframe.go): the changed-files section as a frame
+	// last painted it and the last parse of each section setting. A pointer built once in newModel,
+	// so every by-value copy reaches the one memo (ADR 0011); nil in a bare literal, which paints cold.
+	panelMemo *panelMemo
 	// now is the Model's clock: what time a press on the side panel's grip landed, so two of them
 	// close together read as a double-click ([panelDoubleClick], sidepanel.go). Seeded time.Now by
 	// newModel; a test overwrites it to stub the gap between two presses. A func value, so it rides
@@ -862,6 +866,9 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// And the /thinking pane its wrap memo (thinkingpane.go), for the same reason and built the
 	// same once: every copy of the Model has to reach the one memo, or no render would ever hit it.
 	m.thinking.rows = newThinkingRowCache()
+
+	// And the side panel its paint memo (panelframe.go), for the same reason and built the same once.
+	m.panelMemo = newPanelMemo()
 
 	// Resolve the footer's spelling of that same workspace once, for the same reason: the home
 	// lookup is an environment read, and neither it nor the workspace changes for the life of the

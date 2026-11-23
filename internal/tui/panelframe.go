@@ -1,6 +1,9 @@
 package tui
 
-import "github.com/airiclenz/apogee/internal/domain"
+import (
+	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/sidepanel"
+)
 
 // The side panel's horizontal geometry (ADR 0110, ADR 0111 D7) as one pure value: whether the column
 // shows, docks or overlays this frame, how wide it is docked and painted, the chrome around its
@@ -284,4 +287,115 @@ func (m Model) panelFrameAs(isOverlaid bool) panelFrame {
 		return panelFrame{geometry: geometry}
 	}
 	return m.newPanelFrame(geometry, m.frameSpans().slotBottom)
+}
+
+// panelMemo is the side panel's paint memo: the changed-files section as one frame painted it, and
+// the last parse of each of the two section settings, so a frame whose inputs did not move walks no
+// write log ([sidepanel.State.ChangedFiles]) and repaints no file row. The sub-agents, tasks, usage
+// and MCP sections are painted every frame: a clock, a spinner frame or a gauge moves them.
+//
+// It is built ONCE, in newModel, and lives behind a pointer on the Model (ADR 0011): every by-value
+// copy reaches the one memo, or no frame would ever hit it. What it hands out — painted rows, file
+// rows, parsed lists — is never written after it is stored, so a frame may hold it. Every method is
+// nil-safe: a nil memo (a bare Model literal, a test's cold reference) answers fresh every time and
+// remembers nothing.
+//
+// Invalidation: the changed-files paint is keyed on every input it reads ([panelFilesKey]) except
+// the palette, which no key names; a scheme switch and a glyph-set switch clear it
+// ([Model.applyColorScheme], [tellGlyphs]) as they clear the block-paint cache. A parse is keyed on
+// its source string.
+//
+// walks counts the changed-files sections painted afresh over the memo's life — a diagnostic the
+// tests pin the reuse on. Nothing in production reads it.
+type panelMemo struct {
+	files    panelFilesPaint
+	hasFiles bool
+	sections panelParse[[]domain.SidePanelEntry]
+	folded   panelParse[[]domain.SidePanelSection]
+	walks    int
+}
+
+// panelFilesKey is everything the changed-files section's paint reads ([Model.panelFilesSectionIn])
+// but the palette. state is the panel state the rows are walked from: it is replaced copy-on-write
+// on every fold ([Model.foldSidePanel]), so a new write is a new pointer, and the memo holds the
+// pointer it was keyed on, so that address is never reused by another State while it is the key.
+type panelFilesKey struct {
+	state      *sidepanel.State
+	scope      sidepanel.RunKey
+	goneSerial int
+	width      int
+	chrome     panelChrome
+	glyphs     glyphSet
+	measure    widthAuthority
+	padPrompts bool
+	spinner    SpinnerStyle
+	root       workspaceRoot
+}
+
+// panelFilesPaint is one memoised changed-files paint: its key, the section and its live rule.
+type panelFilesPaint struct {
+	key     panelFilesKey
+	section panelSection
+	isLive  bool
+}
+
+// panelParse is one memoised parse of a section setting: the source string and what it resolved to.
+type panelParse[T any] struct {
+	source string
+	value  T
+	isSet  bool
+}
+
+// newPanelMemo returns an empty memo. Production builds exactly one, in newModel.
+func newPanelMemo() *panelMemo { return &panelMemo{} }
+
+// filesSection returns the changed-files section painted under key: the stored paint when key is
+// the one it was painted under, a fresh one from paint — stored under key — otherwise.
+func (p *panelMemo) filesSection(key panelFilesKey, paint func() (panelSection, bool)) (panelSection, bool) {
+	if p == nil {
+		return paint()
+	}
+	if p.hasFiles && p.files.key == key {
+		return p.files.section, p.files.isLive
+	}
+	section, isLive := paint()
+	p.files, p.hasFiles = panelFilesPaint{key: key, section: section, isLive: isLive}, true
+	p.walks++
+	return section, isLive
+}
+
+// clear drops the changed-files paint, for a change no key names: the palette or the glyph set.
+func (p *panelMemo) clear() {
+	if p == nil {
+		return
+	}
+	p.files, p.hasFiles = panelFilesPaint{}, false
+}
+
+// sectionEntries returns `ui.side-panel.sections` source resolved by parse: the stored result when
+// source is the one it was parsed from, a fresh parse — stored — otherwise.
+func (p *panelMemo) sectionEntries(source string, parse func(string) []domain.SidePanelEntry) []domain.SidePanelEntry {
+	if p == nil {
+		return parse(source)
+	}
+	return p.sections.resolve(source, parse)
+}
+
+// foldedSections returns `ui.side-panel.folded` source resolved by parse, as
+// [panelMemo.sectionEntries] does the sections list.
+func (p *panelMemo) foldedSections(source string, parse func(string) []domain.SidePanelSection) []domain.SidePanelSection {
+	if p == nil {
+		return parse(source)
+	}
+	return p.folded.resolve(source, parse)
+}
+
+// resolve returns source's value: the stored one when source is the one it was parsed from, a fresh
+// parse — stored — otherwise.
+func (c *panelParse[T]) resolve(source string, parse func(string) T) T {
+	if c.isSet && c.source == source {
+		return c.value
+	}
+	c.source, c.value, c.isSet = source, parse(source), true
+	return c.value
 }

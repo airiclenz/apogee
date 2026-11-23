@@ -53,8 +53,9 @@ of re-deriving them from the whole write log. Paint only the body rows `panelLay
 
 - [ ] A benchmark in `internal/tui` with ~300 edit calls over ~150 distinct paths and the panel
       shown at 160 columns records `View` alone with the panel on vs off, before and after.
-- [ ] A `View` whose panel state did not change performs no `ChangedFiles` walk and no section
-      repaint — pinned by `panelSectionPaints` or a call counter.
+- [ ] A `View` whose panel inputs did not change performs no `ChangedFiles` walk and no
+      changed-files repaint — pinned by a call counter. The tasks, sub-agents, usage and MCP
+      sections are still repainted every frame: a clock, a spinner frame or a gauge moves them.
 - [ ] The panel's rows still update when a write lands, shown by a test driving the TUI through
       `internal/tuitest` + `internal/stubllm` (never an `httptest` upstream closure); rendered
       output is byte-identical.
