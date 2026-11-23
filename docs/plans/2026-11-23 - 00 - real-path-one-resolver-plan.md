@@ -111,7 +111,11 @@ internal/platform/seatbelt.go — the profile's writable-roots block; internal/p
 **Acceptance:** `go build ./... && GOOS=windows go vet ./internal/platform/ && GOOS=darwin go vet ./internal/platform/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'BoxRoots|CanonicalWritableRoot|Landlock|Namespace|Seatbelt|UnixSocket' ./internal/platform/ && ! grep -n 'EvalSymlinks(' internal/platform/confine_posix.go && test "$(grep -l 'boxRoots(' internal/platform/landlock_linux.go internal/platform/namespace_linux.go internal/platform/seatbelt.go internal/platform/winguard.go | wc -l)" = 4`
 **Commit:** `refactor(platform): sandbox roots resolve through the realpath leaf`
 
-## 4. Project root, Adoption and config resolve through the leaf
+## 4. Project root, Adoption and config resolve through the leaf — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): `internal/platform/realpath.go` was removed with `git rm`, so its deletion is already staged; every other change is unstaged.
+NOTES (2026-11-23): `internal/projectroot/doc.go`'s layering sentence is rewritten, not just renamed: the package now imports only `internal/realpath` (a leaf), no longer `internal/platform`; `internal/agent/construct.go` and `internal/config/projectwrite.go` drop their `platform` import too, as neither file used it for anything else.
+NOTES (2026-11-23): the guard test reads non-test `.go` files as text (comments included) and spells the retired name in two halves; the two Windows test files are compile-checked only (`GOOS=windows go vet`), unproven until the `test-windows` CI job runs.
 
 Depends on item 1.
 

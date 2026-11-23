@@ -12,7 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/airiclenz/apogee/internal/adoption"
-	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/realpath"
 )
 
 // The Project config writer (ADR 0096 §4). apogee writes `<Project root>/.apogee/config.yaml` only
@@ -45,7 +45,7 @@ const (
 // filepath.Rel never compares a final path with a path as written. The project layer's reader
 // (readProjectLayer) resolves the file it reads through it too. It is a variable so a test can
 // force a resolve failure; nothing else assigns it.
-var projectRealPath = platform.RealPath
+var projectRealPath = realpath.Resolve
 
 // editProject runs one config-write transaction against the Project config of projectRoot, holding
 // a lock kept under workspacesDir (the binary's `~/.apogee/workspaces`). The file and its folder are

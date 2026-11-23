@@ -56,9 +56,8 @@
 // host. platform_posix.go and platform_windows.go are the build-tagged selectors saying which
 // rule set Current returns; only the Windows one carries anything of its own — the OS
 // long-path resolver that lets Contains expand an 8.3 short name instead of refusing to
-// compare it. realpath.go is RealPath, a one-line delegate to realpath.Resolve: the one
-// real-path resolver, and the Windows final-path call behind the finalPath rule, live in the
-// internal/realpath leaf.
+// compare it. The one real-path resolver, and the Windows final-path call behind the finalPath
+// rule, live in the internal/realpath leaf.
 //
 // The Confiner selectors. confiner_darwin.go and confiner_other.go are three-line per-OS
 // choices of NewConfiner and NewReportConfiner — seatbelt, and the deny-all stub.

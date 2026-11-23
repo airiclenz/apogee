@@ -14,7 +14,6 @@ import (
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/gitexec"
-	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -297,7 +296,7 @@ func projectConfigRule(cfg domain.Config) (security.Rule, bool) {
 
 // projectRootPaths spells the symlink-resolved Project root root and the workspace as the session
 // names it, for the guard that reads no disk: the workspace resolved through a link or junction
-// (platform.RealPath) when that differs, and the root spelled through the workspace's own
+// (realpath.Resolve) when that differs, and the root spelled through the workspace's own
 // unresolved prefix — the folder the workspace climbs to as many levels as its resolved form climbs
 // to root — kept only when the file system resolves it to root. A workspace that is itself a link
 // climbs to some other folder (its link's parent), which keeps no spelling, so a home above it is
@@ -318,7 +317,7 @@ func projectRootPaths(root, workspace string) security.ProjectRootPaths {
 	if workspace == "" {
 		return paths
 	}
-	realWorkspace, err := platform.RealPath(workspace)
+	realWorkspace, err := realpath.Resolve(workspace)
 	if err != nil || realWorkspace == workspace {
 		return paths
 	}
@@ -334,7 +333,7 @@ func projectRootPaths(root, workspace string) security.ProjectRootPaths {
 	if linked == root {
 		return paths
 	}
-	if resolved, err := platform.RealPath(linked); err == nil && resolved == root {
+	if resolved, err := realpath.Resolve(linked); err == nil && resolved == root {
 		paths.LinkedRoot = linked
 	}
 	return paths

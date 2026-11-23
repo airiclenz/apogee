@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/realpath"
 )
 
 // dirPerm and filePerm scope the adoption records to the owner: they decide what a repository's
@@ -141,7 +142,7 @@ func ConfigLockPath(dir, projectRoot string) (string, error) {
 
 // key resolves projectRoot to the absolute, symlink-free path a record is keyed on and returns it
 // with its full hex SHA-256 — the record's file name, which leaks neither the project's name nor
-// its location. The resolution is platform.RealPath: filepath.EvalSymlinks wherever that succeeds,
+// its location. The resolution is realpath.Resolve: filepath.EvalSymlinks wherever that succeeds,
 // so every key it produced is unchanged, and the final path name for a root under a Windows
 // junction, where EvalSymlinks fails.
 func key(projectRoot string) (root, digest string, err error) {
@@ -152,7 +153,7 @@ func key(projectRoot string) (root, digest string, err error) {
 	if err != nil {
 		return "", "", fmt.Errorf("apogee: adoption store: resolve Project root %q: %w", projectRoot, err)
 	}
-	root, err = platform.RealPath(abs)
+	root, err = realpath.Resolve(abs)
 	if err != nil {
 		return "", "", fmt.Errorf("apogee: adoption store: resolve Project root %q: %w", projectRoot, err)
 	}

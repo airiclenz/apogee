@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/realpath"
 )
 
 // configDirName is the per-project folder that marks a Project root: it holds the Project config
@@ -82,7 +82,7 @@ func walkToProjectRoot(start, realHome string) (root string, found bool) {
 	}
 }
 
-// realPath renders path absolute and link-resolved through platform.RealPath, so a workspace
+// realPath renders path absolute and link-resolved through realpath.Resolve, so a workspace
 // reached through a Windows junction resolves like one reached through a symlink; it fails when
 // any component is missing.
 func realPath(path string) (string, error) {
@@ -90,7 +90,7 @@ func realPath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return platform.RealPath(abs)
+	return realpath.Resolve(abs)
 }
 
 // realPathOrClean is realPath for the home guard, falling back to the cleaned absolute spelling so

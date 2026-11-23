@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/projectroot"
+	"github.com/airiclenz/apogee/internal/realpath"
 )
 
 // longTempDir is a fresh temporary folder in its long-name spelling. CI's t.TempDir is the 8.3
@@ -19,7 +19,7 @@ import (
 // from this one.
 func longTempDir(t *testing.T) string {
 	t.Helper()
-	dir, err := platform.RealPath(t.TempDir())
+	dir, err := realpath.Resolve(t.TempDir())
 	if err != nil {
 		t.Fatalf("resolve the temp dir: %v", err)
 	}
