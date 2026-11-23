@@ -12,7 +12,8 @@ package main
 // next reply. Every call is a tool group (plan "2026-11-20 - 00" for the group of one): a lone call
 // and a lone delegation are groups of one that stand open while the next Turn runs and fold once
 // its reply shows, open on a click and fold again on a second, and with the collapse off a lone
-// call stands as an open group of one.
+// call stands as an open group of one. A burst of calls one per Turn across consecutive Turns stands
+// as ONE open umbrella until its wrap-up's reply shows (plan "2026-11-23 - 04", item 2).
 // The settledness, the touched exemption and the live apply are pinned in
 // internal/tui; only the binary shows that the config default, the composition root's inversion onto
 // tui.Options and the transcript's seed hold together.
@@ -505,6 +506,84 @@ func TestE2EToolsAutoCollapseFoldsAGroupWhenItsWrapUpArrives(t *testing.T) {
 	waitIdle(drv)
 	if frame := drv.Frame(); !folded.in(frame) {
 		t.Errorf("the group does not stand folded as %q after the wrap-up:\n%s", folded, frame)
+	}
+	quitCleanly(t, sess)
+}
+
+// The burst toolsautocollapse.yaml answers one call per Turn across three Turns: its prompt, the
+// gate its wrap-up is held on, the word only that wrap-up's request carries (second.txt's line),
+// and the umbrella's Group summary. No two neighbouring calls share a tool, so each call stands as
+// a type row of its own — three, under the default `ui.tools-fold-over` of five, so the size rule
+// alone would stand the umbrella open.
+const (
+	autoCollapseBurstPrompt = "Read the burst files."
+	autoCollapseBurstWrapUp = "The burst is read."
+	autoCollapseBurstGate   = "burst"
+	autoCollapseBurstMark   = "osprey"
+	autoCollapseBurstHeader = "✦ Read 2 files, listed 1 dir"
+)
+
+// autoCollapseBurstRows are the burst umbrella's type rows by their heads — branch marker and label,
+// one per call in call order — which an open umbrella paints and a folded one hides.
+var autoCollapseBurstRows = []string{"┝ Read", "┝ List", "┕ Read"}
+
+// autoCollapseBurstWorkspace is the seeded scratch workspace with the burst's own files beside it:
+// burst/first.txt and burst/second.txt, each a line of a word no other prompt's result carries, so
+// the fixture keys each of the burst's Turns on the result its predecessor gives.
+func autoCollapseBurstWorkspace(t *testing.T) string {
+	t.Helper()
+
+	ws := e2eWorkspace(t)
+	dir := filepath.Join(ws, "burst")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatalf("make the burst directory: %v", err)
+	}
+	for name, line := range map[string]string{"first.txt": "kestrel\n", "second.txt": autoCollapseBurstMark + "\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(line), 0o600); err != nil {
+			t.Fatalf("seed burst/%s: %v", name, err)
+		}
+	}
+	return ws
+}
+
+// TestE2EToolsAutoCollapseKeepsAMultiTurnBurstOpen is the burst's claim under the default config:
+// three consecutive Turns that each issue one call — a read, a listing, a read — build ONE umbrella
+// that stands OPEN as `✦ Read 2 files, listed 1 dir ⋯ ▼` over all three type rows while the next
+// Turn's request is held on the `burst` gate, since a new Turn starting is no reason to fold; and
+// once the wrap-up's reply lands, the umbrella folds to its Group summary under `▶`, its type rows
+// gone.
+func TestE2EToolsAutoCollapseKeepsAMultiTurnBurstOpen(t *testing.T) {
+	t.Parallel()
+
+	stub := stubllm.New(t, loadScript(t, "toolsautocollapse"))
+	drv := tuitest.NewDriver(t, autoCollapseTallSize)
+	sess := launchTUIIn(t, drv, stub, autoCollapseBurstWorkspace(t), "")
+	// Registered after the launch so it runs before the session's own teardown: a run that failed
+	// with the request still held must not wait out the gate on the way down.
+	t.Cleanup(func() { stub.Release(autoCollapseBurstGate) })
+	folded := umbrellaHeaderMatch{text: autoCollapseBurstHeader, glyph: "▶"}
+	open := umbrellaHeaderMatch{text: folded.text, glyph: "▼"}
+
+	submit(drv, autoCollapseBurstPrompt)
+	awaitOpenWhileHeld(drv, stub, autoCollapseBurstMark, autoCollapseBurstWrapUp, open)
+	frame := drv.Frame()
+	for _, row := range autoCollapseBurstRows {
+		if !strings.Contains(frame.String(), row) {
+			t.Errorf("the open burst umbrella does not paint its %q type row while the wrap-up is held:\n%s", row, frame)
+		}
+	}
+
+	stub.Release(autoCollapseBurstGate)
+	drv.WaitText(autoCollapseBurstWrapUp)
+	waitIdle(drv)
+	frame = drv.Frame()
+	if !folded.in(frame) {
+		t.Errorf("the burst umbrella does not stand folded as %q after the wrap-up:\n%s", folded, frame)
+	}
+	for _, row := range autoCollapseBurstRows {
+		if strings.Contains(frame.String(), row) {
+			t.Errorf("the folded burst umbrella paints its %q type row after the wrap-up:\n%s", row, frame)
+		}
 	}
 	quitCleanly(t, sess)
 }

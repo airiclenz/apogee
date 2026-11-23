@@ -1,7 +1,7 @@
 # The upstream the auto-collapse runs talk to (TestE2EToolsAutoCollapse*): two prompts that each make
 # the model issue one batch of groupable calls, six that each make it issue one block of another
-# shape — two lone calls, a lone delegation, two Sub-agents groups, a Skill group — and one that
-# only talks.
+# shape — two lone calls, a lone delegation, two Sub-agents groups, a Skill group — one that
+# issues its calls one per Turn across three Turns, and one that only talks.
 #
 #   - "Survey the workspace." issues toolsfold.yaml's three calls of three different tools — Read,
 #     List and Grep — so its umbrella's Group summary is the one e2e_toolsfold_test.go spells
@@ -27,6 +27,12 @@
 #     but with tasks and answers of their own, and its wrap-up is HELD on the `wings` gate: the
 #     request that carries the group's results waits until the test has seen the group stand open,
 #     so the group is shown to stay open while that next Turn runs and to fold once its reply lands.
+#   - "Read the burst files." issues ONE call per Turn over three consecutive Turns — a read of
+#     burst/first.txt, a listing of burst/, a read of burst/second.txt — each Turn keyed on the
+#     result only the call before it gives (the files are seeded by the test in a workspace of its
+#     own, never in e2eWorkspace), so the three calls build one umbrella of three type rows across
+#     Turn boundaries. Its wrap-up is HELD on the `burst` gate, so the umbrella is shown to stand
+#     open through the whole burst and to fold once that reply lands.
 #   - "Anything else?" is the next reply after a settled block: text only, no call.
 #
 # All calls are harmless reads, or delegations whose children only talk: a driven run boots in
@@ -42,6 +48,31 @@ turns:
         last_message: The user's first request
       repeat: true
       text: Workspace survey
+    # The burst's second and third Turns and its wrap-up (TestE2EToolsAutoCollapseKeepsAMultiTurnBurstOpen).
+    # They sit AHEAD of every other wrap-up, which claims any read_file or list_dir result, and each
+    # names a result only its own predecessor gives: first.txt's `kestrel`, the listing's
+    # `second.txt`, second.txt's `osprey` — words no other prompt's workspace holds.
+    - when:
+        tool_result: read_file
+        last_message: kestrel
+      repeat: true
+      tool_calls:
+        - name: list_dir
+          arguments: '{"path":"burst"}'
+    - when:
+        tool_result: list_dir
+        last_message: second\.txt
+      repeat: true
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"burst/second.txt"}'
+    # The burst's wrap-up, held on the `burst` gate until the test has seen the umbrella stand open.
+    - when:
+        tool_result: read_file
+        last_message: osprey
+      repeat: true
+      await: burst
+      text: The burst is read.
     # The zebra search's wrap-up, once its lone grep has found nothing — held on the `zebra` gate
     # until the test has seen the group of one stand open (TestE2EToolsAutoCollapseRefoldsALoneCall). It
     # sits AHEAD of the survey's wrap-up, and its `last_message` names a result only a search that
@@ -117,6 +148,13 @@ turns:
           arguments: '{"path":"missing.txt"}'
         - name: list_dir
           arguments: '{"path":"."}'
+    # The burst's first Turn: one read, the next Turn's call keyed on its result.
+    - when:
+        last_message: ^Read the burst files
+      repeat: true
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"burst/first.txt"}'
     - when:
         last_message: ^Read the one file
       repeat: true

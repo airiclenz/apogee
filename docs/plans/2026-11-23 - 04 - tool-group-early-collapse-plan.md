@@ -69,7 +69,10 @@ internal/tui/autocollapse_turnboundary_test.go — turnBoundary; cmd/apogee/e2e_
 
 **Commit:** `fix(tui): a tool group settles on a follower, not on the next Turn's start`
 
-## 2. Driven test: a multi-Turn tool burst stays open until its follower
+## 2. Driven test: a multi-Turn tool burst stays open until its follower — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): re-derived from "two different tool kinds, so the umbrella has two type rows" — type rows are runs of consecutive same-tool calls, so the burst's read → list → read stands as THREE type rows (┝ Read, ┝ List, ┕ Read), still under the default `ui.tools-fold-over` of 5; the test asserts all three, which is the Goal's "every call's type row".
+NOTES (2026-11-23): the new test (TestE2EToolsAutoCollapseKeepsAMultiTurnBurstOpen) was checked to bite: with item 1's internal/tui/transcript.go change reverted it times out waiting for the open `✦ Read 2 files, listed 1 dir ⋯ ▼` header while the wrap-up is held.
 
 Depends on item 1.
 
