@@ -507,15 +507,18 @@ its id.
   summary; `⏎` on an item opens it read-only — its receipt, the detail output it wrote and its
   whole conversation. On a background `sub_agent`'s one stage `⏎` opens its one item, whose
   detail output is the delegation's report. In a `failed` workflow the stage whose error ended it
-  reads `failed` and the stages after it stay `pending`.
+  reads `failed` and the stages after it stay `pending`. A workflow that could not start at all —
+  its item source no longer reads, or its folder cannot be written — reads `failed` too, with every
+  stage `pending`, and its finish note names the cause; a finished workflow whose re-run could not
+  start keeps the state it had.
 - `^a` answers what the workflow waits on: the pane closes and its oldest waiting approval or
   question opens — one `esc` sent back included — only while the agent is idle; mid-turn it says
   so and opens nothing.
 - `^x` stops the workflow and keeps its finished items.
 - `^r` re-runs its `blocked` and faulted items as a new run of the same finished workflow, in the
   background and only while the agent is idle; every item that ended `ok` or `partial` is kept. A
-  `failed` workflow — one a stage error ended — is resumed the same way, its unreached items run
-  too.
+  `failed` workflow — one a stage error ended, or one that could not start — is resumed the same
+  way, its unreached items run too.
 - `^s` saves a `fan_out`'s workflow as a **recipe**: it asks for a name and writes
   `~/.apogee/skills/<name>/SKILL.md`, whose recipe runs the same stages — the path the items came
   from becomes its `scope` input — and `/<name>` runs it at once. A name a skill or command already

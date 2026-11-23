@@ -163,7 +163,12 @@ Depends on item 5.
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestBackground_' ./internal/agent/`
 **Commit:** `fix(agent): one end path for a background run; a queued stop settles before its id is reused`
 
-## 7. A background run that fails before it starts is recorded and announced
+## 7. A background run that fails before it starts is recorded and announced — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): re-derived from the assumption that the launch id is substituted in `EndingOf`/the manager's `end`: `workflow.RunEnding` carries no id, so the observer takes it — a new `workflowObserver.launch` field (workflowcall.go) that `startBackground` sets to the launch's folder id before the run starts, and `end` reports under it when `Result.ID` is empty (started, then failed). A blocking observer has none and still reports nothing. `ending.go` is unchanged.
+NOTES (2026-11-23): the pending-only rule lives once, in `Runner.failPending` (settle.go): `Run` calls it on the folder as it read it when `resetStatus` fails (joining the mark's error to the reset's), and the new `Runner.SettleFailedStart(id) (Phase, error)` reads the folder and calls it. `endBackground` calls `SettleFailedStart` for an ending with an Err and an empty `Result.ID` (step 1), while the run is still live; a mark that fails is joined into the ending's Err rather than discarded.
+NOTES (2026-11-23): `TestRun_AnAdmitRefusalLeavesTheFolder` is a guard on the new mark and passes on the pre-item tree by construction (nothing marked a refused folder before); the other three new tests were each confirmed red against the pre-item code. The reset-write block in `TestRun_AnEarlyFailureRecordsFailed` sets status.json aside (rather than deleting it as `blockFinalPhaseWrite` does) so the done row can read its kept phase back.
+NOTES (2026-11-23): `capcom check` exits 1 on the untouched tree too, on a stale managed capcom block in AGENTS.md (`AGENTS.md:47: the capcom block is out of date; run capcom agents to refresh it`); this item's Notes pass, and AGENTS.md was left alone as out of scope.
 
 Depends on item 6.
 

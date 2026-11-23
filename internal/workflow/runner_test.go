@@ -1450,3 +1450,129 @@ func TestRun_EveryExitSettlesStatusAndItems(t *testing.T) {
 		})
 	}
 }
+
+// TestRun_AnEarlyFailureRecordsFailed pins that a run that fails before its first stage — here its
+// status cannot be reset, because a directory stands at status.json for that one write — records a
+// folder that never ran as failed, so it lists as failed and can be run again, while a found
+// finished folder is left as it was.
+func TestRun_AnEarlyFailureRecordsFailed(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		prior Phase
+		want  Phase
+	}{
+		{name: "a folder that never ran reads failed", prior: PhasePending, want: PhaseFailed},
+		{name: "a found done folder stays done", prior: PhaseDone, want: PhaseDone},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			runner := newTestRunner(t, spawnFunc(func(_ context.Context, spec ItemSpec) (Outcome, error) {
+				t.Errorf("Run spawned %s; a run whose status cannot be reset spawns nothing", spec.Item.Label)
+				return Outcome{Ending: EndCompleted, Receipt: okReceipt(spec.Item.Label)}, nil
+			}))
+			plan := fanPlan("a")
+			opened, err := runner.Open(plan, "")
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			opened.Phase = tt.prior
+			if err := runner.Store.WriteStatus(opened); err != nil {
+				t.Fatalf("WriteStatus: %v", err)
+			}
+			dir, err := runner.Store.Dir(opened.ID)
+			if err != nil {
+				t.Fatalf("Dir: %v", err)
+			}
+			restore := blockResetWrite(t, runner, dir)
+
+			result, err := runner.Run(context.Background(), plan)
+			restore()
+
+			if err == nil {
+				t.Fatal("Run succeeded, want the reset write's error")
+			}
+			if result.ID != "" {
+				t.Errorf("result ID = %q, want none: the run never reached its folder's stages", result.ID)
+			}
+			status, readErr := runner.Store.ReadStatus(opened.ID)
+			if readErr != nil {
+				t.Fatalf("ReadStatus: %v", readErr)
+			}
+			if status.Phase != tt.want {
+				t.Errorf("status.json phase = %s, want %s", status.Phase, tt.want)
+			}
+		})
+	}
+}
+
+// blockResetWrite fails the status.json write that resets the folder for the run — the first one
+// after the runner's clock is first read, which resetStatus does just before it — by standing a
+// non-empty directory at status.json, the file set aside. The next clock read, the one before the
+// failed write, puts the file back, and so does the returned restore when no such read came.
+func blockResetWrite(t *testing.T, runner *Runner, dir string) (restore func()) {
+	t.Helper()
+	statusPath := filepath.Join(dir, statusFileName)
+	heldPath := statusPath + ".held"
+	reads := 0
+	isBlocked := false
+	unblock := func() {
+		if !isBlocked {
+			return
+		}
+		isBlocked = false
+		if err := os.RemoveAll(statusPath); err != nil {
+			t.Errorf("clear the status.json directory: %v", err)
+		}
+		if err := os.Rename(heldPath, statusPath); err != nil {
+			t.Errorf("put status.json back: %v", err)
+		}
+	}
+	runner.Now = func() time.Time {
+		reads++
+		switch reads {
+		case 1:
+			isBlocked = true
+			if err := os.Rename(statusPath, heldPath); err != nil {
+				t.Errorf("set status.json aside: %v", err)
+			}
+			if err := os.MkdirAll(filepath.Join(statusPath, "keep"), 0o755); err != nil {
+				t.Errorf("make status.json a directory: %v", err)
+			}
+		case 2:
+			unblock()
+		}
+		return storeClock
+	}
+	return unblock
+}
+
+// TestRun_AnAdmitRefusalLeavesTheFolder pins that a folder Admit refuses is not marked failed: the
+// refusal is not the run's failure but another run's claim on the folder, which that run settles.
+func TestRun_AnAdmitRefusalLeavesTheFolder(t *testing.T) {
+	t.Parallel()
+	runner := newTestRunner(t, spawnFunc(func(_ context.Context, spec ItemSpec) (Outcome, error) {
+		return Outcome{Ending: EndCompleted, Receipt: okReceipt(spec.Item.Label)}, nil
+	}))
+	plan := fanPlan("a")
+	opened, err := runner.Open(plan, "")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	errLive := errors.New("folder is live")
+	runner.Admit = func(string) error { return errLive }
+
+	_, err = runner.Run(context.Background(), plan)
+
+	if !errors.Is(err, errLive) {
+		t.Fatalf("Run err = %v, want the Admit refusal", err)
+	}
+	status, err := runner.Store.ReadStatus(opened.ID)
+	if err != nil {
+		t.Fatalf("ReadStatus: %v", err)
+	}
+	if status.Phase != PhasePending || !status.Updated.Equal(opened.Updated) {
+		t.Errorf("refused folder = phase %s updated %v, want it left pending at %v", status.Phase, status.Updated, opened.Updated)
+	}
+}

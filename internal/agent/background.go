@@ -580,6 +580,9 @@ func (a *Agent) startBackground(launch workflowLaunch) (string, error) {
 		plan: built.plan, runner: built.runner, host: built.host, turn: launch.turn, observer: built.observer,
 		done: make(chan struct{}),
 	}
+	// Set before the run starts: a run that fails before its Runner knows the folder still ends
+	// under the id the launch opened.
+	run.observer.launch = run.id
 
 	m := &a.background
 	m.mu.Lock()
@@ -628,13 +631,18 @@ type endOptions struct {
 //
 //  1. Settle the folder — an unstarted run only: no Runner ran it, so none settled it. The run sits
 //     in the settling set meanwhile, so its id cannot be launched again until the write is done,
-//     and the lock is not held across that write.
+//     and the lock is not held across that write. A run whose Runner failed before it knew the
+//     folder (an ending with an Err and a result with no ID) has its launch-time folder marked
+//     failed if it never ran (workflow.Runner.SettleFailedStart), best-effort: the run has failed
+//     either way, and a mark that fails joins the ending's Err. It is still live meanwhile, so its
+//     id cannot be launched again either.
 //  2. Hold the finish note — not for a run that never started (it has nothing to report), not when
 //     a whole-set stop is clearing, and not for a run such a stop retired (holdFinish): that note
 //     belongs to the session the stop ended.
-//  3. Report the end — not for a run that never started: it reported no start either. After the
-//     note, so a Driver that wakes on the event finds it, and outside the lock, so a sink blocked
-//     on its Driver never holds up a stop.
+//  3. Report the end — not for a run that never started: it reported no start either. A run that
+//     failed before its Runner knew the folder reports under its launch-time id (workflowObserver.
+//     launch). After the note, so a Driver that wakes on the event finds it, and outside the lock,
+//     so a sink blocked on its Driver never holds up a stop.
 //  4. Cancel the run's context — a run that started only; a queued one has none.
 //  5. Drop the run from the manager, which closes its done.
 //  6. Start the next workflow queued on the run's server — only when the run held that server: an
@@ -643,6 +651,13 @@ func (a *Agent) endBackground(run *backgroundRun, ending workflow.RunEnding, opt
 	m := &a.background
 	if opts.unstarted {
 		ending = workflow.UnstartedEnding(run.runner.SettleUnstarted(run.id))
+	}
+	if !opts.unstarted && ending.Err != nil && opts.result.ID == "" {
+		// The run has failed either way; a folder that cannot be marked joins its cause, so the note
+		// and the event name both, as Run's own early mark does.
+		if _, err := run.runner.SettleFailedStart(run.id); err != nil {
+			ending.Err = errors.Join(ending.Err, err)
+		}
 	}
 	if !ending.NeverStarted && !opts.clearing {
 		m.holdFinish(run, finishNote(workflow.OriginOf(run.plan), run.plan.Name, opts.result, ending, seatFellBack(run.runner)))

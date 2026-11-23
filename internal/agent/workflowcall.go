@@ -741,6 +741,10 @@ type workflowObserver struct {
 	// resume is the resume command the started phase carries (domain.WorkflowPhaseEvent.Resume):
 	// wireLaunch sets it from a blocking launch's resumeCommand before the run starts; "" otherwise.
 	resume string
+	// launch is the id of the folder a background launch opened ahead of its run (startBackground
+	// sets it before the run starts), which end reports under when Run returned no id; "" for a
+	// blocking launch, whose run that fails before it has an id reports nothing.
+	launch string
 
 	mu sync.Mutex
 	id string // the Workflow's id, once started was emitted
@@ -896,11 +900,17 @@ func (o *workflowObserver) waitingOn(id, stage, detail string) {
 // end reports how the run Run returned ended, read off ending (workflow.EndingOf): failed with its
 // cause when it could not proceed after the Workflow started, else stopped or finished, carrying
 // the result's item tally — the one the model's note reports. A run that failed before its
-// Workflow had an id started nothing and reports nothing.
+// Workflow had an id reports under its launch id (launch) — started, then failed — so a Driver
+// waking on the end finds the note held for it; with no launch id, a blocking launch's, it started
+// nothing and reports nothing.
 func (o *workflowObserver) end(result workflow.Result, ending workflow.RunEnding) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.startLocked(result.ID)
+	id := result.ID
+	if id == "" {
+		id = o.launch
+	}
+	o.startLocked(id)
 	if o.id == "" {
 		return
 	}

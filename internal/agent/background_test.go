@@ -1935,3 +1935,85 @@ func TestAgentReadsAWorkflowEndingInOnePlace(t *testing.T) {
 		t.Errorf("found no .Stopped() call in %s; the scan no longer sees what it guards", exempt)
 	}
 }
+
+// TestBackground_ARunThatCannotStartWakesWithAFailedNote pins the ending of a background run that
+// fails before its Runner knows its folder: a queued launch whose item source is replaced by a
+// directory before it starts, so Run cannot expand its items and returns no id. The launch opened
+// the folder ahead of the run, so the run still ends under that id: the folder reads failed, the
+// failed note is held, the WorkflowFailed event that wakes a Driver names the launch id, and a
+// re-run accepts the folder once its source reads again.
+func TestBackground_ARunThatCannotStartWakesWithAFailedNote(t *testing.T) {
+	t.Parallel()
+
+	sink := newLockedSink()
+	lines := workflow.Recipe{
+		ID: "lines",
+		Plan: workflow.Plan{Name: "lines", Stages: []workflow.Stage{{
+			Name:    "items",
+			Kind:    workflow.StageFanout,
+			Task:    "sweep {item}",
+			Over:    &workflow.ItemSource{Lines: "items.txt"},
+			Returns: workflow.ReceiptSpec{"count": "int"},
+		}}},
+		Dir: "/skills/lines",
+	}
+	cfg := recipeConfig(t, sink, sweepRecipe("first", "one"), lines)
+	source := filepath.Join(cfg.WorkspaceDir, "items.txt")
+	if err := os.WriteFile(source, []byte("alpha\n"), 0o644); err != nil {
+		t.Fatalf("write the item source: %v", err)
+	}
+	started, release := make(chan struct{}), make(chan struct{})
+	up := (&workflowResponder{}).
+		route("sweep one", signalThenWait(started, release), finishScript("f1", "one is fine")).
+		route("sweep alpha", nil, finishScript("f2", "alpha is fine"))
+	a := newBackgroundParent(t, cfg, up)
+
+	launchBackground(t, a, "first")
+	awaitClosed(t, started, "the first workflow's child")
+	id := launchBackground(t, a, "lines")
+	if info := workflowInfo(t, a, id); !info.Queued || info.Status.Phase != workflow.PhasePending {
+		t.Fatalf("lines = %+v, want it queued and pending", info)
+	}
+	if err := os.Remove(source); err != nil {
+		t.Fatalf("remove the item source: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(source, "keep"), 0o755); err != nil {
+		t.Fatalf("stand a directory at the item source: %v", err)
+	}
+	close(release)
+	a.background.waitAll()
+
+	var failed []domain.WorkflowPhaseEvent
+	sink.mu.Lock()
+	for _, event := range sink.events {
+		if phase, ok := event.(domain.WorkflowPhaseEvent); ok && phase.Phase == domain.WorkflowFailed {
+			failed = append(failed, phase)
+		}
+	}
+	sink.mu.Unlock()
+	if len(failed) != 1 || failed[0].Workflow != id || !failed[0].Background || failed[0].Detail == "" {
+		t.Errorf("failed events = %+v, want one background WorkflowFailed naming the launch id %s and its cause", failed, id)
+	}
+	wantNote := fmt.Sprintf(finishFailedFormat, "lines", "")
+	notes := a.background.heldNotes()
+	if !slices.ContainsFunc(notes, func(note string) bool { return strings.HasPrefix(note, wantNote) }) {
+		t.Errorf("held notes = %q, want one beginning %q", notes, wantNote)
+	}
+	if info := workflowInfo(t, a, id); info.Background || info.Status.Phase != workflow.PhaseFailed {
+		t.Errorf("lines = %+v, want it failed and no longer live", info)
+	}
+
+	if err := os.RemoveAll(source); err != nil {
+		t.Fatalf("clear the item source: %v", err)
+	}
+	if err := os.WriteFile(source, []byte("alpha\n"), 0o644); err != nil {
+		t.Fatalf("restore the item source: %v", err)
+	}
+	if err := a.RerunFailed(id); err != nil {
+		t.Fatalf("RerunFailed on the run that could not start: %v", err)
+	}
+	a.background.waitAll()
+	if info := workflowInfo(t, a, id); info.Status.Phase != workflow.PhaseDone || itemReceipts(info)["alpha"] != workflow.StatusOK {
+		t.Errorf("after the re-run = %+v, want alpha ok and the workflow done", info)
+	}
+}

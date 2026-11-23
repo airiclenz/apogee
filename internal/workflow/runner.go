@@ -326,9 +326,13 @@ type Tally struct {
 // items' receipts, and returns a Result whose Phase is PhaseStopped. Either way the run ends by
 // writing items.md (Store.WriteItems) into the folder. The error is for a run that
 // could not proceed: an invalid plan, an unreadable item source, a store that cannot be written, a
-// folder Admit refused. A stage that errors once the folder is running ends the run as failed: its
-// status.json phase PhaseFailed, that stage's too, and items.md written, best-effort (settle), so
-// no listing shows it or a stage of it running.
+// folder Admit refused. A folder that never ran — recorded pending — whose status cannot be reset
+// for the run is recorded failed, best-effort (failPending), so it lists as failed and can be run
+// again; a found done, failed or stopped folder stays as it was, and so does a folder Admit
+// refused. A failure before the folder is known leaves the marking to the caller, which has the
+// launch's id (SettleFailedStart). A stage that errors once the folder is running ends the run as
+// failed: its status.json phase PhaseFailed, that stage's too, and items.md written, best-effort
+// (settle), so no listing shows it or a stage of it running.
 func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 	if r.Spawner == nil || r.Store == nil || r.Workspace == nil {
 		return Result{}, errors.New("workflow: runner needs a Spawner, a Store and a Workspace")
@@ -345,9 +349,11 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 			return Result{}, err
 		}
 	}
+	opened := status
 	status, prior, replay, err := r.resetStatus(plan, status, found)
 	if err != nil {
-		return Result{}, err
+		_, failErr := r.failPending(opened)
+		return Result{}, errors.Join(err, failErr)
 	}
 	dir, err := r.Store.Dir(status.ID)
 	if err != nil {
