@@ -1,11 +1,13 @@
 ---
 title: "A path's real location has one resolver (architecture review 2026-11-21 #4)"
-status: open
+status: done
 type: task
 priority: 3
 labels: [security, windows]
 plan: 2026-11-23 - 00 - real-path-one-resolver-plan
 created: 2026-11-21T12:27:13Z
+closed: 2026-11-23T08:57:42Z
+reason: "Resolved by plan '2026-11-23 - 00 - real-path-one-resolver-plan' (all 7 items done; archived at 94142898): internal/realpath is the one resolver, every other resolver delegates to it."
 ---
 
 Found by docs/reviews/architecture-review-2026-11-21.html, verified 2026-11-21 at 171d210f. The Windows junction behaviour of `EvalRealPath` is inferred from `RealPath`'s own doc, not run on Windows; confirm it first.
