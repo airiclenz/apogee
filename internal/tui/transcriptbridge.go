@@ -621,10 +621,11 @@ func fromWireToolView(w *session.ToolView, done bool) toolView {
 	// the live presenter keeps apart into one counted block: the scrollback changing shape across a
 	// restart, which is the very thing the round trip exists to prevent.
 	//
-	// The first is the REGISTRY's word about the tool (toolPresenter.solo), knowable from the
-	// retained name alone, so it is read off the same row the live producer copies it from
-	// (presentToolCall); a name with no row — a dynamic tool's — reads the zero row, which is
-	// solo=false, the same answer the live path gives it. A sub-agent head is a block in its own
+	// The first is the REGISTRY's word about the tool, its grouping class (toolPresenter.grouping),
+	// knowable from the retained name alone, so it is read off the same row the live producer
+	// copies it from (presentToolCall): any class but groupUmbrella is solo. A name with no row — a
+	// dynamic tool's — reads the zero row, which is groupUmbrella and so solo=false, the same answer
+	// the live path gives it. A sub-agent head is a block in its own
 	// right by rule, not by circumstance — without this, two span-less heads (two delegations
 	// refused at the depth bound) replay as one "✦ Sub-agents (2)".
 	//
@@ -646,14 +647,15 @@ func fromWireToolView(w *session.ToolView, done bool) toolView {
 	// three halves are read off the same name the presenter uses (askUserToolName), so the rules
 	// cannot drift apart.
 	//
-	// A SKILL FETCH is the second row that carries the mark, settled exactly as a delegation head
-	// is: the presenter copies it the moment the call is recognised (presentToolCall), because a
-	// fetch groups with its own kind rather than with the reads around it. Reading the same row
-	// here is what lets a session recorded before the mark existed replay never-group instead of
-	// folding into its neighbour's umbrella.
+	// A SKILL FETCH (groupOwn) and the fan_out and task_list calls (groupSolo) carry the mark the
+	// same way, settled exactly as a delegation head is: the presenter copies it the moment the call
+	// is recognised (presentToolCall). Reading the same row here is what lets a session recorded
+	// before the mark existed replay never-group instead of folding into its neighbour's umbrella.
+	// A background sub-agent card reads the sub_agent row, whose class is not groupUmbrella either,
+	// so it comes back solo as its live presenter made it (backgroundSubAgentPresenter).
 	//
 	// Nothing else is re-derived here; every other Solo is a result-time verdict decode cannot reach.
-	if toolRegistry[tv.name].solo ||
+	if toolRegistry[tv.name].grouping != groupUmbrella ||
 		(tv.name == askUserToolName && done && len(w.Details) > 0 && !tv.Summary.failed) {
 		tv.solo = true
 	}

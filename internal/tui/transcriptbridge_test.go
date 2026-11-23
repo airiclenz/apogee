@@ -2510,7 +2510,7 @@ func TestTranscriptCodecReplaysANoReportDelegationWithoutACheck(t *testing.T) {
 }
 
 // TestTranscriptCodecReDerivesSkillFetchSolo proves the third verdict decode does not take from the
-// file. A skill fetch is solo by its REGISTRY ROW, the way a delegation head is (toolPresenter.solo,
+// file. A skill fetch is solo by its REGISTRY ROW, the way a delegation head is (toolPresenter.grouping,
 // copied by presentToolCall): it groups with its own kind, never with the reads and greps around
 // it. So a blob written before the mark
 // existed — every session recorded up to now, where load_skill had no registry entry at all — must
@@ -2772,4 +2772,57 @@ func TestFetchRowSurvivesTheTranscriptCodec(t *testing.T) {
 			t.Errorf("replayed estimate = %d, want %d", e.tool.estimatedTokens, fetchRowEstimate)
 		}
 	}
+}
+
+// TestTranscriptCodecReDerivesSoloFromTheGroupingClass proves decode re-derives the solo mark off
+// the registry row's grouping class for every row, the same column the live presenter copies it
+// from (presentToolCall). Each record is hand-written WITHOUT a "solo" member, because the case IS
+// an old file — a task_list record from before its row declared groupSolo among them — so a row
+// whose class is not groupUmbrella must come back solo and every other row must not. The
+// re-derivation is add-only: an umbrella row's record that does carry "solo":true keeps it.
+func TestTranscriptCodecReDerivesSoloFromTheGroupingClass(t *testing.T) {
+	t.Parallel()
+
+	decodeOne := func(t *testing.T, tool string) toolView {
+		t.Helper()
+		data := []byte(`{"version":1,"entries":[{"kind":"toolCall","callID":"c1","done":true,"tool":` + tool + `}]}`)
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("decoded %d entries; want 1", len(got))
+		}
+		return got[0].tool
+	}
+
+	for name, p := range toolRegistry {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			tv := decodeOne(t, `{"label":"x","verb":"x","target":"t","name":"`+name+`"}`)
+			if want := p.grouping != groupUmbrella; tv.solo != want {
+				t.Errorf("decoded %q record solo = %v, want %v (grouping class %d)", name, tv.solo, want, p.grouping)
+			}
+		})
+	}
+
+	t.Run("background sub-agent", func(t *testing.T) {
+		t.Parallel()
+		tv := decodeOne(t, `{"label":"Sub-agent","verb":"delegating in the background","target":"survey",`+
+			`"name":"sub_agent","args":{"task":"survey","background":true}}`)
+		if !tv.background {
+			t.Fatal("the record did not decode as a background sub-agent call")
+		}
+		if !tv.solo {
+			t.Error("a background sub-agent record decoded without solo; its live presenter is groupSolo")
+		}
+	})
+
+	t.Run("umbrella record keeps a stored solo", func(t *testing.T) {
+		t.Parallel()
+		tv := decodeOne(t, `{"label":"Read","verb":"reading","target":"main.go","name":"read_file","solo":true}`)
+		if !tv.solo {
+			t.Error(`a record carrying "solo":true lost it on decode; re-derivation only ever adds solo`)
+		}
+	})
 }

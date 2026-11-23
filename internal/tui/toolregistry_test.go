@@ -43,6 +43,75 @@ func TestToolRegistryCoversEveryBuiltInTool(t *testing.T) {
 	}
 }
 
+// groupingClassByTool is the ratified grouping class of every registry row, stated by name so a
+// row that changes class — or a new row that forgets to choose — fails a test rather than quietly
+// changing which list its calls fold into.
+var groupingClassByTool = map[string]groupClass{
+	"read_file":               groupUmbrella,
+	"write_file":              groupUmbrella,
+	"list_dir":                groupUmbrella,
+	"grep":                    groupUmbrella,
+	"find_files":              groupUmbrella,
+	"single_find_and_replace": groupUmbrella,
+	"multi_find_and_replace":  groupUmbrella,
+	"edit_existing_file":      groupUmbrella,
+	"view_diff":               groupUmbrella,
+	"copy_file":               groupUmbrella,
+	"move_file":               groupUmbrella,
+	"delete_file":             groupUmbrella,
+	"terminal":                groupUmbrella,
+	"python_exec":             groupUmbrella,
+	"console_open":            groupUmbrella,
+	"console_send":            groupUmbrella,
+	"console_read":            groupUmbrella,
+	"console_close":           groupUmbrella,
+	"git_branch":              groupUmbrella,
+	"git_commit":              groupUmbrella,
+	"git_diff_range":          groupUmbrella,
+	"git_status":              groupUmbrella,
+	"git_log":                 groupUmbrella,
+	"git_show":                groupUmbrella,
+	"diagnostics":             groupUmbrella,
+	"run_tests":               groupUmbrella,
+	"web_fetch":               groupUmbrella,
+	"http_request":            groupUmbrella,
+	"web_search":              groupUmbrella,
+	"sub_agent":               groupOwn,
+	"fan_out":                 groupSolo,
+	"workflow":                groupUmbrella,
+	"task_list":               groupSolo,
+	"ask_user":                groupUmbrella, // the answered record is solo at result time (askUserAnswerRecord)
+	"present_document":        groupUmbrella,
+	"load_skill":              groupOwn,
+}
+
+// TestEveryRegistryRowDeclaresItsGroupingClass pins each registry row's grouping class to the
+// table above in both directions: every row's class is the one the table names, and every table
+// name is a row, so a renamed or retired tool cannot leave a stale class behind. The background
+// sub-agent presenter is no row, so it is pinned beside them.
+func TestEveryRegistryRowDeclaresItsGroupingClass(t *testing.T) {
+	t.Parallel()
+
+	for name, p := range toolRegistry {
+		want, ok := groupingClassByTool[name]
+		if !ok {
+			t.Errorf("toolRegistry row %q has no entry in groupingClassByTool; state its grouping class", name)
+			continue
+		}
+		if p.grouping != want {
+			t.Errorf("toolRegistry[%q].grouping = %d, want %d", name, p.grouping, want)
+		}
+	}
+	for name := range groupingClassByTool {
+		if _, ok := toolRegistry[name]; !ok {
+			t.Errorf("groupingClassByTool names %q, which has no toolRegistry row", name)
+		}
+	}
+	if got := backgroundSubAgentPresenter.grouping; got != groupSolo {
+		t.Errorf("backgroundSubAgentPresenter.grouping = %d, want groupSolo (%d)", got, groupSolo)
+	}
+}
+
 // TestWorkflowFinishStaysTargetless pins the one unregistered call that keeps no target: a workflow
 // child's receipt. It takes the unregistered fallback's label and labelled arguments, but a target
 // lifted from its first string field would turn the run's closing `finish` card into a member row

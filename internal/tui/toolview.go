@@ -645,13 +645,16 @@ type toolView struct {
 	// to lead a member's leader row — and says nothing about what the block MEANS; solo is where a
 	// presenter states that meaning, for a record whose block is a thing in its own right rather than
 	// one of a batch — or for one that has a LIST OF ITS OWN to join, which is the same statement
-	// from the other side. Three calls say it today: the answered ask_user question, whose block
-	// keeps the permanent record of an exchange (askUserAnswerRecord) and reads as a card, not as a
-	// row in a list of questions; the sub_agent call, whose block heads a whole run and frames the
-	// work beneath it (presentToolCall) — a fact about the call, so it holds from the moment the call
-	// is built, including for a delegation that never produced a run to frame; and the load_skill
-	// fetch, which folds with other fetches under "✦ Skill (N)" (ownGroup) and so must not be folded
-	// into the mixed umbrella first.
+	// from the other side. Two sources set it. The registry row's grouping class is the first
+	// (toolPresenter.grouping, copied by presentToolCall): every class but groupUmbrella — the
+	// groupOwn sub_agent call, whose block heads a whole run (a fact about the call, so it holds
+	// from the moment the call is built, including for a delegation that never produced a run to
+	// frame) and the groupOwn load_skill fetch, which folds with other fetches under "✦ Skill (N)"
+	// (ownGroup); the groupSolo fan_out and task_list calls; and the groupSolo background sub-agent
+	// call (backgroundSubAgentPresenter). The answered ask_user question is the second, the one
+	// verdict no class can state: its block keeps the permanent record of an exchange
+	// (askUserAnswerRecord) and reads as a card, not as a row in a list of questions, and it is
+	// only known once the answer lands.
 	//
 	// It is the presenter's word and not the painter's guess, which is the point: the body a record
 	// carries used to keep it out of a group as a side effect of the old shape rule, and a side effect
@@ -735,15 +738,15 @@ type toolView struct {
 // backgroundSubAgentPresenter is the row a background sub_agent's call is presented by (ADR 0094,
 // toolView.background): the background-workflow call's plain floor that fan_out's row is — the
 // delegation's name (or its task's first line) as the target, the immediate answer's first line as
-// the detail — under the delegation's own label, and solo for the reason a fan_out call is. It is
+// the detail — under the delegation's own label, and groupSolo for the reason a fan_out call is. It is
 // no registry row, because the registry is keyed by the tool's name and this is one sub_agent call
 // shape, not a tool.
 var backgroundSubAgentPresenter = toolPresenter{
-	label:  "Sub-agent",
-	verb:   "delegating in the background",
-	target: subAgentTarget,
-	detail: firstLineDetail,
-	solo:   true,
+	label:    "Sub-agent",
+	verb:     "delegating in the background",
+	target:   subAgentTarget,
+	detail:   firstLineDetail,
+	grouping: groupSolo,
 }
 
 // presenter is the row this card's result is presented by: the background sub_agent row for a
@@ -945,11 +948,12 @@ func presentToolCall(call domain.ToolCall, resolved string, ws workspaceRoot) to
 	// that shape keys on the run's span, which is not the same question — a delegation refused at
 	// the depth bound (executeRefuse, internal/agent) leaves a head with no span at all, and the
 	// shape rule alone would read two refusals in a row as one "Sub-agents (2)". So the fact is
-	// stated on the registry row (toolPresenter.solo) and copied here, where the call is
-	// recognised. A skill fetch is the second row that says it, for the other half of the same
-	// reason: it groups with its OWN kind (loadSkillToolName), and a mixed umbrella would bury the
-	// instructions the run just took on among the reads around them.
-	tv.solo = p.solo
+	// stated on the registry row as its grouping class (toolPresenter.grouping) and copied here,
+	// where the call is recognised: any class but groupUmbrella keeps the block out of the mixed
+	// umbrella. A skill fetch is groupOwn too, for the other half of the same reason: it groups
+	// with its OWN kind (loadSkillToolName), and a mixed umbrella would bury the instructions the
+	// run just took on among the reads around them; fan_out and task_list are groupSolo.
+	tv.solo = p.grouping != groupUmbrella
 	// A block that folds to its header is the presenter's word too, and a fact about the tool
 	// rather than about anything the result will say, so it is settled here where the call is
 	// recognised (toolView.collapsesToHeader). The decoder copies the same entry fields off the
@@ -1011,7 +1015,8 @@ func presentToolCall(call domain.ToolCall, resolved string, ws workspaceRoot) to
 // so no run body opens with the one and no live phrase looks the other up.
 func presentBackgroundSubAgentCall(call domain.ToolCall, ws workspaceRoot) toolView {
 	p := backgroundSubAgentPresenter
-	tv := toolView{Label: p.label, Verb: p.verb, name: call.Tool, solo: p.solo, background: true}
+	tv := toolView{Label: p.label, Verb: p.verb, name: call.Tool, background: true}
+	tv.solo = p.grouping != groupUmbrella
 	tv.Target = p.target(parseArgs(call.Arguments))
 	tv.argsWire = wireArgs(call.Tool, call.Arguments)
 	tv.finishDisplay(ws)

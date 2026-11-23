@@ -58,7 +58,10 @@
 **Closes:** panel-resume-tui-fold
 **Commit:** `test(tui): pin the panel's writer-target map to the tools' writers`
 
-## 2. A registry row declares its grouping class
+## 2. A registry row declares its grouping class — ✅ DONE (2026-11-23)
+
+NOTES (2026-11-23): the item's three new tests live where their siblings do — `TestEveryRegistryRowDeclaresItsGroupingClass` (with its name→class table `groupingClassByTool`) in toolregistry_test.go, `TestPresentToolCallSoloFollowsTheGroupingClass` in toolpresent_test.go, `TestTranscriptCodecReDerivesSoloFromTheGroupingClass` in transcriptbridge_test.go (one subtest per registry row, plus a background sub-agent record and an add-only case); the existing `TestTranscriptCodecReDerivesSkillFetchSolo` comment now cites `toolPresenter.grouping` instead of the removed `toolPresenter.solo`.
+NOTES (2026-11-23): layout.md's "What stays standalone" paragraph now names the grouping class and lists the own-kind pair (Sub-agent, Skill), the three solo calls (Fan-Out, Tasks, background Sub-agent) and the answered Ask User as the result-time verdict no class states; its later "kept the first two out by accident" became "kept the answered question and the delegation out", since the list's order changed.
 
 **What:**
 **Goal:** `toolPresenter` carries a `grouping groupClass` field (`groupUmbrella` zero value, `groupOwn`, `groupSolo`) and no `solo` field; `sub_agent` and `load_skill` rows are `groupOwn`, `fan_out`, `task_list` and the background sub-agent presenter are `groupSolo`; `grep -n 'solo:' internal/tui/toolregistry.go internal/tui/toolview.go` prints nothing. The persisted `Solo` verdict and `toolView.solo` stay (ADR 0083 §1).

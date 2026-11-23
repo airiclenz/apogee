@@ -4451,3 +4451,30 @@ func TestSkillFetchTargetsTheSkillItLoaded(t *testing.T) {
 		})
 	}
 }
+
+// TestPresentToolCallSoloFollowsTheGroupingClass proves the live presenter copies the solo mark off
+// the registry row's grouping class and nothing else: every row whose class is not groupUmbrella is
+// solo the moment its call is built, every groupUmbrella row is not — an ask_user question included,
+// whose solo is a result-time verdict the class cannot state — and so is a tool with no row. The
+// background sub-agent call is built by its own presenter, whose class is groupSolo.
+func TestPresentToolCallSoloFollowsTheGroupingClass(t *testing.T) {
+	t.Parallel()
+
+	for name, p := range toolRegistry {
+		call := domain.ToolCall{ID: "c-" + name, Tool: name, Arguments: []byte(`{}`)}
+		tv := presentToolCall(call, "", workspaceRoot{})
+		if want := p.grouping != groupUmbrella; tv.solo != want {
+			t.Errorf("presentToolCall(%q).solo = %v, want %v (grouping class %d)", name, tv.solo, want, p.grouping)
+		}
+	}
+
+	unregistered := domain.ToolCall{ID: "m1", Tool: "mcp__docs__search", Arguments: []byte(`{"query":"x"}`)}
+	if tv := presentToolCall(unregistered, "", workspaceRoot{}); tv.solo {
+		t.Error("a tool with no registry row presented solo; it reads the zero class, groupUmbrella")
+	}
+
+	background := domain.ToolCall{ID: "b1", Tool: subAgentToolName, Arguments: []byte(`{"task":"survey","background":true}`)}
+	if tv := presentBackgroundSubAgentCall(background, workspaceRoot{}); !tv.solo {
+		t.Error("a background sub-agent call presented without solo; its presenter's class is groupSolo")
+	}
+}

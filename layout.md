@@ -928,15 +928,21 @@ receipt: no registry row knows it, but its first string field (`ok`) would name 
 keeps the unregistered label and labelled arguments and stands as the run's closing `finish` card. And a presenter may state outright that its record must never be an ordinary row in
 a list. The RULE behind that flag is one rule: a call whose presenter marks it solo either is a
 record in its own right, or it **groups with its own kind** — a list of one tool's calls under its
-own umbrella — and a call that has its own list never joins the mixed one. Three calls say it, and
-the second and third are the own-kind half: the answered `Ask User` block, which is the permanent
-record of an exchange and reads as a card; the `Sub-agent` call, which heads a whole delegation and,
-per the canon spec, groups with other sub-agent calls alone rather than joining a super-group; and
-the `Skill` fetch, which groups with other fetches under `✦ Skill (N)` for the same reason and no
-other (*Grouped Skills*, `docs/layout/tool-layout.md`). Neither stands outside a group when it is
+own umbrella — and a call that has its own list never joins the mixed one. Each tool's registry
+row states which of the three it is, its **grouping class**: the mixed umbrella (every tool that
+names none), its own kind, or solo. Two tools group with their own kind: the `Sub-agent` call, which
+heads a whole delegation and, per the canon spec, groups with other sub-agent calls alone rather
+than joining a super-group; and the `Skill` fetch, which groups with other fetches under
+`✦ Skill (N)` for the same reason and no other (*Grouped Skills*, `docs/layout/tool-layout.md`).
+Three calls stand solo: the `Fan-Out` call, which heads a run like a delegation but has no list of
+its own; the `Tasks` checklist, the model's own card; and a background `Sub-agent` call, whose run
+happens outside the conversation. One more record says it, and it is the one no class can state,
+because it is only known once the answer lands: the answered `Ask User` block, which is the
+permanent record of an exchange and reads as a card — a question still awaiting its answer, or one
+that failed, is an ordinary call. Neither own-kind tool stands outside a group when it is
 the only one: a delegation alone is a `✦ Sub-agents (1)` group and a fetch alone a `✦ Skill (1)`
 group, exactly as a groupable call alone is a `✦ Tools` group of one (2026-11-20). That flag is the one deliberate
-never-group switch — it replaces an older rule that kept the first two out by accident, through the
+never-group switch — it replaces an older rule that kept the answered question and the delegation out by accident, through the
 bodies they happen to carry, and so also covers the sub-agent head that got no span at all because
 the delegation was refused at the depth bound. A Firing is not this session's tool call and never
 joins a run either (*The firing block*, below).

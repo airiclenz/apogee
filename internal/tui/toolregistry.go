@@ -60,6 +60,25 @@ import (
 // status line pairs with the target while the call is in flight — the per-tool knowledge
 // stays in this one registry instead of growing a second, parallel switch elsewhere.
 
+// groupClass is a tool's grouping class: the presenter's word about which list, if any, the
+// tool's calls may be folded into. It is a fact about the TOOL, knowable from the retained name
+// alone, so a registry row states it once (toolPresenter.grouping) and the live presenter
+// (presentToolCall) and the transcript decoder (fromWireToolView) both read that one column.
+type groupClass int
+
+const (
+	// groupUmbrella is the zero value: the call folds into the mixed `✦ Tools` umbrella beside its
+	// neighbours whenever its shape allows (groupable). Every row that names no class, and every
+	// tool with no row at all, is one.
+	groupUmbrella groupClass = iota
+	// groupOwn marks a tool whose calls group with their OWN kind under their own umbrella
+	// (`✦ Sub-agents (N)`, `✦ Skill (N)`) and so must never be folded into the mixed one first.
+	groupOwn
+	// groupSolo marks a tool whose block is a thing in its own right — it heads a run or keeps a
+	// record of its own — and never joins any list.
+	groupSolo
+)
+
 // toolPresenter maps a tool name to its friendly label, the active verb naming what the tool
 // is doing while it runs, a header extractor that pulls the Target from the call's
 // arguments, a prose extractor that turns a summary-less result into a [toolOutcome], and the two
@@ -214,18 +233,21 @@ type toolPresenter struct {
 	// call whose arguments are absent or malformed yields no body rather than a guess.
 	argBody func(args map[string]any) []detailLine
 
-	// solo marks a tool whose block must never be folded into a grouped block, however well it
-	// matches its neighbours — the presenter's word about what the block MEANS, copied onto the
-	// view the moment the call is recognised (toolView.solo, presentToolCall). Two rows say it:
-	// sub_agent, whose block heads a whole run and frames the work beneath it — a fact about the
-	// call, so it holds even for a delegation refused at the depth bound that never produced a run
-	// to frame — and load_skill, which groups with its OWN kind under "✦ Skill (N)" (ownGroup) and
-	// so must not be folded into the mixed umbrella first. It is a fact about the TOOL, knowable
-	// from the retained name alone, which is what lets a decoded record re-derive it off this same
-	// row rather than trust a mark the wire may predate (fromWireToolView). The answered ask_user
-	// record is the one solo this column cannot state: it becomes true when the RESULT lands
+	// grouping is the tool's grouping class — the presenter's word about what the block MEANS,
+	// copied onto the view as its solo mark the moment the call is recognised (toolView.solo,
+	// presentToolCall): any class but groupUmbrella keeps the block out of the mixed umbrella,
+	// however well it matches its neighbours. Two rows are groupOwn: sub_agent, whose calls group
+	// under "✦ Sub-agents (N)" and whose block heads a whole run — a fact about the call, so it
+	// holds even for a delegation refused at the depth bound that never produced a run to frame —
+	// and load_skill, which groups under "✦ Skill (N)" (ownGroup). Two rows are groupSolo: fan_out,
+	// which heads a run like sub_agent but has no list of its own, and task_list, the model's own
+	// checklist; the background sub-agent presenter (backgroundSubAgentPresenter) is the third
+	// groupSolo presenter. It is a fact about the TOOL, knowable from the retained name alone,
+	// which is what lets a decoded record re-derive the solo mark off this same row rather than
+	// trust one the wire may predate (fromWireToolView). The answered ask_user record is the one
+	// solo verdict a class cannot state: it becomes true when the RESULT lands
 	// (askUserAnswerRecord, toolOutcome.Solo), so it stays a result-time rule in both producers.
-	solo bool
+	grouping groupClass
 
 	// wireDropped names the argument keys whose value is file content, patch text or replacement
 	// pairs — read off the tool's own schema in internal/tools and cross-checked against it
@@ -254,7 +276,8 @@ const askUserToolName = "ask_user"
 
 // loadSkillToolName is the raw tool id of the second call that never joins a Tools super-group. A
 // skill fetch groups with its OWN kind — one `✦ Skill (N)` umbrella over one row per fetch — and
-// the row's solo column is how that is said (toolPresenter.solo, copied by presentToolCall);
+// the row's grouping class is how that is said (groupOwn on toolPresenter.grouping, copied as the
+// view's solo mark by presentToolCall);
 // folding one into a mixed umbrella beside the reads and greps around it would bury the
 // instructions the run just took on. The transcript codec re-derives the same verdict off the same
 // row (fromWireToolView), so a session recorded before the mark existed replays never-group; the
@@ -579,18 +602,18 @@ var toolRegistry = map[string]toolPresenter{
 		resultDetail: delegationResultDetail, // the report's gist; the nested run already rendered railed
 		stat:         delegationStat,         // the engine's typed outcome: done, capped, stopped, steered
 		failure:      delegationFailure,      // a failed delegation reads red, and still says it was steered
-		solo:         true,                   // heads a run, never a row in a list — even a refused delegation
+		grouping:     groupOwn,               // heads a run, never a row in the mixed umbrella — even a refused delegation
 	},
 	// fan_out asks the engine for a Workflow (ADR 0087): one brief over a list of items, answered
 	// with one line per item plus a report path. It ships default-off, so this row is the plain
 	// floor — the brief's first line as the target, the answer's first line as the detail — and it
 	// heads a run like sub_agent, never a row in a list.
 	"fan_out": {
-		label:  "Fan-Out",
-		verb:   "fanning out",
-		target: firstLineArg("task"),
-		detail: firstLineDetail,
-		solo:   true,
+		label:    "Fan-Out",
+		verb:     "fanning out",
+		target:   firstLineArg("task"),
+		detail:   firstLineDetail,
+		grouping: groupSolo,
 	},
 	// workflow is the model's control over the background workflows fan_out starts (ADR 0089 D4):
 	// status, stop or message. Default-off and TUI-only, so this row is the plain floor too — the
@@ -613,6 +636,7 @@ var toolRegistry = map[string]toolPresenter{
 		stat:              blankStat,      // the header's (done/total) already says how the list stands
 		count:             taskListCount,  // "1/3": done rows over every row the tool echoed back
 		collapsesToHeader: true,           // the checklist folds to its counted header, or opens whole
+		grouping:          groupSolo,      // the model's own checklist, a card of its own and never a row in a list
 	},
 	askUserToolName: {
 		label:   "Ask User",
@@ -628,12 +652,12 @@ var toolRegistry = map[string]toolPresenter{
 		stat:   blankStat,
 	},
 	loadSkillToolName: {
-		label:   "Skill",
-		verb:    "loading a skill",
-		target:  stringArg("query"), // the words the model searched by, until a skill answers to them
-		outcome: loadSkillOutcome,   // the loaded skill's own name, retargeting the row
-		stat:    blankStat,          // the table's `—`: the target already says which skill loaded
-		solo:    true,               // groups with its own kind (ownGroup), never the mixed umbrella
+		label:    "Skill",
+		verb:     "loading a skill",
+		target:   stringArg("query"), // the words the model searched by, until a skill answers to them
+		outcome:  loadSkillOutcome,   // the loaded skill's own name, retargeting the row
+		stat:     blankStat,          // the table's `—`: the target already says which skill loaded
+		grouping: groupOwn,           // groups with its own kind (ownGroup), never the mixed umbrella
 	},
 }
 
@@ -1961,7 +1985,9 @@ func quotedFirstLineDetail(content string) toolOutcome {
 // the reader comes back to, not one row of a batch, so it never folds into a group of its
 // neighbours. It used to be kept out of one by the body it carries — grouping admitted only bodiless
 // calls — and now that a Terminal call and its output group like anything else, the exclusion has
-// to be said rather than inherited.
+// to be said rather than inherited. It is the one solo verdict a grouping class cannot state
+// (toolPresenter.grouping): the ask_user row is groupUmbrella, because a question still awaiting
+// its answer — or one that errored — is an ordinary call, and only the RESULT makes it a record.
 func askUserAnswerRecord(args map[string]any, content string) toolOutcome {
 	out := quotedFirstLineDetail(content)
 	out.Details = askExchangeLines(args, content)
