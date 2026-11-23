@@ -4,6 +4,7 @@ status: open
 type: bug
 priority: 2
 labels: [tui]
+plan: 2026-11-23 - 04 - tool-group-early-collapse-plan.md
 created: 2026-11-23T08:19:52Z
 ---
 
