@@ -414,7 +414,10 @@ NOTES (2026-11-24): `Files.GlobalDocument` on the zero Files reads nothing and a
 - `! grep -rn '"github.com/airiclenz/apogee/internal/projectroot"' --include=*.go --exclude=*_test.go cmd && ! grep -n 'editOpts' cmd/apogee/wire_live.go && ! grep -n 'func userHome' cmd/apogee/wire.go`
 **Commit:** `refactor(cmd): drivers read the Project root from the config source`
 
-## 16. Project-file locations come from the config source
+## 16. Project-file locations come from the config source — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): `(w *rootWiring) files()` lands here in wire_live.go (deferred from item 15): `w.opts.Files`, else `config.FilesAt(w.roots.config, w.roots.workspace, w.roots.project)` for a hand-built test wiring. The global watcher now watches `w.files().GlobalPath()` (was `config.FilePath(w.opts.ConfigDir)`; same file in production).
+NOTES (2026-11-24): `refuseUnadoptedRepoServer` drops its now-unused `roots` parameter and names `opts.ConfigFiles().ProjectPath()`; the settings host's `configPath` and `workspacesDir` still derive from `w.roots.config` (same values; not among the approach's named sites).
 
 **What:** Depends on item 15.
 **Goal:** `projectConfigWatchPath` is gone; every project-file path, global path and workspaces dir used by the watchers, the adoption watch, the `/settings` save root and the project/mcp CLIs comes from `config.Files`.

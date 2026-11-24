@@ -19,7 +19,6 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/mcp"
-	"github.com/airiclenz/apogee/internal/projectroot"
 	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -76,15 +75,17 @@ func newWatchedConfig(t *testing.T, body string) *watchedConfig {
 // the Project root's adoption record watched beside both (the composition root's three watchers): a
 // workspace outside any repository, which is its own Project root (internal/projectroot), whose
 // `.apogee/config.yaml` is seeded with project — or left absent when project is empty — and watched
-// by the second watcher at the path the composition root derives (projectConfigWatchPath).
+// by the second watcher at the path the composition root asks of the config source
+// (config.Files.ProjectPath).
 func newWatchedLayeredConfig(t *testing.T, global, project string) *watchedConfig {
 	t.Helper()
 	home, workspace := t.TempDir(), t.TempDir()
 	path := filepath.Join(home, "config.yaml")
 	writeSettingsFixture(t, path, global)
 	opts := config.Options{ConfigDir: home, Workspace: workspace}
-	projectRoot := projectroot.Resolve(workspace, "")
-	projectPath := projectConfigWatchPath(opts, projectRoot)
+	files := config.ResolveFiles(home, workspace, false, func(string) {})
+	projectRoot := files.ProjectRoot()
+	projectPath := files.ProjectPath()
 	if projectPath == "" {
 		t.Fatal("no Project config path for a workspace that is its own Project root")
 	}
@@ -94,7 +95,7 @@ func newWatchedLayeredConfig(t *testing.T, global, project string) *watchedConfi
 	if project != "" {
 		writeSettingsFixture(t, projectPath, project)
 	}
-	adoptionPath := adoptionWatchPath(opts, stateRoots{config: home, workspace: workspace, project: projectRoot})
+	adoptionPath := adoptionWatchPath(files)
 	if adoptionPath == "" {
 		t.Fatal("no adoption record path for the fixture's Project root")
 	}
@@ -354,30 +355,6 @@ func TestWatchedProjectConfigRemovalChangesNothingLive(t *testing.T) {
 	defer cancel()
 	if c.await(ctx) {
 		t.Error("removing the Project config was reported as a change; it applies at the next launch")
-	}
-}
-
-// The second watcher's path is the Project config the layered load reads, and nothing when there is
-// no second file: a resolution on the global config alone, the empty Project root, or a project
-// file that is the global file itself.
-func TestProjectConfigWatchPath(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	projectFile := filepath.Join(root, ".apogee", "config.yaml")
-	for _, tc := range []struct {
-		name string
-		opts config.Options
-		root string
-		want string
-	}{
-		{"a Project root", config.Options{ConfigDir: t.TempDir()}, root, projectFile},
-		{"the global config alone", config.Options{ConfigDir: t.TempDir(), GlobalConfigOnly: true}, root, ""},
-		{"no Project root", config.Options{ConfigDir: t.TempDir()}, "", ""},
-		{"the global file itself", config.Options{ConfigDir: filepath.Join(root, ".apogee")}, root, ""},
-	} {
-		if got := projectConfigWatchPath(tc.opts, tc.root); got != tc.want {
-			t.Errorf("%s: projectConfigWatchPath = %q, want %q", tc.name, got, tc.want)
-		}
 	}
 }
 

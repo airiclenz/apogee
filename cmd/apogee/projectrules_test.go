@@ -796,7 +796,7 @@ func TestProjectRuleCLIAdoptionAppliesLiveWithoutARestart(t *testing.T) {
 	writeProjectAllow(t, w.roots.project, projectRuleCommand)
 	// The session started with the rule already proposed: that is its baseline, not a change.
 	w.externalEdits.refresh()
-	path := adoptionWatchPath(config.Options{ConfigDir: w.roots.config}, w.roots)
+	path := adoptionWatchPath(w.files())
 	if path == "" {
 		t.Fatal("no adoption record to watch for a session with a Project config")
 	}
@@ -984,18 +984,17 @@ func TestProjectRuleAdoptionWatcherStopsWithTheSession(t *testing.T) {
 func TestProjectRuleAdoptionWatchPathFollowsTheProjectLayer(t *testing.T) {
 	t.Parallel()
 	home, root := t.TempDir(), t.TempDir()
-	roots := stateRoots{config: home, workspace: root, project: root}
 	store, err := adoption.New(config.WorkspacesDir(home), root)
 	if err != nil {
 		t.Fatalf("adoption.New: %v", err)
 	}
-	if got := adoptionWatchPath(config.Options{ConfigDir: home}, roots); got != store.Path() {
+	if got := adoptionWatchPath(config.FilesAt(home, root, root)); got != store.Path() {
 		t.Errorf("adoptionWatchPath = %q, want the root's record %q", got, store.Path())
 	}
-	if got := adoptionWatchPath(config.Options{ConfigDir: home, GlobalConfigOnly: true}, roots); got != "" {
+	if got := adoptionWatchPath(config.ResolveFiles(home, root, true, func(string) {})); got != "" {
 		t.Errorf("adoptionWatchPath with no project layer = %q, want none", got)
 	}
-	if got := adoptionWatchPath(config.Options{ConfigDir: home}, stateRoots{config: home}); got != "" {
+	if got := adoptionWatchPath(config.FilesAt(home, root, "")); got != "" {
 		t.Errorf("adoptionWatchPath with no Project root = %q, want none", got)
 	}
 }

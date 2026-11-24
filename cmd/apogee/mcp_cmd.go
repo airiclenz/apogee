@@ -277,7 +277,7 @@ func mcpLoginCommand(deps mcpLoginDeps) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := refuseUnadoptedRepoServer(opts, offer.Proposals, roots, args[0]); err != nil {
+			if err := refuseUnadoptedRepoServer(opts, offer.Proposals, args[0]); err != nil {
 				return err
 			}
 			server, target, err := oauthServer(opts, roots, args[0])
@@ -383,10 +383,10 @@ func loadMCPConfig(cmd *cobra.Command, opts *config.Options) (stateRoots, config
 // refuseUnadoptedRepoServer refuses a login to name when it is a repo server the user has not
 // adopted (ADR 0104 §12): a proposed one points at `apogee project adopt`, which asks about it; a
 // rejected one, which that command no longer asks about, at its row in /settings. Any other name
-// passes. proposals is the Project config's offer read beside opts.
-func refuseUnadoptedRepoServer(opts config.Options, proposals config.ProjectProposals, roots stateRoots,
-	name string) error {
-	path := projectConfigWatchPath(opts, roots.project)
+// passes. proposals is the Project config's offer read beside opts, and the file named is the
+// Project config of opts' config source (opts.ConfigFiles).
+func refuseUnadoptedRepoServer(opts config.Options, proposals config.ProjectProposals, name string) error {
+	path := opts.ConfigFiles().ProjectPath()
 	if hasRepoServer(proposals.Proposed, name) {
 		return fmt.Errorf("apogee mcp: MCP server %q is proposed by the project config %s and not adopted "+
 			"on this machine, so it has no login — run `apogee project adopt` to adopt it first", name, path)

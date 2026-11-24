@@ -219,7 +219,7 @@ func (w *rootWiring) options() tui.Options {
 			configPath: configPath,
 			// The Project root a "this project" save writes under — empty where there is no Project
 			// config this session may write (projectSaveRoot), which keeps every row global-only.
-			projectRoot:   projectSaveRoot(w.opts, w.roots.project),
+			projectRoot:   projectSaveRoot(w.files()),
 			workspacesDir: w.workspacesDir(),
 			edits:         w.externalEdits,
 			apply:         applySetting,
@@ -655,14 +655,14 @@ func (h settingsHost) ResetIn(target tui.SettingTarget, key string) (tui.Setting
 }
 
 // projectSaveRoot is the Project root a `/settings` save to this project may write under, or "" when
-// this session has no Project config to write: it takes no project layer, it has no Project root, or
-// that root's project file is the global config itself (projectConfigWatchPath, whose answer is the
-// same question asked of the watcher).
-func projectSaveRoot(opts config.Options, projectRoot string) string {
-	if projectConfigWatchPath(opts, projectRoot) == "" {
+// files names no Project config to write: it takes no project layer, it has no Project root, or
+// that root's project file is the global config itself (files.ProjectPath, whose answer is the same
+// question asked of the watcher).
+func projectSaveRoot(files config.Files) string {
+	if files.ProjectPath() == "" {
 		return ""
 	}
-	return projectRoot
+	return files.ProjectRoot()
 }
 
 // errNoProjectConfig refuses a save to this project in a session with no Project config to write —

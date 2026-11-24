@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/airiclenz/apogee"
@@ -70,31 +69,26 @@ func (t watchTiming) applyTo(w *filewatch.Watcher) {
 	}
 }
 
-// projectConfigWatchPath is the Project config file a session watches beside the global one, or ""
-// when there is no second file to watch: a resolution that reads the global config alone, the empty
-// Project root ("no project layer", the home guard), or a project file that is the global file
-// itself — a config home pointed at the project's own `.apogee/` — which the global watcher already
-// covers and which the layered load does not read twice either.
-func projectConfigWatchPath(opts config.Options, projectRoot string) string {
-	if opts.GlobalConfigOnly {
-		return ""
+// files is the config source this session reads: the one its resolution recorded on w.opts, which
+// runRootWith always records, or — for a wiring a test builds by hand with no resolution behind it —
+// the files its roots name. Every file the session watches, and the Project root a `/settings` save
+// writes under, is asked of it, so they are the files the boot read and a re-read reads.
+func (w *rootWiring) files() config.Files {
+	if !w.opts.Files.IsZero() {
+		return w.opts.Files
 	}
-	path := config.ProjectFilePath(projectRoot)
-	if path == "" || filepath.Clean(path) == filepath.Clean(config.FilePath(opts.ConfigDir)) {
-		return ""
-	}
-	return path
+	return config.FilesAt(w.roots.config, w.roots.workspace, w.roots.project)
 }
 
 // adoptionWatchPath is the adoption record a session watches beside its config files, or "" when
-// there is none to watch: no Project config to watch (projectConfigWatchPath), or a Project root the
+// there is none to watch: no Project config to watch (files.ProjectPath), or a Project root the
 // store cannot key a record on. The record need not exist yet — the first answer creates it, and
 // that creation is the change the watcher reports.
-func adoptionWatchPath(opts config.Options, roots stateRoots) string {
-	if projectConfigWatchPath(opts, roots.project) == "" {
+func adoptionWatchPath(files config.Files) string {
+	if files.ProjectPath() == "" {
 		return ""
 	}
-	store, err := adoption.New(config.WorkspacesDir(roots.config), roots.project)
+	store, err := adoption.New(files.WorkspacesDir(), files.ProjectRoot())
 	if err != nil {
 		return ""
 	}
@@ -496,7 +490,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	//
 	// The path is the one this session resolved, which is the same file every seam in the block below
 	// writes; the watcher reads no YAML and holds no projection of its own (internal/filewatch).
-	w.configWatch = filewatch.New(config.FilePath(w.opts.ConfigDir))
+	w.configWatch = filewatch.New(w.files().GlobalPath())
 	configWatchTiming.applyTo(w.configWatch)
 	w.configWatch.Start()
 
@@ -505,7 +499,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// wait the renderer parks on (awaitConfigChangeOn). It watches the path whether or not the file
 	// is there yet — a project file created mid-session is reported as the change it is — and a run
 	// with no project layer watches nothing.
-	if path := projectConfigWatchPath(w.opts, w.roots.project); path != "" {
+	if path := w.files().ProjectPath(); path != "" {
 		w.projectWatch = filewatch.New(path)
 		configWatchTiming.applyTo(w.projectWatch)
 		w.projectWatch.Start()
@@ -517,7 +511,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// so it is watched beside the two config files and fanned into the same wait; the re-read then
 	// installs the rules it settles to (configHost.ReloadConfig). A run with no project layer has no
 	// record to watch.
-	if path := adoptionWatchPath(w.opts, w.roots); path != "" {
+	if path := adoptionWatchPath(w.files()); path != "" {
 		w.adoptionWatch = filewatch.New(path)
 		configWatchTiming.applyTo(w.adoptionWatch)
 		w.adoptionWatch.Start()

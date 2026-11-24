@@ -143,8 +143,10 @@ func adoptProjectRules(cmd *cobra.Command, deps projectAdoptDeps, opts *config.O
 // resolveProjectAdoption reads the config files the way a session does — flags over the
 // environment over the files — and returns the workspace's Project config with every entry it
 // proposes: its Allow rules, MCP servers and reactions, taken from the offer the same read
-// resolved (config.ApplyConfigOffer). A run with no Project config, and a Project config that is
-// the global file itself, are refused: there is nothing a project proposes there.
+// resolved (config.ApplyConfigOffer). Every path it names — the Project config, the adoption
+// record, the global file — is the config source's that read recorded (opts.Files). A run with no
+// Project config, and a Project config that is the global file itself, are refused: there is
+// nothing a project proposes there.
 func resolveProjectAdoption(cmd *cobra.Command, opts *config.Options) (projectAdoptTarget, error) {
 	notify := func(msg string) { cmd.PrintErrln(msg) }
 	offer, err := config.ApplyConfigOffer(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, notify)
@@ -153,11 +155,11 @@ func resolveProjectAdoption(cmd *cobra.Command, opts *config.Options) (projectAd
 	if err != nil && !errors.As(err, &undetermined) {
 		return projectAdoptTarget{}, err
 	}
-	roots, _, err := sessionRoots(*opts)
+	roots, files, err := sessionRoots(*opts)
 	if err != nil {
 		return projectAdoptTarget{}, err
 	}
-	path := projectConfigWatchPath(*opts, roots.project)
+	path := files.ProjectPath()
 	if path == "" {
 		return projectAdoptTarget{}, fmt.Errorf(
 			"apogee project adopt: %s has no Project config to answer — no .apogee/ folder between it "+
@@ -167,7 +169,7 @@ func resolveProjectAdoption(cmd *cobra.Command, opts *config.Options) (projectAd
 	if len(proposed) == 0 {
 		return projectAdoptTarget{path: path}, nil
 	}
-	store, err := adoption.New(config.WorkspacesDir(roots.config), roots.project)
+	store, err := adoption.New(files.WorkspacesDir(), files.ProjectRoot())
 	if err != nil {
 		return projectAdoptTarget{}, err
 	}
@@ -175,8 +177,8 @@ func resolveProjectAdoption(cmd *cobra.Command, opts *config.Options) (projectAd
 		path:        path,
 		proposed:    proposed,
 		store:       store,
-		projectRoot: roots.project,
-		globalPath:  config.FilePath(roots.config),
+		projectRoot: files.ProjectRoot(),
+		globalPath:  files.GlobalPath(),
 	}, nil
 }
 

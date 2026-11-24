@@ -4510,8 +4510,8 @@ func newSessionStartedReload(t *testing.T, exec reactions.Executor, report func(
 	home, workspace := t.TempDir(), t.TempDir()
 	path := filepath.Join(home, "config.yaml")
 	writeSettingsFixture(t, path, "")
-	projectRoot := projectroot.Resolve(workspace, "")
-	projectPath := projectConfigWatchPath(config.Options{ConfigDir: home, Workspace: workspace}, projectRoot)
+	files := config.ResolveFiles(home, workspace, false, func(string) {})
+	projectRoot, projectPath := files.ProjectRoot(), files.ProjectPath()
 	if err := os.MkdirAll(filepath.Dir(projectPath), 0o700); err != nil {
 		t.Fatalf("create the project's .apogee: %v", err)
 	}
@@ -4616,8 +4616,8 @@ func newSessionAdviseReload(t *testing.T, upstream *stubllm.Server) sessionStart
 	home, workspace := t.TempDir(), t.TempDir()
 	path := filepath.Join(home, "config.yaml")
 	writeSettingsFixture(t, path, "")
-	projectRoot := projectroot.Resolve(workspace, "")
-	projectPath := projectConfigWatchPath(config.Options{ConfigDir: home, Workspace: workspace}, projectRoot)
+	files := config.ResolveFiles(home, workspace, false, func(string) {})
+	projectRoot, projectPath := files.ProjectRoot(), files.ProjectPath()
 	if err := os.MkdirAll(filepath.Dir(projectPath), 0o700); err != nil {
 		t.Fatalf("create the project's .apogee: %v", err)
 	}
