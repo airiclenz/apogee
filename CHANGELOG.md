@@ -12,6 +12,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.35.11] — 2026-11-24
+
 - **A sub-agent's run view now shows its `~` context estimate.** Inside a run view the status-line gauge used to stay on the sub-agent's last usage reading while its tool results landed; it now moves to that run's `~` estimate between readings, as the top-level gauge already does, until the run's next reading measures the fill again. Before the run's first reading the slot still reads `esc back`, an error still keeps `enter dismiss`, and the side panel's usage fill follows the gauge. The top-level gauge, watches and the transcript's run rows are unchanged.
 - **A ctrl+v that finishes after a pop-up opened pastes into the pop-up.** Clipboard text from a ctrl+v pressed in the prompt box arrives after the clipboard is read; if a picker, the /sessions browser, the /workflows view or /settings opened in the meantime, the text used to land in the prompt draft hidden behind it. It now goes where a bracketed paste would: into that pane's filter or open field, or nowhere when the pane has no field. Internally, every paste and every widget message now asks the pane table's rows (a new `text` answer per row, walked in the key order) before the prompt box, replacing the hand-ordered paste chains.
 - Every edit to the prompt draft now goes through one operation that drops a stale drag-selection, ends a recall walk and settles the autocomplete menu, so a selection made in the box while answering a question no longer outlives the draft handed back after it.
