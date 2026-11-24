@@ -69,8 +69,8 @@ type sessionView struct {
 	usage domain.Usage
 
 	// usageBase is the accounting the session record carried when this session was (re)opened: the
-	// main agent's stored totals on either resume path (replayResumed, resumeLoaded), and the zero
-	// value on a fresh launch or after /clear (seatSession). It exists because the ENGINE's
+	// main agent's stored totals on either resume door — a --resume start or a /sessions restore, both
+	// a record's seat — and the zero value on a fresh launch or after /clear (seatSession). It exists because the ENGINE's
 	// cumulative reading restarts at zero on every session boundary — a fresh Agent on --resume,
 	// RestoreSession's reset on a browser restore, ClearContext's on /clear — so the
 	// usage fold adds that reading ON TOP of this base instead of letting it replace what the record
@@ -103,8 +103,8 @@ type sessionView struct {
 	// sessionCurrency is the resumed record's own currency label (ADR 0093, amendment 2026-10-04):
 	// the label its priced amount was written in, which outlives a `currency:` changed since. It is
 	// an OVERRIDE only — "" reads the configured label live ([Model.currency]) — seated by either
-	// resume path from the label the binary or session.Meta resolved (replayResumed, resumeLoaded),
-	// escape-stripped there because it is disk input, and dropped on /clear (seatSession).
+	// resume door from the record's Meta (seatSession), escape-stripped there because it is disk
+	// input, and dropped on /clear (seatSession).
 	// While it names a label other than the configured one, every later reading counts its calls
 	// as unpriced ([Model.countedUsage]): their cost was reckoned in the configured currency, and
 	// adding it to an amount in another would misstate both.
@@ -265,8 +265,33 @@ func recordSeed(rec session.Record, inExchange bool) sessionSeed {
 	}
 }
 
+// resumedSeed is the seed of the record the binary resolved for a --resume start: the host's
+// [ResumedSession] read as the Meta, scrollback and mid-Exchange answer a /sessions restore reads off
+// its record, so construction seats a resumed session through the same operation. A nil payload — a
+// fresh start — is the zero seed. Its boundary is nil: the binary hands the view no engine payload,
+// so the first worker launch caches the boundary it actually starts from, as after /clear.
+func resumedSeed(r *ResumedSession) sessionSeed {
+	if r == nil {
+		return sessionSeed{}
+	}
+	return sessionSeed{
+		fromRecord: true,
+		meta: session.Meta{
+			Title:         r.Title,
+			CtxUsed:       r.CtxUsed,
+			Usage:         r.Usage,
+			DelegateUsage: r.DelegateUsage,
+			ServedModels:  r.ServedModels,
+			Currency:      r.Currency,
+		},
+		transcript: r.Transcript,
+		inExchange: r.InExchange,
+	}
+}
+
 // seatSession is the one operation that writes the session-owned fields at a session boundary —
-// /clear and /new (a zero seed) and a /sessions restore or a /fork (a record's seed, resumeLoaded).
+// construction (a --resume start's record seed or a fresh start's zero seed, resumedSeed), /clear
+// and /new (a zero seed) and a /sessions restore or a /fork (a record's seed, resumeLoaded).
 // It touches no engine and queues no write: the caller has already done the engine half, and the
 // view seated here is the one the frame paints next. A zero seed leaves the frame byte-identical
 // to a fresh launch at this window size; a record's seat repaints the stored scrollback and
@@ -293,8 +318,7 @@ func (m *Model) seatSession(seed sessionSeed) {
 	m.panel = nil
 	m.resetPanelDisk()
 	if seed.fromRecord {
-		// Repaint the stored scrollback and say what was reopened, through the one repaint a --resume
-		// start goes through too (replayScrollback).
+		// Repaint the stored scrollback and say what was reopened (replayScrollback).
 		m.replayScrollback(seed.transcript, meta.Title, seed.inExchange)
 	}
 	// An open run view survives exactly as far as the (re)filled transcript carries its run: an empty
@@ -350,10 +374,9 @@ func (m *Model) seatSession(seed sessionSeed) {
 	m.pendingTitle.drop()
 	if seed.fromRecord {
 		// Saves now target a record that already HAS a name, so the automatic naming call is latched
-		// off for the rest of this session, as it is for a --resume start. titleTouched is
-		// deliberately NOT re-armed: its only effect is to DROP a late automatic title, and the one
-		// that can still land after a restore is the outgoing session's in-flight call, which must
-		// not name the record just reopened. An empty title keeps the name (nameSession refuses it).
+		// off for the rest of this session. titleTouched is deliberately NOT re-armed: its only
+		// effect is to DROP a late automatic title, and the one that can still land after a restore
+		// is the outgoing session's in-flight call, which must not name the record just reopened. An empty title keeps the name (nameSession refuses it).
 		m.autoTitleFired = true
 		m.nameSession(meta.Title)
 	} else {

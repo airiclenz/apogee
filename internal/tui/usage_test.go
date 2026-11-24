@@ -661,7 +661,7 @@ func TestDelegateUsageTotalPrefersLiveHeadsOverTheResumedReading(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // resumedUsageModel builds a model opened on a record that already carried the given totals — the
-// startup-resume path, which is where the base is seeded (replayResumed).
+// startup-resume path, which is where the base is seeded (seatSession, from resumedSeed).
 func resumedUsageModel(t *testing.T, stored session.Usage) Model {
 	t.Helper()
 	return newModel(context.Background(), &fakeEngine{}, Options{

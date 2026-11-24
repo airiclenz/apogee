@@ -85,7 +85,7 @@ func paSession(tb testing.TB, tools int) []byte {
 	return blob
 }
 
-// paModel is a model resumed (opts.Resumed → replayResumed, the --resume path) onto a session with
+// paModel is a model resumed (opts.Resumed → resumedSeed, the --resume path) onto a session with
 // `tools` tool blocks, sized to paWidth×paHeight.
 func paModel(tb testing.TB, tools int) Model {
 	opts := testOpts

@@ -2008,7 +2008,7 @@ func (m Model) panelWriteKey(path string) string {
 }
 
 // seedSidePanelUsage seeds the usage section's totals from a resumed record's accounting, once both
-// resume doors have restored it (replayResumed, resumeLoaded): the main agent's base and the
+// resume doors have restored it (seatSession from a record): the main agent's base and the
 // delegates' total, as /usage sums the session. The restored ctxUsed rides along for the State's
 // own fill, but this Driver's section reads the gauge's ([Model.panelFill]), which that same
 // restored ctxUsed relights. A record that counted no call seeds nothing.

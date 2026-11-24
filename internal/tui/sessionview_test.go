@@ -1,9 +1,13 @@
 package tui
 
 import (
+	"context"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
@@ -209,6 +213,94 @@ func TestSeatSessionRecordSeedRelightsFromTheRecord(t *testing.T) {
 			t.Errorf("sessionName = %q, want the name the frame already shows", m.sessionName)
 		}
 	})
+}
+
+// TestBootResumeAndBrowserRestoreSeatAlike pins the two doors into a stored session to one seat: a
+// record boot-resumed (Options.Resumed, resumedSeed) and the same record restored through /sessions
+// (sessionLoadedMsg, recordSeed) end with the same transcript, commit times aside, and the same
+// seat-owned fields. Two fields differ by door and are left out: the cached engine boundary (a
+// restore caches the record's payload, a --resume start hands the view none) and the panel disk
+// check's generation (a boot seat opens generation 1, a restore over a launched view generation 2).
+func TestBootResumeAndBrowserRestoreSeatAlike(t *testing.T) {
+	t.Parallel()
+	stored := newTestModel(t)
+	stored.transcript.addUser("a stored question", nil)
+	blob, err := encodeTranscript(&stored.transcript)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	meta := session.Meta{
+		ID: "sess-1", Title: "prior work", CtxUsed: 2048,
+		Usage: eurRecordUsage, DelegateUsage: session.Usage(childTotals),
+		ServedModels: []string{"stored-answerer"}, Currency: "EUR",
+	}
+	opts := testOpts
+	opts.Currency = "USD"
+	size := tea.WindowSizeMsg{Width: 140, Height: 40}
+
+	boot := opts
+	boot.Resumed = &ResumedSession{
+		Transcript: blob, Title: meta.Title, CtxUsed: meta.CtxUsed, Usage: meta.Usage,
+		DelegateUsage: meta.DelegateUsage, ServedModels: slices.Clone(meta.ServedModels),
+		Currency: meta.EffectiveCurrency(opts.Currency),
+	}
+	booted := step(t, newModel(context.Background(), &fakeEngine{}, boot, nil), size)
+
+	restored := step(t, newModel(context.Background(), &fakeEngine{}, opts, nil), size)
+	restored = step(t, restored, sessionLoadedMsg{rec: session.Record{
+		Meta:       meta,
+		Transcript: blob,
+		Session:    domain.Session{Version: domain.SessionVersion, State: []byte(`"stored"`)},
+	}})
+
+	if !hasEntry(booted, entryUser, "a stored question") || !hasEntry(booted, entryNote, "resumed: prior work") {
+		t.Fatalf("the boot resume did not repaint the record: %v", entryKinds(booted))
+	}
+	if !reflect.DeepEqual(unstamped(booted), unstamped(restored)) {
+		t.Errorf("transcripts differ:\nboot     %v\nrestored %v", entryKinds(booted), entryKinds(restored))
+	}
+	for _, field := range []struct {
+		name          string
+		boot, restore any
+	}{
+		{"autoTitleFired", booted.autoTitleFired, restored.autoTitleFired},
+		{"titleTouched", booted.titleTouched, restored.titleTouched},
+		{"pendingTitle", booted.pendingTitle, restored.pendingTitle},
+		{"sessionName", booted.sessionName, restored.sessionName},
+		{"usage", booted.usage, restored.usage},
+		{"usageBase", booted.usageBase, restored.usageBase},
+		{"delegateUsage", booted.delegateUsage, restored.delegateUsage},
+		{"servedModels", booted.servedModels, restored.servedModels},
+		{"sessionCurrency", booted.sessionCurrency, restored.sessionCurrency},
+		{"ctxUsed", booted.ctxUsed, restored.ctxUsed},
+		{"panel usage", panelUsageTotals(booted), panelUsageTotals(restored)},
+	} {
+		if !reflect.DeepEqual(field.boot, field.restore) {
+			t.Errorf("%s: boot resume %+v, /sessions restore %+v", field.name, field.boot, field.restore)
+		}
+	}
+	if booted.sessionCurrency != "EUR" || booted.sessionName != "prior work" || booted.panel == nil {
+		t.Errorf("sessionCurrency %q, sessionName %q, panel seeded %v: want the record's EUR, its title and a usage section",
+			booted.sessionCurrency, booted.sessionName, booted.panel != nil)
+	}
+}
+
+// unstamped is the transcript's entries with their commit time cleared: a resume note is stamped
+// when it is added, so two seats a moment apart differ in that alone.
+func unstamped(m Model) []entry {
+	entries := slices.Clone(m.transcript.entries)
+	for i := range entries {
+		entries[i].at = time.Time{}
+	}
+	return entries
+}
+
+// panelUsageTotals is the side panel's main usage totals, zero when no panel was folded.
+func panelUsageTotals(m Model) domain.Usage {
+	if m.panel == nil {
+		return domain.Usage{}
+	}
+	return m.panel.Usage(sidepanel.RunKey{}).Totals
 }
 
 // entryKinds lists the kinds of the transcript's entries, in order.

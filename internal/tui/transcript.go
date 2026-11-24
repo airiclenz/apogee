@@ -1054,9 +1054,9 @@ func (t *transcript) addWorkflowNote(text, name string, spent domain.Usage) {
 // which is what makes this the only seam a Reaction notice can use.
 //
 // It escape-strips exactly as addNote does, and for a sharper reason: its two biggest callers word
-// their notice from a stored session title (resumeLoaded, replayResumed) and from the workspace
-// context-file names the session loaded — untrusted DISK input in both cases, since no codec
-// sanitizes a session record's Meta and a repo names its own files.
+// their notice from a stored session title (replayScrollback, from a record's seat) and from the
+// workspace context-file names the session loaded — untrusted DISK input in both cases, since no
+// codec sanitizes a session record's Meta and a repo names its own files.
 func (t *transcript) addEphemeralNote(text string) {
 	t.commit(entry{kind: entryNote, text: stripEscapes(text), ephemeral: true})
 }

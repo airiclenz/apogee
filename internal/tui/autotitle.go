@@ -177,7 +177,7 @@ func (t *titleStash) drop() { t.name = "" }
 // Four things must hold. The config toggle must be on (`auto-title:`), the seam must be wired,
 // there must be a SessionHost — with no persistence there is no Session record to name, so the call
 // would buy nothing and still cost a queue slot — and this record must not have fired already. A
-// resumed session starts latched (replayResumed, resumeLoaded), which is what keeps a record that
+// resumed session starts latched (seatSession from a record), which is what keeps a record that
 // already has a name from being renamed behind the human's back.
 func (m *Model) maybeAutoTitle(firstUserText string) tea.Cmd {
 	if m.autoTitleFired || !m.opts.AutoTitle || m.opts.GenerateTitle == nil || m.sessions == nil {

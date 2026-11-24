@@ -902,25 +902,21 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	}
 	m.workdir = stripEscapes(workdirDisplay(opts.Workspace, home))
 
-	// Seed the one-time start-up box as entries[0]. Seeding it here (rather than on the first
-	// WindowSizeMsg) makes it a normal transcript entry: it renders fresh at the live width on
-	// every repaint, so it reflows on resize with no "already shown" guard, and /clear re-seeds it
-	// through the same boundary call ([Model.beginSession]) to reprint a fresh-launch view.
-	// Construction is the session's first boundary, so it also opens the session's start-up log:
-	// the routine notes below gather into it until the first Exchange launch closes it
-	// (enterRunning).
-	m.beginSession()
-	// A resumed run then repaints the stored scrollback beneath that box and relights the gauge
-	// (a no-op on a fresh start, when opts.Resumed is nil).
-	m.replayResumed(opts.Resumed)
-	// …and its background workflows start again from their folders once the engine is bound and
-	// idle (resumeAfterFold) — at the first fold for a determined start, after the pick for a
+	// Seat the session the Model opens on (seatSession): a fresh start's zero seed, or the record a
+	// --resume start resolved (resumedSeed), through the one operation /clear and a /sessions restore
+	// take too. It seeds the one-time start-up box as entries[0] — a normal transcript entry, so it
+	// renders fresh at the live width on every repaint and reflows on resize with no "already shown"
+	// guard — then, for a resumed record, repaints the stored scrollback beneath it and relights the
+	// gauge, the accounting and the naming from the record, and closes with the workspace context
+	// files the engine loaded: last, so the notice closes the opening frame rather than separating the
+	// box from the scrollback it belongs to. Construction is the session's first boundary, so the
+	// seat also opens the session's start-up log: the routine notes below gather into it until the
+	// first Exchange launch closes it (enterRunning).
+	m.seatSession(resumedSeed(opts.Resumed))
+	// A resumed run's background workflows start again from their folders once the engine is bound
+	// and idle (resumeAfterFold) — at the first fold for a determined start, after the pick for a
 	// pre-bound one.
 	m.resumePending = opts.Resumed != nil
-	// Construction is the session's first boundary, so the workspace context files the engine
-	// loaded are reported here — last, so the notice closes the opening frame rather than
-	// separating the box from the scrollback it belongs to.
-	m.noteContextFiles()
 	// What loading the colour scheme cost, if anything (ADR 0040 design call 11). It goes after the
 	// notices above because it is about the SCREEN rather than about the session, so it reads as the
 	// last word on the frame the human is looking at — and because a scheme that loaded cleanly, the
@@ -967,39 +963,6 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	return m
 }
 
-// replayResumed repaints a resumed session's scrollback beneath the fresh start-up box: it relights
-// the context gauge and the accounting from the stored record, then hands the stored blob to the
-// shared repaint (replayScrollback) that the /sessions restore uses too. A nil payload (a fresh
-// start) is a no-op. It runs at construction, before any WindowSizeMsg, so the replayed entries are
-// present the first time the viewport lays out.
-//
-// This is the --resume HALF of resuming: the binary resolved the record before the Model existed, so
-// what arrives is a [ResumedSession] the host filled in — including its own reading of whether the
-// Agent it rebuilt is mid-Exchange. The /sessions half (resumeLoaded) reads the same three facts off
-// the record it just loaded and asks the live engine the same question, which is why only the
-// repaint below is shared and not this preamble.
-func (m *Model) replayResumed(r *ResumedSession) {
-	if r == nil {
-		return
-	}
-	// A resumed record already HAS a name — possibly one the human chose — so the automatic naming
-	// call is latched off for the life of this session (Ratified design 5). A bare /rename still
-	// regenerates on demand: the toggle answers "name my sessions for me", not "never ask".
-	m.autoTitleFired = true
-	m.nameSession(r.Title) // the window opens under the name this record already carries
-	m.ctxUsed = r.CtxUsed  // relight the gauge near the session's last observed fill
-	// …and reopen the accounting where the record left it: the totals are the reading this session
-	// last took, so a resumed session reports its spend instead of starting from nothing. A record
-	// written before the feature carries zeros, which is exactly the nothing-reported state.
-	m.usageBase = domain.Usage(r.Usage)
-	m.usage = m.usageBase                           // the engine counts from zero; the fold adds its reading on top
-	m.delegateUsage = domain.Usage(r.DelegateUsage) // …and the delegate half beside it, until a head reports
-	m.servedModels = slices.Clone(r.ServedModels)   // …and the models that answered it, so the first save keeps them
-	m.sessionCurrency = stripEscapes(r.Currency)    // …and the label its amount counts under, record-authored text
-	m.replayScrollback(r.Transcript, r.Title, r.InExchange)
-	m.seedSidePanelUsage() // …and the side panel's usage section, from the accounting restored above
-}
-
 // replayScrollback repaints a stored session's scrollback into the view that is about to become it,
 // and closes it with the notes that say what was reopened. It decodes the opaque transcript blob and
 // appends its committed entries under a "resumed: <title>" note. A decode error or a legacy record
@@ -1010,12 +973,12 @@ func (m *Model) replayResumed(r *ResumedSession) {
 // tool calls stored OPEN; those are closed as interrupted before anything is painted, and one more
 // note (progressSavedNote) says the work behind them was not kept.
 //
-// It is the one repaint BOTH ways into a stored session run: --resume at construction (replayResumed,
-// reading the host's [ResumedSession]) and the /sessions browser's restore (resumeLoaded, reading the
-// record it just loaded). They differ in what they resolve the three arguments FROM, never in what
-// the human then sees — which is why the notes are worded once, here, rather than kept identical by
-// hand in two files. The caller has already reset the transcript and reseeded the start-up box: this
-// only appends beneath it.
+// It is the one repaint BOTH ways into a stored session run, reached through a record's seat
+// ([Model.seatSession]): --resume at construction (resumedSeed, reading the host's [ResumedSession])
+// and the /sessions browser's restore (recordSeed, reading the record it just loaded). They differ in
+// what their seed resolves the three arguments FROM, never in what the human then sees — which is why
+// the notes are worded once, here. The seat has already reset the transcript and reseeded the
+// start-up box: this only appends beneath it.
 //
 // All four notices are added EPHEMERALLY (addEphemeralNote): each is derived here from the record
 // being resumed, so the next resume derives it again — persisting one would stack another copy into

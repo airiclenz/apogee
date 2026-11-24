@@ -262,7 +262,12 @@ NOTES (2026-11-24): the regression guard was checked by mutation: seeding the si
 - `! grep -rn 'resetSessionView' internal/tui/ .capcom/knowledge/`
 **Commit:** `refactor(tui): seat a session through one operation from a record or a zero seed`
 
-## 10. The boot resume takes the same seat
+## 10. The boot resume takes the same seat — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): consequential edit — internal/tui/perfaudit_bench_test.go: made necessary by deleting replayResumed; paModel's doc comment named it as the --resume path and now names resumedSeed
+NOTES (2026-11-24): the boot seat now derives sessionCurrency as a /sessions restore does (meta.EffectiveCurrency("") over a Meta built from ResumedSession.Currency), so a record with no priced call seats "" (reads the configured label live) where replayResumed seated the binary-resolved configured label as an override; the label shown and counted is the same unless `currency:` changes mid-session — item 11 owns the one currency rule
+NOTES (2026-11-24): the seat-owned fields comparison clears each entry's commit time (`at`) before comparing transcripts: the resume note is stamped when added, so two seats a moment apart differ in that alone
+NOTES (2026-11-24): sessionview.go's usageBase/sessionCurrency field docs and seatSession's naming comment also named replayResumed or the separate --resume start; reworded to the one seat
 
 **What:** Depends on item 9.
 **Goal:** boot resume, /sessions and /clear reach the session-owned fields through `seatSession` alone; `replayResumed` is gone; a record boot-resumed and the same record restored through /sessions end with identical seat-owned fields and transcript.

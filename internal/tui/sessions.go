@@ -881,11 +881,11 @@ func (m Model) loadSession(id string, keep bool) tea.Cmd {
 // the stored fill, and re-arm the same field set /clear resets. A session restored mid-task gets the
 // interrupted note (item 8 supplies the step-only /continue drive that finishes it).
 //
-// The repaint itself and the three resume notices are replayScrollback's, shared with the --resume
-// start (replayResumed) so both ways into a stored session say the same thing; that is also where
-// the notices' EPHEMERAL posture is written down. The load/restore FAILURE notes above are this
-// fold's own and stay persistent: they belong to the session that stays live, and they record
-// something that happened rather than something re-derived.
+// The repaint itself and the three resume notices are replayScrollback's, reached through the same
+// record seat a --resume start takes (resumedSeed) so both ways into a stored session say the same
+// thing; that is also where the notices' EPHEMERAL posture is written down. The load/restore
+// FAILURE notes above are this fold's own and stay persistent: they belong to the session that stays
+// live, and they record something that happened rather than something re-derived.
 //
 // A record landing while a worker drives the engine is not restored at all (resumeBusyNote): the
 // restore takes the engine at idle, and submit refuses to open an Exchange while the load is in flight
@@ -940,7 +940,7 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	cmd := m.scheduleWrite(recordWrite{kind: writeActivate, meta: msg.rec.Meta})
 	// The engine now holds exactly the record's own payload, so the view is seated from the record
 	// through the one session seat /clear takes too (seatSession): the box reseeded, the stored
-	// scrollback repainted with the resume notices (replayScrollback, shared with a --resume start),
+	// scrollback repainted with the resume notices (replayScrollback, as a --resume start's seat does),
 	// the gauge, the accounting and the label relit, the naming call latched off and the record's
 	// payload cached as the boundary a first-Turn delegation's progress save pairs with.
 	m.seatSession(recordSeed(msg.rec, m.eng.InExchange()))
