@@ -91,8 +91,8 @@ func (m Model) approvalMenuFor(req domain.ApprovalRequest) []approvalOption {
 // own menu rows ([Model.approvalMenuFor]), indexed by the letter each one advertises in its
 // shortcut cell, so the two can never drift — on a forced pane `s` is not in the map because the
 // row is not on the pane, and `p` is absent wherever the project row is. The Cancel row is absent by
-// construction — it sends no decision, and Esc is claimed before the approval routing is reached
-// (handleKey's "esc" case), so the pane inherits the double-tap the key carries everywhere a worker
+// construction — it sends no decision, and the pane declines a conversation's Esc to handleKey's
+// "esc" case ([Model.approvalKey]), so the pane inherits the double-tap the key carries everywhere a worker
 // runs rather than growing a cancel path of its own.
 func (m Model) approvalKeysFor(req domain.ApprovalRequest) map[string]approvalOption {
 	return approvalMenuKeys(m.approvalMenuFor(req))
@@ -149,7 +149,7 @@ func approvalMenuKeys(menu []approvalOption) map[string]approvalOption {
 // decision keys.
 //
 // The worker's Approver hands the gate to the Update loop; this fold records the request and
-// switches state. View renders the prompt and handleApprovalKey replies on msg.Reply (the C3
+// switches state. View renders the prompt and approvalKey replies on msg.Reply (the C3
 // rendezvous; P2.4).
 //
 // The pane opens with its decision keys DEAD (approvalArmed false) and the returned drain marker is
@@ -359,54 +359,82 @@ func isAbandoned(done <-chan struct{}) bool {
 	}
 }
 
-// handleApprovalKey resolves a pending Approval while awaitingApproval. A decision key sends
-// its verdict back over the rendezvous reply channel (sendApproval); ↑/↓ move the menu's highlight,
-// clamped and non-wrapping, the way the ask prompt's choice arrows move (D5), leaving ⏎ to take
-// what they point at (resolveApproval). Any other key scrolls the transcript so the human can
-// review context before ruling — the prompt stays soft-modal, with PgUp/PgDn intercepted upstream
-// so the transcript is still reachable now that ↑/↓ belong to the menu. The decision's transcript
-// record arrives for free as the loop's observational ApprovalEvent (C3; P2.3), so this renders the
-// prompt's resolution, not the record.
+// approvalKey is the approval pane's keypress half — the arm of the prompt's key rung
+// ([Model.promptKey]) that answers at awaitingApproval — and it reports whether it CLAIMED the key,
+// the way the frame's other soft-modal panes do ([Model.reportKey]): every key it does not act on
+// goes where it always went.
+//
+// While the "Always in this project…" row's rule field is open it takes every key the frame chords
+// leave ([Model.projectRuleKey]): its esc goes back to the menu rather than arming the stop
+// double-tap, and its letters type rather than rule. With the menu up, a decision key sends its
+// verdict back over the rendezvous reply channel (sendApproval); ↑/↓ move the menu's highlight,
+// clamped and non-wrapping, the way the ask prompt's choice arrows move (D5); and ⏎ takes what they
+// point at (resolveApproval). Every other key is declined, and at this inert state the frame scrolls
+// the transcript with it (handleKey) so the human can review context before ruling — with PgUp/PgDn
+// answered by handleKey too, so the transcript is still reachable now that ↑/↓ belong to the menu.
+// The decision's transcript record arrives for free as the loop's observational ApprovalEvent (C3;
+// P2.3), so this renders the prompt's resolution, not the record.
+//
+// Esc is claimed for ONE case: a background workflow's gate, which has no worker behind it, so one
+// press sends it back to the engine's queue unanswered ([Model.dismissWorkflowPrompt]) — except
+// while watching, where esc leaves the watch first. A conversation's approval declines its esc to
+// handleKey's shared one: the double-tap it is everywhere a worker runs (one press arms, a second
+// folded before escStopResetMsg disarms it stops), with the ⏎-Cancel row as its one-press spelling.
 //
 // The WALK is the package's shared one ([listCursor.move] with listStopsAtEnds, listsurface.go):
 // stopping at the ends is this pane's own answer to "what does ↓ do at the bottom" and it keeps it —
 // on a security surface, ↑ on the first row jumping to Cancel is the difference between a stray
 // keypress and a stopped run. Which KEYS the menu claims stays this switch's, deliberately, rather
 // than the cursor's full key contract ([listCursor.key]): that contract belongs to the MODAL list
-// overlays, where every unclaimed key is swallowed, and this prompt is soft-modal — esc and ⏎ are
-// claimed upstream (handleKey) and everything else has somewhere else to be, the transcript. So the
-// menu claims ↑/↓ and the decision letters and nothing more.
+// overlays, where every unclaimed key is swallowed, and this prompt is soft-modal — everything it
+// does not claim has somewhere else to be, the transcript. So the menu claims ↑/↓, ⏎ and the
+// decision letters and nothing more.
 //
-// The decision letters are also the one thing on this pane that is not live the instant it opens:
-// they answer only once approvalArmed is set (foldInputDrained), in the same guard-on-Model-state
-// shape [Model.askChoiceKey] uses, because a pane that claims a/s/d on the frame it appears on can
-// be answered by a keystroke aimed at whatever the human was looking at a moment earlier. An
-// unarmed letter is SWALLOWED rather than passed on: falling through would scroll the transcript
-// under a human who thinks they just ruled, and the pane's own reading of "any other key" is that
-// it was aimed at the transcript. Esc stays live throughout — it is claimed upstream (handleKey),
-// it is the safe direction, and the operator's stop path is never the one made harder to reach.
-// ↑/↓ and the wheel move a highlight rather than answer, so they are outside the latch too.
-func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+// The decision letters and ⏎ are also the one thing on this pane that is not live the instant it
+// opens: they answer only once approvalArmed is set (foldInputDrained), through [Model.answerWhenArmed],
+// because a pane that claims a/s/d on the frame it appears on can be answered by a keystroke aimed at
+// whatever the human was looking at a moment earlier. An unarmed letter is CLAIMED and swallowed
+// rather than declined: falling through would scroll the transcript under a human who thinks they
+// just ruled, and the pane's own reading of "any other key" is that it was aimed at the transcript.
+// Esc stays live throughout — it is the safe direction, and the operator's stop path is never the one
+// made harder to reach. ↑/↓ and the wheel move a highlight rather than answer, so they are outside
+// the latch too.
+func (m Model) approvalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
+	if m.editingProjectRule() {
+		next, cmd, claimed := m.projectRuleKey(msg)
+		return claimed, next, cmd
+	}
 	if m.pending == nil {
 		// Unreachable under the state↔payload invariant (model.go); with no request there is no
 		// menu to read, and the key goes where every unclaimed key goes.
-		return m.scrollViewport(msg)
+		return false, m, nil
 	}
-	if opt, ok := m.approvalKeysFor(m.pending.Request)[msg.String()]; ok {
-		return m.answerWhenArmed(func(m Model) (tea.Model, tea.Cmd) {
+	key := msg.String()
+	switch key {
+	case "esc":
+		if m.watch.isActive || m.workflowPromptOrigin() == nil {
+			return false, m, nil
+		}
+		next, cmd := m.dismissWorkflowPrompt()
+		return true, next, cmd
+	case "enter":
+		next, cmd := m.answerWhenArmed(Model.resolveApproval)
+		return true, next, cmd
+	case "up", "down":
+		dir := 1
+		if key == "up" {
+			dir = -1
+		}
+		m.approvalSel.move(dir, len(m.approvalMenuFor(m.pending.Request)), listStopsAtEnds)
+		return true, m, nil
+	}
+	if opt, ok := m.approvalKeysFor(m.pending.Request)[key]; ok {
+		next, cmd := m.answerWhenArmed(func(m Model) (tea.Model, tea.Cmd) {
 			return m.takeApprovalOption(opt)
 		})
+		return true, next, cmd
 	}
-	menu := m.approvalMenuFor(m.pending.Request)
-	switch msg.String() {
-	case "up":
-		m.approvalSel.move(-1, len(menu), listStopsAtEnds)
-		return m, nil
-	case "down":
-		m.approvalSel.move(1, len(menu), listStopsAtEnds)
-		return m, nil
-	}
-	return m.scrollViewport(msg)
+	return false, m, nil
 }
 
 // promptWheel walks the highlight of whichever decision pane is up — the approval menu or the
@@ -420,7 +448,7 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // under the pointer when the pointer is in their box. Outside it the notch carries on down the chain
 // exactly as it did before the pane went up (foldMouseWheel, mouse.go) — to an overflowing prompt
 // box under the pointer, else to the transcript — which is the same review-the-context floor
-// handleApprovalKey keeps for every key the menu does not claim.
+// approvalKey leaves for every key the menu does not claim.
 //
 // Inside it the notch is ALWAYS handled, including on a pane with nothing to walk — a question
 // offering no choices, so there is no highlight — because what decides is the pane under the
@@ -1046,8 +1074,9 @@ func (m Model) openProjectRule() (tea.Model, tea.Cmd) {
 // saves, and every other key edits the field — the letters that answer the menu included, so typing
 // `go test ./...` types it rather than allowing or denying the call. ctrl+c and ctrl+l never reach
 // it: the quit gesture and the repaint stay the frame's, answered ahead of this field as they are
-// ahead of every pane ([Model.frameChord]). It is asked before handleKey's own switch, so this esc
-// is the field's, never the first press of the stop double-tap.
+// ahead of every pane ([Model.frameChord]). It is asked from the prompt's key rung ([Model.approvalKey]),
+// ahead of handleKey's own switch, so this esc is the field's, never the first press of the stop
+// double-tap.
 func (m Model) projectRuleKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	switch msg.String() {
 	case "esc":

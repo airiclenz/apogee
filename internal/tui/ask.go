@@ -50,7 +50,47 @@ func (m Model) foldAskRequest(msg askReqMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(m.input.Focus(), latch, notify)
 }
 
-// askChoiceKey is the ask prompt's keypress half, beside the pane that paints it: while a question
+// askKey is the ask pane's keypress half — the arm of the prompt's key rung ([Model.promptKey]) that
+// answers at awaitingAsk — and it reports whether it CLAIMED the key, the way the frame's other
+// soft-modal panes do ([Model.reportKey]): the input box below is borrowed for the answer, so every
+// key it does not act on goes on to edit that box (handleKey).
+//
+// ⏎ sends the answer ([Model.submitAnswer]) through [Model.answerWhenArmed], latched exactly as the
+// approval pane's ⏎ is and for the same reason: with choices offered the pane opens with the first
+// one highlighted, so an ⏎ already in the buffer when the question appeared would send an answer
+// nobody read. Unarmed it is claimed and swallowed; typed characters, ↑/↓ and a multi-select ␣ stay
+// live ([Model.askChoiceKey]), and so does esc.
+//
+// Esc is the answer box's own cancel, the one carve-out from the stop double-tap: a human backing
+// out of a question is not aborting a turn they lost track of, so one press stops the worker (the
+// `esc cancel` hint). A background workflow's question has no worker behind it, so one press sends
+// it back to the engine's queue unanswered instead ([Model.dismissWorkflowPrompt]). While watching
+// esc is declined: it leaves the watch first (handleKey).
+func (m Model) askKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
+	if m.pendingAsk == nil {
+		// Unreachable under the state↔payload invariant (model.go); with no question there is
+		// nothing to answer, and the key goes where every unclaimed key goes.
+		return false, m, nil
+	}
+	switch msg.String() {
+	case "esc":
+		if m.watch.isActive {
+			return false, m, nil
+		}
+		if m.workflowPromptOrigin() != nil {
+			next, cmd := m.dismissWorkflowPrompt()
+			return true, next, cmd
+		}
+		m.stopWorker()
+		return true, m, nil
+	case "enter":
+		next, cmd := m.answerWhenArmed(Model.submitAnswer)
+		return true, next, cmd
+	}
+	return m.askChoiceKey(msg)
+}
+
+// askChoiceKey is the ask prompt's choice keys, beside the pane that paints it: while a question
 // OFFERING CHOICES is up, ↑/↓ move the choice highlight and ␣ ticks a multi-select row — but ONLY
 // while the input box is empty (D5). The moment the human types, the guard fails and the arrows
 // fall through to the textarea (cursor duty), so multi-line free-text editing is never stolen;
@@ -58,8 +98,7 @@ func (m Model) foldAskRequest(msg askReqMsg) (tea.Model, tea.Cmd) {
 //
 // It reports whether it CLAIMED the key, the way the frame's other non-modal panes do
 // ([Model.reportKey]): the prompt is soft-modal, so every key it does not act
-// on goes where it always went. ⏎ is not its key — the enter switch in handleKey sends the answer
-// through [Model.submitAnswer] — and esc is the frame's own cancel.
+// on goes where it always went. ⏎ and esc are not its keys — [Model.askKey] answers both ahead of it.
 //
 // The WALK is the package's shared one ([listCursor.move] with listStopsAtEnds, listsurface.go), so
 // this offering and the approval menu answer "what does ↓ do at the bottom" through the same code

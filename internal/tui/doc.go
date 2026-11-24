@@ -956,8 +956,8 @@
 // single-flight queue that orders every Save, Rename, Delete, Rotate and Activate against one
 // another (the Model still owns the three fields it latches on); approval.go the approval-decision
 // concern lifted out of model.go beside it (ADR 0043), both halves in one file — the [approvalMenu]
-// the keys and the pane both read, the keypress half over it ([Model.handleApprovalKey],
-// [Model.resolveApproval], [Model.sendApproval]) and the pane that paints it
+// the keys and the pane both read, the keypress half over it ([Model.approvalKey], the approval arm
+// of the prompt's soft key rung [Model.promptKey], with [Model.resolveApproval] and [Model.sendApproval]) and the pane that paints it
 // ([Model.approvalPrompt] with its Sub-agent identity line and its argument block), so a row can
 // never be paintable and unreachable (the Model still owns the pending request and the menu
 // selection), the "Always in this project…" row's rule field that saves an Allow rule through
@@ -973,8 +973,8 @@
 // migration offers, which raise themselves unasked (picker.latched); Esc
 // stays live throughout, since the safe direction is never the one made harder to reach; ask.go the ask_user pane lifted out of model.go beside approval.go (ADR 0043) and
 // shaped like it, both halves in one file — the fold that borrows the input box for a question
-// ([Model.foldAskRequest]), the keys the offering claims while that box is still empty
-// ([Model.askChoiceKey]), the reply that sends the answer back and gives the box up
+// ([Model.foldAskRequest]), the ask arm of the prompt's key rung ([Model.askKey]: ⏎, esc, and the
+// keys the offering claims while that box is still empty, [Model.askChoiceKey]), the reply that sends the answer back and gives the box up
 // ([Model.submitAnswer], [Model.checkedLabels], [Model.restoreAskDraft]) and the pane that paints
 // the question with its choices ([Model.askPrompt], [askChoiceRows] and the row/line budgeting
 // around them), so a choice can never be paintable and unreachable (the Model still owns the

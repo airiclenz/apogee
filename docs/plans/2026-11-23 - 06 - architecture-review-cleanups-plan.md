@@ -171,7 +171,10 @@ NOTES (2026-11-24): the stateErrored case is pinned both ways — with no child 
 - `test "$(grep -c 'm\.approvalArmed' internal/tui/approval.go)" = 1`
 **Commit:** `refactor(tui): gate every question answer on one armed check`
 
-## 6. The prompt row gets a soft-modal key rung
+## 6. The prompt row gets a soft-modal key rung — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): internal/tui/approval_test.go needed no change (named in **Files:**); TestPromptKeyClaimIsSoftModal lives in keyclaim_test.go beside the order test, and TestEveryFramePaneHasASpec now also asserts every row has a non-zero key rank.
+NOTES (2026-11-24): a prompt claim now goes through claimKey, so the transcript clamp is freshened after it (claimKey's shared repair); Update's tail settled it anyway, so nothing observable moves.
 
 **What:** Depends on item 5.
 **Goal:** every `paneSpecs` row has a key claim; `keyClaimOrder` lists "prompt" after "mcp pane"; handleKey holds no awaiting-state, rule-field, workflow-prompt or `askChoiceKey` branch; `handleApprovalKey` is gone; the prompt claim is testable without handleKey.

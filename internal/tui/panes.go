@@ -38,15 +38,17 @@ const (
 //
 // modal says the pane swallows every key it does not act on while it is up (the frame chords
 // excepted: ctrl+c and ctrl+l are answered ahead of every pane, [Model.frameChord]) — the /sessions
-// browser, the picker and the /settings pane through their modalClaim key, the approval or ask
-// prompt through the state-gated switches in handleKey — as opposed to a pane that says something rather than
-// asking (the five reports, the dropdown), behind which the box stays live.
+// browser, the picker and the /settings pane through their modalClaim key — as opposed to a pane that
+// says something rather than asking (the five reports, the dropdown), behind which the box stays live.
+// The decision prompt is modal by STATE rather than by its claim: its rung is soft ([paneClaim] over
+// [Model.promptKey]), but at an approval the box is inert and every key the menu declines scrolls the
+// transcript, and at an ask the box is the borrowed answer box, so no key it declines reaches a
+// surface behind it.
 //
 // key is the pane's rung of the overlay precedence in the claimant currency [keyClaimant.claim]
 // speaks — the row applies [modalClaim] or [paneClaim] to the pane's own handler itself, so the
-// rung of [keyClaimOrder] that reads it ([paneClaimant]) adapts nothing. It is nil for the prompt
-// alone: the approval and the ask prompt are modal by STATE, and their keys are handleKey's own
-// switches. keyOpen is that rung's gate — whether the pane is up and entitled to be asked at all;
+// rung of [keyClaimOrder] that reads it ([paneClaimant]) adapts nothing. Every row has one. keyOpen
+// is that rung's gate — whether the pane is up and entitled to be asked at all;
 // nil means "always ask", the pane's own claim then being the whole test, which a closed pane
 // answers false to anyway.
 //
@@ -72,7 +74,7 @@ type paneSpec struct {
 	open    func(Model) bool                                                 // whether the Model has it open
 	render  func(Model) string                                               // its rendered block for one frame, "" when closed or unseated
 	height  func(Model) int                                                  // the rows render's block takes, without rendering it; 0 where render is ""
-	key     func(Model, tea.KeyPressMsg) (Model, tea.Cmd, bool)              // its key claim, in claimant currency; nil only for the prompt
+	key     func(Model, tea.KeyPressMsg) (Model, tea.Cmd, bool)              // its key claim, in claimant currency
 	keyOpen func(Model) bool                                                 // the key claim's gate; nil = always ask
 	click   func(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) // its answer to a left-click on the frame
 	wheel   func(Model, tea.MouseWheelMsg) (Model, bool)                     // its answer to a wheel notch on the frame
@@ -81,13 +83,13 @@ type paneSpec struct {
 }
 
 // paneRank is where one pane stands in the two gesture chains, 1 for the first rung. key is its rung
-// of the overlay precedence ([keyClaimOrder]) and 0 for the prompt alone, which has no rung — its keys
-// are handleKey's state switches. pointer is its place in the one order the click and the wheel ask the
-// panes in ([pointerPanes], whose doc states why the order is what it is), and every pane has one. The
+// of the overlay precedence ([keyClaimOrder]), and every pane has one. pointer is its place in the one
+// order the click and the wheel ask the panes in ([pointerPanes], whose doc states why the order is
+// what it is), and every pane has one too. The
 // ranks of one chain are distinct, so each chain is ONE order; TestKeyClaimOrderMatchesTheDocumentedPrecedence
 // and TestPointerPanesWalkInTheClickChainOrder pin the orders they derive.
 type paneRank struct {
-	key     int // rung of keyClaimOrder, 0 = none
+	key     int // rung of keyClaimOrder
 	pointer int // place in pointerPanes
 }
 
@@ -122,21 +124,31 @@ func init() {
 	paneSpecs = [paneKinds]paneSpec{
 		panePrompt: {
 			// The approval and the ask prompt belong to different states, so they are never both up:
-			// the one pane covers both. It is modal by STATE rather than by a keyClaimOrder rung — at
-			// awaitingApproval the keyboard belongs to a/d/s and the Enter-dismiss, at awaitingAsk to
-			// the borrowed answer box (handleKey).
-			name:   "prompt",
-			slot:   slotTranscript,
-			modal:  true,
-			open:   Model.promptOpen,
-			render: Model.renderPrompt,
-			height: Model.promptHeight,
-			click:  promptPointerClick,
-			wheel:  Model.promptWheel,
-			hover:  promptHover,
-			// No key rung, for the reason above; its place in the pointer chain is the one pointerPanes
-			// states.
-			rank: paneRank{pointer: 10},
+			// the one pane covers both. It is modal by STATE rather than by its claim — at
+			// awaitingApproval the box is inert and the keyboard belongs to the menu, at awaitingAsk to
+			// the borrowed answer box — so its claim is the soft one: promptKey dispatches to the live
+			// state's arm (approvalKey, askKey) and declines everything that arm does not act on.
+			name:    "prompt",
+			slot:    slotTranscript,
+			modal:   true,
+			open:    Model.promptOpen,
+			render:  Model.renderPrompt,
+			height:  Model.promptHeight,
+			key:     paneClaim(Model.promptKey),
+			keyOpen: Model.promptOpen,
+			click:   promptPointerClick,
+			wheel:   Model.promptWheel,
+			hover:   promptHover,
+			// The last pane rung of the key precedence, below the five reports: a report opened over
+			// the question it is blocked on answers its own esc and its scroll keys first, and the next
+			// esc reaches the question exactly as it would have with no report open. Its gate is
+			// disjoint from the four modal rungs and the dropdown above it — each of them is gated on
+			// idle or a live state, which a pending decision is not — so only a report stands between it
+			// and the keys it claims. It sits ABOVE
+			// the run view, whose gate is shut while a decision is pending, and above navigation mode,
+			// which suspends itself for the same pending decision ([Model.blockCursorOwnsKeys]). Its
+			// place in the pointer chain is the one pointerPanes states.
+			rank: paneRank{key: 11, pointer: 10},
 		},
 		paneBrowser: {
 			// The /sessions browser takes the prompt's position in the slot because they never
@@ -364,6 +376,19 @@ func reportPaneRow(name string, r reportKind, rank paneRank) paneSpec {
 func paneClaimant(p framePane) keyClaimant {
 	row := paneSpecs[p]
 	return keyClaimant{name: row.name, open: row.keyOpen, claim: row.key}
+}
+
+// promptKey is the decision prompt's key claim, in the shape [paneClaim] adapts: the live state's
+// arm answers — [Model.approvalKey] at awaitingApproval, [Model.askKey] at awaitingAsk — and every
+// other state declines, which the rung's gate ([Model.promptOpen]) already keeps it from being asked in.
+func (m Model) promptKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
+	switch m.state {
+	case stateAwaitingApproval:
+		return m.approvalKey(msg)
+	case stateAwaitingAsk:
+		return m.askKey(msg)
+	}
+	return false, m, nil
 }
 
 // promptOpen reports whether the frame has a decision prompt up — the approval or the ask pane, each

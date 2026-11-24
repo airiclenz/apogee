@@ -1,6 +1,12 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/airiclenz/apogee/internal/domain"
+)
 
 // TestKeyClaimOrderMatchesTheDocumentedPrecedence pins the overlay precedence [Model.handleKey]
 // walks. The order is load-bearing — a surface that rises steals keys the one above it answers, and
@@ -24,6 +30,7 @@ func TestKeyClaimOrderMatchesTheDocumentedPrecedence(t *testing.T) {
 		"thinking pane",
 		"advice pane",
 		"mcp pane",
+		"prompt",
 		"run view",
 		"navigation mode",
 	}
@@ -43,6 +50,76 @@ func TestKeyClaimOrderMatchesTheDocumentedPrecedence(t *testing.T) {
 		}
 		seen[claimant.name] = true
 	}
+}
+
+// TestPromptKeyClaimIsSoftModal asks the prompt's rung directly — its row's key claim, with no
+// handleKey around it — which keys it takes. It is SOFT-modal: an approval claims its menu (the
+// decision letters, ↑/↓ and ⏎) and declines the keys the frame answers (the page keys, the mode
+// chord, tab, ctrl+g) and any letter that is not a decision; an ask claims ⏎ and esc, and the
+// offering's ↑/↓/␣ only while the answer box is empty, and declines what is typed into that box and
+// the esc that leaves a watch.
+func TestPromptKeyClaimIsSoftModal(t *testing.T) {
+	t.Parallel()
+	claim := paneSpecs[panePrompt].key
+
+	t.Run("approval", func(t *testing.T) {
+		t.Parallel()
+		m, reply, _ := projectRulePane(t, terminalGate("go test ./..."), nil)
+		claims := func(k tea.KeyPressMsg) bool {
+			_, _, claimed := claim(m, k)
+			select { // an armed decision key answers; empty the reply so the next one can too
+			case <-reply:
+			default:
+			}
+			return claimed
+		}
+		for _, k := range []tea.KeyPressMsg{keyRune('a'), keyRune('s'), keyRune('d'), keyRune('p'), keyUp(), keyDown(), keyEnter()} {
+			if !claims(k) {
+				t.Errorf("the approval declined %q; it is the menu's", k.String())
+			}
+		}
+		for _, k := range []tea.KeyPressMsg{keyPgUp(), keyPgDown(), keyShiftTab(), keyTab(), keyCtrlG(), keyRune('x')} {
+			if claims(k) {
+				t.Errorf("the approval claimed %q; it belongs to the frame", k.String())
+			}
+		}
+	})
+
+	t.Run("ask", func(t *testing.T) {
+		t.Parallel()
+		m, reply := newAskModel(t, domain.AskRequest{Question: "which?", Choices: []string{"left", "right"}, MultiSelect: true})
+		claims := func(m Model, k tea.KeyPressMsg) bool {
+			_, _, claimed := claim(m, k)
+			select { // an armed ⏎ answers; empty the reply so the next one can too
+			case <-reply:
+			default:
+			}
+			return claimed
+		}
+		for _, k := range []tea.KeyPressMsg{keyEnter(), keyEsc(), keyUp(), keyDown(), keySpace()} {
+			if !claims(m, k) {
+				t.Errorf("the ask declined %q on an empty box; it is the pane's", k.String())
+			}
+		}
+		for _, k := range []tea.KeyPressMsg{keyRune('x'), keyRune('a')} {
+			if claims(m, k) {
+				t.Errorf("the ask claimed the printable %q; it types the answer", k.String())
+			}
+		}
+		watching := m
+		watching.watch.isActive = true
+		if claims(watching, keyEsc()) {
+			t.Error("the ask claimed esc while watching; that esc leaves the watch")
+		}
+
+		typed, _ := newAskModel(t, domain.AskRequest{Question: "which?", Choices: []string{"left", "right"}, MultiSelect: true})
+		typed.input.SetValue("free text")
+		for _, k := range []tea.KeyPressMsg{keyUp(), keyDown(), keySpace()} {
+			if _, _, claimed := claim(typed, k); claimed {
+				t.Errorf("the ask claimed %q over a typed answer; it is the box's cursor key", k.String())
+			}
+		}
+	})
 }
 
 // TestTheFirstClaimantThatWantsAKeyAnswersIt drives the order rather than reading it: with both

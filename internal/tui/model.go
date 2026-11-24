@@ -1936,13 +1936,14 @@ func reportClaim(r reportKind) func(Model, tea.KeyPressMsg) (bool, tea.Model, te
 
 // keyClaimOrder is the overlay precedence [Model.handleKey] walks, top rung first — after the frame
 // chords, which no rung is ever asked for ([Model.frameChord]): the modal overlays that own the
-// keyboard while they are up, then the report panes that claim only their
-// own keys, then navigation mode's cursor — and only then the frame's own verbs, the state-gated
-// switches in handleKey itself.
+// keyboard while they are up, then the report panes that claim only their own keys, then the
+// decision prompt's soft rung (an approval's menu and rule field, an ask's ⏎, esc and choice keys),
+// then the run view and navigation mode's cursor — and only then the frame's own verbs, the
+// switches in handleKey itself, which hold no pane's keys.
 //
 // The order is load-bearing, which is why it is data: every rung states what its surface claims and
 // why it can neither rise nor fall in the list, and TestKeyClaimOrderMatchesTheDocumentedPrecedence
-// fails if the sequence changes. The nine pane rungs are DERIVED from the pane table: each pane's row
+// fails if the sequence changes. The eleven pane rungs are DERIVED from the pane table: each pane's row
 // carries its rung ([paneRank], panes.go) beside its gate and its claim, and init() lists the panes in
 // rank order ([keyClaimRungs]), each read off its row ([paneClaimant]) — so what a pane DOES with a
 // key and WHEN it is asked are both stated once, on its row, together with why it sits where it does.
@@ -2033,7 +2034,7 @@ func (m Model) claimKey(order []keyClaimant, msg tea.KeyPressMsg) (Model, tea.Cm
 
 // frameChord answers the frame chords — the two keys whose meaning belongs to the frame rather than
 // to whatever surface is up — and reports whether msg was one. [Model.handleKey] asks it ahead of
-// every claimant in [keyClaimOrder] and ahead of the approval pane's rule field, so a modal pane that
+// every claimant in [keyClaimOrder] — the approval pane's rule field among them, on the prompt's rung — so a modal pane that
 // claims every other key never sees these two: a quit and a repair must be reachable from under any
 // pane, or the one way out of a pane the human cannot read (a terminal that smeared it) is gone.
 //
@@ -2126,40 +2127,21 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, claimCmd
 	}
 
-	// The approval pane's rule field, while it is open, takes every key the frame chords above left —
-	// asked HERE, ahead of the switch, so its esc goes back to the menu rather than arming the stop
-	// double-tap, and its letters type rather than rule (projectRuleKey, approval.go).
-	if m.editingProjectRule() {
-		if next, cmd, claimed := m.projectRuleKey(msg); claimed {
-			return next, cmd
-		}
-	}
-
 	switch msg.String() {
 	case "esc":
 		// Esc never ends the program; it only cancels an in-flight worker. At idle/errored it
 		// is a no-op (use Ctrl+C twice to exit), so a reflexive Esc never quits.
 		//
 		// While watching there is no worker of the watcher's to cancel: esc leaves the watch and goes
-		// back to the parked session (watch.go). A run view or pane open in the watch claimed it above.
+		// back to the parked session (watch.go). A run view or pane open in the watch claimed it above;
+		// a decision pane declines it to this case, so the watch is left before any pane's own esc.
 		if m.watch.isActive {
 			left, redelivered, gitRead := m.leaveWatch()
 			return left, tea.Batch(redelivered, gitRead)
 		}
-		// A background workflow's prompt (either pane) has no worker behind it: one press sends it
-		// back to the engine's queue unanswered (dismissWorkflowPrompt, workflow.go).
-		if m.workflowPromptOrigin() != nil {
-			return m.dismissWorkflowPrompt()
-		}
-		// The ask prompt is the one carve-out: its Esc is the answer box's own cancel, and a
-		// human backing out of a question is not aborting a turn they lost track of — one press
-		// still cancels there (ask.go's `esc cancel` hint).
-		if m.state == stateAwaitingAsk {
-			m.stopWorker()
-			return m, nil
-		}
-		// Everywhere else a worker runs — including under a live approval pane, which this case
-		// reaches before the approval routing below — a lone Esc no longer kills the turn. The
+		// Everywhere else a worker runs — including under a conversation's approval pane, which
+		// declines its esc to this case (approvalKey, approval.go) — a lone Esc no longer kills the
+		// turn; the ask pane and a background workflow's prompt claimed theirs above. The
 		// first press arms the gesture (and shows the hint via statusRight); a second press
 		// folded while it is still armed stops the worker, however long the fold queue held it.
 		// Only the tick (escStopResetMsg) or the worker unwinding (finishWorker) disarms it, and
@@ -2185,7 +2167,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// letting the whole wave finish first — in the main prompt and, addressed to the child on
 		// screen, in a run view. At idle there is no wave to cut short, so it submits exactly as ⏎
 		// does. Under a pane — an approval, a question, an error — it does nothing: the box belongs
-		// to the decision in front of it, and there is no message to send now.
+		// to the decision in front of it, and there is no message to send now. The prompt's rung
+		// declines it, so it lands here and does nothing.
 		switch m.state {
 		case stateIdle:
 			return m.sendAtIdle()
@@ -2202,26 +2185,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// Staged, never launched (stageWhileRunning); an ordinary ⏎ row lets a running
 			// sub_agent wave finish before it lands — ctrl+g is the send that skips its queued members.
 			return m.stageWhileRunning(false)
-		case stateAwaitingAsk:
-			// Submit the typed answer back to the blocked ask_user tool (P3.11).
-			//
-			// Latched exactly as the approval pane's ⏎ below, and for the same reason: with choices
-			// offered the pane opens with the first one highlighted, so an ⏎ already in the buffer
-			// when the question appeared would send an answer nobody read. Unarmed it is swallowed;
-			// typed characters, ↑/↓ and a multi-select ␣ stay live, and so does esc (claimed above).
-			return m.answerWhenArmed(Model.submitAnswer)
-		case stateAwaitingApproval:
-			// Take the approval menu's highlighted row. The menu IS the decision surface now — the
-			// legend that used to spell the letters out is gone, so ⏎ on the pointed-at row is the
-			// way in for a human who has not learnt a/s/d yet (resolveApproval).
-			//
-			// Latched with the decision letters, and for the same reason: the menu opens on Allow,
-			// so an ⏎ already in the buffer when the pane appeared would allow a call nobody read.
-			// Unarmed it is swallowed here rather than falling through to the states below
-			// (approval.go). Esc, the safe direction, is claimed above and stays live throughout —
-			// as the double-tap it is everywhere a worker runs: one press arms, a second folded
-			// before escStopResetMsg disarms it stops. The ⏎-Cancel row below is the one-press spelling of it.
-			return m.answerWhenArmed(Model.resolveApproval)
+		// At an approval or an ask the prompt's rung claimed ⏎ above (approvalKey, askKey): it sends
+		// the answer or takes the menu's highlighted row, latched until the pane arms.
 		case stateErrored:
 			// Dismiss the error and return to idle so the next message can be sent. With a queue
 			// held by the fault (ADR 0025) that is deliberately TWO presses: this one clears the
@@ -2278,19 +2243,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "pgup", "pgdown":
 		return m.scrollViewport(msg)
-	}
-
-	// A live approval prompt claims the decision keys. This branch must precede the scroll
-	// fall-through below, which would otherwise swallow a/d/s as viewport scroll keys.
-	if m.state == stateAwaitingApproval {
-		return m.handleApprovalKey(msg)
-	}
-
-	// The ask prompt's choice keys — ↑/↓ over the offering and ␣ on a multi-select row — are the
-	// pane's own while the answer box is still empty (ask.go). It claims nothing once the human starts
-	// typing, so the arrows go back to being cursor keys and the free-text answer is never stolen.
-	if claimed, next, cmd := m.askChoiceKey(msg); claimed {
-		return next, cmd
 	}
 
 	// Wherever the box is editable the keys type into it: idle (a message to send), awaiting an
@@ -2362,8 +2314,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.layout() // re-flow: the input box auto-grows as the message wraps to more rows
 		return m, cmd
 	}
-	// At the inert states — errored (⏎ dismisses) and a live approval that fell past its decision
-	// keys — the keys scroll the transcript instead, and where the scroll leaves the view sets the
+	// At the inert states — errored (⏎ dismisses) and a live approval whose rung declined the key
+	// (approvalKey) — the keys scroll the transcript instead, and where the scroll leaves the view sets the
 	// follow policy (scrollViewport): off the bottom holds the position, back at the bottom follows
 	// the tail again. While running the transcript scrolls by PgUp/PgDn (intercepted above) and the
 	// mouse wheel, the keyboard being the input's now.
