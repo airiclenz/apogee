@@ -120,6 +120,8 @@
 // (ADR 0033); daemonfire.go that same composition for the daemon — the adopted
 // name→Entry set a Firing resolves its schedule against, the `servers:` entry it binds to
 // by name, and the unattended run composed over the pair (ADR 0034, ADR 0055);
+// driverhost.go the Driver host — the process-scope steps every Driver opens once at start-up
+// and tears down in one close (adr-0083-amend-1123);
 // serverstats.go the per-server stats recorder — the Driver sink the session's boot and
 // every Firing wrap Config.Events in, appending each upstream attempt to
 // ~/.apogee/server-stats.jsonl while `server-stats:` is on (ADR 0085);

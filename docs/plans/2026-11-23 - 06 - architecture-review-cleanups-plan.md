@@ -527,7 +527,11 @@ NOTES (2026-11-24): the amendment's refs are cmd/apogee/wire.go, headless.go, da
 - `capcom check`
 **Commit:** `docs(adr): reopen ADR 0083 part 5 for one Driver host, verdicts per Driver`
 
-## 22. One Driver host for the shared process-scope steps
+## 22. One Driver host for the shared process-scope steps — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): newDriverHost keeps the plan's signature (roots, opts, newConfiner) and leaves files zero; openDriverHost records the config source from sessionRoots on the host it builds.
+NOTES (2026-11-24): openStore's keep callback returns an error that openStore passes back as the start-up error, and say may be nil (the share warning is then dropped) — the shape the TUI's resolveResume and the daemon's log need.
+NOTES (2026-11-24): wire.go's test-split sentence now says "the twelve wire_ files above" and names driverhost_test.go, since driverhost.go joined the seam list; TestDriverHostOpenFindsTheProjectRootFromASubfolder also has a subtest showing withProject=false gives no Project root and zero files.
 
 **What:** Recast at the regression check (2026-11-23). Depends on items 15 and 21. No Driver migrated yet.
 **Goal:** `cmd/apogee/driverhost.go` exists with `driverHost`, covered by `TestDriverHost*`; it owns no sink and calls no `wrap`.

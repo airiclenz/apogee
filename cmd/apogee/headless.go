@@ -180,14 +180,6 @@ func watchSecondInterrupt(sigs <-chan os.Signal, done <-chan struct{}, errOut io
 	}
 }
 
-// prewarmLabelWalk is the seam onto the Windows label-walk pre-warm, for the same reason hardExit
-// is one: platform.PrewarmLabelWalk is an empty function off Windows
-// (internal/platform/prewarm_other.go), so a test that only asserted "the run made no noise" would
-// pass identically against a tree that never calls it at all. Replacing this variable is how the
-// suite proves the confined-Auto headless path reaches the pre-warm on the one host where it does
-// work. Production never reassigns it.
-var prewarmLabelWalk = platform.PrewarmLabelWalk
-
 // narrationSink is the headless Driver's own EventSink: the live view of an unattended run under
 // `--format text`. It prints one stderr line per [domain.PruneEvent], per
 // [domain.MalformedChunksEvent], per [domain.RefClippedEvent], per

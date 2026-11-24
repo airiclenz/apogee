@@ -38,14 +38,18 @@ package main
 //     one shape rather than three that drift, plus the per-model rebind notices it hands back.
 //   - wire_server.go — the entry a startup selection collapses to, the one step that binds any entry
 //     to a session, and the config-change wait the reload chain parks on.
+//   - driverhost.go — the Driver host: the process-scope steps every Driver takes at start-up, over
+//     this file's roots and sweeps — roots and the scratch sweep, the Confiner, the stats recorder,
+//     the session store with its share warning and sweeps, and their one teardown
+//     (adr-0083-amend-1123).
 //
 // The tests mirror that split (S-1): wire_boot_test.go, wire_engine_test.go, wire_live_test.go,
 // wire_server_test.go, wire_session_test.go, wire_settings_test.go, wire_tools_test.go and
-// wire_verbs_test.go cover wire.go and the twelve files above, over the doubles and fixtures they
-// share in wire_helpers_test.go; the Firing composer is pinned at its own construction site
-// instead, in wire_firing_test.go, and the options projection has no file of its own — it is
-// exercised through the seams it projects (wire_boot_test.go, wire_settings_test.go,
-// settingsrows_test.go).
+// wire_verbs_test.go cover wire.go and the twelve wire_ files above, over the doubles and fixtures
+// they share in wire_helpers_test.go; the Driver host is pinned in driverhost_test.go, the Firing
+// composer at its own construction site instead, in wire_firing_test.go, and the options
+// projection has no file of its own — it is exercised through the seams it projects
+// (wire_boot_test.go, wire_settings_test.go, settingsrows_test.go).
 
 import (
 	"context"
