@@ -845,7 +845,7 @@ func adoptedRepoWikiServer(t *testing.T, w *rootWiring) mcp.ServerConfig {
 	writeRepoWikiScript(t, w.roots.project, "exec true")
 	writeProjectConfig(t, w.roots.project, repoWikiServerYAML)
 	adoptEveryProposal(t, w.configPath(), w.roots.project)
-	o, err := loadLayeredOptions(w.configPath(), w.roots.project)
+	o, _, err := w.files().Layered(os.ReadFile, func(string) {})
 	if err != nil {
 		t.Fatalf("load the layered config: %v", err)
 	}

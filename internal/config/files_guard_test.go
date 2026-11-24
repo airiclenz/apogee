@@ -1,6 +1,7 @@
 package config
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -57,6 +58,94 @@ func TestOnlyConfigImportsProjectroot(t *testing.T) {
 	if parsed == 0 {
 		t.Fatal("no .go files were parsed; the guard proved nothing")
 	}
+}
+
+// configImport is this package's import path, the one the read entries below are reached through.
+const configImport = "github.com/airiclenz/apogee/internal/config"
+
+// sourceBypasses are the package-level read entries that take paths rather than a config source.
+// They stay exported for this package's own tests and for the test fixtures elsewhere; a production
+// read asks a [Files] instead ([Files.Global], [Files.Layered], [Files.GlobalDocument],
+// [Files.Overlay]), so the files it reads are the ones the session's resolution named.
+var sourceBypasses = map[string]bool{
+	"LoadFileConfig":      true,
+	"LoadLayeredConfig":   true,
+	"LoadLayeredOffer":    true,
+	"ReadGlobalDocument":  true,
+	"OverlayProjectLayer": true,
+	"OverlayProjectOffer": true,
+}
+
+// TestProductionReadsGoThroughTheConfigSource holds the one-source rule for config reads: no
+// production .go file outside internal/config references a package-level read entry that takes
+// paths (sourceBypasses), so every live re-read asks the session's config source ([Files]) and
+// cannot pick a file or a Project root of its own. The Drivers' boot calls (ApplyConfig,
+// ApplyConfigOffer) and the test seam ResolveOptions are not read entries of that kind and stay.
+// Each file is parsed and only selectors on the config import are judged — under whatever name the
+// file imports it — so a comment naming an entry passes and a build-tagged file is checked from
+// any host. It walks the module root package's own files plus internal/ and cmd/, skipping every
+// directory whose name starts with a dot.
+func TestProductionReadsGoThroughTheConfigSource(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := filepath.Join("..", "..")
+	parsed := 0
+	fset := token.NewFileSet()
+	for _, relative := range productionGoFiles(t, repoRoot) {
+		if strings.HasPrefix(relative, "internal/config/") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, filepath.Join(repoRoot, filepath.FromSlash(relative)), nil,
+			parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse %s: %v", relative, err)
+		}
+		parsed++
+		for _, ref := range sourceBypassReferences(file) {
+			t.Errorf("%s:%d references config.%s; read through the config source (config.Files)",
+				relative, fset.Position(ref.Pos()).Line, ref.Name)
+		}
+	}
+	// A guard that parsed no files would pass over a tree it never looked at.
+	if parsed == 0 {
+		t.Fatal("no .go files were parsed; the guard proved nothing")
+	}
+}
+
+// sourceBypassReferences returns every selector in file that names a read entry of sourceBypasses
+// on the config import, under whatever name the file imports it: a call and a bare reference
+// alike. A file that dot-imports the package is reported at the import, since a bare entry name
+// there cannot be told from a local one.
+func sourceBypassReferences(file *ast.File) []*ast.Ident {
+	var found []*ast.Ident
+	localName := ""
+	for _, imported := range file.Imports {
+		if strings.Trim(imported.Path.Value, `"`) != configImport {
+			continue
+		}
+		switch {
+		case imported.Name == nil:
+			localName = "config"
+		case imported.Name.Name == ".":
+			found = append(found, imported.Name)
+		case imported.Name.Name != "_":
+			localName = imported.Name.Name
+		}
+	}
+	if localName == "" {
+		return found
+	}
+	ast.Inspect(file, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if pkg, ok := selector.X.(*ast.Ident); ok && pkg.Name == localName && sourceBypasses[selector.Sel.Name] {
+			found = append(found, selector.Sel)
+		}
+		return true
+	})
+	return found
 }
 
 // mayImportProjectroot reports whether the file at the slash path relative sits in a directory

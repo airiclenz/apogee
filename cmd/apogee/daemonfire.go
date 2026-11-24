@@ -64,7 +64,7 @@ type daemonWiring struct {
 	// must honour for the one-configuration reason headless honours them (ADR 0031).
 	opts config.Options
 	// global is config.yaml as this daemon read it at startup: the document every Firing's
-	// Project config is merged into (config.OverlayProjectLayer), held here so that layering a
+	// Project config is merged into (config.Files.Overlay), held here so that layering a
 	// workspace's file never reads the global one again (ADR 0055).
 	global config.GlobalDocument
 	// keys resolves an entry's key SOURCE into the token its Firings send. One resolver for the

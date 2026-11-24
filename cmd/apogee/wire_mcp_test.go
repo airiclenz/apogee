@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -1728,7 +1729,7 @@ func TestMCPStartupSkippedServerIsRedialledByTheRetryGesture(t *testing.T) {
 	t.Parallel()
 	w, _, skipped := startupSkippedWiki(t)
 	writeRepoWikiScript(t, w.roots.project, "exec true")
-	o, err := loadLayeredOptions(w.configPath(), w.roots.project)
+	o, _, err := w.files().Layered(os.ReadFile, func(string) {})
 	if err != nil {
 		t.Fatalf("load the layered config: %v", err)
 	}
@@ -1755,7 +1756,7 @@ func TestMCPStartupSkippedServerReadoptedWithANewPinDials(t *testing.T) {
 	t.Parallel()
 	w, global, skipped := startupSkippedWiki(t)
 	adoptEveryProposal(t, w.configPath(), w.roots.project)
-	o, err := loadLayeredOptions(w.configPath(), w.roots.project)
+	o, _, err := w.files().Layered(os.ReadFile, func(string) {})
 	if err != nil {
 		t.Fatalf("load the layered config: %v", err)
 	}

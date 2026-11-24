@@ -309,6 +309,7 @@ func (w *rootWiring) settingsApplier() settingsApplier {
 		binding:    w.holder.Binding,
 		rebind:     w.rebind,
 		configPath: w.configPath(),
+		files:      w.files(),
 		skills:     w.skillProvider,
 		tools:      w.toolSet,
 		mcp:        w.mcpSet,

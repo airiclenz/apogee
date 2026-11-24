@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -984,6 +985,10 @@ type settingsApplier struct {
 	// configPath is the config.yaml this session resolved — re-read whole for the keys whose value is
 	// a structure no single string can spell.
 	configPath string
+	// files is the config source this session was resolved from (rootWiring.files): every re-read
+	// of the global file and of the layered set asks it (settingsApplier.files), so a re-read reads
+	// the files startup read and layers the Project root startup layered.
+	files config.Files
 	// skills is the shared skill catalogue: the SAME Provider the loop resolves attached ids against
 	// and the "/" menu lists, so re-pointing it at another source layering moves both at once.
 	skills settingsSkills
@@ -1926,13 +1931,13 @@ func (a settingsApplier) rideTheRebind() error {
 //
 // Nothing is cached across applies: a row applies against the file as it is at that moment. The
 // notice hook is a no-op because a live read never migrates: a file still in the retired schema is
-// refused with the start-up refusal rather than folded under a running session (LoadFileConfig).
+// refused with the start-up refusal rather than folded under a running session (config.Files.Global).
 //
 // A file that no longer parses is reported back unchanged: what a refusal COSTS differs per key —
 // connections that stay where they are, a list nothing displaces — so each caller says that in its
 // own words rather than being answered for here.
 func (a settingsApplier) fileConfig() (config.Options, error) {
-	return config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	return a.configFiles().Global(os.ReadFile, func(string) {})
 }
 
 // layeredConfig re-reads the set the MCP servers and the reactions resolve from — the global
@@ -1946,8 +1951,23 @@ func (a settingsApplier) fileConfig() (config.Options, error) {
 // parsing is not an error: the loader skips that layer, so the re-read degrades to the global set
 // alone — the adopted repo servers are torn down and the repo reactions leave the lanes — and the
 // first save that parses again brings them back (the watched diff sees them return).
+//
+// The loader's notices are dropped: the watched re-read says them (ConfigHost.ReloadConfig), and
+// the offer the read resolves beside the options is the Adoption snapshot's to answer, not a
+// reload's.
 func (a settingsApplier) layeredConfig() (config.Options, error) {
-	return loadLayeredOptions(a.configPath, a.roots.project)
+	layered, _, err := a.configFiles().Layered(os.ReadFile, func(string) {})
+	return layered, err
+}
+
+// configFiles is the config source this applier re-reads: the session's own (files), or, for an
+// applier built without one, the source its configPath and roots name, walking nothing — the
+// global file at configPath and the Project root in roots (rootWiring.files is the same rule).
+func (a settingsApplier) configFiles() config.Files {
+	if !a.files.IsZero() {
+		return a.files
+	}
+	return config.FilesAt(filepath.Dir(a.configPath), a.roots.workspace, a.roots.project)
 }
 
 // widenSecretEnv widens the live credential scrub by every token variable the layered set names

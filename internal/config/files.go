@@ -84,6 +84,14 @@ func (f Files) ProjectPath() string {
 // global path is known (the zero value).
 func (f Files) WorkspacesDir() string { return workspacesDirOf(f.GlobalPath()) }
 
+// Global reads f's global file on its own, the way a live re-read reads it ([LoadFileConfig]): no
+// project layer, never migrating and never writing — a file still written in a retired shape is
+// refused with [ErrRetiredShape] rather than folded under a running session — and an absent file
+// answers the options of no file at all. The zero value reads nothing and answers those options too.
+func (f Files) Global(readFile func(string) ([]byte, error), notify func(string)) (Options, error) {
+	return LoadFileConfig(f.GlobalPath(), readFile, notify)
+}
+
 // Layered reads the global file with the Project config layered over it, the way a live re-read
 // reads them ([LoadLayeredOffer]): it never migrates and never writes, a defect in the global file
 // is the error, and one in the project file is a notice. The zero value reads nothing and answers

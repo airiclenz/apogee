@@ -430,16 +430,6 @@ func (w *rootWiring) bootSnapshot() project.Snapshot {
 	return project.SnapshotOf(w.opts, w.offer)
 }
 
-// loadLayeredOptions is the global config at configPath with the Project config of projectRoot
-// layered over it, sorted by that root's adoption record — the one live reading every re-read of
-// the layered set makes (the watched Allow-rule refresh, and the live reload of the MCP servers and
-// reactions, settingsApplier.layeredConfig). It never migrates, and it drops the loader's notices:
-// the watched re-read says them (ConfigHost.ReloadConfig). A Project config that does not parse is
-// skipped by the loader, so the answer is then the global file alone.
-func loadLayeredOptions(configPath, projectRoot string) (config.Options, error) {
-	return config.LoadLayeredConfig(configPath, projectRoot, os.ReadFile, func(string) {})
-}
-
 // workspacesDir is where this run keeps each Project root's adoption record and the Project config
 // writer's lock: `~/.apogee/workspaces`.
 func (w *rootWiring) workspacesDir() string { return config.WorkspacesDir(w.roots.config) }

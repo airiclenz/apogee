@@ -450,7 +450,10 @@ NOTES (2026-11-24): answer_test.go's `answerFixture` gains a `files` field built
 - `! grep -rn 'config.LoadLayeredOffer' --include=*.go internal/project`
 **Commit:** `refactor(project): the adoption snapshot reads through the config source`
 
-## 18. Every production config read asks the one source
+## 18. Every production config read asks the one source — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): the applier's fallback method is named `configFiles()`, not `files()` as the regression guard spells it: the struct gains a `files config.Files` field, and Go forbids a field and a method of the same name. It answers `a.files`, else `config.FilesAt(filepath.Dir(a.configPath), a.roots.workspace, a.roots.project)`, so the tests that set `applier.configPath` still read that file.
+NOTES (2026-11-24): probeconfig.go, cmd/apogee/settingsapplier_helper_test.go and cmd/apogee/configwatch_apply_test.go needed no edit: item 14 already fixed probeconfig's comment, and `fakeApplier`/`layeredApplier` keep working through the `configFiles()` fallback (they set `configPath` and `roots.project`). The guard judges code selectors on the config import only (go/parser), so comments were swept by hand: wire_settings.go's `(LoadFileConfig)` and daemonfire.go's `config.OverlayProjectLayer` now name `config.Files.Global` / `config.Files.Overlay`. wire_mcp_test.go gains an `os` import for its two `w.files().Layered(os.ReadFile, …)` calls.
 
 **What:** Depends on items 16 and 17.
 **Goal:** no non-test file outside internal/config references `config.LoadFileConfig`, `LoadLayeredConfig`, `LoadLayeredOffer`, `ReadGlobalDocument`, `OverlayProjectLayer` or `OverlayProjectOffer`, enforced by a guard test; `loadLayeredOptions` is gone. `ApplyConfig`/`ApplyConfigOffer` stay each Driver's boot call (ADR 0083 §5); `ResolveOptions` stays the test seam.
