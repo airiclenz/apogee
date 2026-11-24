@@ -225,20 +225,20 @@ func runDaemonWith(ctx context.Context, opts *config.Options, changed func(strin
 	defer release()
 
 	// The host half of every Firing — the confinement backend, the key resolver, the sessions
-	// store — resolved once, because config.yaml is read once (ADR 0055).
+	// store — resolved once, because config.yaml is read once (ADR 0055); the process-scope part of
+	// it is opened through the Driver host (driverhost.go).
 	wiring, err := newDaemonWiring(*opts, log, deps)
 	if err != nil {
 		return err
 	}
-	// The teardown the Windows token backend needs to put the disk back (ADR 0020 §2) — the same
-	// optional-interface assertion runRoot and runHeadless make, for the same reason. It is deferred
-	// rather than run at the end of the shutdown sequence so that every refusal below leaves through
-	// it too. The per-server stats recorder (ADR 0085) is stopped on the same beat, as runRoot stops
-	// the session's.
+	// The Driver host's close: it stops the per-server stats recorder (ADR 0085) and runs the
+	// teardown the Windows token backend needs to put the disk back (ADR 0020 §2), and returns the
+	// sentence a teardown that could not owes, said here on stderr where every other lifecycle
+	// refusal is said. It is deferred rather than run at the end of the shutdown sequence so that
+	// every refusal below leaves through it too.
 	defer func() {
-		wiring.stats.close()
-		if notice := wiring.closeConfiner(); notice != "" {
-			_, _ = fmt.Fprintln(errOut, notice)
+		if n := wiring.boot.close(); n != "" {
+			_, _ = fmt.Fprintln(errOut, n)
 		}
 	}()
 	// The confinement posture a Firing will run under, said once at startup where a supervisor
@@ -250,8 +250,7 @@ func runDaemonWith(ctx context.Context, opts *config.Options, changed func(strin
 	// confinement facts daemonHost hands internal/daemon below are what it asks probe with. The
 	// mode is fixed to Auto because that is the only mode the disclosure is about, and an auto
 	// Firing is what this process exists to run.
-	if notice := probe.ResidualNotice(probe.BackendName(wiring.confiner),
-		wiring.confiner.Capabilities(), domain.ModeAuto, opts.ConfineToWorkspace); notice != "" {
+	if notice := wiring.boot.posture(domain.ModeAuto, opts.ConfineToWorkspace).residual; notice != "" {
 		_, _ = fmt.Fprintln(errOut, notice)
 	}
 	// A plaintext `api-key:` and a retired `sub-agents: true` flag in config.yaml are said here as

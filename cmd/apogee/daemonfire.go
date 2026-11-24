@@ -18,20 +18,19 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/notice"
-	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
+	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // daemonWiring turns one Firing into one unattended run. It is the value wired into
@@ -71,13 +70,18 @@ type daemonWiring struct {
 	// daemon's lifetime, so a `api-key-cmd:` runs once per entry rather than once per Firing — it
 	// is goroutine-safe, which is what lets Firings on different Schedules share it.
 	keys *config.KeyResolver
-	// confiner is this host's confinement backend, built once by newDaemonWiring through the
+	// boot is the Driver host (driverhost.go) this daemon opened its process-scope facilities
+	// through: the startup sweeps, the confinement backend, the stats recorder and the sessions
+	// store. confiner, store and stats below are its copies, held here because a Firing reads them
+	// on every raise. [driverHost.close] is the other end of it, run when the daemon stops.
+	boot *driverHost
+	// confiner is this host's confinement backend, built once by the Driver host through the
 	// constructor the daemon was handed (daemonDeps). A Firing takes it whatever its mode: an Auto
 	// entry is fenced by it, and a Plan entry's terminal commands are confined by the same posture a
 	// session's are. Whether this host may run Auto unattended at all was ruled on at VALIDATION
 	// (internal/daemon's Host.Confinement), where the refusal could name the entry, so nothing here
-	// re-asks. [daemonWiring.closeConfiner] is the other end of it: a backend that has to put the
-	// disk back is torn down when the daemon stops.
+	// re-asks. The Driver host's close is the other end of it: a backend that has to put the disk
+	// back is torn down when the daemon stops.
 	confiner apogee.Confiner
 	// runner is what every Firing of this daemon is handed to once its gates have passed
 	// (firingInputs.runner) — the daemon's half of daemonDeps, carried here because fire runs on the
@@ -97,8 +101,8 @@ type daemonWiring struct {
 	// upstream attempts through (firingInputs.stats), into the same server-stats.jsonl the TUI and
 	// headless Drivers append to. Built once, off `server-stats:` as config.yaml stated it at
 	// startup — the daemon reads that file once (ADR 0055), so there is no live switch to follow —
-	// and, off, it opens nothing, so the file is neither read nor written. The daemon stops it at
-	// shutdown, beside the confinement teardown (daemon.go).
+	// and, off, it opens nothing, so the file is neither read nor written. The Driver host's close
+	// stops it at shutdown, beside the confinement teardown (daemon.go).
 	stats *statsRecorder
 
 	// mu guards adopted, which the daemon's reload replaces wholesale while Firings read it, and
@@ -138,7 +142,7 @@ type projectNotice struct {
 //
 // A nil field is the production value, resolved where it is used and never at construction: a nil
 // runner leaves daemonWiring.runner nil and raise runs the Firing through run.Once; a nil confiner
-// builds the backend through platform.NewConfiner when newDaemonWiring gets there.
+// builds the production backend when the Driver host opens (driverhost.go).
 type daemonDeps struct {
 	// runner is what a Firing runs through once its gates have passed (firingInputs.runner).
 	runner func(context.Context, run.Spec) (run.Result, error)
@@ -158,48 +162,26 @@ type daemonDeps struct {
 // runner and the backend constructor are the host's to state (daemonDeps), and zero deps are the
 // production values.
 func newDaemonWiring(opts config.Options, log *daemonLog, deps daemonDeps) (*daemonWiring, error) {
-	roots, err := resolveRoots(opts.ConfigDir, "")
+	// The process-scope facilities, opened through the Driver host every Driver shares
+	// (driverhost.go): the apogee home's roots with no Project root — a daemon's workspace and
+	// Project root are each Firing's own — the scratch sweep, the confinement backend built through
+	// the constructor the host handed this daemon (daemonDeps; nil is the production route), and
+	// the stats recorder `server-stats:` asks for. A daemon mints a fresh dir, record and snapshot
+	// store per Firing and never passes the TUI's boot, so these startup sweeps are the only beat
+	// on which a host that only ever runs daemons reclaims what its Firings left behind.
+	boot, err := openDriverHost(opts, false, deps.confiner)
 	if err != nil {
 		return nil, err
 	}
 
-	// The scratch sweep, run once at startup for the reason runRoot runs it (wire.go): a daemon
-	// mints a fresh dir per Firing and never passes the TUI's boot, so this is the only beat on
-	// which a host that only ever runs daemons reclaims the dirs its Firings left behind.
-	// Best-effort and silent, exactly as it is there — GC is never a reason a daemon fails to start.
-	gcScratchDirs(roots.scratch, time.Now())
-
-	// The session sweep, on the same beat and for the same reason (wire.go): a host that only ever
-	// runs daemons never passes the TUI's boot, so this is where its retention policy is applied.
-	// A daemon resumes nothing — every Firing mints its own record — so no id is kept.
-	//
-	// With `sessions.share-group:` set the store writes every session file for that group — each
+	// The sessions store, with its session and snapshot sweeps on the same beat. A daemon resumes
+	// nothing — every Firing mints its own record — so no id is kept. With
+	// `sessions.share-group:` set the store writes every session file for that group — each
 	// Firing's record and journal included — and the warning a group-readable config.yaml owes goes
-	// to the daemon's log (sessionStoreOptions).
-	storeOpts, shareWarning, err := sessionStoreOptions(opts.Sessions, roots.config)
+	// to the daemon's log.
+	store, err := boot.openStore(func(n tui.Notice) { log.line("%s", n.Text) }, nil)
 	if err != nil {
-		return nil, err
-	}
-	if shareWarning != "" {
-		log.line("%s", shareWarning)
-	}
-	store := session.NewStore(roots.sessions, storeOpts...)
-	gcSessions(store, opts.Sessions)
-
-	// The undo stores' own sweep, on the same beat and for the same reason (wire_live.go runs it
-	// beside the TUI's session sweep): every Firing opens a snapshot store of its own
-	// (internal/run) and a host that only ever runs daemons never passes the TUI's boot, so without
-	// this line those stores would accumulate forever. Once at startup rather than per Firing — a
-	// sweep costs a directory read and a full store listing, work no Firing pays today — and after
-	// the session sweep so a record that sweep just pruned is already gone when this one looks for
-	// it.
-	gcSnapshotDirs(roots.snapshots, store, time.Now())
-
-	// The backend is built through the constructor the host handed this daemon (daemonDeps); a nil
-	// one is the production route, platform.NewConfiner, resolved here and not earlier.
-	buildConfiner := deps.confiner
-	if buildConfiner == nil {
-		buildConfiner = platform.NewConfiner
+		return nil, closeWithError(boot, err)
 	}
 
 	// The global file every Firing's Project config is merged into, read here once beside the
@@ -209,7 +191,7 @@ func newDaemonWiring(opts config.Options, log *daemonLog, deps daemonDeps) (*dae
 		log.line("%s", msg)
 	})
 	if err != nil {
-		return nil, err
+		return nil, closeWithError(boot, err)
 	}
 
 	return &daemonWiring{
@@ -221,33 +203,26 @@ func newDaemonWiring(opts config.Options, log *daemonLog, deps daemonDeps) (*dae
 		// command against — firingConfig names the Firing's own roots.workspace on every
 		// resolution (KeyResolver.ResolveWithin), memoised keys included.
 		keys:               config.NewKeyResolver(""),
-		confiner:           buildConfiner(),
+		boot:               boot,
+		confiner:           boot.confiner,
 		runner:             deps.runner,
 		store:              store,
 		log:                log,
-		stats:              newStatsRecorder(serverStatsPath(roots.config), opts.ServerStats),
+		stats:              boot.stats,
 		adopted:            make(map[string]daemon.Entry),
 		prewarmed:          make(map[string]struct{}),
 		saidProjectNotices: make(map[projectNotice]struct{}),
 	}, nil
 }
 
-// closeConfiner tears the confinement backend down at the end of the daemon's life and reports the
-// one failure that has no other surface. The POSIX backends (landlock, namespace, seatbelt) need nothing; the Windows token
-// backend has to put the disk back (ADR 0020 §2), and a teardown that could not is a silently
-// mutated disk the user is otherwise never told about — which is why runRoot and runHeadless make
-// this same optional-interface assertion, through the same wording (internal/platform).
-//
-// It returns the notice rather than printing it, because this one is not a Firing's narration —
-// it is the daemon's own life ending, said on the stream every other lifecycle refusal is said on
-// (stderr), and that stream is daemon.go's to choose. What [daemonWiring.fire] logs is the
-// narration of one run, which is why that has a log to write to and this does not.
-func (w *daemonWiring) closeConfiner() string {
-	closer, ok := w.confiner.(interface{ Close() error })
-	if !ok {
-		return ""
+// closeWithError closes a Driver host that a later start-up step failed after, and joins the
+// teardown's sentence to that step's error so a backend that could not put the disk back is still
+// told about.
+func closeWithError(boot *driverHost, err error) error {
+	if n := boot.close(); n != "" {
+		return errors.Join(err, errors.New(n))
 	}
-	return platform.ConfinementTeardownNotice(closer.Close())
+	return err
 }
 
 // adopt replaces the set a Firing resolves its name against. It is called once with the file the
@@ -420,16 +395,17 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// whole user interface (ADR 0034 decision 10). Latched to once per daemon process: the sentence
 	// is about the HOST's posture, which no tick changes.
 	//
-	// The daemon's OTHER confinement sentence — probe.ResidualNotice — is said at boot instead
+	// The daemon's OTHER confinement sentence — the posture's residual — is said at boot instead
 	// (daemon.go), and stays there: its cell is the backend's own residual write class, a fact of
 	// this host that every Firing shares, whereas this one is a fact of this ENTRY.
-	if f.Mode == domain.ModeAuto && !opts.ConfineToWorkspace && w.latchUnconfinedWarning() {
-		w.log.line("%s", unconfinedAutoWarning)
+	posture := w.boot.posture(f.Mode, opts.ConfineToWorkspace)
+	if posture.unconfined != "" && w.latchUnconfinedWarning() {
+		w.log.line("%s", posture.unconfined)
 	}
 
-	// Then the eager label walk, behind the SAME gate the launch and headless paths use
-	// (shouldPrewarmLabelWalk, wire_boot.go) — one gate function, never a second copy, because a
-	// second copy is how the boot paths drift apart. On the Windows token backend a confined
+	// Then the eager label walk, behind the SAME gate the launch and headless paths use — the
+	// Driver host's posture answers it (driverhost.go) and runs the walk — one gate, never a second
+	// copy, because a second copy is how the boot paths drift apart. On the Windows token backend a confined
 	// command labels the workspace tree at ~1 ms/object, and an unattended run is exactly where
 	// that stall goes unexplained; off Windows PrewarmLabelWalk is an empty no-op
 	// (internal/platform/prewarm_other.go), so this changes no byte of any other host's log.
@@ -437,9 +413,8 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// Latched per workspace path rather than per process, because what is warmed is one tree.
 	// The progress notice leaves through the daemon log like every other thing a Firing narrates:
 	// one seam, so the journal stays one timestamped line per event.
-	if shouldPrewarmLabelWalk(f.Mode, opts.ConfineToWorkspace, w.confiner.Capabilities().FSWrite) &&
-		w.latchPrewarm(roots.workspace) {
-		platform.PrewarmLabelWalk(w.confiner, roots.workspace, daemonLogWriter{log: w.log})
+	if posture.prewarm && w.latchPrewarm(roots.workspace) {
+		w.boot.prewarm(roots.workspace, daemonLogWriter{log: w.log})
 	}
 
 	// A Reaction's trouble goes on the daemon log, which is this Driver's whole user interface (ADR

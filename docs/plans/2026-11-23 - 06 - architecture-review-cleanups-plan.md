@@ -551,7 +551,10 @@ NOTES (2026-11-24): wire.go's test-split sentence now says "the twelve wire_ fil
 - `! grep -n 'var prewarmLabelWalk' cmd/apogee/headless.go && ! grep -n 'wrap(' cmd/apogee/driverhost.go`
 **Commit:** `refactor(cmd): one Driver host for the shared process-scope boot steps`
 
-## 23. The daemon opens its facilities through the Driver host
+## 23. The daemon opens its facilities through the Driver host — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): the "on a later error join h.close()'s sentence" step is a small helper `closeWithError(boot, err)` in daemonfire.go (errors.Join of the error and the non-empty teardown sentence), used for both the openStore and the global-document failures.
+NOTES (2026-11-24): deleting TestDaemonFireServerStatsOffWritesNothing left daemonStatsFire with a single caller passing on=true, so its bool parameter is dropped (ServerStats: true inline; its doc comment already said "on").
 
 **What:** Depends on item 22.
 **Goal:** the daemon builds no startup roots, sweeps, store, confiner or recorder of its own (the per-Firing roots stay the daemon's); its residual and teardown sentences come from the host; its unconfined-warning and prewarm latches and rootless key resolver stay its own.

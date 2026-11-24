@@ -1052,7 +1052,7 @@ func newReloadHarness(t *testing.T, body string) *reloadHarness {
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)
 	}
-	t.Cleanup(func() { wiring.closeConfiner() })
+	t.Cleanup(func() { wiring.boot.close() })
 
 	host := daemonHost(opts, h.home, wiring)
 	file, err := loadSchedules(h.schedules, host, log)
