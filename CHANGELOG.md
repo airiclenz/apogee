@@ -12,6 +12,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.35.10] — 2026-11-24
+
 - **Typing no longer repaints the transcript.** A keystroke in the prompt box used to re-render the whole scrollback on every key; now the transcript is repainted only when something it draws actually changed, and a draft that wraps to a new row just re-fits the transcript above the box. Typing into a long session stays as fast as typing into an empty one (300 tool blocks: about 15 ms → 2.3 ms per key in the audit benchmark).
 - **Repainting a long transcript no longer measures the whole scrollback.** Every repaint used to hand the scroll widget the full transcript, which measured the width of every line ever drawn; the widget now only keeps the scroll position and apogee draws just the rows on screen. The frame is unchanged byte for byte. A repaint of a 900-block session drops from about 39 ms to about 8 ms in the audit benchmark.
 - **Drawing a frame does less repeated work.** Each frame used to measure the width of every transcript row two or three times over, render the scroll bar's two glyphs once per line, and re-parse the unchanged bottom chrome (status line, input box, footer) on every spinner tick. Each row is now measured once, the bar's glyphs are rendered once per frame, and the chrome's row-edge sealing is remembered from the last frame. The frame is unchanged byte for byte. Drawing an idle 300-block session drops from about 1.8 ms to about 1.4 ms per frame in the audit benchmark.
