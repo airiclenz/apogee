@@ -42,7 +42,9 @@
 - Plan 07's items; unfiled audit findings (blink splice, preview markdown memo, debounce, long-draft geometry, cursor-move park).
 - Lazy / visible-first cold painting; forking bubbles.
 
-## 1. Verify plan 07 is archived
+## 1. Verify plan 07 is archived — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): gate passed — `docs/plans/archived/2026-11-23 - 07 - tui-perf-frame-and-local-fixes-plan.md` exists (no unarchived copy under docs/plans/), and internal/tui/perfaudit_bench_test.go defines BenchmarkPerfAuditStream (l.118), BenchmarkPerfAuditBlocks (l.161), BenchmarkPerfAuditType (l.266), plus Fold, Scroll and Idle (grep count 6); no tree change, nothing to commit.
 
 **What:** test-only gate. Confirm `docs/plans/archived/2026-11-23 - 07 - tui-perf-frame-and-local-fixes-plan.md` exists and `internal/tui/perfaudit_bench_test.go` defines `BenchmarkPerfAuditStream`, `BenchmarkPerfAuditBlocks`, `BenchmarkPerfAuditType`. Stop the run if not.
 **Files:** none
