@@ -488,7 +488,7 @@ func (m Model) stageChildMessage(now bool) (tea.Model, tea.Cmd) {
 	m.promptEditor.reset()
 	m.detached = false // a sent message re-arms follow-the-tail, exactly as one sent at the top level does
 	m, record = m.recordSend(sent)
-	m.layout() // geometry: detached = false above is read only by refreshViewport (its GotoBottom); settleFrame's frameKey and stale-height checks never see the flag
+	m.layout() // geometry: detached = false above is read only by layout's offset seat (seatViewportOffset's GotoBottom, run repaint or not); settleFrame's frameKey and stale-height checks never see the flag
 	return m, record
 }
 

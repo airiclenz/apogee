@@ -55,7 +55,19 @@ NOTES (2026-11-24): gate passed — `docs/plans/archived/2026-11-23 - 07 - tui-p
 - `grep -c 'func BenchmarkPerfAudit' internal/tui/perfaudit_bench_test.go`
 **Commit:** none (gate only)
 
-## 2. A draft edit does not repaint the transcript
+## 2. A draft edit does not repaint the transcript — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): benchmark `go test -run '^$' -bench 'PerfAuditType' -benchmem ./internal/tui/` (dev box, no -race) — before: N=0 2.07 ms/op 382 KB 3296 allocs; N=48 4.50 ms/op 575 KB 5486 allocs; N=300 14.76 ms/op 1.39 MB 7200 allocs. After: N=0 1.83 ms/op 371 KB 3192 allocs; N=48 2.37 ms/op 429 KB 5023 allocs; N=300 2.29 ms/op 421 KB 5021 allocs — flat in N.
+
+NOTES (2026-11-24): the shared re-seat helper is `Model.seatViewportOffset` (model.go); refreshViewport ends in it after SetContentLines, layout's no-repaint branch clamps a past-bottom offset (as SetContentLines does) and then calls it unconditionally. The no-repaint branch does not re-seat the block cursor (seatBlockCursor is "against the paint that just landed", and no paint landed).
+
+NOTES (2026-11-24): renderView's inputs (transcript generation, theme scheme/glyphs/measure/padPrompts, width via transcriptWidth, blink, backHint) plus the widget measure's viewport width are all in frameKey or the explicit viewport-width check; nothing joined the key. layout repaints when `m.lines == nil`, the viewport width changed, or the key moved.
+
+NOTES (2026-11-24): consequential edit — internal/tui/settled_test.go: made necessary by the new helper seatViewportOffset (standing requirement: a new repaint helper joins TestArmsLeaveLayoutToTail's name list; fixture line and expected finding added to TestArmsLeaveLayoutToTailBites).
+
+NOTES (2026-11-24): consequential edit — cmd/apogee/testdata/stubllm/typing.yaml: made necessary by TestE2ETypingWrapsAndRefitsTheTranscript (a new stubllm fixture with a reply long enough to overflow the transcript).
+
+NOTES (2026-11-24): runview.go:318's `// geometry: ... read only by refreshViewport` comment stays as written: that arm calls refreshViewport directly, which still ends at the GotoBottom it names.
 
 **What:**
 **Goal:** typing a printable rune causes no transcript repaint (`m.lines` stays the same slice, no paint-cache lookup); the input box still auto-grows and the transcript re-fits above it; frames byte-identical.

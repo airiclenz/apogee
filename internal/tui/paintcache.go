@@ -467,7 +467,8 @@ type frameKey struct {
 }
 
 // frameKey reads the key the model stands at now — the value refreshViewport stashes beside the
-// lines it just rendered (Model.painted), and the one settle compares it against.
+// lines it just rendered (Model.painted), and the one settle and layout compare it against: layout
+// keeps the stored lines and only re-seats the offset while the two agree ([Model.layout]).
 func (m Model) frameKey() frameKey {
 	return frameKey{
 		generation:     m.transcript.generation,

@@ -3060,6 +3060,10 @@ func (m Model) frameFloorRows() int {
 // tail. A floor of one row keeps the WIDGET valid on a tiny window; the frame spends
 // transcriptBudget instead, which does not have that floor and so cannot compose a row the window
 // never paid for.
+//
+// It repaints the transcript (refreshViewport) only when the paint's input moved; otherwise it keeps
+// the stored lines and re-seats the offset alone ([Model.seatViewportOffset]), so a draft edit that
+// grows the box re-fits the transcript above it without re-rendering the scrollback.
 func (m *Model) layout() {
 	// The scroll-bar gutter column is reserved only while the bar is shown (ui.show-scrollbar,
 	// Options.UI.ShowScrollbar as the config spells it): a hidden bar gives the column back to the
@@ -3071,6 +3075,7 @@ func (m *Model) layout() {
 	if m.opts.UI.ShowScrollbar {
 		width -= scrollbarWidth
 	}
+	viewportWidthBefore := m.viewport.Width()
 	m.viewport.SetWidth(max(1, width))
 	// The box's text width moves with its own overflow bar ([Model.inputInnerWidth]), so a keystroke
 	// that crosses the cap, a recall, or a live ui.show-scrollbar change can re-wrap the draft at an
@@ -3092,7 +3097,25 @@ func (m *Model) layout() {
 	// That floor is a lie about the frame on a window too short to pay for it, so the frame spends
 	// transcriptBudget instead — see there.
 	m.viewport.SetHeight(m.transcriptWidgetRows())
-	m.refreshViewport()
+
+	// The paint is re-rendered only when its input moved: a frame key the lines no longer answer to
+	// ([Model.frameKey], which names every input of renderView and of the widget measure), a widget
+	// width the stored lines were not held to (reserveWidgetCells), or no paint at all yet. A draft
+	// edit moves none of them — at most the box's height, and with it the widget's — so a keystroke
+	// re-seats the offset over the lines already stored instead of walking the whole scrollback.
+	if m.lines == nil || m.viewport.Width() != viewportWidthBefore || m.frameKey() != m.painted {
+		m.refreshViewport()
+		return
+	}
+	// The widget's height may have moved under unchanged content, and SetHeight does not clamp: the
+	// held offset is clamped back exactly as SetContentLines clamps it on a repaint, so the re-seat
+	// below starts from the state a repaint would have left. It runs unconditionally, height moved or
+	// not — it is O(1), and an arm that re-armed following (stageChildMessage clears detached) lays
+	// out with the key and the heights unchanged and still lands at the bottom.
+	if m.viewport.PastBottom() {
+		m.viewport.GotoBottom()
+	}
+	m.seatViewportOffset()
 }
 
 // transcriptWidgetRows is the height the viewport WIDGET carries: the rows the transcript is drawn on
@@ -3113,10 +3136,11 @@ func (m Model) transcriptWidgetRows() int {
 // stays the single setter of both heights and the box's width (design call 3): this asks only
 // whether the last set still holds, and hands the setting back to layout() when it does not.
 //
-// The question is asked rather than the answer simply re-applied because layout() re-renders the whole
-// transcript: a pane key that moved no rows — a selection step in the browser, a scroll in /usage —
-// pays one measure of the overlays (each pane's height query, no paint) instead of a second full
-// repaint of the history.
+// The question is asked rather than the answer simply re-applied because layout() re-measures the
+// whole frame — the box's rows, the overlays' heights — and re-seats the transcript's offset: a pane
+// key that moved no rows — a selection step in the browser, a scroll in /usage — pays one measure of
+// the overlays (each pane's height query, no paint) instead of a second lay-out. Under an unchanged
+// frame key layout() repaints nothing either way ([Model.layout]).
 func (m *Model) freshenTranscriptClamp() {
 	if m.viewport.Height() == m.transcriptWidgetRows() && m.input.Height() == m.inputRows() &&
 		m.input.Width() == m.inputInnerWidth() {
@@ -3128,8 +3152,9 @@ func (m *Model) freshenTranscriptClamp() {
 // settle is the repaint tail of every Update ([Model.Update]'s deferred settleFrame): the two
 // questions a fold may have left unanswered, asked once in the order that makes the second one
 // cheap. Has the paint's INPUT moved — the frame key the lines were rendered under against the one
-// the model stands at now ([Model.frameKey])? Then layout() ALONE: it ends in refreshViewport, which
-// stores the key, and it sizes both heights on the way, so nothing is left for the second question.
+// the model stands at now ([Model.frameKey])? Then layout() ALONE: it finds the same moved key and
+// ends in refreshViewport, which stores it, and it sizes both heights on the way, so nothing is left
+// for the second question.
 // Otherwise, has a HEIGHT gone stale under an unchanged paint — a pane redrawn taller, a draft that
 // grew ([Model.freshenTranscriptClamp])?
 //
@@ -3421,20 +3446,30 @@ func (m *Model) refreshViewport() {
 	// cursor standing in a transcript that has no stop left is handed to the side panel's
 	// (seatBlockCursor).
 	m.cursor = m.seatBlockCursor()
+	m.viewport.SetContentLines(rendered.lines)
+	m.seatViewportOffset()
+}
+
+// seatViewportOffset is the tail every lay-out of the transcript ends in, repaint or not
+// ([Model.refreshViewport] after it hands the widget fresh lines, [Model.layout] when the paint
+// stands and only the widget's height may have moved): unless the human has scrolled away
+// (detached), the view ends at the TRUE tail; while detached the offset is left where the human put
+// it, floored under a rooted paint's breadcrumb.
+//
+// Content that SHRANK under the held offset — or a widget that grew under it — has already been
+// clamped back to the bottom by the caller (SetContentLines, or layout's own clamp); the human is
+// looking at the tail again, so following resumes and the invariant "detached ⇔ off the bottom"
+// stays total. Growth never lands here — the offset is untouched and the new tail is below it. This
+// is the one place a lay-out touches the flag, and it only ever CLEARS it: no repaint may fake a
+// human scroll.
+func (m *Model) seatViewportOffset() {
 	if m.detached {
-		m.viewport.SetContentLines(rendered.lines)
 		m.floorShortScreenOffset()
-		// Content that SHRANK under the held offset is clamped back to the bottom by
-		// SetContentLines; the human is looking at the tail again, so following resumes and the
-		// invariant "detached ⇔ off the bottom" stays total. Growth never lands here — the offset
-		// is untouched and the new tail is below it. This is the one place a repaint touches the
-		// flag, and it only ever CLEARS it: no repaint may fake a human scroll.
 		if m.viewport.AtBottom() {
 			m.detached = false
 		}
 		return
 	}
-	m.viewport.SetContentLines(rendered.lines)
 	m.viewport.GotoBottom() // the real tail: the content ends where the transcript ends
 	m.floorShortScreenOffset()
 }

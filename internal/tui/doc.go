@@ -1383,7 +1383,8 @@
 // The positioning repaints keep their calls under that reading: [Model.refreshViewportAnchored]
 // (an anchored block), the run view's [Model.pushView] (the one move in, which openRun lands
 // through) and [Model.upRun] (a view landed or restored, runview.go), the child-addressed send's
-// [Model.stageChildMessage] (follow-the-tail re-armed for the message just sent, interject.go),
+// [Model.stageChildMessage] (follow-the-tail re-armed for the message just sent: a lay-out whose
+// offset seat lands it at the tail, repainting only if the frame key moved, interject.go),
 // and the claim walk's [Model.freshenTranscriptClamp] (a pane key answered with its height fresh
 // for whatever the claimant reads next). Everything else is a mutation and a return.
 // TestMouseMotionNeverRepaints pins the one exemption the tail itself makes — mouse motion — and

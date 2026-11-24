@@ -9543,3 +9543,141 @@ func TestSettingsClickBesideTheSidePanel(t *testing.T) {
 		}
 	})
 }
+
+// TestTypingDoesNotRepaintTheTranscript pins the keystroke's cost against the scrollback: a printable
+// rune moves the draft and nothing renderView reads, so the frame key stands and layout() keeps the
+// stored lines — the SAME slice, and not one paint-cache lookup — rather than walking all 300 blocks
+// for a frame that would come out byte-identical.
+func TestTypingDoesNotRepaintTheTranscript(t *testing.T) {
+	t.Parallel()
+	m := paModel(t, 300)
+	lines := m.lines
+	hits, misses := m.transcript.paints.hits, m.transcript.paints.misses
+
+	m = step(t, m, keyRune('a'))
+
+	if got := m.input.Value(); got != "a" {
+		t.Fatalf("setup: the box holds %q after one rune; want %q", got, "a")
+	}
+	if !sameLines(lines, m.lines) {
+		t.Error("a typed rune replaced the transcript's lines: the scrollback was repainted for a draft edit")
+	}
+	if gotHits, gotMisses := m.transcript.paints.hits, m.transcript.paints.misses; gotHits != hits || gotMisses != misses {
+		t.Errorf("paint cache consulted by a typed rune: hits %d → %d, misses %d → %d; want both unchanged",
+			hits, gotHits, misses, gotMisses)
+	}
+}
+
+// TestTypingReseatsWhenTheBoxGrows holds the no-repaint lay-out to what a repaint would have left: the
+// rune that wraps the draft to a second row grows the box, the transcript widget shrinks above it and
+// the offset is re-seated — at the tail while following, where the human left it while detached —
+// over the very lines already stored, and the frame matches one composed from a fresh paint.
+func TestTypingReseatsWhenTheBoxGrows(t *testing.T) {
+	t.Parallel()
+	for _, detached := range []bool{false, true} {
+		name := "following"
+		if detached {
+			name = "detached"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			m := paModel(t, 48)
+			if detached {
+				for range 3 {
+					m = step(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+				}
+				if !m.detached || m.viewport.AtBottom() {
+					t.Fatalf("setup: the wheel left the view at the bottom (detached %v)", m.detached)
+				}
+			}
+			heightBefore, offsetBefore, lines := m.input.Height(), m.viewport.YOffset(), m.lines
+
+			for range 4 * m.inputInnerWidth() {
+				if m.input.Height() > heightBefore {
+					break
+				}
+				m = step(t, m, keyRune('w'))
+			}
+			if m.input.Height() <= heightBefore {
+				t.Fatalf("setup: the draft never wrapped to a second row (box height %d)", m.input.Height())
+			}
+
+			assertSettled(t, m)
+			if !sameLines(lines, m.lines) {
+				t.Error("the box grew by a repaint of the transcript; the paint input did not move")
+			}
+			if m.detached != detached {
+				t.Errorf("detached = %v after the box grew; want %v", m.detached, detached)
+			}
+			if detached {
+				if got := m.viewport.YOffset(); got != offsetBefore {
+					t.Errorf("the box's growth moved the detached view from offset %d to %d", offsetBefore, got)
+				}
+			} else if !m.viewport.AtBottom() {
+				t.Errorf("the following view left the tail when the box grew: offset %d", m.viewport.YOffset())
+			}
+
+			fresh := m
+			fresh.lines = nil
+			fresh.layout()
+			if got, want := m.View(), fresh.View(); got.Content != want.Content {
+				t.Errorf("the re-seated frame differs from one composed over a fresh paint:\n got:\n%s\nwant:\n%s",
+					plain(got), plain(want))
+			}
+		})
+	}
+}
+
+// TestLayoutReseatsADetachedChildSend is the guard on layout()'s no-repaint branch running its offset
+// seat unconditionally: a message sent inside a run view the human had scrolled away from re-arms
+// following (stageChildMessage clears detached) and lays out with the frame key and the widget's
+// height both unchanged — the rows the emptied draft gives back are exactly the rows the staged
+// message's band takes — and the view must still land at the tail, as the repaint's GotoBottom always landed it.
+func TestLayoutReseatsADetachedChildSend(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, recallOpts(&fakeRecallHost{}))
+	m.input.SetValue("survey the repo")
+	m, _ = stepCmd(t, m, keyEnter())
+	run := stampedDelegation(&m.transcript, runRef{}, "s1", "run-s1", "repo-scout")
+	stampedPhase(&m.transcript, run, domain.SubAgentStarted, "")
+	var report strings.Builder
+	for i := range 40 {
+		fmt.Fprintf(&report, "- finding %02d\n", i)
+	}
+	m.transcript.apply(domain.MessageEvent{EventBase: stampedBase(run), Text: report.String()})
+	m.refreshViewport()
+	m = enterOnLastBlock(t, m)
+	if !m.inRunView() {
+		t.Fatal("setup: ⏎ on the delegation opened no run view")
+	}
+	// Four draft rows: the box gives back three when it empties, and the staged row's band takes
+	// exactly those three (the height check after the send holds the fixture to it).
+	m = typeText(t, m, strings.Repeat("w", 3*m.inputInnerWidth()+4))
+	m.viewport.SetYOffset(0)
+	m.detached = true
+	if m.viewport.AtBottom() {
+		t.Fatal("setup: the run view does not overflow, so a held offset is the tail already")
+	}
+	widgetRows, lines := m.viewport.Height(), m.lines
+
+	m = step(t, m, keyEnter())
+
+	if len(eng.childInterjections()) != 1 {
+		t.Fatalf("setup: the message did not reach the child (%d sends)", len(eng.childInterjections()))
+	}
+	if got := m.viewport.Height(); got != widgetRows {
+		t.Fatalf("setup: the send moved the widget's height %d → %d; this guards the unchanged-height lay-out",
+			widgetRows, got)
+	}
+	if !sameLines(lines, m.lines) {
+		t.Fatal("setup: the send repainted the transcript; this guards the lay-out that keeps the paint")
+	}
+	if m.detached {
+		t.Error("the view stayed detached; a sent message re-arms follow-the-tail")
+	}
+	if !m.viewport.AtBottom() {
+		t.Errorf("the sent message left the view at offset %d, off the tail it re-armed following of",
+			m.viewport.YOffset())
+	}
+}

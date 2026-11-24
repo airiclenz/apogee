@@ -1,0 +1,56 @@
+# The upstream TestE2ETypingWrapsAndRefitsTheTranscript talks to: one reply long enough to overflow
+# the transcript, so a draft that wraps to a second row has scrollback to push up above the box.
+model: typing-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Typing refit
+    - when:
+        last_message: ^List the findings
+      text: |
+        - finding 01
+        - finding 02
+        - finding 03
+        - finding 04
+        - finding 05
+        - finding 06
+        - finding 07
+        - finding 08
+        - finding 09
+        - finding 10
+        - finding 11
+        - finding 12
+        - finding 13
+        - finding 14
+        - finding 15
+        - finding 16
+        - finding 17
+        - finding 18
+        - finding 19
+        - finding 20
+        - finding 21
+        - finding 22
+        - finding 23
+        - finding 24
+        - finding 25
+        - finding 26
+        - finding 27
+        - finding 28
+        - finding 29
+        - finding 30
+        - finding 31
+        - finding 32
+        - finding 33
+        - finding 34
+        - finding 35
+        - finding 36
+        - finding 37
+        - finding 38
+        - finding 39
+        - finding 40, the last one
+    # Anything else apogee asks on its own account.
+    - repeat: true
+      text: Noted.

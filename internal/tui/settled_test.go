@@ -56,6 +56,11 @@ const layoutCallFile = "model.go"
 // model.go: the arm reads geometry after the call, and the comment says what.
 const geometryMark = "// geometry:"
 
+// layoutCallNames are the methods that lay the transcript out — the two that may repaint it and the
+// offset seat every lay-out ends in ([Model.seatViewportOffset]) — and so the calls the arm scan
+// holds to doc.go's "an arm mutates".
+var layoutCallNames = map[string]bool{"layout": true, "refreshViewport": true, "seatViewportOffset": true}
+
 // TestArmsLeaveLayoutToTail pins doc.go's "an arm mutates; Update's tail lays out and repaints"
 // structurally: every non-test file in this package other than model.go is scanned, and a
 // layout() or refreshViewport() call on any receiver (m, next, bound, …) without a same-line
@@ -108,6 +113,7 @@ func (m Model) arm() Model {
 func foldBeat(next Model, bound *Model) {
 	next.layout()
 	bound.layout()
+	bound.seatViewportOffset()
 	next.layout() // geometry: the beat reads the placed pane's rows
 }
 `
@@ -126,6 +132,7 @@ func foldBeat(next Model, bound *Model) {
 		"fixture.go:10: m.layout() outside model.go without a same-line \"// geometry:\" comment — leave layout to Update's tail, or say what the arm reads after it (doc.go, \"an arm mutates\")",
 		"fixture.go:17: next.layout() outside model.go without a same-line \"// geometry:\" comment — leave layout to Update's tail, or say what the arm reads after it (doc.go, \"an arm mutates\")",
 		"fixture.go:18: bound.layout() outside model.go without a same-line \"// geometry:\" comment — leave layout to Update's tail, or say what the arm reads after it (doc.go, \"an arm mutates\")",
+		"fixture.go:19: bound.seatViewportOffset() outside model.go without a same-line \"// geometry:\" comment — leave layout to Update's tail, or say what the arm reads after it (doc.go, \"an arm mutates\")",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("scanner findings differ\n got:\n  %s\nwant:\n  %s",
@@ -133,9 +140,10 @@ func foldBeat(next Model, bound *Model) {
 	}
 }
 
-// unannotatedLayoutCalls reports, in source order, every argument-less layout() or
-// refreshViewport() call in file whose line carries no comment opening with geometryMark. The file
-// must be parsed with parser.ParseComments, or every call reads as unannotated.
+// unannotatedLayoutCalls reports, in source order, every argument-less layout(), refreshViewport() or
+// seatViewportOffset() call in file whose line carries no comment opening with geometryMark — the
+// offset seat is layout's no-repaint tail, so an arm calling it lays out by hand just the same. The
+// file must be parsed with parser.ParseComments, or every call reads as unannotated.
 func unannotatedLayoutCalls(fset *token.FileSet, file *ast.File) []string {
 	marked := map[int]bool{}
 	for _, group := range file.Comments {
@@ -153,7 +161,7 @@ func unannotatedLayoutCalls(fset *token.FileSet, file *ast.File) []string {
 			return true
 		}
 		sel, isSel := call.Fun.(*ast.SelectorExpr)
-		if !isSel || (sel.Sel.Name != "layout" && sel.Sel.Name != "refreshViewport") {
+		if !isSel || !layoutCallNames[sel.Sel.Name] {
 			return true
 		}
 		pos := fset.Position(sel.Sel.Pos())
