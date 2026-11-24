@@ -523,8 +523,7 @@ func (m Model) dismissWorkflowPrompt() (Model, tea.Cmd) {
 // unless another hold still stands (releaseEngine, as at an Exchange's end), and the next waiting
 // prompt is offered at the tail.
 func (m *Model) closeWorkflowPrompt() {
-	m.pendingDecision.reset()
-	m.restoreAskDraft()
+	m.letGoOfQuestion()
 	m.state = stateIdle
 	m.releaseEngine()
 	m.promptPending = true

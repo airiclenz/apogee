@@ -210,6 +210,26 @@ func (m *Model) openDecisionLatch() tea.Cmd {
 	return decisionLatchCmds(m.approvalSeq)
 }
 
+// letGoOfQuestion is the ONE close every question pane takes — an approval or ask_user pane
+// answered (sendApproval, submitAnswer), withdrawn because nobody is left to answer it
+// ([Model.withdrawAbandonedDecision]), a background workflow's prompt answered or sent back
+// (closeWorkflowPrompt, workflow.go), or killed with its Exchange (finishWorker, model.go). It
+// forgets the whole decision — the request, the checked set, the rule field and the latch
+// (pendingDecision.reset) — and hands the input box back the draft the question borrowed it from
+// (restoreAskDraft), so no route can drop one half and keep the other. What follows the close is
+// the caller's: a resumed run, idle, or the Exchange's own end.
+func (m *Model) letGoOfQuestion() {
+	m.pendingDecision.reset()
+	m.restoreAskDraft()
+}
+
+// resumeAfterQuestion is the close of a pane whose run goes on: it lets go of the question and
+// returns the Model to running (resumeRunning, model.go), handing back the re-armed spinner's tick.
+func (m *Model) resumeAfterQuestion() tea.Cmd {
+	m.letGoOfQuestion()
+	return m.resumeRunning()
+}
+
 // decisionLatchCmds is the pair of Cmds a latch of generation seq arms on: the drain marker and the
 // backstop tick. openDecisionLatch issues it from the Update that opened the surface; Init issues it
 // for a surface newModel opened, which no Update has yet had the chance to return a Cmd for.
@@ -305,9 +325,7 @@ func (m Model) withdrawAbandonedDecision() (Model, tea.Cmd) {
 	default:
 		return m, nil
 	}
-	m.pendingDecision.reset()
-	m.restoreAskDraft()
-	tick := m.resumeRunning()
+	tick := m.resumeAfterQuestion()
 	return m, tick
 }
 
@@ -460,8 +478,10 @@ func (m Model) takeApprovalOption(opt approvalOption) (tea.Model, tea.Cmd) {
 
 // sendApproval hands one verdict back over the pending request's rendezvous reply channel (buffered
 // cap 1, so the send never blocks — messages.go) and returns the model to running so the worker's
-// blocked Step resumes — the launch verb's resume half (resumeRunning, model.go): the state, the
-// legend the question has let go of, the layout the departed pane frees, and the re-armed spinner.
+// blocked Step resumes through the one close a resumed pane takes ([Model.resumeAfterQuestion]): the
+// whole decision forgotten, then the launch verb's resume half (resumeRunning, model.go) — the
+// state, the legend the question has let go of, the layout the departed pane frees, and the
+// re-armed spinner.
 //
 // A gate a background workflow raised (approvalReqMsg.Workflow) has no Reply and no worker: the
 // verdict goes back through the engine and the TUI returns to idle (answerWorkflowPrompt,
@@ -472,15 +492,10 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 		return m, nil
 	}
 	m.pending.Reply <- decision
-	m.pending = nil
 	// The next request this Exchange folds finds the human here (notify.go).
 	m.answeredInExchange = true
-	// The rule field belongs to the request just answered.
-	m.ruleEdit = projectRuleEdit{}
-	m.approvalArmed = false // the latch belongs to the pane that just closed, not to the next one
-	m.approvalDrainMark = 0 // and so does the marker it was waiting on; the next pane asks for its own
-	m.approvalDrainRelayed = false
-	tick := m.resumeRunning()
+	// The request, its rule field and its latch go together: the next pane asks for its own.
+	tick := m.resumeAfterQuestion()
 	return m, tick
 }
 

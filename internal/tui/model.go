@@ -304,8 +304,9 @@ type Model struct {
 	// pendingDecision is the question this Exchange is blocked on and the payload that rides with
 	// it. It is EMBEDDED anonymously like liveStats (sessionView), so m.pending, m.pendingAsk and
 	// m.askChecked read exactly as they always did while the three of them gain one owner — and
-	// with it the one call that lets go of ALL of them when the Exchange ends (pendingDecision.reset,
-	// finishWorker), rather than a run of assignments a new payload can be left out of.
+	// with it the one call that lets go of ALL of them whenever the question closes
+	// (pendingDecision.reset, through letGoOfQuestion), rather than a run of assignments a new
+	// payload can be left out of.
 	pendingDecision
 	// askSel is where the ask_user offering's highlight stands while awaitingAsk (D5): the row ↑/↓
 	// walk and ⏎ sends, pre-selected on the first choice while the answer box is empty. It is the
@@ -762,11 +763,13 @@ type decisionLatch struct {
 }
 
 // reset lets go of the question and its payload together — the whole value, so a payload added to it
-// later is dropped by the same line that drops these four. It is the Exchange's own boundary
-// (finishWorker): a stop or a fault kills the question along with the worker that asked it, and no
-// path may leave a dead request or a dead checked set standing. The DRAFT the question borrowed the
-// input box from is not in here: handing that back is restoreAskDraft's, because it writes the box
-// rather than this value.
+// later is dropped by the same line that drops these four. Its one caller is the one close every
+// question pane takes ([Model.letGoOfQuestion], approval.go) — an answer, a withdrawal, a background
+// prompt's close, and the Exchange's own boundary (finishWorker), where a stop or a fault kills the
+// question along with the worker that asked it — so no path may leave a dead request or a dead
+// checked set standing. The DRAFT the question borrowed the input box from is not in here: handing
+// that back is restoreAskDraft's, because it writes the box rather than this value; the same close
+// does both.
 func (d *pendingDecision) reset() {
 	*d = pendingDecision{}
 }
@@ -2741,14 +2744,13 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	m.installBox()
 	// The question this Exchange was blocked on dies with it — the Approval, the ask_user request,
 	// and the ticked set that rides with the latter: no path leaves a dead request or a dead checked
-	// set standing (pendingDecision.reset).
-	m.pendingDecision.reset()
+	// set standing. A question that dies with its Exchange — a stop, a fault — lets go of the box
+	// exactly as an answered one does, so the message it borrowed the box from comes back here too
+	// (letGoOfQuestion).
+	m.letGoOfQuestion()
 	// And so does the answer that kept the next one silent: the next Exchange's first question
 	// notifies again (notify.go).
 	m.answeredInExchange = false
-	// A question that dies with its Exchange — a stop, a fault — lets go of the box exactly as an
-	// answered one does, so the message it borrowed the box from comes back here too.
-	m.restoreAskDraft()
 	m.genStart = time.Time{}
 	// The worker has unwound, so every run's activity is over — the whole board goes, including a
 	// sticky "stopping", which only this path clears, and any delegate slot whose child never got

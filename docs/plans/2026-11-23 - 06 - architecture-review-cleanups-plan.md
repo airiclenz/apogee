@@ -137,7 +137,7 @@ NOTES (2026-11-24): the stateErrored case is pinned both ways — with no child 
 **Closes:** run-fill-value
 **Commit:** `feat(tui): a run view's gauge shows the viewed run's estimate`
 
-## 4. One close for a question pane
+## 4. One close for a question pane — ✅ DONE (2026-11-24)
 
 **What:**
 **Goal:** `pendingDecision.reset()` and `restoreAskDraft()` are each called from exactly one place, `letGoOfQuestion`; every way a question pane closes goes through it.

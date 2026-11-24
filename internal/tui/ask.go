@@ -136,16 +136,12 @@ func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.pendingAsk.Reply <- domain.AskAnswer{Text: answer}
-	m.pendingAsk = nil
 	// The next request this Exchange folds finds the human here (notify.go).
 	m.answeredInExchange = true
-	m.askChecked = nil      // the question is answered: no checked set outlives it
-	m.approvalArmed = false // the latch belongs to the pane that just closed, not to the next one
-	m.approvalDrainMark = 0 // and so does the marker it was waiting on; the next pane asks for its own
-	m.approvalDrainRelayed = false
+	// The answer has gone out, so the box is emptied before the question lets go of it: the message
+	// it interrupted comes back alone, and the box is the human's own again — ⏎ queues from here.
 	m.input.Reset()
-	m.restoreAskDraft()       // the question has let go of the box: the message it interrupted comes back
-	tick := m.resumeRunning() // the box is the human's own again — ⏎ queues from here
+	tick := m.resumeAfterQuestion()
 	return m, tick
 }
 
@@ -173,9 +169,10 @@ func (m Model) checkedLabels() []string {
 
 // restoreAskDraft hands the input box back the message an ask_user question borrowed it from: the
 // unsent draft the human was typing when the question arrived, which the askReqMsg fold stashed
-// before emptying the box for the answer. It runs on BOTH ways the box stops being borrowed — the
-// answer going out (submitAnswer) and the Exchange ending under the question (finishWorker) — so no
-// route leaves the stash behind, and it is a no-op on every path where nothing was borrowed.
+// before emptying the box for the answer. Its one caller is the one close every question pane
+// takes ([Model.letGoOfQuestion]) — the answer going out (submitAnswer), the Exchange ending under
+// the question (finishWorker), and every other way a pane closes — so no route leaves the stash
+// behind, and it is a no-op on every path where nothing was borrowed.
 //
 // Whatever is in the box when it runs is the ANSWER. On the answered path that is already gone
 // (submitAnswer resets first). On the abandoned path it is a half-typed answer to a question that no
@@ -183,7 +180,7 @@ func (m Model) checkedLabels() []string {
 // the draft goes back above it, one line apart, with the caret at the end. Neither half of what was
 // typed is discarded on either path, which is the whole point of the stash.
 //
-// The caller re-lays the frame out: both of them do it a few statements later, for their own
+// The caller re-lays the frame out: each close does it a few statements later, for its own
 // reasons, and the box has to regrow around the restored draft exactly once.
 func (m *Model) restoreAskDraft() {
 	draft := m.askDraft

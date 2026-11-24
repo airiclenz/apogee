@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -478,6 +479,75 @@ func TestStoppedChildWithdrawsItsApprovalPane(t *testing.T) {
 			t.Errorf("state = %v mid whole-Turn stop; want the pane left for finishWorker to clear", m.state)
 		}
 	})
+}
+
+// TestEveryQuestionCloseForgetsTheWholeDecision pins the one close every question pane takes
+// (letGoOfQuestion): however the pane goes — an approval letter, an ask_user answer, an approval
+// nobody is left to answer, a background prompt sent back with esc, or the Exchange dying under the
+// question — the whole decision is forgotten (the request, the checked set, the rule field and the
+// latch) and the draft the question borrowed the box from is handed back, never left stashed.
+func TestEveryQuestionCloseForgetsTheWholeDecision(t *testing.T) {
+	t.Parallel()
+	const draft = "the message the question interrupted"
+
+	// askPane raises an armed ask_user question over a box holding draft, typing typed as the answer.
+	askPane := func(t *testing.T, typed string) Model {
+		t.Helper()
+		m := typeInput(t, newTestModel(t), draft)
+		m = step(t, m, askReqMsg{Request: domain.AskRequest{Question: "which way?"}, Reply: make(chan domain.AskAnswer, 1)})
+		if m.state != stateAwaitingAsk || m.askDraft != draft {
+			t.Fatalf("setup: state = %v, stash = %q; want the question open over the stashed draft", m.state, m.askDraft)
+		}
+		return typeInput(t, armAsk(t, m), typed)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		close func(t *testing.T) Model
+	}{
+		{"an approval letter", func(t *testing.T) Model {
+			m, _ := newUnarmedApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
+			return step(t, armApproval(t, m), keyRune('a'))
+		}},
+		{"an ask answer", func(t *testing.T) Model {
+			return step(t, askPane(t, "teal"), keyEnter())
+		}},
+		{"an abandoned approval", func(t *testing.T) Model {
+			m, stop := childApprovalPane(t)
+			stop()
+			return step(t, m, finishedPhase("s1", "run-s1"))
+		}},
+		{"a background prompt dismissed", func(t *testing.T) Model {
+			eng := &fakeEngine{workflowPrompts: []domain.WorkflowPrompt{bgQuestion(7)}}
+			m := newTestModelEng(t, eng, testOpts)
+			m.input.SetValue(draft)
+			m = foldEvents(t, m, bgPhase(domain.WorkflowStarted), bgWaiting())
+			if m.state != stateAwaitingAsk || m.askDraft != draft {
+				t.Fatalf("setup: state = %v, stash = %q; want the prompt open over the stashed draft", m.state, m.askDraft)
+			}
+			return step(t, m, keyEsc())
+		}},
+		{"the exchange cancelled under the question", func(t *testing.T) Model {
+			m := askPane(t, "tea")
+			startStubWorker(t, &m)
+			return step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := tc.close(t)
+
+			if m.questionOpen() {
+				t.Fatalf("state = %v with a question still standing; want the pane closed", m.state)
+			}
+			if !reflect.DeepEqual(m.pendingDecision, pendingDecision{}) {
+				t.Errorf("pendingDecision = %+v after the close; want the whole decision forgotten", m.pendingDecision)
+			}
+			if m.askDraft != "" {
+				t.Errorf("askDraft = %q after the close; want the borrowed draft handed back, not left stashed", m.askDraft)
+			}
+		})
+	}
 }
 
 // approvalMenuLen is how many rows the open approval pane's menu offers: the per-request menu
