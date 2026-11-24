@@ -117,7 +117,15 @@ The comments recording the widget's clip as the reserve's backstop are supersede
 - `go test -run '^$' -bench 'PerfAuditBlocks/repaint' -benchmem ./internal/tui/` — N=900 well below 40.6 ms (record before/after)
 **Commit:** `perf(tui): stop the viewport re-measuring every scrollback line on repaint`
 
-## 4. View measures each visible row once
+## 4. View measures each visible row once — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): benchmark `go test -run '^$' -bench 'PerfAuditBlocks/view' -benchmem ./internal/tui/` (dev box, no -race) — before (HEAD 6adcc3713, already past item 3): N=48 1.87 ms/op 172 KB 5232 allocs; N=300 1.82 ms/op 165 KB 5230 allocs; N=900 1.93 ms/op 163 KB 5228 allocs. After: N=48 1.41 ms/op 151 KB 4954 allocs; N=300 1.39 ms/op 147 KB 4953 allocs; N=900 1.39 ms/op 146 KB 4951 allocs. The Goal's 2.2 ms / 720 KB at N=300 was the header base; item 3 had already brought View under it, this item takes a further ~24%.
+
+NOTES (2026-11-24): the known widths travel in a new `squaredRows` value (rows + per-row painted width): `joinScrollbar` returns it, `joinColumn` takes one as its head and returns one, and `joinFrame(head, blocks)` pads or cuts the head rows by their carried width (`squareKnown`); View holds the head separately from its block list. A joined row's width is the sum of its parts only where no grapheme cluster can span the seam (`seamHolds`: left ends and right starts on an ASCII byte); otherwise, and after a cut that drops a straddling wide glyph, the joined row is measured — so the carried width is always exact and the frame byte-identical (`TestJoinFrameSkipsSquaredRows` fails if the seam guard is forced true).
+
+NOTES (2026-11-24): the seal memo (`sealMemo`, Model field `seals`) has one slot per frame row by row index rather than a fixed list of chrome rows: it stores only rows that carry a background SGR (in practice the bottom chrome, hairlines and sent prompt blocks), empties a slot whose row this frame does not seal, and drops slots past the frame's last row, so it holds the last frame only. Keyed on line, width and width method; nil-safe.
+
+NOTES (2026-11-24): `TestScrollbarGlyphsRenderedOnce` proves the one-render-per-bar by string backing identity (`unsafe.StringData`) — `testing.AllocsPerRun` panics in a parallel test and counts other goroutines' allocations.
 
 **What:** Depends on item 3.
 **Goal:** a `View` of an unchanged model costs measurably less than 2.2 ms / 720 KB per frame at N=300, with every golden frame unchanged.

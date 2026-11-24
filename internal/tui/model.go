@@ -501,6 +501,11 @@ type Model struct {
 	// last painted it and the last parse of each section setting. A pointer built once in newModel,
 	// so every by-value copy reaches the one memo (ADR 0011); nil in a bare literal, which paints cold.
 	panelMemo *panelMemo
+	// seals is the frame's memo of its sealed rows (boxdraw.go): the last frame's row-edge seal of
+	// each row carrying a background, so an unchanged chrome row skips the parse. A pointer built
+	// once in newModel, so every by-value copy reaches the one memo (ADR 0011); nil in a bare
+	// literal, which seals cold.
+	seals *sealMemo
 	// now is the Model's clock: what time a press on the side panel's grip landed, so two of them
 	// close together read as a double-click ([panelDoubleClick], sidepanel.go). Seeded time.Now by
 	// newModel; a test overwrites it to stub the gap between two presses. A func value, so it rides
@@ -873,6 +878,9 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 
 	// And the side panel its paint memo (panelframe.go), for the same reason and built the same once.
 	m.panelMemo = newPanelMemo()
+
+	// And the frame its seal memo (boxdraw.go), for the same reason and built the same once.
+	m.seals = newSealMemo()
 
 	// Resolve the footer's spelling of that same workspace once, for the same reason: the home
 	// lookup is an environment read, and neither it nor the workspace changes for the life of the
@@ -3899,6 +3907,10 @@ func (m Model) View() tea.View {
 	ov := m.frameOverlays()
 
 	rows := make([]string, 0, frameBlocks)
+	// head is the frame's top rows once a joiner has squared them — the transcript with its bar hung
+	// off it, then everything the side panel's column hangs beside — carrying the width each row
+	// paints, so joinFrame squares them without measuring them again (squaredRows).
+	var head squaredRows
 	// Draw the transcript at the height the overlays leave it, with its sticky header, then hang the
 	// scroll-bar gutter off its right edge — the bar is sized from the same local viewport, so the
 	// two columns line up row-for-row. With the bar switched off (ui.show-scrollbar) the body goes
@@ -3919,7 +3931,7 @@ func (m Model) View() tea.View {
 		if !m.opts.UI.ShowScrollbar {
 			rows = append(rows, body)
 		} else {
-			rows = append(rows, m.joinScrollbar(body, m.renderScrollbar(vp)))
+			head = m.joinScrollbar(body, m.renderScrollbar(vp))
 		}
 	}
 	// The single blank line between chat content and what follows it (layout.md). It sits ABOVE the
@@ -3958,7 +3970,7 @@ func (m Model) View() tea.View {
 			}
 			left -= len(sidePanelOverlayGap)
 		}
-		rows = []string{joinColumn(m.th.measure, rows, left, column)}
+		head, rows = joinColumn(m.th.measure, head, rows, left, column), rows[:0]
 	}
 	// Then the ▔ top-edge hairline capping the chrome, and the status line under it.
 	rows = append(rows, m.topRule(), m.statusLine())
@@ -3974,7 +3986,7 @@ func (m Model) View() tea.View {
 	}
 	rows = append(rows, m.inputView(), m.footerView(), m.bottomRule())
 
-	v := tea.NewView(m.joinFrame(rows))
+	v := tea.NewView(m.joinFrame(head, rows))
 	v.AltScreen = true
 	// Wheel scrolling, clicks and drags always (Update routes the mouse Msgs); all-motion hover
 	// reports only while the pointer-shape gate is open (mouseMode, pointerprobe.go).

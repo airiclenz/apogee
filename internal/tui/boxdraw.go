@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	lipgloss "charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -25,11 +26,72 @@ import (
 // VS16 grapheme is padded one cell short of where it paints, and everything the layout hangs off
 // that row's right edge moves with it.
 func squareLine(measure widthAuthority, s string, w int) string {
-	over := measure.Width(s) - w
-	if over > 0 {
+	return squareKnown(measure, s, measure.Width(s), w)
+}
+
+// squareKnown is squareLine for a line whose painted width k a joiner already holds (k must be
+// measure.Width(s)): the same pad or cut, without measuring s again.
+func squareKnown(measure widthAuthority, s string, k, w int) string {
+	if k > w {
 		return measure.Truncate(s, w, "")
 	}
-	return s + strings.Repeat(" ", -over)
+	return s + strings.Repeat(" ", w-k)
+}
+
+// squareMeasured is squareKnown that also returns the width the squared line paints, so the joiner
+// that squared it can hand that width on rather than have the next one measure the line again. It
+// is w, except where a cut drops a wide glyph straddling column w whole — the cut line then stops
+// short of w and is measured — or where the pad's seam may not hold ([seamHolds]).
+func squareMeasured(measure widthAuthority, s string, k, w int) (string, int) {
+	switch {
+	case k > w:
+		cut := measure.Truncate(s, w, "")
+		return cut, measure.Width(cut)
+	case k == w:
+		return s, w
+	}
+	pad := strings.Repeat(" ", w-k)
+	padded := s + pad
+	return padded, seamWidth(measure, s, k, pad, w-k, padded)
+}
+
+// seamWidth is the painted width of joined, which is left+right: the sum of the two sides' own
+// widths where no grapheme cluster can span the seam between them ([seamHolds]), and joined measured
+// afresh where one might.
+func seamWidth(measure widthAuthority, left string, lw int, right string, rw int, joined string) int {
+	if seamHolds(left, right) {
+		return lw + rw
+	}
+	return measure.Width(joined)
+}
+
+// seamHolds reports whether left and right, joined, paint exactly as wide as the two do apart. It
+// holds where left ends on an ASCII byte and right starts on one: no ASCII code point is a Prepend,
+// ZWJ or Regional Indicator, the left side of every UAX #29 rule that joins two code points into one
+// cluster (GB9b, GB11, GB12–13), nor an Extend, SpacingMark or Extended_Pictographic, the right side
+// (GB9, GB9a, GB11). The one ASCII pair that joins, CR LF (GB3), never forms: no frame row holds a
+// line break. Both sides are whole rows, so neither ends or starts inside an escape sequence.
+func seamHolds(left, right string) bool {
+	return (left == "" || left[len(left)-1] < utf8.RuneSelf) && (right == "" || right[0] < utf8.RuneSelf)
+}
+
+// squaredRows is a run of frame rows a joiner has already squared, each with the width it paints in
+// the authority's measure (widths[i] is measure.Width(rows[i])). joinScrollbar and joinColumn build
+// it so that the joiner after them — joinColumn, then joinFrame — pads or cuts each row by its known
+// width rather than measuring it again: a visible row is measured once per frame.
+type squaredRows struct {
+	rows   []string
+	widths []int
+}
+
+// measuredRows splits block into rows and measures each one, for a block no joiner squared.
+func measuredRows(measure widthAuthority, block string) squaredRows {
+	rows := strings.Split(block, "\n")
+	widths := make([]int, len(rows))
+	for i, row := range rows {
+		widths[i] = measure.Width(row)
+	}
+	return squaredRows{rows: rows, widths: widths}
 }
 
 // squareOnField is squareLine with the pad painted on field rather than left bare — the same split
@@ -160,72 +222,117 @@ func scrollbarThumb(start, window, total, height int) (pos, size int) {
 // th.scrollTrack. It is the one painter of the stroke the transcript's gutter and the prompt box's
 // bar both draw; a window that shows the whole list comes back as bare track, so a caller that
 // keeps a blank gutter there asks for it before calling.
+//
+// Each of the two cells is rendered once per call and shared by every line it stands on: the style
+// pass is the same for every line, so a bar paid one per line for nothing.
 func scrollbarCells(th theme, start, window, total, height int) []string {
 	cells := make([]string, max(0, height))
+	if len(cells) == 0 {
+		return cells
+	}
 	pos, size := scrollbarThumb(start, window, total, height) // pos: 0 (top) … height-size (bottom)
+	track := th.scrollTrack.Render(glyphScrollTrack)
+	thumb := ""
+	if size > 0 {
+		thumb = th.scrollThumb.Render(glyphScrollThumb)
+	}
 	for i := range cells {
 		if i >= pos && i < pos+size {
-			cells[i] = th.scrollThumb.Render(glyphScrollThumb)
+			cells[i] = thumb
 		} else {
-			cells[i] = th.scrollTrack.Render(glyphScrollTrack)
+			cells[i] = track
 		}
 	}
 	return cells
 }
 
 // joinScrollbar hangs the scroll-bar gutter off the right edge of the transcript body: every body
-// row is squared to the viewport's width first (squareLine), then its bar cell is appended.
+// row is squared to the viewport's width first (squareLine), then its bar cell is appended. The rows
+// come back with the width each paints ([squaredRows]), so no joiner after it measures them again.
 //
 // It stands in for the lipgloss.JoinHorizontal this used to be. JoinHorizontal pads each block's
 // rows to that block's widest row in GraphemeWidth, so on a terminal painting in WcWidth the ⚠️ row
 // reached the gutter a column short and dropped its bar cell one column left of every other row's.
 // Doing the padding here, in the painter's measure, is what makes the bar a straight column.
-func (m Model) joinScrollbar(body, bar string) string {
+func (m Model) joinScrollbar(body, bar string) squaredRows {
+	measure := m.th.measure
 	if bar == "" {
-		return body
+		return measuredRows(measure, body)
 	}
 	rows := strings.Split(body, "\n")
 	barRows := strings.Split(bar, "\n")
 	if n := len(barRows); n > len(rows) {
 		rows = append(rows, make([]string, n-len(rows))...) // a bar taller than the body keeps its cells
 	}
+	widths := make([]int, len(rows))
 	w := max(0, m.viewport.Width())
+	var cell cellWidth
 	for i, row := range rows {
-		row = squareLine(m.th.measure, row, w)
+		row, widths[i] = squareMeasured(measure, row, measure.Width(row), w)
 		if i < len(barRows) {
-			row += barRows[i]
+			joined := row + barRows[i]
+			widths[i] = seamWidth(measure, row, widths[i], barRows[i], cell.of(measure, barRows[i]), joined)
+			row = joined
 		}
 		rows[i] = row
 	}
-	return strings.Join(rows, "\n")
+	return squaredRows{rows: rows, widths: widths}
 }
 
-// joinColumn hangs a column off the right edge of a run of stacked blocks and returns them as one
-// block: every physical line of blocks is squared to w in the painter's measure (squareLine), then
-// the column's row of the same index is appended. A line past the column's last row keeps its w
-// columns and nothing after them; a column row past the blocks' last line is not drawn.
+// cellWidth measures a run of column cells — a scroll bar's, a side panel's — remembering the last
+// one it measured: a column repeats the same cell row after row, so most of them are not measured.
+type cellWidth struct {
+	cell     string
+	width    int
+	measured bool
+}
+
+// of is cell's painted width in measure.
+func (c *cellWidth) of(measure widthAuthority, cell string) int {
+	if !c.measured || cell != c.cell {
+		c.cell, c.width, c.measured = cell, measure.Width(cell), true
+	}
+	return c.width
+}
+
+// joinColumn hangs a column off the right edge of a run of stacked rows and returns them as one run:
+// head's rows, then every physical line of blocks, are each squared to w in the painter's measure
+// (squareLine), then the column's row of the same index is appended. A line past the column's last
+// row keeps its w columns and nothing after them; a column row past the last line is not drawn.
+// head is rows a joiner already squared (joinScrollbar's), which are padded or cut by the width they
+// carry rather than measured again; the rows come back carrying theirs for joinFrame.
 //
 // It is joinScrollbar's reason one block wider: a lipgloss.JoinHorizontal or a Style.Width would
 // pad the left side to a width measured in GraphemeWidth, so on a terminal painting in WcWidth a
 // row carrying a VS16 grapheme would start the column a cell left of every other row's (ADR 0030).
 // The side panel's column hangs here, off the rows above the session-name rule (View).
-func joinColumn(measure widthAuthority, blocks []string, w int, column []string) string {
-	lines := make([]string, 0, len(column))
+func joinColumn(measure widthAuthority, head squaredRows, blocks []string, w int, column []string) squaredRows {
+	lines := make([]string, 0, max(len(column), len(head.rows)))
+	widths := make([]int, 0, cap(lines))
+	lines, widths = append(lines, head.rows...), append(widths, head.widths...)
 	for _, block := range blocks {
-		lines = append(lines, strings.Split(block, "\n")...)
+		for _, ln := range strings.Split(block, "\n") {
+			lines, widths = append(lines, ln), append(widths, measure.Width(ln))
+		}
 	}
+	var cell cellWidth
 	for i, ln := range lines {
-		ln = squareLine(measure, ln, w)
+		ln, widths[i] = squareMeasured(measure, ln, widths[i], w)
 		if i < len(column) {
-			ln += column[i]
+			joined := ln + column[i]
+			widths[i] = seamWidth(measure, ln, widths[i], column[i], cell.of(measure, column[i]), joined)
+			ln = joined
 		}
 		lines[i] = ln
 	}
-	return strings.Join(lines, "\n")
+	return squaredRows{rows: lines, widths: widths}
 }
 
-// joinFrame stacks the frame's blocks into the one string the View hands bubbletea, squaring every
-// physical line to the window width in the painter's measure.
+// joinFrame stacks the frame's rows into the one string the View hands bubbletea, squaring every
+// physical line to the window width in the painter's measure and sealing its painted edges
+// (sealRowEdges, through the frame's seal memo). head is the frame's top rows as a joiner already
+// squared them — the transcript and whatever hangs beside it — padded or cut by the widths they
+// carry; every line of blocks, stacked under them, is measured here.
 //
 // It stands in for the lipgloss.JoinVertical this used to be, for the same reason joinScrollbar
 // stands in for JoinHorizontal: JoinVertical left-aligns by padding every row out to the widest row
@@ -234,14 +341,82 @@ func joinColumn(measure widthAuthority, blocks []string, w int, column []string)
 // WcWidth painter does — and then the pad it applies to EVERY OTHER row pushes the whole frame past
 // the terminal's last column. Squaring to m.width instead makes layout.md's absolute width cap hold
 // at the layer the terminal actually reads, whichever measure that is.
-func (m Model) joinFrame(blocks []string) string {
-	lines := make([]string, 0, len(blocks))
+func (m Model) joinFrame(head squaredRows, blocks []string) string {
+	measure := m.th.measure
+	lines := make([]string, 0, len(head.rows)+len(blocks))
+	for i, ln := range head.rows {
+		lines = append(lines, m.seals.seal(measure, len(lines), squareKnown(measure, ln, head.widths[i], m.width), m.width))
+	}
 	for _, block := range blocks {
 		for _, ln := range strings.Split(block, "\n") {
-			lines = append(lines, sealRowEdges(m.th.measure, squareLine(m.th.measure, ln, m.width), m.width))
+			lines = append(lines, m.seals.seal(measure, len(lines), squareLine(measure, ln, m.width), m.width))
 		}
 	}
+	m.seals.keep(len(lines))
 	return strings.Join(lines, "\n")
+}
+
+// sealMemo is the frame's memo of its sealed rows ([sealRowEdges]): for each frame row that carries
+// a background — the status line, the input box, the footer, the hairlines, a sent prompt block —
+// the line the last frame sealed there and what sealing it gave. The bottom chrome is the same line
+// frame after frame while the transcript streams or the pointer moves, so its rows skip the parse.
+//
+// It holds the LAST frame only: one slot per frame row, keyed by the row's index and checked against
+// the line, the width and the measure, so a slot whose row this frame does not seal is emptied and
+// the slots past the frame's last row are dropped ([sealMemo.keep]). A spinner tick or a keystroke
+// rewrites a slot, never adds one.
+//
+// It is built ONCE, in newModel, and lives behind a pointer on the Model (ADR 0011): every by-value
+// copy reaches the one memo, or no frame would ever hit it. Every method is nil-safe: a nil memo
+// (a bare Model literal) seals fresh every time and remembers nothing.
+type sealMemo struct {
+	rows []sealedRow
+}
+
+// sealedRow is one slot of a [sealMemo]: the line sealed at width in method, and the result.
+type sealedRow struct {
+	line   string
+	width  int
+	method ansi.Method
+	sealed string
+	isSet  bool
+}
+
+// newSealMemo returns an empty memo. Production builds exactly one, in newModel.
+func newSealMemo() *sealMemo { return &sealMemo{} }
+
+// seal is sealRowEdges(measure, ln, w) for frame row row: the slot's stored result when row last
+// sealed this same line at this width in this measure, a fresh seal — stored in the slot — otherwise.
+// A line sealRowEdges would hand back untouched (no background SGR) empties the slot.
+func (s *sealMemo) seal(measure widthAuthority, row int, ln string, w int) string {
+	if s == nil {
+		return sealRowEdges(measure, ln, w)
+	}
+	if w <= 0 || !carriesBackgroundSGR(ln) { // sealRowEdges' own gate: nothing to seal
+		if row < len(s.rows) {
+			s.rows[row] = sealedRow{}
+		}
+		return ln
+	}
+	for len(s.rows) <= row {
+		s.rows = append(s.rows, sealedRow{})
+	}
+	slot := &s.rows[row]
+	if slot.isSet && slot.width == w && slot.method == measure.Method() && slot.line == ln {
+		return slot.sealed
+	}
+	sealed := sealRowEdges(measure, ln, w)
+	*slot = sealedRow{line: ln, width: w, method: measure.Method(), sealed: sealed, isSet: true}
+	return sealed
+}
+
+// keep drops the slots past the frame's last row: rows is how many the frame just sealed.
+func (s *sealMemo) keep(rows int) {
+	if s == nil || len(s.rows) <= rows {
+		return
+	}
+	clear(s.rows[rows:])
+	s.rows = s.rows[:rows]
 }
 
 // rowEdgeBuffers holds the one-row screen buffers [sealRowEdges] parses a line into. A pool rather
