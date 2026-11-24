@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
@@ -25,7 +24,6 @@ import (
 	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/notice"
-	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
@@ -118,7 +116,7 @@ func exitCodeFor(err error) int {
 // A nil field is the production value, resolved where it is used and never at construction: a nil
 // runner leaves firingInputs.runner nil and raise runs the Firing through run.Once (or, with a run
 // budget set, budgetedRunner wraps run.Once itself); a nil confiner
-// builds the backend through platform.NewConfiner when the run gets there.
+// lets the Driver host build the production backend when the run opens it (openDriverHost).
 type headlessDeps struct {
 	// runner is what the Firing runs through once its gates have passed (firingInputs.runner).
 	runner func(context.Context, run.Spec) (run.Result, error)
@@ -831,10 +829,33 @@ func runHeadlessBody(
 				"(use --mode plan or --mode auto)", mode))
 	}
 
-	roots, _, err := sessionRoots(*opts)
+	// The Driver host opens this run's process-scope facilities (driverhost.go): the session's state
+	// roots with the Project root the config source names, the stale-scratch sweep — the only beat
+	// on which a host that is only ever driven headlessly reclaims the dirs earlier runs left
+	// behind, since it never passes the TUI's boot — the confinement backend this host builds
+	// through the dependency the host handed this command (headlessDeps), and the per-server stats
+	// recorder (ADR 0085). The sweep is best-effort and silent: GC is never a reason a run fails to
+	// start.
+	//
+	// Its teardown is deferred here: the recorder stops, and the Windows token backend puts the disk
+	// back (ADR 0020 §2), saying the one sentence a teardown that could not owes on stderr. It is
+	// deferred, which is why every failure below travels as a returned error: an os.Exit in this
+	// function would leave the labels on the disk.
+	//
+	// The hard second interrupt (watchSecondInterrupt) is the one exit that does exactly that, and
+	// leaves them there deliberately: the human asked for the process to stop, not for it to tidy
+	// up first, and a label walk is exactly the tidying that would hold the shell for seconds. The
+	// labels are not lost — a later session reverts them (winlabel.TeardownNotice's own remedy).
+	host, err := openDriverHost(*opts, true, deps.confiner)
 	if err != nil {
 		return run.Result{}, notStarted(err)
 	}
+	defer func() {
+		if notice := host.close(); notice != "" {
+			cmd.PrintErrln(notice)
+		}
+	}()
+	roots := host.roots
 
 	// A reaction the Project config proposes runs nothing until it is adopted, and an unattended run
 	// has nobody to ask, so it is skipped with one line naming it (ADR 0104 §12) — on stderr, where
@@ -842,12 +863,6 @@ func runHeadlessBody(
 	if n := skippedReactionsNotice(roots.project, offer.Proposals); n != "" {
 		cmd.PrintErrln(n)
 	}
-
-	// The scratch sweep, run once here for the reason runRoot runs it at boot (wire.go): this run
-	// mints a dir of its own below and a host that is only ever driven headlessly never passes the
-	// TUI's boot, so this is the only beat on which the dirs earlier runs left behind are reclaimed.
-	// Best-effort and silent, exactly as it is there — GC is never a reason a run fails to start.
-	gcScratchDirs(roots.scratch, time.Now())
 
 	// A plaintext `api-key:` and a retired `sub-agents: true` flag in the config file are worth
 	// saying out loud here too (ADR 0047, ADR 0045), but only saying: the migration OFFERS are the
@@ -860,31 +875,6 @@ func runHeadlessBody(
 	notices, _ := configHygieneNotices(opts.Servers, filepath.Join(roots.config, "config.yaml"), neverPromptsHeadless)
 	for _, notice := range notices {
 		cmd.PrintErrln(notice)
-	}
-
-	// The host's real Confiner backend for this OS, and the teardown the Windows token backend
-	// needs to put the disk back (ADR 0020 §2) — the same optional-interface assertion runRoot
-	// makes, for the same reason. It is deferred, which is why every failure below travels as a
-	// returned error: an os.Exit in this function would leave the labels on the disk.
-	//
-	// The hard second interrupt (watchSecondInterrupt) is the one exit that does exactly that, and
-	// leaves them there deliberately: the human asked for the process to stop, not for it to tidy
-	// up first, and a label walk is exactly the tidying that would hold the shell for seconds. The
-	// labels are not lost — a later session reverts them (winlabel.TeardownNotice's own remedy).
-	//
-	// The backend is built through the dependency the host handed this command (headlessDeps); a
-	// nil one is the production route, platform.NewConfiner, resolved here and not earlier.
-	buildConfiner := deps.confiner
-	if buildConfiner == nil {
-		buildConfiner = platform.NewConfiner
-	}
-	confiner := buildConfiner()
-	if closer, ok := confiner.(interface{ Close() error }); ok {
-		defer func() {
-			if notice := platform.ConfinementTeardownNotice(closer.Close()); notice != "" {
-				cmd.PrintErrln(notice)
-			}
-		}()
 	}
 
 	// Auto's eligibility is ruled on HERE, by the surface that offered the mode (ADR 0033,
@@ -900,8 +890,9 @@ func runHeadlessBody(
 	// refusal happens before the Config is composed for that reason: nothing is sent, and exit 2
 	// tells the script this is an invocation to fix rather than an outcome to read.
 	if mode == domain.ModeAuto {
+		posture := host.posture(mode, opts.ConfineToWorkspace)
 		if blocked := probe.AutoUnattendedBlocked(
-			"a headless run", probe.BackendName(confiner), confiner.Capabilities(), opts.ConfineToWorkspace); blocked != "" {
+			"a headless run", posture.backend, posture.caps, opts.ConfineToWorkspace); blocked != "" {
 			return run.Result{}, notStarted(fmt.Errorf(
 				"apogee headless: --mode auto cannot run on this host — %s (use --mode plan, or "+
 					"run unconfined with `confine-to-workspace: false` in ~/.apogee/config.yaml, "+
@@ -911,30 +902,29 @@ func runHeadlessBody(
 		// acknowledgement. That is not blocked — a headless run is never held to a stricter bar
 		// than a launch — but it is the one blanket loosen in the system, so it says so, in the
 		// launch's own words and on stderr, where it cannot contaminate the answer.
-		if !opts.ConfineToWorkspace {
-			cmd.PrintErrln(unconfinedAutoWarning)
+		if posture.unconfined != "" {
+			cmd.PrintErrln(posture.unconfined)
 		}
-		// probe.DegradedNotice is deliberately NOT printed here, though runRoot prints it at this
-		// point: its cell — auto, confinement asked for, a backend that cannot fence — is exactly
-		// the cell refused two branches above, so the notice could never speak, and its remedies
-		// (`/confine off`) are slash commands a headless run has no way to type. What the TUI
-		// degrades to, this command refuses; the equivalence is pinned by a test rather than left
+		// The posture's degraded notice is deliberately NOT printed here, though runRoot prints it at
+		// this point: its cell — auto, confinement asked for, a backend that cannot fence — is
+		// exactly the cell refused two branches above, so the notice could never speak, and its
+		// remedies (`/confine off`) are slash commands a headless run has no way to type. What the
+		// TUI degrades to, this command refuses; the equivalence is pinned by a test rather than left
 		// to the reader (headless_test.go, the degraded-cell test).
 		//
-		// probe.ResidualNotice IS printed, for the opposite reason: its cell is a backend that
-		// fences — so the run is never refused — which knowingly leaves a write-class access open
-		// (truncate(2) at landlock ABI 1–2; connect(2) AF_UNIX or mach-lookup, a same-user service
-		// that can run commands outside the fence — ADR 0112). An unattended run is exactly where
-		// that goes unnoticed otherwise, and it names no slash command. It is disclosure on
-		// stderr, never a blocker: the answer on stdout is untouched.
-		if notice := probe.ResidualNotice(
-			probe.BackendName(confiner), confiner.Capabilities(), mode, opts.ConfineToWorkspace); notice != "" {
-			cmd.PrintErrln(notice)
+		// The posture's residual disclosure IS printed, for the opposite reason: its cell is a
+		// backend that fences — so the run is never refused — which knowingly leaves a write-class
+		// access open (truncate(2) at landlock ABI 1–2; connect(2) AF_UNIX or mach-lookup, a
+		// same-user service that can run commands outside the fence — ADR 0112). An unattended run
+		// is exactly where that goes unnoticed otherwise, and it names no slash command. It is
+		// disclosure on stderr, never a blocker: the answer on stdout is untouched.
+		if posture.residual != "" {
+			cmd.PrintErrln(posture.residual)
 		}
 
-		// Eager pre-warm of the confinement label walk, behind the SAME gate and in the same place
-		// the launch path uses (announceConfinement, wire_boot.go) — one gate function, never a
-		// second copy, because a second copy is how the two boot paths drift apart. On the Windows
+		// Eager pre-warm of the confinement label walk, behind the SAME gate the launch path uses
+		// (announceConfinement, wire_boot.go), which the posture answers — one gate function, never
+		// a second copy, because a second copy is how the two boot paths drift apart. On the Windows
 		// token backend a confined command labels the workspace tree at ~1 ms/object, and an
 		// unattended run is exactly where a first command stalling on a large .git goes unexplained;
 		// under Auto+confine a confined command is effectively certain, so the walk is hoisted here.
@@ -944,26 +934,31 @@ func runHeadlessBody(
 		// The one deliberate difference from the launch path: the progress notice goes to the
 		// command's own stderr writer rather than raw os.Stderr, because everything this command
 		// narrates travels through the cobra writers.
-		if shouldPrewarmLabelWalk(mode, opts.ConfineToWorkspace, confiner.Capabilities().FSWrite) {
-			prewarmLabelWalk(confiner, roots.workspace, cmd.ErrOrStderr())
+		if posture.prewarm {
+			host.prewarm(roots.workspace, cmd.ErrOrStderr())
 		}
 	}
 
-	// The shared sessions store, built whatever --no-save says: the sweep below is about the
-	// records ALREADY on disk, not about the one this run may add, so the flag must not switch it
-	// off. Building it costs nothing on its own — the store is a directory path and a clock until
-	// something reads or writes.
+	// The shared sessions store, opened by the Driver host whatever --no-save says: its two boot
+	// sweeps are about the records ALREADY on disk, not about the one this run may add, so the flag
+	// must not switch them off. Opening it costs nothing on its own — the store is a directory path
+	// and a clock until something reads or writes.
 	//
 	// With `sessions.share-group:` set it writes every session file for that group, and the warning
-	// a group-readable config.yaml owes goes to this command's stderr (sessionStoreOptions).
-	storeOpts, shareWarning, err := sessionStoreOptions(opts.Sessions, roots.config)
+	// a group-readable config.yaml owes goes to this command's stderr.
+	//
+	// The sweeps run here for the reason the daemon runs them: a host that only ever runs
+	// `apogee headless` never passes the TUI's boot, so this is the only beat on which its retention
+	// policy is applied and the undo stores its earlier runs left behind (a headless run opens a
+	// snapshot store per record — internal/run) are reclaimed. That host is exactly the one most
+	// likely to pass --no-save, which is why the sweeps run over the always-open store rather than
+	// the record-writing one: --no-save promises no RECORD of this run, never an unswept store. No
+	// id is kept — a headless run resumes nothing, and the record it is about to mint, and its own
+	// snapshot store, do not exist yet.
+	sessions, err := host.openStore(func(n tui.Notice) { cmd.PrintErrln(n.Text) }, nil)
 	if err != nil {
 		return run.Result{}, notStarted(err)
 	}
-	if shareWarning != "" {
-		cmd.PrintErrln(shareWarning)
-	}
-	sessions := session.NewStore(roots.sessions, storeOpts...)
 
 	// The store the record lands in: the shared sessions store, so a headless run is browsable in
 	// /sessions beside the conversations it ran beside. --no-save leaves it nil, which is
@@ -972,23 +967,6 @@ func runHeadlessBody(
 	if !noSave {
 		store = sessions
 	}
-
-	// The startup session sweep (wire.go), run here for the reason the daemon runs it: a host that
-	// only ever runs `apogee headless` never passes the TUI's boot, so this is the only beat on
-	// which its retention policy is ever applied. That host is exactly the one most likely to pass
-	// --no-save, which is why the sweep is handed the store above rather than the record-writing
-	// one: --no-save promises no RECORD of this run, never an unswept store. No id is kept — a
-	// headless run resumes nothing, and the record it is about to mint is not in the store yet.
-	gcSessions(sessions, opts.Sessions)
-
-	// The undo stores' own sweep, on the same beat and for the same reason (wire_live.go runs it
-	// beside the TUI's session sweep): a headless run opens a snapshot store per record
-	// (internal/run) and a host driven only headlessly never passes the TUI's boot, so without this
-	// line the stores its earlier runs left behind would accumulate forever. It runs after the
-	// session sweep so a record that sweep just pruned is already gone when this one looks for it,
-	// and it is handed the always-open store for the reason the session sweep is. No id is kept —
-	// this run's own store does not exist yet.
-	gcSnapshotDirs(roots.snapshots, sessions, time.Now())
 
 	// Ctrl-C and SIGTERM end the run rather than the process: the cancellation flows out of Once
 	// as a run failure carrying whatever the run had reached, so an interrupted run still prints
@@ -1120,7 +1098,7 @@ func runHeadlessBody(
 		opts:     *opts,
 		entry:    entry,
 		roots:    roots,
-		confiner: confiner,
+		confiner: host.confiner,
 		mode:     mode,
 		recipe:   launch,
 		skills:   skillCatalog,
@@ -1130,10 +1108,10 @@ func runHeadlessBody(
 			MaxTurns:    opts.HeadlessMaxTurns,
 			MaxWallTime: opts.HeadlessMaxWallTime,
 		}),
-		// The per-server stats recorder (ADR 0085): every upstream attempt this run makes is
-		// appended to the home's server-stats.jsonl while `server-stats:` is on. Off, it opens
-		// nothing, so the file is neither read nor written.
-		stats: newStatsRecorder(serverStatsPath(roots.config), opts.ServerStats),
+		// The Driver host's per-server stats recorder (ADR 0085): every upstream attempt this run
+		// makes is appended to the home's server-stats.jsonl while `server-stats:` is on. Off, it
+		// opens nothing, so the file is neither read nor written.
+		stats: host.stats,
 	}, prompt, nil, store, onID, narrate)
 	for _, n := range notices {
 		cmd.PrintErrln(n)

@@ -1235,6 +1235,68 @@ func TestHeadlessRunSweepsStaleSnapshotDirs(t *testing.T) {
 	}
 }
 
+// TestHeadlessStartupNoticesKeepTheirOrder pins the order a headless start says its notices in on
+// stderr, now that the Driver host opens the roots, the confiner and the store: the skipped
+// Project reaction first, then the config hygiene, then Auto's own sentence, then the share
+// warning the session store owes. One run states all four: a Project config proposing a reaction
+// nobody adopted, a plaintext api-key in the home's config.yaml, `confine-to-workspace: false`
+// under `--mode auto`, and `sessions.share-group:` over that group-readable config.yaml.
+func TestHeadlessStartupNoticesKeepTheirOrder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sessions.share-group is refused on Windows")
+	}
+	srv := headlessBeatServer(t)
+	home := t.TempDir()
+	body := "confine-to-workspace: false\n" +
+		"sessions:\n  share-group: \"" + fmt.Sprint(os.Getegid()) + "\"\n" +
+		"servers:\n  - name: " + testServerName + "\n    endpoint: " + srv.URL + "\n" +
+		"    api-key: sk-plaintext\n" +
+		"server: " + testServerName + "\n"
+	path := filepath.Join(home, "config.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o640); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatalf("chmod config.yaml: %v", err)
+	}
+	workspace := t.TempDir()
+	writeProjectConfig(t, workspace, projectFmtReactionYAML)
+	t.Setenv(config.EnvMode, "")
+
+	stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
+	cmd := newHeadlessCommandWith(headlessDeps{
+		runner:   stub.once,
+		confiner: func() apogee.Confiner { return fenceableHost },
+	})
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetArgs([]string{"--config", home, "--workspace", workspace, "--mode", "auto", "a prompt"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("headless: %v\n%s", err, errOut.String())
+	}
+
+	stderr := errOut.String()
+	notices := []struct{ name, marker string }{
+		{"the skipped-reactions notice", "this run skips"},
+		{"the hygiene notice", "is stored in plain text in"},
+		{"the Auto sentence", unconfinedAutoWarning},
+		{"the share warning", "group-readable"},
+	}
+	last := -1
+	for _, n := range notices {
+		at := strings.Index(stderr, n.marker)
+		if at < 0 {
+			t.Fatalf("%s (%q) is missing from stderr:\n%s", n.name, n.marker, stderr)
+		}
+		if at < last {
+			t.Errorf("%s came before the notice it must follow:\n%s", n.name, stderr)
+		}
+		last = at
+	}
+}
+
 // headlessSummarySession lifts the record id out of the summary line a headless run prints on
 // stderr (`session: <id> · turns: N · denied: M`): the name the run's scratch dir carries.
 var headlessSummarySession = regexp.MustCompile(`session: (\S+) · turns:`)

@@ -569,7 +569,10 @@ NOTES (2026-11-24): deleting TestDaemonFireServerStatsOffWritesNothing left daem
 - `! grep -nE 'gcScratchDirs|gcSnapshotDirs|gcSessions|newStatsRecorder|platform\.NewConfiner|sessionStoreOptions|ConfinementTeardownNotice|ResidualNotice|closeConfiner' cmd/apogee/daemonfire.go cmd/apogee/daemon.go`
 **Commit:** `refactor(daemon): open the daemon's process-scope facilities through the Driver host`
 
-## 24. Headless opens its facilities through the Driver host
+## 24. Headless opens its facilities through the Driver host — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): the host variable is named `host` rather than the plan's `h`, and the posture value `posture`, for readability in a function this long; the Auto block prints `posture.unconfined`, so headless.go no longer names `unconfinedAutoWarning` (the new test reads the constant).
+NOTES (2026-11-24): deleting TestServerStatsOffWritesNothing left headlessStatsRun with a single caller passing "", so its extraConfig parameter is dropped (the same tidy item 23 made to daemonStatsFire).
 
 **What:** Recast at the regression check (2026-11-23). Depends on item 22.
 **Goal:** headless builds no roots, sweeps, store, confiner or recorder of its own; its Auto refusal stays its own; stderr order unchanged (skipped reactions, hygiene, Auto sentences, share warning).

@@ -98,14 +98,13 @@ func TestServerStatsSessionTurnWritesOneLine(t *testing.T) {
 	assertOneAttemptLine(t, statsLines(t, sess.Home()), stub)
 }
 
-// headlessStatsRun runs one headless prompt against stub in a fresh home carrying extraConfig, and
-// returns the home.
-func headlessStatsRun(t *testing.T, stub *stubllm.Server, extraConfig string) string {
+// headlessStatsRun runs one headless prompt against stub in a fresh home, and returns the home.
+func headlessStatsRun(t *testing.T, stub *stubllm.Server) string {
 	t.Helper()
 
 	assertNoAmbientApogeeConfig(t)
 	home := upstreamHome(t, stub.URL, stub.Model)
-	appendHomeConfig(t, home, "auto-title: false\n"+extraConfig)
+	appendHomeConfig(t, home, "auto-title: false\n")
 
 	cmd := newHeadlessCommandWith(headlessDeps{runner: run.Once})
 	var out, errOut bytes.Buffer
@@ -127,22 +126,10 @@ func TestServerStatsHeadlessFiringWritesOneLine(t *testing.T) {
 	t.Parallel()
 
 	stub := stubllm.New(t, loadScript(t, "server-stats"))
-	home := headlessStatsRun(t, stub, "")
+	home := headlessStatsRun(t, stub)
 	stub.AssertConsumed(t)
 
 	assertOneAttemptLine(t, statsLines(t, home), stub)
-}
-
-// `server-stats: off` writes nothing: the file is never created.
-func TestServerStatsOffWritesNothing(t *testing.T) {
-	t.Parallel()
-
-	stub := stubllm.New(t, loadScript(t, "server-stats"))
-	home := headlessStatsRun(t, stub, "server-stats: off\n")
-
-	if _, err := os.Stat(serverStatsPath(home)); !os.IsNotExist(err) {
-		t.Errorf("stat the stats file = %v; server-stats: off must neither write nor create it", err)
-	}
 }
 
 // The settings-pane row opens and stops the store live: a flip off stops the next attempt from
