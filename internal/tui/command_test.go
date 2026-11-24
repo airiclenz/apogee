@@ -407,9 +407,11 @@ func TestOnlyTheCannedTurnAndCompactionOpenAnExchange(t *testing.T) {
 // Drift guard on the server set and on the latch that reads it. actuationBlocked used to carry a
 // six-name list of its own, pinned by nothing: a verb added to the namespace and forgotten there
 // ran straight into a server mid-restart and said nothing about it. Both halves are pinned — the
-// flag's own set, and the seven verbs the latch refuses because of the two flags together — because
-// the second is the one a reader of the latch actually asks about.
-func TestTheActuationLatchRefusesExactlyTheServerAndExchangeVerbs(t *testing.T) {
+// flag's own set, and the verbs the latch refuses because of it — because the second is the one a
+// reader of the latch actually asks about. The verbs that open an Exchange are not among them: they
+// wait out the latch through the one hold question every Exchange opener asks (exchangeRefusal,
+// TestEveryExchangeOpenerWaitsOutEveryRefusingHold).
+func TestTheActuationLatchRefusesExactlyTheServerVerbs(t *testing.T) {
 	t.Parallel()
 	var touching []string
 	for _, spec := range commandSpecs {
@@ -427,7 +429,7 @@ func TestTheActuationLatchRefusesExactlyTheServerAndExchangeVerbs(t *testing.T) 
 			blocked = append(blocked, spec.name)
 		}
 	}
-	want := []string{"bg", "compact", "continue", "model", "server", "stop-server", "unload-model"}
+	want := []string{"bg", "model", "server", "stop-server", "unload-model"}
 	if !reflect.DeepEqual(blocked, want) {
 		t.Errorf("latch-blocked verbs = %v, want exactly %v — everything else stays live", blocked, want)
 	}
@@ -1282,6 +1284,147 @@ func TestBgLaunchKeepsARebindStashedPastAnActuationEnd(t *testing.T) {
 	}
 	if m.hb.pendingRebind != nil {
 		t.Errorf("pendingRebind = %+v after the launch landed, want it cleared by the apply", m.hb.pendingRebind)
+	}
+}
+
+// refusingHold is one of the holds under which no Exchange may open (holdsRefusingExchange): how a
+// test puts the Model under it, the note a human opener answers with, and whether it also takes the
+// Agent (holdsTakingAgent), which queues an idle-only verb before runCommand is reached.
+type refusingHold struct {
+	name       string
+	hold       func(*Model)
+	note       string
+	takesAgent bool
+}
+
+// refusingHolds lists every refusing hold, each forced directly onto the Model: the subject here is
+// what the openers ask, not how each hold is taken.
+var refusingHolds = []refusingHold{
+	{name: "session load", hold: func(m *Model) { m.holds.hold(holdSessionLoad) }, note: sessionLoadHoldNote},
+	{name: "bg launch", hold: func(m *Model) { m.holds.hold(holdBgLaunch) }, note: bgLaunchHoldNote, takesAgent: true},
+	{name: "git action", hold: func(m *Model) { m.holds.hold(holdGitAction) }, note: gitActionHoldNote, takesAgent: true},
+	{
+		name: "actuation latch",
+		hold: func(m *Model) {
+			m.actuation.inFlight, m.actuation.verb, m.actuation.profile = true, verbLoad, "alpha"
+		},
+		note: "profile load in flight — alpha",
+	},
+}
+
+// exchangeOpener drives one of the six ways an Exchange opens against a Model the hold has already
+// been applied to (or, for the completion flush, is applied to mid-run) and asserts it opened none.
+type exchangeOpener struct {
+	name string
+	run  func(t *testing.T, hold refusingHold)
+}
+
+// assertNoWorker fails when the opener started a worker.
+func assertNoWorker(t *testing.T, m Model) {
+	t.Helper()
+	if m.state != stateIdle || m.busy() {
+		t.Errorf("state = %v, busy %v; want idle — no Exchange may open under the hold", m.state, m.busy())
+	}
+}
+
+// underHold is an idle, bound model over eng with hold applied.
+func underHold(t *testing.T, eng *fakeEngine, hold refusingHold) Model {
+	t.Helper()
+	m := newTestModelEng(t, eng, testOpts)
+	hold.hold(&m)
+	return m
+}
+
+// assertVerbRefusedOrQueued fails unless verb, run under hold, started no worker and either answered
+// with the hold's note or — under a hold that takes the Agent — was queued for the next idle.
+func assertVerbRefusedOrQueued(t *testing.T, hold refusingHold, verb string) {
+	t.Helper()
+	m := sendLine(t, underHold(t, &fakeEngine{}, hold), verb)
+
+	assertNoWorker(t, m)
+	if hold.takesAgent {
+		if len(m.deferredCommands) != 1 || m.deferredCommands[0].command != strings.TrimPrefix(verb, "/") {
+			t.Errorf("queued commands = %+v, want %s waiting for the hold to land", m.deferredCommands, verb)
+		}
+		return
+	}
+	assertLastNote(t, m, hold.note)
+}
+
+// The hold rule for opening an Exchange is asked by every opener: under each refusing hold, the
+// typed message, the held-queue ⏎, /continue, /compact, the completion flush and the
+// background-workflow wake all open no Exchange. The human openers answer with the hold's note (or,
+// for an idle-only verb under a hold that takes the Agent, queue the verb); the completion flush
+// keeps its rows staged under the note for a retry; the wake waits silently.
+func TestEveryExchangeOpenerWaitsOutEveryRefusingHold(t *testing.T) {
+	t.Parallel()
+	openers := []exchangeOpener{
+		{name: "typed message", run: func(t *testing.T, hold refusingHold) {
+			m := sendLine(t, underHold(t, &fakeEngine{}, hold), "hello")
+
+			assertNoWorker(t, m)
+			if got := m.input.Value(); got != "hello" {
+				t.Errorf("input = %q, want the typed line left in the box", got)
+			}
+			assertLastNote(t, m, hold.note)
+		}},
+		{name: "held-queue enter", run: func(t *testing.T, hold refusingHold) {
+			m := underHold(t, &fakeEngine{}, hold)
+			m.pendingInterjections = []queuedInterjection{{raw: "held", input: domain.UserInput{Text: "held"}}}
+
+			m = step(t, m, keyEnter())
+
+			assertNoWorker(t, m)
+			if len(m.pendingInterjections) != 1 {
+				t.Errorf("%d rows held, want the held row still held", len(m.pendingInterjections))
+			}
+			assertLastNote(t, m, hold.note)
+		}},
+		{name: "/continue", run: func(t *testing.T, hold refusingHold) {
+			assertVerbRefusedOrQueued(t, hold, "/continue")
+		}},
+		{name: "/compact", run: func(t *testing.T, hold refusingHold) {
+			assertVerbRefusedOrQueued(t, hold, "/compact")
+		}},
+		{name: "completion flush", run: func(t *testing.T, hold refusingHold) {
+			m := newTestModelEng(t, &fakeEngine{}, testOpts)
+			startStubWorker(t, &m)
+			m = stageRow(t, m, "and the docs")
+			hold.hold(&m)
+
+			m = step(t, m, exchangeDoneMsg{})
+
+			assertNoWorker(t, m)
+			if len(m.pendingInterjections) != 1 || !m.flushPending {
+				t.Errorf("%d rows staged, retry pending %v; want the row staged for a retry",
+					len(m.pendingInterjections), m.flushPending)
+			}
+			assertLastNote(t, m, hold.note)
+		}},
+		{name: "wake", run: func(t *testing.T, hold refusingHold) {
+			eng := wakingEngine()
+			m := underHold(t, eng, hold)
+			notes := len(noteTexts(m))
+			m.wakePending = true
+
+			m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+
+			assertNoWorker(t, m)
+			if eng.wakes() != 0 || !m.wakePending {
+				t.Errorf("Wake calls %d, pending %v; want the wake held", eng.wakes(), m.wakePending)
+			}
+			if added := noteTexts(m)[notes:]; len(added) != 0 {
+				t.Errorf("the held wake said %q, want it to wait silently", added)
+			}
+		}},
+	}
+	for _, hold := range refusingHolds {
+		for _, opener := range openers {
+			t.Run(hold.name+"/"+opener.name, func(t *testing.T) {
+				t.Parallel()
+				opener.run(t, hold)
+			})
+		}
 	}
 }
 

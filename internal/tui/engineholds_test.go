@@ -21,13 +21,15 @@ type engineAnswers struct {
 	wakes           bool
 	startsMCPDials  bool
 	swapsTools      bool
+	opensExchange   bool // mayOpenExchange: no refusing hold stands
+	opensWake       bool // canOpenWake
 }
 
 // atRest is the answer set of a Model nothing holds: every question says yes.
 var atRest = engineAnswers{
 	runsIdleOnly: true, runsReport: true, runsDeferred: true, rebinds: true, beatCounts: true,
 	editsConfig: true, launchesBg: true, isQuiescent: true, resumesWorkflow: true, wakes: true,
-	startsMCPDials: true, swapsTools: true,
+	startsMCPDials: true, swapsTools: true, opensExchange: true, opensWake: true,
 }
 
 // TestEngineHolds_Questions pins the holds × questions table: each row puts the Model under one
@@ -52,24 +54,32 @@ func TestEngineHolds_Questions(t *testing.T) {
 		{
 			name:  "worker running",
 			setup: func(m *Model) { m.state = stateRunning },
-			want:  engineAnswers{runsReport: true, startsMCPDials: true},
+			want:  engineAnswers{runsReport: true, startsMCPDials: true, opensExchange: true},
 		},
 		{
 			name:  "worker blocked on an approval",
 			setup: func(m *Model) { m.state = stateAwaitingApproval },
-			want:  engineAnswers{runsReport: true, startsMCPDials: true},
+			want:  engineAnswers{runsReport: true, startsMCPDials: true, opensExchange: true},
 		},
 		{
 			name:  "errored counts idle for quiescent, not for wake or resume",
 			setup: func(m *Model) { m.state = stateErrored },
-			want:  atRestExcept(func(a *engineAnswers) { a.resumesWorkflow, a.wakes = false, false }),
+			want: atRestExcept(func(a *engineAnswers) {
+				a.resumesWorkflow, a.wakes, a.opensWake = false, false, false
+			}),
 		},
 		{
 			name:  "actuation in flight",
 			setup: func(m *Model) { m.actuation.inFlight = true },
 			want: atRestExcept(func(a *engineAnswers) {
 				a.rebinds, a.beatCounts, a.editsConfig, a.isQuiescent = false, false, false, false
+				a.opensExchange, a.opensWake = false, false
 			}),
+		},
+		{
+			name:  "beat owed after a launcher verb's release",
+			setup: func(m *Model) { m.actuation.beatOwed = true },
+			want:  atRestExcept(func(a *engineAnswers) { a.opensWake = false }),
 		},
 		{
 			name:  "bg launch is quiescent",
@@ -77,6 +87,7 @@ func TestEngineHolds_Questions(t *testing.T) {
 			want: atRestExcept(func(a *engineAnswers) {
 				a.runsIdleOnly, a.runsDeferred, a.rebinds, a.launchesBg = false, false, false, false
 				a.resumesWorkflow, a.wakes, a.swapsTools = false, false, false
+				a.opensExchange, a.opensWake = false, false
 			}),
 		},
 		{
@@ -84,27 +95,37 @@ func TestEngineHolds_Questions(t *testing.T) {
 			setup: func(m *Model) { m.holds.hold(holdSessionLoad) },
 			want: atRestExcept(func(a *engineAnswers) {
 				a.resumesWorkflow, a.wakes, a.swapsTools = false, false, false
+				a.opensExchange, a.opensWake = false, false
+			}),
+		},
+		{
+			name:  "git action running",
+			setup: func(m *Model) { m.holds.hold(holdGitAction) },
+			want: atRestExcept(func(a *engineAnswers) {
+				a.runsIdleOnly, a.runsDeferred, a.launchesBg = false, false, false
+				a.resumesWorkflow, a.wakes, a.swapsTools = false, false, false
+				a.opensExchange, a.opensWake = false, false
 			}),
 		},
 		{
 			name:  "record write in flight",
 			setup: func(m *Model) { m.writeBusy = true },
 			want: atRestExcept(func(a *engineAnswers) {
-				a.resumesWorkflow, a.wakes, a.swapsTools = false, false, false
+				a.resumesWorkflow, a.wakes, a.swapsTools, a.opensWake = false, false, false, false
 			}),
 		},
 		{
 			name:  "record write queued",
 			setup: func(m *Model) { m.pendingWrites = []recordWrite{{}} },
 			want: atRestExcept(func(a *engineAnswers) {
-				a.resumesWorkflow, a.wakes, a.swapsTools = false, false, false
+				a.resumesWorkflow, a.wakes, a.swapsTools, a.opensWake = false, false, false, false
 			}),
 		},
 		{
 			name:  "quitting",
 			setup: func(m *Model) { m.quitting = true },
 			want: atRestExcept(func(a *engineAnswers) {
-				a.runsDeferred, a.resumesWorkflow, a.wakes = false, false, false
+				a.runsDeferred, a.resumesWorkflow, a.wakes, a.opensWake = false, false, false, false
 				a.startsMCPDials, a.swapsTools = false, false
 			}),
 		},
@@ -112,13 +133,15 @@ func TestEngineHolds_Questions(t *testing.T) {
 			name:  "prebound",
 			setup: func(m *Model) { m.opts.Prebound.Reason = domain.PreboundFirstBoot },
 			want: atRestExcept(func(a *engineAnswers) {
-				a.resumesWorkflow, a.wakes, a.swapsTools = false, false, false
+				a.resumesWorkflow, a.wakes, a.swapsTools, a.opensWake = false, false, false, false
 			}),
 		},
 		{
 			name:  "interjection held",
 			setup: func(m *Model) { m.pendingInterjections = []queuedInterjection{{}} },
-			want:  atRestExcept(func(a *engineAnswers) { a.isQuiescent, a.wakes = false, false }),
+			want: atRestExcept(func(a *engineAnswers) {
+				a.isQuiescent, a.wakes, a.opensWake = false, false, false
+			}),
 		},
 		{
 			name:  "command queued",
@@ -130,12 +153,14 @@ func TestEngineHolds_Questions(t *testing.T) {
 			setup: func(m *Model) {
 				m.picker = picker{open: true, kind: pickerWorkflowBoundary}
 			},
-			want: atRestExcept(func(a *engineAnswers) { a.runsDeferred, a.wakes = false, false }),
+			want: atRestExcept(func(a *engineAnswers) {
+				a.runsDeferred, a.wakes, a.opensWake = false, false, false
+			}),
 		},
 		{
 			name:  "modal pane open",
 			setup: func(m *Model) { m.sessionBrowser.open = true },
-			want:  atRestExcept(func(a *engineAnswers) { a.wakes = false }),
+			want:  atRestExcept(func(a *engineAnswers) { a.wakes, a.opensWake = false, false }),
 		},
 		{
 			name: "worker and actuation at once",
@@ -166,6 +191,8 @@ func TestEngineHolds_Questions(t *testing.T) {
 				wakes:           holds.canWake(),
 				startsMCPDials:  holds.canStartMCPDials(),
 				swapsTools:      holds.canSwapTools(),
+				opensExchange:   holds.mayOpenExchange(),
+				opensWake:       holds.canOpenWake(),
 			}
 			today := engineAnswers{
 				runsIdleOnly:    m.commandRunnable(idleOnly),
@@ -202,6 +229,55 @@ func pickModelGates(a engineAnswers) engineAnswers {
 		isQuiescent:     a.isQuiescent,
 		resumesWorkflow: a.resumesWorkflow,
 		wakes:           a.wakes,
+	}
+}
+
+// TestEngineHolds_RetriesFlush pins canRetryFlush, which needs a staged row to say yes, so it is
+// not a column of the table above, whose at-rest row answers yes to everything with nothing staged.
+// Every case but the first two stages one row; each then adds the one fact that must hold the
+// retry back.
+func TestEngineHolds_RetriesFlush(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		setup func(*Model)
+		want  bool
+	}{
+		{name: "a row staged at rest", setup: func(*Model) {}, want: true},
+		{name: "nothing staged", setup: func(m *Model) { m.pendingInterjections = nil }, want: false},
+		{name: "session loading", setup: func(m *Model) { m.holds.hold(holdSessionLoad) }},
+		{name: "bg launch", setup: func(m *Model) { m.holds.hold(holdBgLaunch) }},
+		{name: "git action running", setup: func(m *Model) { m.holds.hold(holdGitAction) }},
+		{name: "actuation in flight", setup: func(m *Model) { m.actuation.inFlight = true }},
+		{name: "beat owed after the release", setup: func(m *Model) { m.actuation.beatOwed = true }},
+		{name: "worker running", setup: func(m *Model) { m.state = stateRunning }},
+		{name: "errored", setup: func(m *Model) { m.state = stateErrored }},
+		{name: "quitting", setup: func(m *Model) { m.quitting = true }},
+		{name: "watching", setup: func(m *Model) { m.watch.isActive = true }},
+		{name: "prebound", setup: func(m *Model) { m.opts.Prebound.Reason = domain.PreboundFirstBoot }},
+		{
+			name:  "boundary confirm open",
+			setup: func(m *Model) { m.picker = picker{open: true, kind: pickerWorkflowBoundary} },
+		},
+		{
+			name:  "command queued ahead",
+			setup: func(m *Model) { m.deferredCommands = []parsedInput{parseInput("/clear", nil)} },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var m Model
+			m.pendingInterjections = []queuedInterjection{{}}
+			tt.setup(&m)
+
+			got := m.engineHolds().canRetryFlush()
+
+			if got != tt.want {
+				t.Errorf("canRetryFlush = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

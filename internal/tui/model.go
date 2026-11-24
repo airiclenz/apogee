@@ -416,16 +416,16 @@ type Model struct {
 	// derived by engineHolds), each set and cleared through hold/release:
 	//   - holdSessionLoad marks a /sessions load in flight — the record is being read off the loop,
 	//     and the restore that follows (resumeLoaded) takes the engine at idle — so a wake is held
-	//     until it lands, and a typed message, /continue and /compact are refused (loadHoldNote).
+	//     until it lands, and every Exchange opener refuses or waits (exchangeRefusal).
 	//   - holdBgLaunch marks a /bg launch in flight (runBg sets it, foldBgStarted releases it): the
 	//     launch reads the Agent off the loop where the idle-only mutators must not run
 	//     (StartRecipe's launch-time snapshot), so until it lands a heartbeat's rebind is stashed
 	//     (observeBinding), a wake is held (canWake), an idle-only command is queued rather
-	//     than run (commandRunnable), and a typed message is refused (loadHoldNote).
+	//     than run (commandRunnable), and every Exchange opener refuses or waits (exchangeRefusal).
 	//   - holdGitAction marks a footer git action running or waiting on a background fetch
 	//     (startGitAction sets it, foldGitActionDone releases it, gitactions.go): until it lands a
-	//     wake and a workflow resume are held, an idle-only command is queued, a typed message is
-	//     refused (loadHoldNote), and a quit defers its exit (quitSession).
+	//     wake and a workflow resume are held, an idle-only command is queued, every Exchange opener
+	//     refuses or waits (exchangeRefusal), and a quit defers its exit (quitSession).
 	//
 	// resumePending says a restored session's background workflows are still to be started from
 	// their folders (Engine.ResumeWorkflows): set by a --resume start and by every /sessions switch
@@ -2372,18 +2372,14 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		// (preboundRefusal).
 		return m.preboundRefusal()
 	}
-	if note, held := m.loadHoldNote(); held {
-		// A session load or a /bg launch is reading the Agent off the loop, and an Exchange opened
-		// now would be a second goroutine on it. The line stays in the box — and a held queue stays
-		// held — so ⏎ sends the very same message once the load lands.
+	if note, refused := m.exchangeRefusal(); refused {
+		// A refusing hold stands: a session load or a /bg launch is reading the Agent off the loop, a
+		// git action is rewriting the workspace the Turn would read, or a launcher verb owns the
+		// server this message would go to (ADR 0029 D5). An Exchange opened now would race it, so the
+		// line stays in the box — and a held queue stays held — and ⏎ sends the very same message
+		// once the hold has released. The hold is asked before the upstream gate, so when both
+		// refuse, the hold's note is the one said.
 		m.transcript.addNote(note)
-		return m, nil
-	}
-	if m.actuation.inFlight {
-		// A launcher verb owns the server this message would go to (ADR 0029 D5). Refuse it exactly
-		// as an offline upstream is refused, and for the same reason: the typed line stays in the box
-		// so ⏎ sends it the moment the actuation completes.
-		m.transcript.addNote(m.actuationBlockNote())
 		return m, nil
 	}
 	if m.blockedUpstream() {
@@ -2437,37 +2433,22 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	return next, tea.Batch(cmd, nameCmd, record)
 }
 
-// The notes an Exchange opener answers with while an off-loop load holds the engine
-// ([Model.loadHoldNote], [Model.exchangeRefusal]): each names the hold it waits out.
+// The notes an Exchange opener answers with while an off-loop hold stands ([Model.exchangeRefusal]):
+// each names the hold it waits out.
 const (
 	sessionLoadHoldNote = "still loading a session — send once it has loaded"
 	bgLaunchHoldNote    = "still starting a /bg launch — send once it has started"
 	gitActionHoldNote   = "still running a git action — send once it has finished"
 )
 
-// loadHoldNote reports whether a session load (holdSessionLoad) or a /bg launch (holdBgLaunch) is
-// reading the Agent off the loop, or a footer git action (holdGitAction) is changing the workspace
-// under it, with the note naming which. The human's Exchange openers — the typed message and the
-// held-queue flush in submit, /continue and /compact — ask it before starting a worker: a worker
-// started now would drive the Agent beside the goroutine still reading it, or read a workspace a
-// pull or a sync is still rewriting, so the opener refuses and nothing moves. The completion flush
-// asks exchangeRefusal instead, which answers for the actuation latch too.
-func (m Model) loadHoldNote() (string, bool) {
-	switch {
-	case m.holds.has(holdSessionLoad):
-		return sessionLoadHoldNote, true
-	case m.holds.has(holdBgLaunch):
-		return bgLaunchHoldNote, true
-	case m.holds.has(holdGitAction):
-		return gitActionHoldNote, true
-	}
-	return "", false
-}
-
 // exchangeRefusal reports whether a refusing hold stands (engineHolds.refusingExchange), with the
 // note an opener answers with: the off-loop hold's own note, or the actuation latch's
 // (actuationBlockNote). An Exchange opened under any of them would drive the Agent beside a
 // goroutine reading it, read a workspace being rewritten, or send to a server being restarted.
+// It is the one hold question every Exchange opener asks at the head of its ladder: the typed
+// message and the held-queue ⏎ in submit, /continue and /compact in runCommand, and the completion
+// flush (flushInterjections) refuse with the note; the wake asks the same holds silently
+// (engineHolds.canOpenWake).
 func (m Model) exchangeRefusal() (string, bool) {
 	hold, refused := m.engineHolds().refusingExchange()
 	if !refused {

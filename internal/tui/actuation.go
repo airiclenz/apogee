@@ -34,8 +34,9 @@ import (
 // picker and sessionBrowser (ADR 0011) — plain values plus a channel, which is a reference header
 // and so copies safely.
 type actuation struct {
-	// inFlight is the latch itself: while it is set, sends and every switching or actuating verb
-	// are refused with one note (actuationBlockNote).
+	// inFlight is the latch itself: while it is set, every Exchange opener refuses or waits
+	// (holdActuation, one of the refusing holds exchangeRefusal asks about) and every switching or
+	// actuating verb is refused (actuationBlocked), with one note (actuationBlockNote).
 	inFlight bool
 	// verb is which of the three is running — verbLoad, verbUnload, verbStop — read by the footer
 	// and by the completion fold.
@@ -187,17 +188,17 @@ func unloadOutcome(res ActuationResult) string {
 	return "model unloaded — this stopped " + res.Backend
 }
 
-// actuationBlocked reports whether command is one of the verbs the latch refuses while it is held:
-// the ones that open an Exchange (a typed message is the third path and is gated in submit) and the
-// ones that switch or actuate the session's server (with /bg, whose launch reads the engine a
-// completing move would re-point). Both sets are read off the "/" table's own flags
-// (commandSpec.opensExchange, commandSpec.touchesServer) rather than named here, so a verb cannot be
-// added to the namespace and forgotten by the latch — which used to fail silently, the verb running
-// into a server mid-restart. Everything else — scrollback, /clear, /sessions, /version, /confine —
-// stays live, because none of them touches the server being worked on.
+// actuationBlocked reports whether command is one of the server-moving verbs the latch refuses while
+// it is held: the ones that switch or actuate the session's server (with /bg, whose launch reads the
+// engine a completing move would re-point). The set is read off the "/" table's own flag
+// (commandSpec.touchesServer) rather than named here, so a verb cannot be added to the namespace and
+// forgotten by the latch — which used to fail silently, the verb running into a server mid-restart.
+// The verbs that open an Exchange are not its to answer: the latch is one of the refusing holds every
+// Exchange opener asks about (exchangeRefusal). Everything else — scrollback, /clear, /sessions,
+// /version, /confine — stays live, because none of them touches the server being worked on.
 func actuationBlocked(command string) bool {
 	spec, ok := commandByName(command)
-	return ok && (spec.opensExchange || spec.touchesServer)
+	return ok && spec.touchesServer
 }
 
 // actuationBlockNote words that refusal. A load names the profile it is waiting on — that is the

@@ -888,8 +888,9 @@ func (m Model) loadSession(id string, keep bool) tea.Cmd {
 // live, and they record something that happened rather than something re-derived.
 //
 // A record landing while a worker drives the engine is not restored at all (resumeBusyNote): the
-// restore takes the engine at idle, and submit refuses to open an Exchange while the load is in flight
-// (loadHoldNote), so this is the guard behind that guard — /fork reaches here past its own (foldFork).
+// restore takes the engine at idle, and every Exchange opener refuses or waits while the load is in
+// flight (exchangeRefusal), so this is the guard behind that guard — /fork reaches here past its own
+// (foldFork).
 //
 // The title is untrusted disk input — no codec sanitizes a record's Meta on the way back in, which
 // is why sessionRowCells strips it too — and it needs no wrapping here: both addNote and

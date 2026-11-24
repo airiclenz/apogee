@@ -124,6 +124,11 @@ func (m Model) runDeferredCommands() (Model, tea.Cmd) {
 // what happens to the editor (a flush at a natural completion deliberately leaves a half-typed
 // line alone).
 //
+// Precondition: no refusing hold stands. The caller has asked exchangeRefusal at the head of its
+// own ladder (submit, flushInterjections) and turned the send away under one, so a worker started
+// here never drives the Agent beside an off-loop load, reads a workspace a git action is
+// rewriting, or sends to a server a launcher verb is restarting. It does not ask again.
+//
 // The mailbox is fresh per Exchange: this worker is the only one that will ever drain it, and it
 // dies with the Exchange (finishWorker clears it), so a row can never be delivered into an
 // Exchange other than the one it was typed during.
@@ -409,18 +414,25 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// One actuation at a time (ADR 0029 D5). While a launcher verb is in flight the latch refuses
-	// every command that would open an Exchange or move the session — the same serialization the
-	// facade demands of its caller, and the honest answer for the human: the server is mid-restart,
-	// so there is nothing to send to and nothing stable to switch. Everything else stays live.
-	if m.actuation.inFlight && actuationBlocked(parsed.command) {
+	// /continue and /compact open an Exchange, so they ask the one hold question a typed message
+	// asks (exchangeRefusal) before the upstream gate below — when both refuse, the hold's note is
+	// the one said. Every other verb answers only to the actuation latch, and only when it moves
+	// the session's server (actuationBlocked): one actuation at a time (ADR 0029 D5), the same
+	// serialization the facade demands of its caller, because there is nothing stable to switch
+	// while the server is mid-restart. Everything else stays live.
+	if parsed.opensExchange() {
+		if note, refused := m.exchangeRefusal(); refused {
+			m.transcript.addNote(note)
+			return m, nil
+		}
+	} else if m.actuation.inFlight && actuationBlocked(parsed.command) {
 		m.transcript.addNote(m.actuationBlockNote())
 		return m, nil
 	}
 
-	// /continue and /compact are the two commands that open an Exchange, so they answer to the
-	// heartbeat exactly as a typed message does (blockedUpstream). Which verbs those are is the
-	// table's own commandSpec.opensExchange, not a name list here: the purely local verbs —
+	// /continue and /compact answer to the heartbeat exactly as a typed message does
+	// (blockedUpstream). Which verbs those are is the table's own commandSpec.opensExchange, not a
+	// name list here: the purely local verbs —
 	// /clear, /sessions, /version, /confine, /server — stay live while the server is away (moving to
 	// another server is the one useful thing to do with an unreachable one); /model consults the
 	// heartbeat itself, because "which models are served" is a question only a reachable server can
@@ -485,8 +497,11 @@ func actuationVerb(verb string) commandRun {
 
 // runContinue drives /continue: the canned "Please continue" turn, or — on a session restored
 // mid-task — the resumption of the Exchange that was left open. It opens an Exchange, so it rides a
-// worker and answers to the heartbeat and the actuation latch like a typed message (runCommand's
-// gates, read off commandSpec.opensExchange).
+// worker and answers to the refusing holds and the heartbeat like a typed message (runCommand's
+// gates, read off commandSpec.opensExchange): it is never reached while a session load, a /bg
+// launch, a git action or a launcher verb holds the engine (exchangeRefusal) — and under a /bg
+// launch or a git action, which take the Agent, it is queued before runCommand at all
+// (commandRunnable).
 //
 // InExchange is only ever true right after an interrupted resume — the TUI aborts on every live
 // cancel — and then the verb resumes the OPEN Exchange rather than opening a new one: Step-only from
@@ -498,15 +513,7 @@ func actuationVerb(verb string) commandRun {
 // left standing in the box is still a DRAFT — it carries its own tokens when it is eventually sent,
 // and nothing is silently borrowed from it here. The order is the typed prompt's: follow-the-tail
 // re-armed, then the user block, then the launch.
-//
-// A session load in flight refuses it with the load's note (loadHoldNote): the record is still being
-// read off the loop, and the worker this verb starts would drive the Agent beside that restore. A
-// /bg launch never reaches here — /continue is idle-only and waits for it in the queue.
 func (m Model) runContinue() (tea.Model, tea.Cmd) {
-	if note, held := m.loadHoldNote(); held {
-		m.transcript.addNote(note)
-		return m, nil
-	}
 	m.takeContextEstimate() // on this goroutine, before either worker below owns the engine
 	if m.eng.InExchange() {
 		box := newInterjectBox() // a resumed Exchange is a running one; it takes interjections too
@@ -534,13 +541,9 @@ func (m Model) runContinue() (tea.Model, tea.Cmd) {
 // derived from stateRunning at paint, says "queue" here as well; and compaction emits no Events
 // until it lands, so the phrase the verb sets is the one that stands until then.
 //
-// A session load in flight refuses it exactly as it refuses /continue (loadHoldNote): no worker
-// starts while the restore is still to come.
+// Like /continue it opens no worker under a refusing hold: runCommand asks exchangeRefusal before
+// it gets here.
 func (m Model) runCompact() (tea.Model, tea.Cmd) {
-	if note, held := m.loadHoldNote(); held {
-		m.transcript.addNote(note)
-		return m, nil
-	}
 	cmd, cancel := startCompact(m.parent, m.eng)
 	batch := m.enterRunning(cmd, cancel, nil, actCompacting)
 	return m, batch
@@ -622,8 +625,8 @@ type bgStartedMsg struct {
 // launch is latched until its answer folds (holdBgLaunch, released by foldBgStarted) the way a
 // /sessions load is: while the Cmd reads the Agent, a heartbeat's rebind is stashed, a wake is held
 // and every idle-only command — a second /bg among them — is queued, so no idle-only mutator runs
-// against the launch-time snapshot; a typed message is refused with the launch's note (loadHoldNote),
-// so no Exchange opens while the launch reads the Agent either.
+// against the launch-time snapshot; every Exchange opener refuses or waits with the launch's note
+// (exchangeRefusal), so no Exchange opens while the launch reads the Agent either.
 func (m Model) runBg(rest string) (tea.Model, tea.Cmd) {
 	token, text := cutToken(rest)
 	id, named := strings.CutPrefix(token, "/")
@@ -648,8 +651,8 @@ func (m Model) runBg(rest string) (tea.Model, tea.Cmd) {
 // exactly as the engine worded it. It releases the launch latch first, and — the engine being the
 // loop's again — binds a rebind a beat stashed meanwhile (releaseEngine, unless a worker or an
 // actuation still holds the engine) and runs the commands queued behind the launch, in order. No
-// worker can have started meanwhile — a typed message is refused while the launch holds the engine
-// (submit, loadHoldNote) — though releaseEngine and the drain still defer to one (finishWorker). A
+// worker can have started meanwhile — every Exchange opener refuses or waits while the launch holds
+// the engine (exchangeRefusal) — though releaseEngine and the drain still defer to one (finishWorker). A
 // held wake is tried by the Update tail (wakeAfterFold).
 func (m Model) foldBgStarted(msg bgStartedMsg) (tea.Model, tea.Cmd) {
 	m.holds.release(holdBgLaunch)

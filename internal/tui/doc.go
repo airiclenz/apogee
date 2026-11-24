@@ -642,11 +642,16 @@
 // HUMAN opens an Exchange with — a message, /continue, /compact — are refused with a note while
 // there is nothing to send to, and the typed message STAYS IN THE BOX (a held interjection queue
 // stays held for the same reason), while scrollback, /clear, /sessions, /version, /confine and
-// Shift+Tab all stay live. The interjection auto-flush (ADR 0025) is a FOURTH opener and is
-// deliberately ungated: it runs inside a natural completion's own fold, where foldBeat's own rule —
-// a failed beat during an in-flight Exchange is ignored — means the offline state cannot have moved
-// since the Exchange that just completed was allowed to start. An unwired seam arms no chain, folds
-// nothing and blocks nothing, which is exactly the pre-heartbeat renderer.
+// Shift+Tab all stay live. Each of them asks the refusing holds first ([Model.exchangeRefusal]), so
+// when a hold and an absent server coincide the hold's note is the one said. The interjection
+// auto-flush (ADR 0025) is a FOURTH opener, and its first try is ungated here: it runs inside a
+// natural completion's own fold, where foldBeat's own rule — a failed beat during an in-flight
+// Exchange is ignored — means the offline state cannot have moved since the Exchange that just
+// completed was allowed to start. Its retry, after a refusing hold turned it away, is gated
+// ([flushAfterFold], adr-0029-amend-1123): by then a launcher verb may have stopped the server, so
+// the retry waits for a beat folded since the latch's release and for blockedUpstream to clear. An
+// unwired seam arms no chain, folds nothing and blocks nothing, which is exactly the pre-heartbeat
+// renderer.
 //
 // The footer's git state is the package's THIRD tick chain, on the heartbeat's shape. [GitStatusHost]
 // is the seam the binary backs with its hardened git runner — this package imports internal/gitstatus
@@ -1000,8 +1005,12 @@
 // which overlap rather than exclude one another, the snapshot [Model.engineHolds] takes of it with
 // the non-hold facts the gates also read, and the named questions asked of that snapshot
 // (commandRunnable, canRunDeferred, canRebind, beatMayCount, canEditConfigExternally, canLaunchBg,
-// quiescent, canResumeWorkflows, canWake, canStartMCPDials, canSwapTools), and [Model.releaseEngine], the one release transition
-// every fold that hands the engine back runs; heartbeat.go the fourth cluster lifted out of
+// quiescent, canResumeWorkflows, canWake, canStartMCPDials, canSwapTools, and the one Exchange hold
+// question — refusingExchange over holdsRefusingExchange, with mayOpenExchange, canOpenWake and
+// canRetryFlush — that all six Exchange openers ask at the head of their ladders: the typed message
+// and the held-queue ⏎, /continue, /compact and the completion flush through
+// [Model.exchangeRefusal], the wake through canOpenWake), and [Model.releaseEngine], the one release
+// transition every fold that hands the engine back runs; heartbeat.go the fourth cluster lifted out of
 // model.go beside them (ADR 0043) — the upstream heartbeat end to end (ADR 0024): the
 // [heartbeatState] the footer and the send gate read, the tick chain that keeps it current
 // ([Model.beatCmd], [Model.armBeat], [Model.beatTick]), the folds a beat, a failure or a

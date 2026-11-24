@@ -117,7 +117,8 @@ type parsedInput struct {
 //     where the flag is read).
 //
 //   - opensExchange — running this verb opens an Exchange with the model, so it answers to the
-//     heartbeat exactly as a typed message does: /continue and /compact are refused with
+//     refusing holds (exchangeRefusal) and the heartbeat exactly as a typed message does: /continue
+//     and /compact are refused with the hold's note while a refusing hold stands, and with
 //     upstreamBlockNote while there is nothing to send to (parsedInput.opensExchange is where the
 //     flag is read). Every other verb is purely local and stays live while the server is away —
 //     switching to another server is the one useful thing to do with an unreachable one — and
@@ -127,10 +128,11 @@ type parsedInput struct {
 //   - touchesServer — the verb switches the session's server or actuates it, so the actuation latch
 //     refuses it while a launcher verb is in flight: the server is mid-restart, and there is nothing
 //     stable to switch (actuationBlocked, ADR 0029 D5). /bg carries it too: its launch reads the
-//     Agent off the loop (holdBgLaunch), which a completing load's move would re-point beside it. The
-//     latch refuses the opensExchange pair for the neighbouring reason — there is nothing to send
-//     to — so it reads the two flags together rather than keeping a verb list of its own, and a
-//     future verb that opens an Exchange is latched by declaring that one flag.
+//     Agent off the loop (holdBgLaunch), which a completing load's move would re-point beside it.
+//     The opensExchange pair is refused under the latch for the neighbouring reason — there is
+//     nothing to send to — but through the one hold question every Exchange opener asks
+//     (exchangeRefusal), so a future verb that opens an Exchange waits out the latch, and every
+//     other refusing hold, by declaring opensExchange alone.
 //
 //   - gatedByEffort — the verb is only worth offering when the bound model has a thinking-effort
 //     dial, so the dropdown DROPS its row when detection says there is none (ADR 0060 D5). /effort
@@ -537,9 +539,9 @@ func (p parsedInput) safeWhileRunning() bool {
 }
 
 // opensExchange reports whether driving this parsed command LINE would open an Exchange with the
-// model. It is the one place commandSpec.opensExchange is read on the send path — the heartbeat's
-// gate in runCommand — so /continue and /compact answer to an unreachable server exactly as a typed
-// message does. A verb the table does not carry opens nothing, for the same reason a missing spec
+// model. It is the one place commandSpec.opensExchange is read on the send path — runCommand's hold
+// gate (exchangeRefusal) and its heartbeat gate — so /continue and /compact answer to a refusing hold
+// and to an unreachable server exactly as a typed message does. A verb the table does not carry opens nothing, for the same reason a missing spec
 // reads not-safe-while-running: the table is the authority.
 func (p parsedInput) opensExchange() bool {
 	spec, ok := commandByName(p.command)
