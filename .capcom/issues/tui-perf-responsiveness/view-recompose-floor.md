@@ -1,11 +1,13 @@
 ---
 title: Every frame pays about 2.2 ms of View composition with nothing changed
-status: open
+status: done
 type: task
 priority: 3
 labels: [perf, tui]
 plan: 2026-11-23 - 08 - tui-perf-repaint-plan.md
 created: 2026-11-23T19:29:39Z
+closed: 2026-11-24T07:01:47Z
+reason: "Resolved by tui-perf-repaint-plan (2026-11-23 - 08), archived at ff4144896, item 4: View measures each visible row once; View-alone ~1.39 ms / ~150 KB per frame."
 ---
 
 ## Problem

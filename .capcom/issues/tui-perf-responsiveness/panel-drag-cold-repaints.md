@@ -1,11 +1,13 @@
 ---
 title: Dragging the side-panel separator cold-repaints the transcript per column
-status: open
+status: done
 type: task
 priority: 2
 labels: [perf, tui, slow-box]
 plan: 2026-11-23 - 08 - tui-perf-repaint-plan.md
 created: 2026-11-23T19:29:39Z
+closed: 2026-11-24T07:01:48Z
+reason: "Resolved by tui-perf-repaint-plan (2026-11-23 - 08), archived at ff4144896, item 8: queued separator motions coalesce to one cold repaint per settled burst (adr-0110-amend-1123)."
 ---
 
 ## Problem

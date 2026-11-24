@@ -1,11 +1,13 @@
 ---
 title: Every keystroke repaints the whole transcript
-status: open
+status: done
 type: task
 priority: 2
 labels: [perf, tui, slow-box]
 plan: 2026-11-23 - 08 - tui-perf-repaint-plan.md
 created: 2026-11-23T19:29:39Z
+closed: 2026-11-24T07:01:47Z
+reason: "Resolved by tui-perf-repaint-plan (2026-11-23 - 08), archived at ff4144896, item 2: a draft edit no longer repaints the transcript; per-key benchmark flat in N (N=300 14.76 -> 2.29 ms)."
 ---
 
 ## Problem

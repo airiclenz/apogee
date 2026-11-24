@@ -1,11 +1,13 @@
 ---
 title: The transcript viewport re-measures every scrollback line on every repaint
-status: open
+status: done
 type: task
 priority: 2
 labels: [perf, tui]
 plan: 2026-11-23 - 08 - tui-perf-repaint-plan.md
 created: 2026-11-23T19:29:39Z
+closed: 2026-11-24T07:01:47Z
+reason: "Resolved by tui-perf-repaint-plan (2026-11-23 - 08), archived at ff4144896, item 3: viewport gets placeholder lines, body composed from m.lines; N=900 repaint 38.57 -> 8.09 ms, golden frames byte-identical."
 ---
 
 ## Problem

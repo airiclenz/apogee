@@ -1,10 +1,12 @@
 ---
 title: TUI performance and responsiveness — review and refactor
-status: open
+status: done
 type: task
 priority: 3
 plan: 2026-11-23 - 08 - tui-perf-repaint-plan.md
 created: 2026-11-22T16:52:23Z
+closed: 2026-11-24T07:01:48Z
+reason: "Resolved by tui-perf-repaint-plan (2026-11-23 - 08), archived at ff4144896, item 9: before/after recorded in docs/reviews/tui-perf-audit-2026-11-23-results.md; all 13 children closed (plans 07 + 08); unfiled leftovers listed there under What stays open."
 ---
 
 ## Problem

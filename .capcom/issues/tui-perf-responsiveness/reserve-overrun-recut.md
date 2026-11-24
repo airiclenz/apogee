@@ -1,11 +1,13 @@
 ---
 title: One overrunning scrollback line puts every repaint on the slow reserve path
-status: open
+status: done
 type: task
 priority: 4
 labels: [perf, tui]
 plan: 2026-11-23 - 08 - tui-perf-repaint-plan.md
 created: 2026-11-23T19:29:39Z
+closed: 2026-11-24T07:01:47Z
+reason: "Resolved by tui-perf-repaint-plan (2026-11-23 - 08), archived at ff4144896, item 5: overrunning lines split when a block's paint is stored; AllHit ~246 -> ~121 us, matching the no-overrun twin."
 ---
 
 ## Problem

@@ -1,11 +1,13 @@
 ---
 title: Every streamed delta repaints the whole transcript
-status: open
+status: done
 type: task
 priority: 2
 labels: [perf, tui, slow-box]
 plan: 2026-11-23 - 08 - tui-perf-repaint-plan.md
 created: 2026-11-23T19:29:39Z
+closed: 2026-11-24T07:01:47Z
+reason: "Resolved by tui-perf-repaint-plan (2026-11-23 - 08), archived at ff4144896, item 6: a streamed batch re-renders only the preview tail; session=300 5.16 -> 2.64 ms/delta (session=0 2.46)."
 ---
 
 ## Problem
