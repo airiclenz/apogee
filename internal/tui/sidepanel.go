@@ -1283,7 +1283,24 @@ type panelDrag struct {
 	// that never moved keeps it, so a second press within [panelDoubleClick] reads as a
 	// double-click; every other end zeroes it.
 	pressedAt time.Time
+	// target is the clamped width the latest motion landed, not yet applied: the settle
+	// ([panelDragSettleMsg]) or the release applies it, so a burst of queued motions costs one
+	// relayout at the latest width (adr-0110-amend-1123). Read only while settling is true.
+	target int
+	// settling is true while a [panelDragSettleMsg] is in flight for this drag: a motion then only
+	// moves target, and schedules no second settle.
+	settling bool
 }
+
+// panelDragSettleMsg applies a separator drag's latest target width ([panelDrag].target), so the
+// repaint tail relayouts the frame once for every motion queued ahead of it (adr-0110-amend-1123).
+// It is inert unless the drag it was scheduled for is still active with a target pending: it can
+// land after the release applied the target, or after a resize abandoned the drag.
+type panelDragSettleMsg struct{}
+
+// settlePanelDrag is the Cmd a separator drag's first unsettled motion returns. It sends its Msg
+// at once: the motions already queued fold before it, and the latest of them is what it applies.
+func settlePanelDrag() tea.Msg { return panelDragSettleMsg{} }
 
 // panelDoubleClick is the longest gap between two presses on the grip that reads as a double-click
 // (adr-0110-amend-1108 (b)).
@@ -1322,30 +1339,59 @@ func (m Model) startPanelDrag(grab int, at time.Time) Model {
 }
 
 // dragPanelSeparator moves the separator of an active drag to the pointer's column x less the grab
-// offset, clamped as a set width ([Model.clampPanelWidth]) — a drag sets the width it lands. It
-// changes the stored width only when the clamped width differs from the one painted, so a pointer
-// held past a limit leaves a stored width the window clamps untouched; the repaint tail relayouts
-// the frame for the one motion that moved it ([Model.panelDragResized]).
-func (m Model) dragPanelSeparator(x int) Model {
+// offset, clamped as a set width ([Model.clampPanelWidth]) — a drag sets the width it lands. The
+// width is recorded as the drag's target, not applied: the first motion that moves it off the
+// width standing schedules one [panelDragSettleMsg], and every motion folded before that Msg lands
+// only moves the target, so a burst of queued motions costs one relayout at the latest width
+// (adr-0110-amend-1123). A motion is never a repaint itself ([settleFrame]); a pointer held past a
+// limit moves no target, so a stored width the window clamps stays untouched.
+func (m Model) dragPanelSeparator(x int) (Model, tea.Cmd) {
 	width := m.clampPanelWidth(m.width-(x-m.panelDrag.grabOffset), true)
-	if width != m.panelWidth() {
-		m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(width)
-		m.panelDrag.moved = true
+	if m.panelDrag.settling {
+		if width != m.panelDrag.target {
+			m.panelDrag.target = width
+			m.panelDrag.moved = true
+		}
+		return m, nil
 	}
+	if width == m.panelWidth() {
+		return m, nil
+	}
+	m.panelDrag.target, m.panelDrag.settling, m.panelDrag.moved = width, true, true
+	return m, settlePanelDrag
+}
+
+// foldPanelDragSettle applies the target of the drag a [panelDragSettleMsg] was scheduled for, and
+// Update's repaint tail lays the frame out at it; the Msg is inert once the drag ended or its target
+// was applied.
+func (m Model) foldPanelDragSettle() Model {
+	if !m.panelDrag.active || !m.panelDrag.settling {
+		return m
+	}
+	return m.applyPanelDragTarget()
+}
+
+// applyPanelDragTarget applies an active drag's pending target and clears it. It changes the stored
+// width only when the target differs from the one painted, so a drag that came back to a clamped
+// stored width leaves it as it stood.
+func (m Model) applyPanelDragTarget() Model {
+	if !m.panelDrag.settling {
+		return m
+	}
+	if m.panelDrag.target != m.panelWidth() {
+		m.opts.UI.SidePanelWidth = domain.StatedSidePanelWidth(m.panelDrag.target)
+	}
+	m.panelDrag.target, m.panelDrag.settling = 0, false
 	return m
 }
 
-// panelDragResized reports whether an active separator drag has moved the painted width off the one
-// the frame was last laid out at — the one mouse motion [settleFrame] settles (adr-0110-amend-1108 (e)).
-func (m Model) panelDragResized() bool {
-	return m.panelDrag.active && m.painted.sidePanelWidth != m.panelWidth()
-}
-
-// endPanelDrag ends an active separator drag on the release: a painted width that differs from the
-// press's is written as `ui.side-panel.width` ([Model.setPanelWidth]), once; one that does not puts
-// the press-time stored width back and writes nothing. A drag that never moved the separator keeps
-// its press time, the first half of a double-click ([Model.panelDoubleClicked]).
+// endPanelDrag ends an active separator drag on the release, applying any target a settle has not
+// yet ([Model.applyPanelDragTarget]): a painted width that differs from the press's is written as
+// `ui.side-panel.width` ([Model.setPanelWidth]), once; one that does not puts the press-time stored
+// width back and writes nothing. A drag that never moved the separator keeps its press time, the
+// first half of a double-click ([Model.panelDoubleClicked]).
 func (m Model) endPanelDrag() Model {
+	m = m.applyPanelDragTarget()
 	drag := m.panelDrag
 	m.panelDrag = panelDrag{}
 	if !drag.moved {

@@ -619,8 +619,9 @@ func (m Model) footerGitHit(pre Model, x, y int) bool {
 // the drag never finishes. With nothing armed it is the hover it reads as.
 //
 // A held-button motion while a separator drag is active ([panelDrag], sidepanel.go) belongs to that
-// drag before any selection: it moves the separator, and it is the one motion the repaint tail lays
-// the frame out for ([settleFrame], adr-0110-amend-1108 (e)).
+// drag before any selection: it moves the drag's target width, and the first that moves it returns
+// the Cmd whose [panelDragSettleMsg] lays the frame out at the latest target — the motion itself is
+// never repainted on ([settleFrame], adr-0110-amend-1123).
 func (m Model) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
 	if msg.Button == tea.MouseNone && m.mousePressed {
 		return m.handleMouseRelease(tea.MouseReleaseMsg{X: msg.X, Y: msg.Y, Button: tea.MouseLeft, Mod: msg.Mod})
@@ -632,7 +633,8 @@ func (m Model) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.panelDrag.active {
-		return m.dragPanelSeparator(msg.X), nil
+		next, cmd := m.dragPanelSeparator(msg.X)
+		return next, cmd
 	}
 	if next, claimed := m.handleSettingsMotion(msg); claimed {
 		return next, nil

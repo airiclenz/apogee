@@ -3087,9 +3087,21 @@ const separatorRow = 2
 // draggedPanelWidth is the default-width panel after its separator is dragged 14 columns left.
 const draggedPanelWidth = domain.DefaultSidePanelWidth + 14
 
-// TestSidePanelSeparatorDrag pins the resize drag (adr-0110-amend-1108 (b), (c)): a press on the
-// separator or the cell right of it grabs it, each held-button motion re-wraps the frame live at
-// the clamped width, and the release writes `ui.side-panel.width` once — only when the painted width
+// settledDrag is one held-button motion of an active separator drag to column x on separatorRow,
+// followed by the settle Msg its Cmd sends — the pair a live drag folds once no further motion is
+// queued (adr-0110-amend-1123). The motion must move the separator: a nil Cmd fails the test.
+func settledDrag(t *testing.T, m Model, x int) Model {
+	t.Helper()
+	m, cmd := stepCmd(t, m, leftDrag(x, separatorRow))
+	if cmd == nil {
+		t.Fatalf("a drag motion to column %d scheduled no settle", x)
+	}
+	return step(t, m, cmd())
+}
+
+// TestSidePanelSeparatorDrag pins the resize drag (adr-0110-amend-1108 (b), (c); adr-0110-amend-1123):
+// a press on the separator or the cell right of it grabs it, each settled burst of held-button motions
+// re-wraps the frame live at the clamped width, and the release writes `ui.side-panel.width` once — only when the painted width
 // moved off the press's, so a drag that comes back where it began writes nothing and leaves a stored
 // width the window clamps as it stood.
 func TestSidePanelSeparatorDrag(t *testing.T) {
@@ -3100,9 +3112,9 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 		m, spy, sep := separatorDragModel(t, nil)
 
 		m = step(t, m, leftClick(sep, separatorRow))
-		m = step(t, m, leftDrag(sep-4, separatorRow))
+		m = settledDrag(t, m, sep-4)
 		live := m.viewport.Width()
-		m = step(t, m, leftDrag(sep-14, separatorRow))
+		m = settledDrag(t, m, sep-14)
 		m = step(t, m, leftRelease(sep-14, separatorRow))
 
 		if live != sep-4-scrollbarWidth {
@@ -3141,9 +3153,9 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 			m, spy, sep := separatorDragModelUnder(t, show, nil)
 
 			m = step(t, m, leftClick(sep, separatorRow))
-			m = step(t, m, leftDrag(0, separatorRow))
+			m = settledDrag(t, m, 0)
 			widest := m.panelWidth()
-			m = step(t, m, leftDrag(m.width-1, separatorRow))
+			m = settledDrag(t, m, m.width-1)
 			m = step(t, m, leftRelease(m.width-1, separatorRow))
 
 			if widthCap := m.width - sidePanelTranscriptLeast - scrollbarWidth; widest != widthCap {
@@ -3228,6 +3240,36 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 		}
 	})
 
+	t.Run("a settle that lands after the release or an abandon is inert", func(t *testing.T) {
+		t.Parallel()
+		m, spy, sep := separatorDragModel(t, nil)
+
+		m = step(t, m, leftClick(sep, separatorRow))
+		m, late := stepCmd(t, m, leftDrag(sep-14, separatorRow))
+		m = step(t, m, leftRelease(sep-14, separatorRow))
+		m = step(t, m, late())
+
+		if m.panelWidth() != draggedPanelWidth || m.panelDrag.active {
+			t.Errorf("panel %d, drag %+v; want the release's %d standing and no drag", m.panelWidth(), m.panelDrag, draggedPanelWidth)
+		}
+		if want := []string{domain.UIKeySidePanelWidth + "=" + strconv.Itoa(draggedPanelWidth)}; !slices.Equal(spy.writes, want) {
+			t.Errorf("writes %v, want %v — the release applied the target once", spy.writes, want)
+		}
+
+		abandoned, _, sep := separatorDragModel(t, nil)
+		stored := abandoned.opts.UI.SidePanelWidth
+		abandoned = step(t, abandoned, leftClick(sep, separatorRow))
+		abandoned, late = stepCmd(t, abandoned, leftDrag(sep-14, separatorRow))
+		abandoned = step(t, abandoned, tea.WindowSizeMsg{Width: 120, Height: 30})
+		abandoned = step(t, abandoned, late())
+		abandoned = step(t, abandoned, tea.WindowSizeMsg{Width: 200, Height: 30})
+
+		if abandoned.opts.UI.SidePanelWidth != stored || abandoned.panelWidth() != domain.DefaultSidePanelWidth {
+			t.Errorf("stored %+v, panel %d; want the press-time %+v and the default width back",
+				abandoned.opts.UI.SidePanelWidth, abandoned.panelWidth(), stored)
+		}
+	})
+
 	t.Run("a resize that hides the column abandons the drag", func(t *testing.T) {
 		t.Parallel()
 		m, spy, sep := separatorDragModel(t, nil)
@@ -3299,6 +3341,59 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 			t.Errorf("at rest the column opens %q, want the scroll track's stroke %q", opening, track)
 		}
 	})
+}
+
+// TestDragBurstCostsOneColdRepaint pins the drag's coalescing (adr-0110-amend-1123): a burst of
+// queued separator motions repaints nothing while it folds, schedules one settle, and that settle
+// costs the paint-cache misses of one cold repaint at the latest width — the same as a single
+// motion straight there — never one repaint per motion.
+func TestDragBurstCostsOneColdRepaint(t *testing.T) {
+	t.Parallel()
+	const bursts = 12
+	pressed := func(t *testing.T) (Model, int) {
+		t.Helper()
+		m, _, sep := separatorDragModel(t, nil)
+		for i := range 20 {
+			m.transcript.addNote(fmt.Sprintf("note %d, long enough to wrap differently at every width the drag moves through", i))
+		}
+		return step(t, m, leftClick(sep, separatorRow)), sep
+	}
+
+	m, sep := pressed(t)
+	lines, misses := m.lines, m.transcript.paints.misses
+	var cmds []tea.Cmd
+	for i := 1; i <= bursts; i++ {
+		var cmd tea.Cmd
+		m, cmd = stepCmd(t, m, leftDrag(sep-i, separatorRow))
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+
+	if len(cmds) != 1 {
+		t.Fatalf("%d motions scheduled %d settles, want 1", bursts, len(cmds))
+	}
+	if !sameLines(m.lines, lines) || m.transcript.paints.misses != misses {
+		t.Errorf("the burst repainted before its settle: misses %d → %d", misses, m.transcript.paints.misses)
+	}
+	m = step(t, m, cmds[0]())
+	burstMisses := m.transcript.paints.misses - misses
+
+	ref, refSep := pressed(t)
+	refMisses := ref.transcript.paints.misses
+	ref = settledDrag(t, ref, refSep-bursts)
+	oneMisses := ref.transcript.paints.misses - refMisses
+
+	if oneMisses == 0 {
+		t.Fatal("premise: a single settled motion took no paint-cache miss — the repaint was never cold")
+	}
+	if burstMisses != oneMisses {
+		t.Errorf("a burst of %d motions took %d misses to settle, want %d — one cold repaint", bursts, burstMisses, oneMisses)
+	}
+	if m.viewport.Width() != sep-bursts-scrollbarWidth {
+		t.Errorf("viewport width %d after the settle, want the latest motion's %d", m.viewport.Width(), sep-bursts-scrollbarWidth)
+	}
+	assertPaintFresh(t, m, "after the burst's settle")
 }
 
 // TestSidePanelSeparatorDragResizesWhileWatching pins the grip live while watching another session:

@@ -1813,6 +1813,11 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// unless the release, or the pointer coming back inside, has retired this loop since.
 		return m.foldDragScrollTick(msg)
 
+	case panelDragSettleMsg:
+		// A separator drag's latest target width is applied, and the repaint tail lays the frame out
+		// at it once for every motion queued ahead (sidepanel.go) — unless the drag has ended since.
+		return m.foldPanelDragSettle(), nil
+
 	default:
 		// Every other Bubble Tea Msg belongs to a widget: route it to the focused input, which is
 		// the /settings field while the pane has one open (prompteditor.go).
@@ -3186,9 +3191,10 @@ func (m *Model) freshenTranscriptClamp() {
 // selection's head or, hovering, the pointer shape last written, and nothing else; View overlays the
 // shade, and a key miss that motion happens to be the first Update after waits for the next Msg
 // rather than repainting the scrollback at the mouse's sampling rate (TestMouseMotionNeverRepaints).
-// The exemption's one exception is a held-button motion that moved an active side-panel separator
-// drag's width ([Model.panelDragResized], adr-0110-amend-1108 (e)): the panel and the transcript
-// re-wrap live on every column the separator moves (TestMouseMotionRepaintsADraggedSeparator).
+// A side-panel separator drag takes no exception: its motions move a target width, and the
+// [panelDragSettleMsg] the first of them schedules applies the latest, so the panel and the
+// transcript re-wrap live once per settled burst of motions (adr-0110-amend-1123,
+// TestMouseMotionRepaintsADraggedSeparator).
 //
 // Before either question it refreshes the footer's delegate-spend memo where the transcript's
 // generation has moved ([Model.freshenDelegateSpend]), so View reads the sum without walking the
@@ -3208,14 +3214,14 @@ func (m *Model) settle() {
 // settleFrame is [Model.settle] as Update's deferred rewrite of its return value sees it, the shape
 // reportActivity takes (schedule.go): anything that is not a Model is handed straight back, and so is
 // a Model after a tea.MouseMotionMsg — the one Msg the tail never repaints on (ratified, plan
-// "2026-09-16 - 00" item 18), save the motion that moved an active separator drag's width, which
-// that rule's one exception narrows it by (adr-0110-amend-1108 (e), [Model.panelDragResized]).
+// "2026-09-16 - 00" item 18). A separator drag's motions are no exception: the drag repaints on its
+// own [panelDragSettleMsg] (adr-0110-amend-1123).
 func settleFrame(msg tea.Msg, next tea.Model) tea.Model {
 	m, ok := next.(Model)
 	if !ok {
 		return next
 	}
-	if _, motion := msg.(tea.MouseMotionMsg); motion && !m.panelDragResized() {
+	if _, motion := msg.(tea.MouseMotionMsg); motion {
 		return next
 	}
 	m.settle()

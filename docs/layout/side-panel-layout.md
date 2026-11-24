@@ -98,7 +98,8 @@ the clamp: once the column has docked, a width the user set may narrow the trans
 - With no section to show, the column stays and paints one dim line, `nothing live`, on its second
   row, below the blank top row ("Rows and spacing").
 - Crossing a threshold re-wraps the transcript once, like any deliberate width change. A separator
-  drag re-wraps the panel and the transcript live, on every column the separator moves.
+  drag re-wraps the panel and the transcript live, once per burst of queued motions, at the
+  latest motion's width.
 
 ### Below the threshold: the overlay
 
@@ -299,7 +300,8 @@ When the shown sections need more rows than the slot has below the column's blan
   any row above the session-name rule — starts a resize drag. The grip is those two columns however
   the gutter yields, so a press on a header's pin glyph is never one. The separator keeps its grab offset
   from the pointer and moves with it, clamped to the limits under "Where it sits"; the panel and the
-  transcript re-wrap on every column it moves, and the separator is drawn in the accent tone, bold,
+  transcript re-wrap live at the latest width once the queued motions are folded (the widths a
+  burst passed through are never drawn), and the separator is drawn in the accent tone, bold,
   while the drag holds it. The release writes `ui.side-panel.width` to the global config once, and
   only when the width differs from the one at the press; a failed save keeps the width for the
   session and says `not saved`. A window narrowed until the column hides ends the drag with no write.

@@ -236,7 +236,13 @@ The returned count equals `th.measure.Width(row)`: lipgloss expands a tab to 4 c
 - `go test -run '^$' -bench 'PerfAuditBlocks/resize' -benchmem ./internal/tui/` (record before/after)
 **Commit:** `perf(tui): paint bare-colour spans without the lipgloss block pipeline`
 
-## 8. Coalesce side-panel separator drag repaints
+## 8. Coalesce side-panel separator drag repaints — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): consequential edit — internal/tui/watch.go: made necessary by the new panelDragSettleMsg fold case (watchRouteOf must name every folded Msg, TestWatchIsolatesRoutesEveryFoldedMsg); routed as a view Msg like dragScrollTickMsg, so the drag still works while watching
+
+NOTES (2026-11-24): consequential edit — .capcom/knowledge/decisions/adr-0110/adr-0110-amend-1108.md: made necessary by adr-0110-amend-1123 superseding (b)'s "every column" and (e)'s motion exception (dated blockquotes under each)
+
+NOTES (2026-11-24): Model.panelDragResized is removed (its one caller, settleFrame's motion exception, is gone); the pending target lives on panelDrag (target, settling) and the release applies it via applyPanelDragTarget before the write; added a "settle that lands after the release or an abandon is inert" subtest to TestSidePanelSeparatorDrag beyond the plan's named tests
 
 **What:**
 **Goal:** a burst of K queued separator motions costs one cold repaint at the latest width; the separator still re-wraps while dragged; the drag's final width persists; `adr-0110` records the narrowed rule.

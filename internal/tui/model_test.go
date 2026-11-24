@@ -7611,10 +7611,11 @@ func TestMouseMotionNeverRepaints(t *testing.T) {
 	assertPaintFresh(t, m, "after the first non-motion Msg")
 }
 
-// TestMouseMotionRepaintsADraggedSeparator is the one exception to TestMouseMotionNeverRepaints
-// (adr-0110-amend-1108 (e)): a held-button motion that moves an active side-panel separator drag's
-// width settles, so the transcript re-wraps on every column the separator moves — and a motion of
-// the same drag that moves no width still repaints nothing, even over a key miss.
+// TestMouseMotionRepaintsADraggedSeparator pins how a side-panel separator drag keeps
+// TestMouseMotionNeverRepaints (adr-0110-amend-1123): a held-button motion that moves an active
+// drag's width repaints nothing itself but returns the settle Cmd, and its Msg lays the frame out at
+// the moved width, so the transcript re-wraps live — while a motion of the same drag that moves no
+// width returns no Cmd and still repaints nothing, even over a key miss.
 func TestMouseMotionRepaintsADraggedSeparator(t *testing.T) {
 	t.Parallel()
 	m, _, sep := separatorDragModel(t, nil)
@@ -7622,21 +7623,32 @@ func TestMouseMotionRepaintsADraggedSeparator(t *testing.T) {
 	m.transcript.addNote("a key miss a width-less motion must not settle")
 	lines := m.lines
 
-	still := step(t, m, leftDrag(sep, separatorRow))
+	still, cmd := stepCmd(t, m, leftDrag(sep, separatorRow))
 
+	if cmd != nil {
+		t.Error("a drag motion that moved no width scheduled a settle")
+	}
 	if !sameLines(still.lines, lines) {
 		t.Error("a drag motion that moved no width repainted the transcript")
 	}
 
-	moved := step(t, still, leftDrag(sep-6, separatorRow))
+	moved, cmd := stepCmd(t, still, leftDrag(sep-6, separatorRow))
 
-	if sameLines(moved.lines, lines) {
-		t.Error("a drag motion that moved the separator did not repaint")
+	if !sameLines(moved.lines, lines) {
+		t.Error("a drag motion repainted the transcript itself — the settle Msg is the drag's one repaint")
 	}
-	if moved.viewport.Width() != sep-6-scrollbarWidth {
-		t.Errorf("viewport width %d after the motion, want %d", moved.viewport.Width(), sep-6-scrollbarWidth)
+	if cmd == nil {
+		t.Fatal("a drag motion that moved the separator scheduled no settle")
 	}
-	assertPaintFresh(t, moved, "after a drag motion that moved the separator")
+	settled := step(t, moved, cmd())
+
+	if sameLines(settled.lines, lines) {
+		t.Error("the settle Msg after a drag motion that moved the separator did not repaint")
+	}
+	if settled.viewport.Width() != sep-6-scrollbarWidth {
+		t.Errorf("viewport width %d after the settle, want %d", settled.viewport.Width(), sep-6-scrollbarWidth)
+	}
+	assertPaintFresh(t, settled, "after the settle of a drag motion that moved the separator")
 }
 
 // TestSettleWaitsForTheFirstWindowSize is the tail's other exemption: it is a no-op until a

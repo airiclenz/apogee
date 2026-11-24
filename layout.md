@@ -3349,7 +3349,7 @@ when the window crosses a threshold or the user changes `ui.side-panel.show`, an
 only on a deliberate act of the user's — a separator drag, a double-click, `/panel width` or a
 `/settings` edit — or, within that clamp, on a terminal resize**. Nothing a section shows or hides
 moves it, so live content never re-wraps the transcript, the same promise the scroll bar keeps. A
-separator drag re-wraps the transcript live, on every column moved: the one mouse motion that
-repaints the frame. While it shows, the transcript slot and every
+separator drag re-wraps the transcript live, once per burst of queued motions at the latest
+width, on a settle of its own: no mouse motion repaints the frame. While it shows, the transcript slot and every
 pane painted in it are the slot's width, and the top rule, status line, prompt box and footer keep
 the window's.
