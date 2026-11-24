@@ -303,7 +303,15 @@ NOTES (2026-11-24): consequential edit — .capcom/knowledge/decisions/adr-0093.
 **Closes:** session-seat-copies
 **Commit:** `refactor(tui): derive a resumed session's currency label by one rule in the seat`
 
-## 12. Flush and wake wait out every refusing hold
+## 12. Flush and wake wait out every refusing hold — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): the "beat folded since the release" guard is `actuation.beatOwed`. `foldActuationDone` sets it only when the heartbeat is wired (`observesUpstream`), so a session with no monitor never waits for a beat that will not come. `foldBeatMsg` clears it on any live beat, and the snapshot carries it as `engineHolds.isBeatOwed`, which `canRetryFlush` and `canOpenWake` read.
+NOTES (2026-11-24): beyond the item text, `noteHeldQueue` also clears `flushPending`, so rows a stop or a fault holds are never retried at a later release, even if a hold had turned their flush away earlier.
+NOTES (2026-11-24): consequential edit — .capcom/knowledge/decisions/adr-0025/adr-0025-decision.md: made necessary by the flush retry; dated blockquote under D7's "a natural completion auto-sends what is left" pointing to adr-0029-amend-1123
+NOTES (2026-11-24): consequential edit — .capcom/knowledge/decisions/adr-0025/adr-0025-consequences.md: made necessary by the gated retry; dated blockquote under the "auto-flush ... deliberately not gated" bullet
+NOTES (2026-11-24): consequential edit — .capcom/knowledge/decisions/adr-0025.md: made necessary by the two blockquotes above; its Status line names adr-0029-amend-1123
+NOTES (2026-11-24): `loadHoldNote` stays for the human openers (item 13 removes it). Its doc comment, the hold-notes const comment and `Model.canWake`'s doc were reworded because the completion flush now asks `exchangeRefusal` and the wake asks `canOpenWake`. doc.go's heartbeat paragraph is left for item 13, as the plan says.
+NOTES (2026-11-24): edge case left open: with `/stop-server` or `/unload-model`, a beat sent before the release but folded after it also clears `beatOwed`, because the old beat chain keeps its generation and is not re-armed. The plan's rule is "a beat has folded since the release", and this follows it.
 
 **What:** Behaviour change by owner call (2026-11-23): neither the completion flush (ADR 0025 D7) nor the background-workflow wake (ADR 0089 D3) opens an Exchange while a refusing hold stands; both retry at its release. Today a queued idle-only `/model` drained at completion, the start-up restore, or a workflow ending during a load can open one into a restarting server.
 **Goal:** `engineHolds` answers one "refuse this Exchange?" question and both automatic openers ask it; a completion under a hold leaves rows staged with the hold's note and flushes at release; a pending wake fires at release; rows held by esc or a fault still wait for ⏎; ADR 0029 carries `adr-0029-amend-1123`.

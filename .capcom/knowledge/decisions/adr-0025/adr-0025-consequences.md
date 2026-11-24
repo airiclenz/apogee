@@ -102,6 +102,11 @@ title: ADR 0025 consequences
   in-flight Exchange is ignored) means the offline state cannot have moved since the Exchange that
   just completed was allowed to start. Recorded because it is an invariant, not a coincidence: if the
   offline debounce ever becomes able to cross mid-Exchange, the flush needs the guard.
+
+  > **Amended 2026-11-23 (`adr-0029-amend-1123`).** The first try at the completion is still not
+  > gated. A flush a refusing hold turned away is retried at a later fold, where the invariant no
+  > longer holds, so the retry waits for a beat after a launcher verb's release and asks
+  > `blockedUpstream`.
 - **Selection got its own answer, and it needed no ADR of its own.** ISSUES item 3 ("I cannot select
   text while the model is working") rode this plan: a transcript selection now survives a repaint by
   the **keep-if-unchanged** rule — it lives exactly while every rendered line it spans is identical

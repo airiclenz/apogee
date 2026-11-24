@@ -400,7 +400,12 @@ type Model struct {
 	//
 	// wakePending says a background workflow has ended since the last wake was tried: the Update
 	// tail asks the engine to wake on its finish note at the first idle fold with no idle-only
-	// operation in flight (wakeIfIdle), and clears it on that one try.
+	// operation in flight and no refusing hold standing (wakeIfIdle), and clears it on that one try.
+	//
+	// flushPending says a completion flush found a refusing hold standing (exchangeRefusal) and left
+	// the staged rows where they were under the hold's note: the Update tail retries the flush at
+	// the first fold the hold has released at (flushAfterFold), and clears it there or once nothing
+	// is staged any more. Rows held by a stop or a fault never set it — they wait for ⏎.
 	//
 	// promptPending says a background workflow's prompt may be waiting to be offered: a waiting
 	// phase folded, a background pane closed, or an Exchange ended with a dismissed prompt still
@@ -427,6 +432,7 @@ type Model struct {
 	// or /fork that restored a record, and honoured by the Update tail at the first fold that finds
 	// the engine bound, idle and on the restored session's scratch directory (resumeAfterFold).
 	wakePending   bool
+	flushPending  bool
 	promptPending bool
 	holds         engineHold
 	resumePending bool
@@ -1216,7 +1222,10 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	// both, a restored session's background workflows are started again (resumeAfterFold), so a
 	// note the snapshot held is there for the wake, and then the proposed project rules waiting for
 	// their adoption pane are offered (adoptAfterFold) — before the prompt and the wake, because a
-	// rule the human adopts is one the turn a wake starts can already use. That idle fold is what
+	// rule the human adopts is one the turn a wake starts can already use. Between the adoption and
+	// the prompt, a completion flush a refusing hold turned away is retried once the hold has
+	// released (flushAfterFold, interject.go): the staged rows are the human's own words and go
+	// before a workflow's prompt or wake, and the Exchange they open holds both. That idle fold is what
 	// makes "the next turn boundary" (ADR 0096 §4): a file that changed mid-turn is asked about at
 	// the fold that ends the turn, and one that changed while idle at the fold that saw it. After the
 	// wake, the MCP reconnect takes its queued dials and commits what has finished once the engine
@@ -1228,6 +1237,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	defer func() {
 		next = resumeAfterFold(next)
 		next, cmd = adoptAfterFold(next, cmd)
+		next, cmd = flushAfterFold(next, cmd)
 		next, cmd = offerAfterFold(next, cmd)
 		next, cmd = wakeAfterFold(next, cmd)
 		next, cmd = mcpAfterFold(next, cmd)
@@ -2428,7 +2438,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 }
 
 // The notes an Exchange opener answers with while an off-loop load holds the engine
-// ([Model.loadHoldNote]): each names the hold it waits out.
+// ([Model.loadHoldNote], [Model.exchangeRefusal]): each names the hold it waits out.
 const (
 	sessionLoadHoldNote = "still loading a session — send once it has loaded"
 	bgLaunchHoldNote    = "still starting a /bg launch — send once it has started"
@@ -2437,11 +2447,11 @@ const (
 
 // loadHoldNote reports whether a session load (holdSessionLoad) or a /bg launch (holdBgLaunch) is
 // reading the Agent off the loop, or a footer git action (holdGitAction) is changing the workspace
-// under it, with the note naming which. Every Exchange opener — the typed message and the held-queue
-// flush in submit, the completion flush (flushInterjections), /continue and /compact — asks it
-// before starting a worker: a worker started now would drive the Agent beside the goroutine still
-// reading it, or read a workspace a pull or a sync is still rewriting, so the opener refuses and
-// nothing moves.
+// under it, with the note naming which. The human's Exchange openers — the typed message and the
+// held-queue flush in submit, /continue and /compact — ask it before starting a worker: a worker
+// started now would drive the Agent beside the goroutine still reading it, or read a workspace a
+// pull or a sync is still rewriting, so the opener refuses and nothing moves. The completion flush
+// asks exchangeRefusal instead, which answers for the actuation latch too.
 func (m Model) loadHoldNote() (string, bool) {
 	switch {
 	case m.holds.has(holdSessionLoad):
@@ -2452,6 +2462,27 @@ func (m Model) loadHoldNote() (string, bool) {
 		return gitActionHoldNote, true
 	}
 	return "", false
+}
+
+// exchangeRefusal reports whether a refusing hold stands (engineHolds.refusingExchange), with the
+// note an opener answers with: the off-loop hold's own note, or the actuation latch's
+// (actuationBlockNote). An Exchange opened under any of them would drive the Agent beside a
+// goroutine reading it, read a workspace being rewritten, or send to a server being restarted.
+func (m Model) exchangeRefusal() (string, bool) {
+	hold, refused := m.engineHolds().refusingExchange()
+	if !refused {
+		return "", false
+	}
+	switch hold {
+	case holdSessionLoad:
+		return sessionLoadHoldNote, true
+	case holdBgLaunch:
+		return bgLaunchHoldNote, true
+	case holdGitAction:
+		return gitActionHoldNote, true
+	default:
+		return m.actuationBlockNote(), true
+	}
 }
 
 // submitLine parses the editor's contents for a send: the chat mini-language's parse

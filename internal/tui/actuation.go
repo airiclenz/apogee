@@ -50,6 +50,12 @@ type actuation struct {
 	// events is the pump's channel — the blocking verb's goroutine writes, the listen Cmd reads.
 	// nil when nothing is in flight.
 	events chan actuationEvent
+	// beatOwed says the latch was released and no beat has folded since (foldActuationDone sets it
+	// when the heartbeat is wired, foldBeatMsg clears it). The completion flush's retry and a pending
+	// wake wait for that beat (engineHolds.canRetryFlush, engineHolds.canOpenWake): a /stop-server or
+	// /unload-model releases the latch while the heartbeat, its failures ignored under the latch, has
+	// not yet seen the server gone.
+	beatOwed bool
 }
 
 // The three verbs, as the footer spells them and the completion fold switches on them.
@@ -373,7 +379,9 @@ func (m Model) foldActuation(msg actuationMsg) (tea.Model, tea.Cmd) {
 // consolation.
 func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 	verb, profile := m.actuation.verb, m.actuation.profile
-	m.actuation = actuation{gen: m.actuation.gen} // released on EVERY path, generation kept
+	// Released on EVERY path, generation kept, with a beat owed before an automatic opener may send
+	// to the server this verb just moved.
+	m.actuation = actuation{gen: m.actuation.gen, beatOwed: m.observesUpstream()}
 
 	// The launcher's notices (config warnings, the drift notice a non-restarting activation emits)
 	// and a stop's recorded steps are the same kind of thing: what the library did, in its words.
@@ -424,11 +432,13 @@ func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 	// for: observeBinding STASHES one rather than driving Agent.Rebind beside a move this completion
 	// may be about to make. It is finishWorker's posture, one level across, and it runs BEFORE the
 	// completion's own words because the beat that saw it landed before the completion did. Another
-	// hold still standing keeps it stashed for that hold's own release (releaseEngine): a worker an
-	// Exchange or a wake opened during the actuation keeps it for finishWorker, and a /bg launch
-	// still reading the Agent off the loop keeps it for foldBgStarted — /bg is touchesServer, so the
-	// latch refuses it while a launcher verb is in flight, and the gate holds the boundary should the
-	// two ever overlap anyway.
+	// hold still standing keeps it stashed for that hold's own release (releaseEngine): no Exchange
+	// or wake opens during an actuation — a human opener is refused with the latch's note, and the
+	// completion flush and a pending wake wait for the release and a beat after it
+	// (adr-0029-amend-1123) — but a worker already running when the verb began keeps it for
+	// finishWorker, and a /bg launch still reading the Agent off the loop keeps it for foldBgStarted
+	// — /bg is touchesServer, so the latch refuses it while a launcher verb is in flight, and the gate
+	// holds the boundary should the two ever overlap anyway.
 	m.releaseEngine()
 
 	if ev.err != nil {

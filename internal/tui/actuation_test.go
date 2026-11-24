@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -1330,6 +1331,163 @@ func TestStopThenBeatFailuresCrossOffline(t *testing.T) {
 	}
 	if n := countNotes(m, "server offline"); n != 1 {
 		t.Errorf("offline notes = %d, want the crossing narrated once", n)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The automatic openers wait out every refusing hold (adr-0029-amend-1123)
+// ----------------------------------------------------------------------------
+
+// stopServerMidRun opens an Exchange on a launcher host, queues /stop-server and stages one row
+// while it runs, then completes the Exchange: the drain runs the queued verb, which takes the latch,
+// so the completion flush meets it. It returns the model with the latch held and the Cmd carrying
+// the verb's pump.
+func stopServerMidRun(t *testing.T) (Model, tea.Cmd) {
+	t.Helper()
+	fake := newLauncher()
+	fake.actResult = ActuationResult{
+		Steps: []string{"Sending stop signal"}, ServerStopped: true, Backend: "llamacpp", Addr: "localhost:1234",
+	}
+	m, _ := wireLauncher(t, fake)
+	m = stageRow(t, m, "open the exchange")
+	if m.state != stateRunning {
+		t.Fatalf("precondition: state = %v, want running", m.state)
+	}
+	m = stageRow(t, m, "/stop-server")
+	m = stageRow(t, m, "and the docs")
+	if len(m.deferredCommands) != 1 || len(m.pendingInterjections) != 1 {
+		t.Fatalf("precondition: %d commands queued, %d rows staged; want one of each",
+			len(m.deferredCommands), len(m.pendingInterjections))
+	}
+	m, cmd := stepCmd(t, m, exchangeDoneMsg{})
+	if !m.actuation.inFlight {
+		t.Fatal("precondition: the drained /stop-server did not take the latch")
+	}
+	return m, cmd
+}
+
+// assertFlushHeld fails unless the staged row is still staged and no Exchange is running.
+func assertFlushHeld(t *testing.T, m Model, when string) {
+	t.Helper()
+	if m.state != stateIdle || m.busy() {
+		t.Errorf("%s: state = %v, want idle — no Exchange may open yet", when, m.state)
+	}
+	if len(m.pendingInterjections) != 1 {
+		t.Errorf("%s: %d rows staged, want the row still waiting", when, len(m.pendingInterjections))
+	}
+}
+
+// assertFlushed fails unless the staged row went out as the opening of a new Exchange.
+func assertFlushed(t *testing.T, m Model, want string) {
+	t.Helper()
+	if !m.busy() {
+		t.Fatalf("state = %v, want the retried flush running", m.state)
+	}
+	if len(m.pendingInterjections) != 0 || m.flushPending {
+		t.Errorf("staged rows %d, retry pending %v; want both cleared by the flush", len(m.pendingInterjections), m.flushPending)
+	}
+	if got := lastPrompt(t, m); got.text != want {
+		t.Errorf("last prompt = %q, want the flushed row %q", got.text, want)
+	}
+}
+
+// A completion whose drained /stop-server took the latch does not flush into the server being
+// stopped: the row stays staged under the latch's note, and the release alone does not send it —
+// the heartbeat has ignored every failure under the latch, so it still calls the stopped server
+// online. Only a beat folded after the release may let the retry go.
+func TestCompletionFlushWaitsOutTheActuationLatch(t *testing.T) {
+	t.Parallel()
+	m, cmd := stopServerMidRun(t)
+
+	assertFlushHeld(t, m, "under the latch")
+	assertLastNote(t, m, "stop-server in flight")
+	if !m.flushPending {
+		t.Error("the turned-away flush left no retry pending")
+	}
+
+	m, _ = driveActuation(t, m, cmd)
+	assertFlushHeld(t, m, "at the release")
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24}) // any fold that is not a beat
+	assertFlushHeld(t, m, "at a fold after the release with no beat")
+	if n := countNotes(m, "stop-server in flight"); n != 1 {
+		t.Errorf("latch notes = %d, want the hold said once", n)
+	}
+
+	m = foldBeatMsg(t, m, twoModelBeat())
+
+	assertFlushed(t, m, "and the docs")
+}
+
+// A completion under a session load leaves the row staged with the load's note and flushes it at
+// the fold that lands the record.
+func TestCompletionFlushWaitsOutASessionLoad(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{}
+	m, loadCmd := loadingBrowserModel(t, eng)
+	startStubWorker(t, &m) // forced: an Exchange running when the load began
+	m = stageRow(t, m, "and the docs")
+	m = step(t, m, exchangeDoneMsg{})
+
+	assertFlushHeld(t, m, "under the load")
+	assertLastNote(t, m, sessionLoadHoldNote)
+
+	m = step(t, m, untickedMsg(t, loadCmd)) // the record lands; its writes are not this test's subject
+
+	assertFlushed(t, m, "and the docs")
+}
+
+// A background workflow that ends during a profile load does not wake the agent into the server
+// being restarted: the wake waits, silently, for the release and a beat after it.
+func TestWakeWaitsOutTheActuationLatch(t *testing.T) {
+	t.Parallel()
+	fake := newLauncher()
+	m, _ := wireLauncher(t, fake)
+	eng := m.eng.(*fakeEngine)
+	eng.wakeFn = func(context.Context) (bool, error) { return true, nil }
+	m, cmd := startLoad(t, m, "alpha")
+	notes := len(noteTexts(m))
+
+	m = finishBackground(t, m)
+	if eng.wakes() != 0 || !m.wakePending {
+		t.Fatalf("Wake calls %d, pending %v; want the wake held under the latch", eng.wakes(), m.wakePending)
+	}
+
+	m, _ = driveActuation(t, m, cmd)
+	if eng.wakes() != 0 || !m.wakePending {
+		t.Fatalf("Wake calls %d, pending %v; want the wake held until a beat folds after the release", eng.wakes(), m.wakePending)
+	}
+	for _, note := range noteTexts(m)[notes:] {
+		if strings.Contains(note, "in flight") {
+			t.Errorf("the held wake said %q, want it to wait silently", note)
+		}
+	}
+
+	m = foldBeatMsg(t, m, twoModelBeat())
+
+	if eng.wakes() != 1 || m.wakePending {
+		t.Errorf("Wake calls %d, pending %v; want one wake once the beat folded", eng.wakes(), m.wakePending)
+	}
+}
+
+// Rows a stop held wait for ⏎, never for a latch's release: a /stop-server run after the cancel
+// releases its latch and a beat folds, and the held row is still held.
+func TestHeldQueueAfterACancelIsNotRetriedAtTheLatchRelease(t *testing.T) {
+	t.Parallel()
+	fake := newLauncher()
+	fake.actResult = ActuationResult{ServerStopped: true, Backend: "llamacpp", Addr: "localhost:1234"}
+	m, _ := wireLauncher(t, fake)
+	m = stageRow(t, m, "open the exchange")
+	m = stageRow(t, m, "and the docs")
+	m = step(t, m, cancelledMsg{})
+	assertFlushHeld(t, m, "after the cancel")
+
+	m, cmd := typeCommand(t, m, "/stop-server")
+	m, _ = driveActuation(t, m, cmd)
+	m = foldBeatMsg(t, m, twoModelBeat())
+
+	assertFlushHeld(t, m, "after the latch released and a beat folded")
+	if m.flushPending {
+		t.Error("a held queue was marked for a retry")
 	}
 }
 

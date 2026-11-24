@@ -270,6 +270,9 @@ func (m Model) foldBeatMsg(msg beatMsg) (tea.Model, tea.Cmd) {
 	if !m.heartbeatLive(msg.gen) {
 		return m, nil
 	}
+	// A live beat has folded, so the one a launcher verb's release owed the automatic openers is
+	// paid: from here the heartbeat's own state says whether the server is there (blockedUpstream).
+	m.actuation.beatOwed = false
 	// A beat that MOVED something — the offline state, a binding, the rows of an open picker — is
 	// laid out by Update's tail ([Model.settle]): its notes move the transcript generation, and a
 	// picker redrawn at a new height leaves the viewport widget's height stale, which the tail's
@@ -853,11 +856,14 @@ func (m Model) foldBeatFailure(failure string) Model {
 // Everything else stays live: scrollback, /clear, /sessions, /version, /confine, Shift+Tab.
 //
 // The interjection auto-flush (flushAfterCompletion, ADR 0025) is a FOURTH path that opens an
-// Exchange and deliberately does NOT consult this: it runs inside a natural completion's own fold,
+// Exchange. Its first try does NOT consult this: it runs inside a natural completion's own fold,
 // and foldBeat ignores a failed beat while an Exchange is in flight, so the offline state cannot
 // have moved since the Exchange that just completed was itself allowed to start. That is an
 // invariant, not a coincidence — if the offline crossing ever becomes able to land mid-Exchange,
-// the flush needs this guard too.
+// the flush needs this guard too. Its RETRY is gated (flushAfterFold, adr-0029-amend-1123): a
+// flush a refusing hold turned away goes at a later fold, by which time a launcher verb may have
+// stopped the server, so the retry waits for a beat after the latch's release and then for this to
+// say there is something to send to.
 //
 // With the monitor unwired it is always false: nothing observes the server, so the TUI has no
 // standing to refuse anything (and every pre-heartbeat test keeps its behaviour).

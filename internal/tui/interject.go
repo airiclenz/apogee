@@ -692,11 +692,14 @@ func (m Model) drainThenFlush(done tea.Cmd) (tea.Model, tea.Cmd) {
 // half-typed line is not something they asked to send — it stays in the box, and the staged rows
 // (which they did press ⏎ on) are what goes.
 //
-// A session load or /bg launch in flight holds the flush (loadHoldNote): the rows stay staged, as a
-// held queue, for the ⏎ that sends them once the load lands.
+// A refusing hold — a session load, a /bg launch, a git action, or a launcher verb restarting the
+// server — turns the flush away (exchangeRefusal): the rows stay staged under the hold's note, said
+// once, and flushPending has the Update tail retry the flush once the hold has released
+// (flushAfterFold). A ⏎ before then sends them as it would any staged row.
 func (m Model) flushInterjections() (tea.Model, tea.Cmd) {
-	if note, held := m.loadHoldNote(); held {
+	if note, refused := m.exchangeRefusal(); refused {
 		m.transcript.addNote(note)
+		m.flushPending = true
 		return m, nil
 	}
 	in, spans := m.joinedInterjections(parsedInput{})
@@ -704,6 +707,30 @@ func (m Model) flushInterjections() (tea.Model, tea.Cmd) {
 	m.detached = false // the flushed prompt re-arms follow-the-tail, exactly as a typed one does
 	m.transcript.addUser(in.Text, spans)
 	return m.launchExchange(in)
+}
+
+// flushAfterFold is the Update tail's flush retry: a completion flush a refusing hold turned away
+// (flushPending) goes at the first fold that finds the hold released, the session idle with nothing
+// ahead of it (engineHolds.canRetryFlush) and something to send to (blockedUpstream). After a
+// launcher verb that means a beat folded since its release, so a stopped server is not sent to on
+// the latch's word alone. The retry is silent — the hold's note was said when the flush was turned
+// away — and the latch clears once nothing is staged any more, whether the retry or a ⏎ sent them.
+// Anything but the Model, or a Model with no retry pending, passes through untouched.
+func flushAfterFold(next tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
+	m, ok := next.(Model)
+	if !ok || !m.flushPending {
+		return next, cmd
+	}
+	if len(m.pendingInterjections) == 0 {
+		m.flushPending = false
+		return m, cmd
+	}
+	if !m.engineHolds().canRetryFlush() || m.blockedUpstream() {
+		return m, cmd
+	}
+	m.flushPending = false
+	flushed, launch := m.flushInterjections()
+	return flushed, tea.Batch(cmd, launch)
 }
 
 // joinedInterjections composes the ONE unmarked user message a flush sends: the staged rows'
@@ -771,6 +798,7 @@ const interjectionJoin = "\n\n"
 // two terminal folds that do NOT flush, so it fires exactly once per hold — at the transition into
 // it, never on the keypresses that follow — and says nothing at all when nothing is staged.
 func (m *Model) noteHeldQueue() {
+	m.flushPending = false // a hold waits for ⏎, never for a retry
 	if n := len(m.pendingInterjections); n > 0 {
 		m.transcript.addNote(heldNote(n))
 	}

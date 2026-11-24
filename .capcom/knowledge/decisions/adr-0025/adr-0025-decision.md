@@ -155,6 +155,11 @@ below). A natural completion (`exchangeDoneMsg`, and `compactDoneMsg`, which is 
 auto-sends what is left, because the human pressed `⏎` on those rows and has no reason to expect a
 second keypress is needed. A deferred quit beats a flush outright.
 
+> **Amended 2026-11-23 (`adr-0029-amend-1123`).** A completion that finds a refusing hold standing
+> — a session load, a `/bg` launch, a git action, or the actuation latch — does not auto-send: the
+> rows stay staged under the hold's note, said once, and go at the first fold after the hold's
+> release (after the latch, once a beat has also folded since the release).
+
 > **Amended 2026-09-14 — the hold is a hold on MESSAGES.** The commands queued while the worker ran
 > (decision 10, amended the same day) are not held by a stop or a fault: they run at that very idle,
 > FIFO, before the `N queued messages held` note is stated — so Esc×2 does not drop a queued `/clear`,

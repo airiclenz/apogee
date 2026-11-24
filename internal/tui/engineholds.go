@@ -54,7 +54,17 @@ const (
 	// holding the engine parked.
 	holdsBlockingResume = holdPrebound | holdQuitting | holdSessionLoad | holdBgLaunch | holdRecordWrite |
 		holdWatching | holdGitAction
+	// holdsRefusingExchange are the holds under which no Exchange may open: a session load or a /bg
+	// launch is reading the Agent off the loop, a git action is rewriting the workspace the next
+	// Turn reads, or a launcher verb is restarting the server it would be sent to (ADR 0029 D5,
+	// adr-0029-amend-1123). A human opener refuses with the hold's note; the completion flush and
+	// the background-workflow wake wait for its release.
+	holdsRefusingExchange = holdSessionLoad | holdBgLaunch | holdGitAction | holdActuation
 )
+
+// refusingExchangeOrder is the order refusingExchange names a standing refusing hold in — the
+// order an opener's note is chosen in, so two holds at once always answer with the same note.
+var refusingExchangeOrder = [...]engineHold{holdSessionLoad, holdBgLaunch, holdGitAction, holdActuation}
 
 // has reports whether every hold in want is in the set.
 func (s engineHold) has(want engineHold) bool {
@@ -105,6 +115,10 @@ type engineHolds struct {
 	hasQueuedCommands bool
 	// isModalPaneOpen reports a pane that owns the keyboard is up ([Model.modalPaneOpen]).
 	isModalPaneOpen bool
+	// isBeatOwed reports a launcher verb has released the latch and no beat has folded since
+	// (actuation.beatOwed): the server it restarted or stopped is not yet observed, so an automatic
+	// opener waits for that beat.
+	isBeatOwed bool
 }
 
 // engineHolds takes the snapshot the engine gates are asked through: the hold set read from the
@@ -123,6 +137,7 @@ func (m Model) engineHolds() engineHolds {
 		hasInterjections:  len(m.pendingInterjections) > 0,
 		hasQueuedCommands: len(m.deferredCommands) > 0,
 		isModalPaneOpen:   m.modalPaneOpen(),
+		isBeatOwed:        m.actuation.beatOwed,
 	}
 }
 
@@ -187,6 +202,39 @@ func (h engineHolds) canResumeWorkflows() bool {
 // message (the human's next ⏎ sends it) and no modal pane the human is answering.
 func (h engineHolds) canWake() bool {
 	return h.canResumeWorkflows() && !h.hasInterjections && !h.isModalPaneOpen
+}
+
+// refusingExchange reports the first refusing hold standing (refusingExchangeOrder), the one an
+// opener names in its note, and whether any stands.
+func (h engineHolds) refusingExchange() (engineHold, bool) {
+	for _, hold := range refusingExchangeOrder {
+		if h.held.has(hold) {
+			return hold, true
+		}
+	}
+	return 0, false
+}
+
+// mayOpenExchange reports whether no refusing hold stands, so an Exchange may open as far as the
+// holds are concerned.
+func (h engineHolds) mayOpenExchange() bool {
+	return !h.holding(holdsRefusingExchange)
+}
+
+// canOpenWake reports whether a pending wake may open its Exchange now: the wake conditions, no
+// refusing hold, and no beat still owed after a launcher verb's release — a /stop-server or
+// /unload-model releases the latch while the heartbeat has not yet seen the server gone.
+func (h engineHolds) canOpenWake() bool {
+	return h.canWake() && h.mayOpenExchange() && !h.isBeatOwed
+}
+
+// canRetryFlush reports whether a completion flush a refusing hold turned away may go now: idle,
+// something still staged, no refusing hold and no beat owed after a launcher verb's release, no
+// worker, exit, watch or missing engine, no stop-or-keep confirm waiting, and no queued command
+// still to run ahead of the flush.
+func (h engineHolds) canRetryFlush() bool {
+	return h.isIdle && h.hasInterjections && h.mayOpenExchange() && !h.isBeatOwed &&
+		!h.holding(holdWorker|holdQuitting|holdWatching|holdPrebound) && !h.isConfirmOpen && !h.hasQueuedCommands
 }
 
 // canStartMCPDials reports whether an MCP server's dial may start now (mcpreconnect.go): any time
