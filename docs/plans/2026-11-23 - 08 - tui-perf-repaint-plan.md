@@ -261,7 +261,13 @@ The comment rule is every comment or doc that says a drag motion re-wraps, relay
 - `capcom check`
 **Commit:** `perf(tui): coalesce side-panel separator drag repaints`
 
-## 9. Record the audit's before/after
+## 9. Record the audit's before/after — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): measured at 33035dea4 on the Pi 5 (Go 1.26.11, no -race, -benchmem, -count 1), one benchmark at a time from one prebuilt `go test -c` binary; also ran BenchmarkReserveWidgetCellsAllHitNoOverrun (matched by the AllHit prefix) and BenchmarkPromptKeyLongDraft (not in the item's list) so the audit's "400-line draft" Profile row has an after value.
+
+NOTES (2026-11-24): the audit's stream allocation column reads "MB per delta" but matches GB per op of 4,096 deltas (1.50 GB/op measured before item 6); the report says so in a note rather than correcting the audit.
+
+NOTES (2026-11-24): the audit findings plans 07 and 08 left out of scope (blink splice, preview markdown memo, per-key debounce, long-draft geometry 21.5 ms/key, cursor-move park, remaining side-panel sections, smaller item-11 leaves, linear repaint) are listed as open in the report; none has an issue.
 
 **What:** Depends on items 2–8. Docs-only. Run each `BenchmarkPerfAudit*` scenario, `BenchmarkThinkingPaneUpdateAndView`, `BenchmarkSidePanelView`, `BenchmarkRenderViewDelegationsAllHit` and `BenchmarkReserveWidgetCellsAllHit` one at a time, and write `docs/reviews/tui-perf-audit-2026-11-23-results.md`: the audit's Profile table with an "after" column, each dominant cost with its fix status and issue id (plans 07 and 08), and what stays open.
 **Files:** docs/reviews/tui-perf-audit-2026-11-23-results.md
