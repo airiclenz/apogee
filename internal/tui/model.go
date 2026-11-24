@@ -3430,7 +3430,8 @@ func (m Model) hiddenDraftRows() int {
 // one (newModel). The paint is then held to the viewport's own width in the widget's measure
 // (reserveWidgetCells, render.go), so the body's cut finds nothing to cut (transcriptBody): a line
 // the painter filled to the column and that measure counts wider — a full line ending in a VS16
-// glyph — is broken into stored lines HERE rather than losing its tail at the right edge.
+// glyph — is broken into stored lines rather than losing its tail at the right edge: when its
+// block's paint is stored (blockPaint.brokenAt), or HERE for a line no stored block holds.
 //
 // The widget itself is handed BLANK placeholder lines of the same count (placeholderLines), never
 // the paint: it keeps the scroll state — the offset, the bottom, the line count the scroll bar and

@@ -567,8 +567,12 @@ type umbrellaFold struct {
 //
 // A paint it stores is stored MEASURED: its lines' widget widths are taken once, here, at the width
 // the key names ([measuredCells]), so every repaint the row serves hands reserveWidgetCells the
-// widths instead of the lines to measure again (render.go). A paint that is never stored — an
-// uncacheable kind, a block with no cache behind it — carries none and is measured as before.
+// widths instead of the lines to measure again (render.go). It is stored BROKEN too: a line those
+// widths count wider than the viewport the key's width is shown in ([storedBreakLimit]) is broken
+// onto rows of its own here, by the reserve's own rule ([blockPaint.brokenAt]), so a repaint the row
+// serves arrives with nothing left for the reserve to break. A paint that is never stored — an
+// uncacheable kind, a block with no cache behind it — carries no widths, is broken by the reserve,
+// and is measured as before.
 func (t *transcript) paintBlock(head int, key paintKey, draw func() blockPaint) blockPaint {
 	if !key.kind.cacheable() {
 		t.paints.miss()
@@ -580,6 +584,9 @@ func (t *transcript) paintBlock(head int, key paintKey, draw func() blockPaint) 
 	paint := draw()
 	if t.paints != nil {
 		paint.cells = measuredCells(paint.lines, key.width)
+		if limit := storedBreakLimit(key.width); limit > 0 {
+			paint = paint.brokenAt(limit)
+		}
 	}
 	t.paints.store(head, key, paint)
 	return paint

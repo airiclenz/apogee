@@ -863,10 +863,17 @@ func BenchmarkThinkingPaneUpdateAndView(b *testing.B) {
 // every repaint before stored widths had to measure them, and some really are broken by the
 // reserve.
 func widgetCellsFixture(width int) *transcript {
+	return widgetCellsFixtureEnding(width, vs16Warning+vs16Warning)
+}
+
+// widgetCellsFixtureEnding is [widgetCellsFixture] with each answer filled to the column by ending
+// instead of the two VS16 glyphs: an ending the two measures agree about gives the same scrollback
+// with nothing for the reserve to break.
+func widgetCellsFixtureEnding(width int, ending string) *transcript {
 	tr := &transcript{}
 	for i := range 12 {
 		tr.addUser(fmt.Sprintf("question %d — what does the fold do here?", i), nil)
-		tr.commitAssistant(strings.Repeat("a", width-4)+vs16Warning+vs16Warning, runRef{})
+		tr.commitAssistant(strings.Repeat("a", width-4)+ending, runRef{})
 		readCall(tr, fmt.Sprintf("r%d", i), fmt.Sprintf("f%d.go", i), 1, 5, 0)
 	}
 	return tr
@@ -893,7 +900,8 @@ func sameReserve(t *testing.T, what string, got, want renderedTranscript) {
 }
 
 // A repaint served from the cache measures none of its cached lines in the widget's measure: each
-// block stored its lines' widths when it was painted, so the reserve reads them instead of
+// block stored its lines' widths when it was painted — and broke the overrunning ones there, its
+// cut rows carrying the columns the cut gave them — so the reserve reads them instead of
 // re-measuring the scrollback every frame. A block that changes is measured again — its own lines,
 // and nothing of the blocks around it. Not parallel: widgetMeasures is process-wide, and a
 // neighbour's render would be counted as this one's.
@@ -908,20 +916,37 @@ func TestWidgetCellsAreMeasuredOncePerPaintedBlock(t *testing.T) {
 		f()
 		return widgetMeasures.Load() - before
 	}
+	// overWidth is the lines of a cold paint the painted block measures: those longer in bytes
+	// than the width it was painted to (measuredCells).
+	overWidth := func(lines []string) int {
+		n := 0
+		for _, ln := range lines {
+			if len(ln) > width {
+				n++
+			}
+		}
+		return n
+	}
 
+	cold := coldRender(tr, th, width, false)
+	if got := len(baseReserve(cold, limit).lines); got == len(cold.lines) {
+		t.Fatal("setup: the reserve broke no line; the fixture does not exercise a break")
+	}
 	first := paint()
 	overBytes := 0
-	for _, ln := range first.lines {
-		if len(ln) > limit {
-			overBytes++
+	for i, ln := range first.lines {
+		if len(ln) <= limit {
+			continue
+		}
+		overBytes++
+		if c := first.cells[i]; c < 0 || c > limit {
+			t.Errorf("line %d (%q) overruns the limit in bytes and stores cells %d; "+
+				"want a width in [0, %d], so no repaint measures it again", i, strip(ln), c, limit)
 		}
 	}
 	if overBytes == 0 {
 		t.Fatal("setup: no line overruns the limit in bytes; " +
 			"the fixture measures nothing either way")
-	}
-	if got := len(baseReserve(first, limit).lines); got == len(first.lines) {
-		t.Fatal("setup: the reserve broke no line; the fixture does not exercise a break")
 	}
 
 	var repaint renderedTranscript
@@ -929,19 +954,15 @@ func TestWidgetCellsAreMeasuredOncePerPaintedBlock(t *testing.T) {
 		t.Errorf("an all-hit repaint measured %d lines; "+
 			"want 0 (the %d byte-overrunning lines are stored)", got, overBytes)
 	}
-	sameReserve(t, "all-hit repaint", repaint, baseReserve(first, limit))
+	sameReserve(t, "all-hit repaint", repaint, baseReserve(cold, limit))
 
-	// One block more: only its lines are measured, once, when it is painted.
+	// One block more: only its lines are measured, once, when it is painted — the lines it was
+	// painted with, before the stored break cut any of them.
 	tr.commitAssistant(strings.Repeat("b", width-4)+vs16Warning+vs16Warning, runRef{})
 	var grown renderedTranscript
 	got := measured(func() { grown = paint() })
-	added := grown.lines[len(first.lines)+1:] // past the separator the new block opened with
-	want := 0
-	for _, ln := range added {
-		if len(ln) > width {
-			want++
-		}
-	}
+	coldGrown := coldRender(tr, th, width, false)
+	want := overWidth(coldGrown.lines[len(cold.lines)+1:]) // past the separator the block opened with
 	if want == 0 || int(got) != want {
 		t.Errorf("painting one new block measured %d lines; want its own %d over-width lines",
 			got, want)
@@ -953,8 +974,8 @@ func TestWidgetCellsAreMeasuredOncePerPaintedBlock(t *testing.T) {
 
 // The stored widths change nothing the reserve decides: over wide and narrow viewports, and under
 // either painter measure (WcWidth before a terminal answers mode 2027, GraphemeWidth after), the
-// reserved lines, targets and spans equal what measuring every line where it stands produced —
-// through a cold paint, a warm one and the rooted run view alike.
+// reserved lines, targets and spans equal what measuring every line of the cold paint where it stands
+// produced — through a warm paint and the rooted run view alike.
 func TestWidgetCellsReserveAsTheWidgetMeasures(t *testing.T) {
 	t.Parallel()
 	for _, method := range []struct {
@@ -966,23 +987,76 @@ func TestWidgetCellsReserveAsTheWidgetMeasures(t *testing.T) {
 				t.Parallel()
 				th := newTheme(scheme.Default())
 				th.measure = widthAuthority{method: method.method}
-				for _, limit := range []int{width, width + bodyRightGutter} {
-					tr := warmed(widgetCellsFixture(width))
-					cold := coldRender(tr, th, width, false)
-					tr.renderView(th, width, false, breadcrumbHint) // fill the cache
-					warm := tr.renderView(th, width, false, breadcrumbHint)
-					sameReserve(t, "warm", warm.reserveWidgetCells(limit), baseReserve(cold, limit))
+				// The one limit a paint at width is reserved at (transcriptWidth); a cached paint is
+				// broken for it when stored (TestStoredPaintsArrivePreBroken).
+				limit := width + bodyRightGutter
+				tr := warmed(widgetCellsFixture(width))
+				cold := coldRender(tr, th, width, false)
+				tr.renderView(th, width, false, breadcrumbHint) // fill the cache
+				warm := tr.renderView(th, width, false, breadcrumbHint)
+				sameReserve(t, "warm", warm.reserveWidgetCells(limit), baseReserve(cold, limit))
 
-					view, root := allHitRunViewFixture()
-					view = warmed(view)
-					view.setRoot(root)
-					view.renderView(th, width, false, breadcrumbHint)
-					rooted := view.renderView(th, width, false, breadcrumbHint)
-					sameReserve(t, "run view",
-						rooted.reserveWidgetCells(limit), baseReserve(rooted, limit))
-				}
+				view, root := allHitRunViewFixture()
+				view = warmed(view)
+				view.setRoot(root)
+				coldView := coldRender(view, th, width, false)
+				view.renderView(th, width, false, breadcrumbHint)
+				rooted := view.renderView(th, width, false, breadcrumbHint)
+				sameReserve(t, "run view",
+					rooted.reserveWidgetCells(limit), baseReserve(coldView, limit))
 			})
 		}
+	}
+}
+
+// A cached block's overrunning lines are broken once, when its paint is stored: a warm paint holds
+// no line wider than the viewport before the reserve runs, and reserved it lays down exactly the
+// rows, marks, half rows and spans the cold paint reserved does. At transcriptWidth's floor, where
+// the paint width does not say which viewport it is shown in, nothing is broken when stored and
+// every limit still yields the cold path's lines.
+func TestStoredPaintsArrivePreBroken(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		width  int
+		limits []int
+	}{
+		{"narrow", 24, []int{24 + bodyRightGutter}},
+		{"wide", 60, []int{60 + bodyRightGutter}},
+		{"floor", 1, []int{1, 1 + bodyRightGutter}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			th := newTheme(scheme.Default())
+			// the floor paints the narrow fixture: one filled to a single column holds no text
+			tr := warmed(widgetCellsFixture(max(tc.width, 24)))
+			cold := coldRender(tr, th, tc.width, false)
+			tr.renderView(th, tc.width, false, breadcrumbHint) // fill the cache
+			warm := tr.renderView(th, tc.width, false, breadcrumbHint)
+
+			if limit := storedBreakLimit(tc.width); limit > 0 {
+				if len(baseReserve(cold, limit).lines) == len(cold.lines) {
+					t.Fatal("setup: the reserve broke no cold line; the fixture does not overrun")
+				}
+				for i, ln := range warm.lines {
+					if w := ansi.StringWidth(ln); w > limit {
+						t.Errorf("warm line %d (%q) is %d cells before the reserve; want at most %d",
+							i, strip(ln), w, limit)
+					}
+				}
+			}
+			for _, limit := range tc.limits {
+				got, want := warm.reserveWidgetCells(limit), cold.reserveWidgetCells(limit)
+				what := fmt.Sprintf("limit %d", limit)
+				sameReserve(t, what, got, want)
+				if !slices.Equal(got.pads, want.pads) {
+					t.Errorf("%s: pads = %v; want %v", what, got.pads, want.pads)
+				}
+				if !slices.Equal(got.padSeps, want.padSeps) {
+					t.Errorf("%s: padSeps = %v; want %v", what, got.padSeps, want.padSeps)
+				}
+			}
+		})
 	}
 }
 
@@ -1027,9 +1101,24 @@ func TestWidgetCellsSurviveRailedAndRetargeted(t *testing.T) {
 // BenchmarkReserveWidgetCellsAllHit is what the reserve costs a repaint served from the cache: the
 // scrollback's stored widths read instead of every overrunning line measured again.
 func BenchmarkReserveWidgetCellsAllHit(b *testing.B) {
-	th := newTheme(scheme.Default())
 	const width = 100
-	tr := warmed(widgetCellsFixture(width))
+	benchmarkReserveAllHit(b, widgetCellsFixture(width), width)
+}
+
+// BenchmarkReserveWidgetCellsAllHitNoOverrun is the same repaint over a twin scrollback whose
+// answers end in two ASCII cells instead of two VS16 glyphs: nothing in it overruns the viewport,
+// so it is the cost the all-hit repaint of an overrunning scrollback is held to.
+func BenchmarkReserveWidgetCellsAllHitNoOverrun(b *testing.B) {
+	const width = 100
+	benchmarkReserveAllHit(b, widgetCellsFixtureEnding(width, "!!"), width)
+}
+
+// benchmarkReserveAllHit times the all-hit repaint — renderView served wholly from the cache, then
+// the reserve — over tr grown by forty plain answers.
+func benchmarkReserveAllHit(b *testing.B, tr *transcript, width int) {
+	b.Helper()
+	th := newTheme(scheme.Default())
+	tr = warmed(tr)
 	for range 40 {
 		tr.commitAssistant(strings.Repeat("word ", 60), runRef{})
 	}

@@ -141,7 +141,15 @@ NOTES (2026-11-24): `TestScrollbarGlyphsRenderedOnce` proves the one-render-per-
 - `go test -run '^$' -bench 'PerfAuditBlocks/view' -benchmem ./internal/tui/` (record before/after)
 **Commit:** `perf(tui): measure each visible row once per frame`
 
-## 5. Overrunning lines are split when a block's paint is stored
+## 5. Overrunning lines are split when a block's paint is stored — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): benchmark `go test -run '^$' -bench 'ReserveWidgetCellsAllHit' -benchmem -count=3 ./internal/tui/` (dev box, no -race) — before (HEAD f79dff178, new twin added first): AllHit ~246 µs/op 111 KB 294 allocs; AllHitNoOverrun ~117 µs/op 59 KB 176 allocs. After: AllHit ~121 µs/op 69 KB 177 allocs; AllHitNoOverrun ~117 µs/op 59 KB 176 allocs (unchanged). The twin is `widgetCellsFixtureEnding(width, "!!")` — same scrollback with an ASCII ending the two measures agree on; both benchmarks share `benchmarkReserveAllHit`.
+
+NOTES (2026-11-24): the store-time break is gated by `storedBreakLimit(width)` = width + bodyRightGutter, or 0 at width ≤ 1: transcriptWidth's floor makes a 1-column paint ambiguous (viewport 1 or 2 wide), so such a paint is stored whole and the reserve breaks it cold at whatever limit; `TestStoredPaintsArrivePreBroken/floor` covers limits 1 and 2 and fails if the gate is dropped. The shared per-line rule is `widgetRows` (= `dropBlankTail(splitAtWidgetWidth(...))`), used by both `reserveWidgetCells` and the new `blockPaint.brokenAt`; cut rows carry cells `min(limit, width-k*limit)`, never -1.
+
+NOTES (2026-11-24): `TestWidgetCellsReserveAsTheWidgetMeasures` drops the `limit = width` case and now compares the warm and rooted paints against a cold render's reserve (the warm paint is pre-broken, so `baseReserve` of it would prove nothing); `TestWidgetCellsAreMeasuredOncePerPaintedBlock` takes its break premise and its new-block measure count from `coldRender`, and asserts every byte-overrunning warm line stores cells in [0, limit].
+
+NOTES (2026-11-24): consequential edit — internal/tui/model.go: made necessary by the store-time break (refreshViewport's comment said overrunning lines are broken only in the reserve).
 
 **What:**
 **Goal:** an all-hit repaint whose scrollback holds an overrunning line costs about what a reserve with no overrun costs, and its lines are byte-identical to today's.

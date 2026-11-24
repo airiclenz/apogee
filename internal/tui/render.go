@@ -22,6 +22,7 @@ package tui
 // P3.14 sub-agent renderer extends these seams rather than reworking them.
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -88,7 +89,9 @@ type blockPaint struct {
 	// block is painted ([transcript.paintBlock], [measuredCells]), so a repaint served from the
 	// cache hands reserveWidgetCells the widths the paint already knows instead of re-measuring
 	// every line of the scrollback. A width is a fact about the line alone — never a verdict
-	// against one limit — so it stays true for any viewport width the same paint is shown at.
+	// against one limit — so it stays true for any viewport width the same paint is shown at; the
+	// one exception is a row the stored break cut ([blockPaint.brokenAt]), which carries the
+	// columns the cut gave it — at most the limit it was cut at — rather than a measure of its own.
 	cells []int
 }
 
@@ -538,10 +541,16 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 // rows added inside it, so the accounting the mouse reads is still the one the paint laid down.
 //
 // It is paid once per block, not once per repaint: a block stores its lines' widget widths when it
-// is painted ([blockPaint.cells]), so a repaint served from the cache measures none of the lines it
-// was handed and only the unmeasured ones — separators, the breadcrumb, the streaming preview — are
-// measured here, each settled by its byte length first. What it returns carries no cells: its
-// broken rows were never measured.
+// is painted ([blockPaint.cells]) and, where its paint width names the viewport it is shown in
+// ([storedBreakLimit]), breaks its own overrunning lines there by this very rule
+// ([blockPaint.brokenAt]). So a repaint served from the cache measures none of the lines it was
+// handed and breaks none of them — an overrunning scrollback costs what one with no overrun does —
+// and only the unmeasured lines — separators, the breadcrumb, the streaming preview — are measured
+// here, each settled by its byte length first. A paint with no cache behind it arrives unbroken
+// and is broken here: that cold path is the reference the stored break is held to. The stored
+// break matches it only at limit = width + bodyRightGutter, the one viewport a paint composed to
+// width is shown in (Model.transcriptWidth); reserved at any other limit, a cached paint is not
+// what the cold path gives. What it returns carries no cells: its broken rows were never measured.
 func (r renderedTranscript) reserveWidgetCells(limit int) renderedTranscript {
 	if limit < 1 {
 		return r
@@ -588,10 +597,10 @@ func (r renderedTranscript) reserveWidgetCells(limit int) renderedTranscript {
 		segs := []string{ln}
 		switch {
 		case i == first:
-			segs = dropBlankTail(splitAtWidgetWidth(ln, firstWidth, limit))
+			segs = widgetRows(ln, firstWidth, limit)
 		case i > first && len(ln) > limit:
 			if w := widthOf(i); w > limit {
-				segs = dropBlankTail(splitAtWidgetWidth(ln, w, limit))
+				segs = widgetRows(ln, w, limit)
 			}
 		}
 		target := lineTarget{}
@@ -680,6 +689,60 @@ func dropBlankTail(segs []string) []string {
 		segs = segs[:len(segs)-1]
 	}
 	return segs
+}
+
+// widgetRows is the reserve's per-line rule: ln, whose widget width is width, broken into the
+// limit-column rows the viewport widget would have drawn it on, less a tail of rows that show
+// nothing. The reserve ([renderedTranscript.reserveWidgetCells]) and the break a block's paint
+// takes when it is stored ([blockPaint.brokenAt]) both break through it, so the two cannot part.
+func widgetRows(ln string, width, limit int) []string {
+	return dropBlankTail(splitAtWidgetWidth(ln, width, limit))
+}
+
+// storedBreakLimit is the viewport width a paint composed to width is shown in — width plus the
+// right gutter, the inverse of Model.transcriptWidth — or 0 where the paint width cannot say: at
+// transcriptWidth's floor of one column the viewport may be one column wide or two. A paint stored
+// at a width with a limit is broken there ([blockPaint.brokenAt]); one at the floor is stored whole
+// and the reserve breaks it at whichever limit it is handed, exactly as on the cold path.
+func storedBreakLimit(width int) int {
+	if width <= 1 {
+		return 0
+	}
+	return width + bodyRightGutter
+}
+
+// brokenAt is the paint with every line its cells count wider than limit broken onto rows of its
+// own by the reserve's rule ([widgetRows]) — the break [renderedTranscript.reserveWidgetCells]
+// would make for it at limit, made once, when the paint is stored ([transcript.paintBlock]). Each
+// row carries its line's mark whole, the pad flag included, as the reserve's rows carry its target
+// and pad flag, and a width no greater than limit — the columns the cut gave it, never measured
+// again — so a repaint reserved at limit finds nothing to break and nothing to measure. A paint
+// with no cells, or none over limit, is returned as it came.
+func (p blockPaint) brokenAt(limit int) blockPaint {
+	first := slices.IndexFunc(p.cells, func(c int) bool { return c > limit })
+	if first < 0 {
+		return p
+	}
+	lines := append(make([]string, 0, len(p.lines)+1), p.lines[:first]...)
+	targets := make([]lineMark, first, len(p.lines)+1)
+	copy(targets, p.targets) // a mark past the painter's own is the zero mark appendJoined reads
+	cells := append(make([]int, 0, len(p.lines)+1), p.cells[:first]...)
+	for i := first; i < len(p.lines); i++ {
+		mark := lineMark{}
+		if i < len(p.targets) {
+			mark = p.targets[i]
+		}
+		width := p.cells[i]
+		if width <= limit {
+			lines, targets, cells = append(lines, p.lines[i]), append(targets, mark), append(cells, width)
+			continue
+		}
+		for k, row := range widgetRows(p.lines[i], width, limit) {
+			lines, targets = append(lines, row), append(targets, mark)
+			cells = append(cells, min(limit, width-k*limit))
+		}
+	}
+	return blockPaint{lines: lines, targets: targets, cells: cells}
 }
 
 // splitAtWidgetWidth cuts ln into limit-column runs in the widget's measure — the viewport's own
