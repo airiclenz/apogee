@@ -239,7 +239,11 @@ NOTES (2026-11-24): the edits are named funcs in prompteditor.go (draftMsg, empt
 **Closes:** paste-outside-pane-table
 **Commit:** `refactor(tui): give the prompt draft one edit operation`
 
-## 9. Seat a session through one operation: /clear, /new, /sessions, /fork
+## 9. Seat a session through one operation: /clear, /new, /sessions, /fork — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): consequential edit — internal/tui/autotitle.go: made necessary by deleting resetSessionView's direct sessionName clear; nameSession's doc now names seatSession's zero seed as the one other writer instead of startNewSession
+NOTES (2026-11-24): resumeLoaded's naming latch and cacheBoundary now run at the end of the seat (after the repaint) rather than before beginSession; no step in between reads either, so the seated fields and the frame are the same — the restore/fork/clear acceptance tests pass unchanged
+NOTES (2026-11-24): the regression guard was checked by mutation: seeding the side panel's usage for a zero seed fails TestSeatSessionZeroSeedEmptiesEverySessionField's live-workflow subtest
 
 **What:**
 **Goal:** `Model.seatSession(sessionSeed)` is the only code writing the session-owned fields at /clear, /new, a /sessions restore and /fork; `resetSessionView` no longer exists; frames unchanged.

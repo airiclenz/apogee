@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"slices"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/sidepanel"
 )
 
@@ -17,7 +19,7 @@ import (
 //
 // It is the unit a watch swaps: watch mode parks the owner's sessionView whole (watchState.parked,
 // watch.go) and paints the watched run's in its place, and every swap goes through one method
-// ([Model.swapSessionView]). A field resetSessionView or resumeLoaded writes belongs here, and
+// ([Model.swapSessionView]). A field seatSession or resumeLoaded writes belongs here, and
 // TestSessionViewHoldsEveryFieldTheBoundariesReset fails until it is (or until the guard's
 // allow-list says why it stays on the Model). The Model embeds it anonymously, so every
 // m.transcript, m.state and m.ctxUsed site reads as it did before the fields gained this owner.
@@ -33,7 +35,7 @@ type sessionView struct {
 	// chrome is the session's start-up chrome (startupchrome.go): whether its start-up log still
 	// takes routine notes, and the router every launch-side note is placed through ([Model.note]).
 	// Its zero value is closed, so a fresh view — a watch's (clearWatchView) — starts with no log to
-	// join; only a session boundary opens it (resetSessionView, resumeLoaded, construction).
+	// join; only a session boundary opens it (seatSession, construction).
 	chrome startupChrome
 
 	// thinking is the session's thinking as the view RETAINS it — one bounded, escape-stripped
@@ -68,7 +70,7 @@ type sessionView struct {
 
 	// usageBase is the accounting the session record carried when this session was (re)opened: the
 	// main agent's stored totals on either resume path (replayResumed, resumeLoaded), and the zero
-	// value on a fresh launch or after /clear (resetSessionView). It exists because the ENGINE's
+	// value on a fresh launch or after /clear (seatSession). It exists because the ENGINE's
 	// cumulative reading restarts at zero on every session boundary — a fresh Agent on --resume,
 	// RestoreSession's reset on a browser restore, ClearContext's on /clear — so the
 	// usage fold adds that reading ON TOP of this base instead of letting it replace what the record
@@ -95,14 +97,14 @@ type sessionView struct {
 	// (foldStats). It is a record fact the renderer keeps because it is the one that sees the
 	// readings: it is seeded from a resumed record (ResumedSession.ServedModels, resumeLoaded),
 	// saved with every snapshot beside the tallies (savePayload), painted by /usage as `served:`,
-	// and zeroed with the tallies on /clear (resetSessionView). Nil until a reply names a model.
+	// and zeroed with the tallies on /clear (seatSession). Nil until a reply names a model.
 	servedModels []string
 
 	// sessionCurrency is the resumed record's own currency label (ADR 0093, amendment 2026-10-04):
 	// the label its priced amount was written in, which outlives a `currency:` changed since. It is
 	// an OVERRIDE only — "" reads the configured label live ([Model.currency]) — seated by either
 	// resume path from the label the binary or session.Meta resolved (replayResumed, resumeLoaded),
-	// escape-stripped there because it is disk input, and dropped on /clear (resetSessionView).
+	// escape-stripped there because it is disk input, and dropped on /clear (seatSession).
 	// While it names a label other than the configured one, every later reading counts its calls
 	// as unpriced ([Model.countedUsage]): their cost was reckoned in the configured currency, and
 	// adding it to an amount in another would misstate both.
@@ -119,7 +121,7 @@ type sessionView struct {
 	// panel from one path. It is nil until the first Event the panel reads, and COPY-ON-WRITE:
 	// [Model.foldSidePanel] folds into a clone and replaces the pointer, never writes through it, so a
 	// discarded Model copy's fold leaves the kept one's panel as it was (ADR 0011). Both session
-	// boundaries drop it — /clear (resetSessionView) and an in-TUI restore (resumeLoaded) — and a
+	// boundaries drop it — /clear and an in-TUI restore, both through seatSession — and a
 	// watch starts its own at nil (clearWatchView).
 	panel *sidepanel.State
 
@@ -142,7 +144,7 @@ type sessionView struct {
 	// folded from every domain.MCPServerEvent the view hears — live, from a watched journal, and from
 	// the startup seed ([Model.seedMCP]) — by foldEventAgainst. It belongs to the PROCESS, not the conversation: a
 	// server stays connected across /clear and an in-TUI restore, so neither boundary
-	// (resetSessionView, resumeLoaded) writes it. It lives here rather than on the Model because a
+	// (seatSession, resumeLoaded) writes it. It lives here rather than on the Model because a
 	// watch swaps it with the rest of the view: the watched process's own fold, built from its
 	// journal's mcp_server lines, is painted in its place and the owner's is parked untouched. A
 	// plain value whose fold replaces its slice whole, so ADR 0011's copy rule holds.
@@ -217,8 +219,8 @@ type sessionView struct {
 	// named — and "" means "not named yet", which the seam that renders it answers for itself. It
 	// carries untrusted text (a model's reply, a resumed record's Meta), so that seam sanitizes;
 	// nothing else reads it.
-	// Four plain values, safe in the value-copied Model (ADR 0011); startNewSession resets all of
-	// them, so the session /clear opens names itself afresh.
+	// Four plain values, safe in the value-copied Model (ADR 0011); seatSession's zero seed resets
+	// all of them, so the session /clear opens names itself afresh.
 	autoTitleFired bool
 	titleTouched   bool
 	pendingTitle   titleStash
@@ -230,10 +232,144 @@ type sessionView struct {
 	// progress save pairs with the LIVE transcript while a Turn is still open (progressSave,
 	// sessionsave.go). hasBoundary is its presence flag, because a zero domain.Session is itself a
 	// legal envelope and so cannot say whether one was ever cached. cacheBoundary is the only site
-	// that fills the pair; startNewSession is the only one that empties it.
+	// that fills the pair; seatSession is the only one that empties it.
 	//
 	// A domain.Session is plain values (a version and an opaque blob), so it rides the
 	// value-copied Model like the usage readings above (ADR 0011).
 	boundary    domain.Session
 	hasBoundary bool
+}
+
+// sessionSeed is what a session boundary seats the view from ([Model.seatSession]): a stored
+// record — its Meta, its opaque transcript blob, whether the engine came back mid-Exchange and the
+// engine payload the restore left standing — or, as the zero value, the empty session /clear and
+// /new open. fromRecord says which: a record's Meta may itself be all zero, so the seed cannot ask
+// its fields. Plain values and one pointer that is read, never written through (ADR 0011).
+type sessionSeed struct {
+	fromRecord bool
+	meta       session.Meta
+	transcript []byte
+	inExchange bool
+	boundary   *domain.Session
+}
+
+// recordSeed is the seed of a record the engine has just restored: its Meta and scrollback, the
+// engine's own mid-Exchange answer, and the record's payload as the boundary the engine now holds.
+func recordSeed(rec session.Record, inExchange bool) sessionSeed {
+	return sessionSeed{
+		fromRecord: true,
+		meta:       rec.Meta,
+		transcript: rec.Transcript,
+		inExchange: inExchange,
+		boundary:   &rec.Session,
+	}
+}
+
+// seatSession is the one operation that writes the session-owned fields at a session boundary —
+// /clear and /new (a zero seed) and a /sessions restore or a /fork (a record's seed, resumeLoaded).
+// It touches no engine and queues no write: the caller has already done the engine half, and the
+// view seated here is the one the frame paints next. A zero seed leaves the frame byte-identical
+// to a fresh launch at this window size; a record's seat repaints the stored scrollback and
+// relights the gauge, the accounting and the label from the record.
+//
+// The per-door differences are kept on purpose: only a record re-places the binding's first-contact
+// lines (a zero seed's fresh view is the launch's, whose lines a reset never carried), only a
+// record seeds the side panel's usage section, a record's empty title keeps the name the frame
+// shows, and a restore leaves titleTouched standing where /clear clears it.
+func (m *Model) seatSession(seed sessionSeed) {
+	meta := seed.meta
+	// The new session reseeds the box and opens its own start-up log, as a launch does, before its
+	// first notice.
+	m.beginSession()
+	if seed.fromRecord {
+		// The server's first-contact lines still describe the binding this session runs on, and were
+		// never in any record, so they come back under the box as a launch placed them.
+		m.replaceFirstContactLines()
+	}
+	// The side panel's folded state falls with the outgoing session, whose Events it was folded from,
+	// and so does the disk re-check of its changed files, whose reply would name the closed session's
+	// rows — BEFORE a record's replay, which rebuilds the resumed session's tasks and writes from its
+	// stored entries (replayScrollback).
+	m.panel = nil
+	m.resetPanelDisk()
+	if seed.fromRecord {
+		// Repaint the stored scrollback and say what was reopened, through the one repaint a --resume
+		// start goes through too (replayScrollback).
+		m.replayScrollback(seed.transcript, meta.Title, seed.inExchange)
+	}
+	// An open run view survives exactly as far as the (re)filled transcript carries its run: an empty
+	// session closes every view, and a record holding the same spawn id reopens on the same view
+	// (runview.go). It is asked AFTER the replay, since a stack judged against an empty list would
+	// pop the view the replay was about to restore.
+	m.reseatViewStack()
+	// The boundary made the engine re-read the workspace context files, so the notice says what the
+	// session is carrying now (the resolved-live posture). A pre-bound session's unbound holder
+	// reports nothing and adds nothing.
+	m.noteContextFiles()
+	// The suggestion band's spent set and the /thinking and /advice boards fall with the conversation
+	// they were advising and recording (suggestband.go, resetSessionBoards): none of them is stored,
+	// so a restored record has nothing of its own to reopen them at.
+	m.spentSkills = nil
+	m.resetSessionBoards()
+	// A held interjection queue deliberately SURVIVES the boundary (ADR 0025): staged rows are
+	// outgoing input, not context — the human wrote them and has not unwritten them.
+	//
+	// The live reading falls whole and the gauge is relit from the seed's stored fill — zero for an
+	// empty session (liveStats.reset).
+	m.liveStats.reset()
+	m.ctxUsed = meta.CtxUsed
+	// The cumulative accounting reopens where the seed left it. The engine's tally restarts at zero on
+	// every boundary (ClearContext, RestoreSession), so the fold adds onto this base (foldStats); an
+	// empty session's base is zero, so it reports only what it spends — the closing record took the
+	// closed session's sums with the save that ran before this seat. The delegate half is a fallback
+	// only: a replayed run head's own reading replaces it the moment one reports (delegateUsageTotal).
+	m.usageBase = domain.Usage(meta.Usage)
+	m.usage = m.usageBase
+	m.delegateUsage = domain.Usage(meta.DelegateUsage)
+	if seed.fromRecord {
+		// The side panel's usage section reopens at the restored accounting. A record seed only: it
+		// runs before the workflows' rebase below, so for an empty session a live background
+		// workflow's earlier spend would otherwise open a usage section /clear leaves nil.
+		m.seedSidePanelUsage()
+	}
+	// A background workflow running across the boundary (ADR 0089 D5) spent its runs' readings so far
+	// in the session just closed, whose record counted them: the view is rebased so the seated session
+	// counts only what it spends from here (backgroundWorkflows.rebased).
+	m.workflows = m.workflows.rebased()
+	// The models that answered come back with the tallies they qualify (a record's set must ride
+	// along or the reopened session's first save would drop it), and an empty session has none.
+	m.servedModels = slices.Clone(meta.ServedModels)
+	// The label a record's amount counts under, by the one rule the host's later saves follow
+	// (session.Meta.EffectiveCurrency): asked for the record's own label alone, so a record with no
+	// priced amount — and an empty session — answers "" and the view reads the configured label live.
+	// Disk input, so escape-stripped.
+	m.sessionCurrency = stripEscapes(meta.EffectiveCurrency(""))
+	m.detached = false // re-arm follow-the-tail: the seated view opens at its tail like a launch
+	m.flash = ""       // drop any transient note; a seated session shows nothing stale
+	// A title still waiting for an id was stashed for the session this boundary replaced.
+	m.pendingTitle.drop()
+	if seed.fromRecord {
+		// Saves now target a record that already HAS a name, so the automatic naming call is latched
+		// off for the rest of this session, as it is for a --resume start. titleTouched is
+		// deliberately NOT re-armed: its only effect is to DROP a late automatic title, and the one
+		// that can still land after a restore is the outgoing session's in-flight call, which must
+		// not name the record just reopened. An empty title keeps the name (nameSession refuses it).
+		m.autoTitleFired = true
+		m.nameSession(meta.Title)
+	} else {
+		// A fresh session names itself: unlatch the naming call, forget that the CLOSED session was
+		// named by hand, and drop its name — the session /clear opens is unnamed until it names itself.
+		m.autoTitleFired = false
+		m.titleTouched = false
+		m.sessionName = ""
+	}
+	// The cached boundary belongs to the conversation just closed and must never be paired with the
+	// seated session's transcript (progressSave). An empty session forgets it — the next worker
+	// launch caches the boundary it actually starts from; a restored record's payload IS the engine's
+	// boundary now, so it is cached as it stands rather than re-Snapshotted.
+	m.boundary = domain.Session{}
+	m.hasBoundary = false
+	if seed.boundary != nil {
+		m.cacheBoundary(*seed.boundary)
+	}
 }

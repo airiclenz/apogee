@@ -726,7 +726,7 @@ func TestUsageAccumulatesOverAResumedReading(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// The session boundary /clear and /new draw through the accounting (resetSessionView)
+// The session boundary /clear and /new draw through the accounting (seatSession)
 // ----------------------------------------------------------------------------
 
 // TestClearResetsTheUsageTallies pins the view half of the /clear boundary. The sums belong to the

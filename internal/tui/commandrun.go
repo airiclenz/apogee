@@ -165,7 +165,7 @@ func (m Model) launchExchange(in domain.UserInput) (tea.Model, tea.Cmd) {
 // is noted — a fresh-looking view must never lie about an engine that still remembers the old
 // conversation; the save already on the queue is harmless (the session was closing anyway).
 //
-// A pre-bound session takes the view-only half instead (resetSessionView): there is no engine to
+// A pre-bound session takes the view-only half instead (seatSession): there is no engine to
 // flush from, no Exchange to abort and no context to clear, and the unbound holder answers all three
 // with errNoServerBound — which used to surface as a "could not clear context" note over a view the
 // reset never reached. Options.Prebound is left standing, so the reason, its start-up box and the
@@ -182,7 +182,7 @@ func (m Model) launchExchange(in domain.UserInput) (tea.Model, tea.Cmd) {
 func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	if m.prebound() && m.opts.Resumed == nil {
 		// Nothing to flush, abort or clear while no engine exists, so the reset is the view's alone.
-		m.resetSessionView()
+		m.seatSession(sessionSeed{})
 		return m, nil
 	}
 	if m.workflowsRunning() {
@@ -219,7 +219,9 @@ func (m Model) clearSession(keep bool) (tea.Model, tea.Cmd) {
 	if rotate := m.scheduleWrite(recordWrite{kind: writeRotate}); rotate != nil {
 		cmd = rotate
 	}
-	m.resetSessionView()
+	// The engine has accepted the clear, so the view seats the empty session it now holds. The
+	// closing record took the closed session's tallies with the flush above, before this seat.
+	m.seatSession(sessionSeed{})
 	if keep {
 		m.transcript.addNote(workflowsKeptNote)
 	}
@@ -351,82 +353,10 @@ func (m Model) answerBoundary(answer boundaryAnswer) (tea.Model, tea.Cmd) {
 	return after, cmd
 }
 
-// resetSessionView wipes what the closed conversation owned out of the view and re-seeds the
-// one-time start-up box, so the frame is byte-identical to a fresh launch at this window size. It
-// touches no engine and queues no write — both halves of /clear end here: the bound one once the
-// engine has accepted the clear, and the pre-bound one, which has no engine to accept it and for
-// which this is the whole of the reset.
-func (m *Model) resetSessionView() {
-	// The suggestion band's spent set falls with the conversation it was advising (suggestband.go):
-	// the skills it named in the closed session are advice the human has not been given in this one.
-	// A refused clear returns before this runs, so the set survives exactly as long as the session it
-	// belongs to does.
-	m.spentSkills = nil
-	m.resetSessionBoards() // the /thinking and /advice boards fall with the conversation they recorded
-	m.panel = nil          // so does the side panel's folded state: every section it paints was the closed session's
-	m.resetPanelDisk()     // and the disk re-check of its changed files, whose reply would name the closed session's rows
-	// The new session reseeds the box and opens its own start-up log, as a launch does, before its
-	// first notice.
-	m.beginSession()
-	// A bound reset's clear was a session boundary, so the engine re-read the workspace context files:
-	// the fresh view says what the NEW session is carrying (which is why the notice is reprinted
-	// rather than assumed unchanged — the repo's AGENTS.md may have moved since launch). A pre-bound
-	// session has no engine to ask and the unbound holder's empty report adds nothing.
-	m.noteContextFiles()
-	// The conversation the reset threw away took every run inside it, so no open run view still names
-	// entries the transcript holds: the stack falls whole and the paint is re-rooted at the top level
-	// (runview.go states the rule once, for every reset that goes through it).
-	m.reseatViewStack()
-	// A held interjection queue deliberately SURVIVES the reset (ADR 0025): staged rows are
-	// outgoing input, not context — the human wrote them and has not unwritten them — so /clear
-	// drops what the model remembers and leaves what is still waiting to be sent.
-	m.detached = false // re-arm follow-the-tail: the fresh transcript opens at its tail like a launch
-	// The gauge, the generation clock and the throughput fall with the discarded conversation — the
-	// same reason compactDoneMsg zeroes the gauge on a fold.
-	m.liveStats.reset()
-	// So does the CUMULATIVE accounting beside them: the sums belong to the session just closed, and
-	// its record took them (saveAtIdle runs BEFORE this reset, so the closing record keeps its own
-	// tally). The engine zeroes its tally at the same boundary (ClearContext, like RestoreSession),
-	// so the base the fold adds its readings onto is zero from here — a resumed record's offset was
-	// that record's, not this session's — and the /usage pane and the first save of the fresh
-	// session report only what the fresh session spends. The delegate half falls the same way: the
-	// run heads it stood in for went with the transcript above, and a restored record's sum was the
-	// closed session's. Until 2026-09-15 the three stood across this boundary, so a fresh session
-	// inherited the closed one's spend (the 2026-08-20 deferred defect this closes).
-	m.usage = domain.Usage{}
-	m.usageBase = domain.Usage{}
-	m.delegateUsage = domain.Usage{}
-	// A background workflow the human kept running across the clear (ADR 0089 D5) — or one still
-	// ending on a `y` — spent its runs' readings so far in the closed session, whose record counted
-	// them; its view is rebased so the fresh session's /usage and its stop or finish line carry only
-	// what it spends from here (backgroundWorkflows.rebased).
-	m.workflows = m.workflows.rebased()
-	// The models that answered fall with the tallies they qualify: they were the closed session's
-	// answerers, and its record took them with the same saveAtIdle above.
-	m.servedModels = nil
-	// The label a resumed record's amount counted under falls with that amount: the fresh session
-	// prices its calls in the configured `currency:` again (Model.currency).
-	m.sessionCurrency = ""
-	m.flash = "" // drop any transient copy note; a new session shows nothing stale
-	// A bound reset queues a Rotate above, which opens a fresh Session record, and a fresh record
-	// names itself; a pre-bound one had no session to rotate. Either way: unlatch the naming call,
-	// forget that the CLOSED session was named by hand, and drop any title still waiting for an id —
-	// it was stashed for the session that just went into history.
-	m.autoTitleFired = false
-	m.titleTouched = false
-	m.pendingTitle.drop()
-	m.sessionName = "" // the session /clear opens is unnamed until it names itself
-	// The cached boundary belongs to the conversation just closed, and the fresh session's
-	// transcript must never be paired with it (progressSave). It is forgotten rather than refreshed:
-	// the next worker launch caches the boundary the new session actually starts from.
-	m.boundary = domain.Session{}
-	m.hasBoundary = false
-}
-
 // resetSessionBoards empties the two boards a session boundary takes with it — the /thinking board
 // (thinking.go) and the /advice board (advicepane.go) — so a new or switched session opens on both
 // exactly as a launch does. It is the one owner of that list, called by both boundaries: /clear
-// and /new through resetSessionView, a /sessions resume and /fork through resumeLoaded. Neither
+// and /new through seatSession's zero seed, a /sessions resume and /fork through a record's. Neither
 // board is persisted, so a restored session has nothing of its own to reopen them at; left
 // standing, they would show the closed conversation's thinking and advice under the new one.
 //

@@ -4627,7 +4627,7 @@ func TestSidePanelDiskGoneSetFallsWithWritesAndBoundaries(t *testing.T) {
 	t.Run("/clear", func(t *testing.T) {
 		t.Parallel()
 		m, _ := gone(t)
-		m.resetSessionView()
+		m.seatSession(sessionSeed{})
 		if len(m.panelDisk.gone) != 0 {
 			t.Errorf("/clear kept the gone set: %v", m.panelDisk.gone)
 		}

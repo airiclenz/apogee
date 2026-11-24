@@ -15,7 +15,7 @@ the watcher's own home ⏎ then resumes through the normal door, and a **Watched
 is never resumable. See ADR 0103.
 
 In code, a new Msg case in `Model.fold` needs a watch route in `watchRouteOf` (view, owner or held),
-and a new field `resetSessionView` or `resumeLoaded` writes belongs in `sessionView`, the one value
+and a new field `seatSession` or `resumeLoaded` writes belongs in `sessionView`, the one value
 a watch parks and swaps. Two guard tests enforce this (`TestWatchIsolatesRoutesEveryFoldedMsg`,
 `TestSessionViewHoldsEveryFieldTheBoundariesReset`), and choosing the route is a design decision.
 Every view swap goes through `swapSessionView`, which calls `forgetPaintedFrame`, since the parked

@@ -1799,8 +1799,8 @@ func sortedKeys(set map[string]bool) []string {
 	return keys
 }
 
-// The two session boundaries the view resets at — /clear and /new (resetSessionView) and an in-TUI
-// /sessions restore (resumeLoaded) — write only the session view, which is the one value a watch
+// The two session boundaries the view resets at — /clear and /new (seatSession's zero seed) and an
+// in-TUI /sessions restore (resumeLoaded, which seats a record's) — write only the session view, which is the one value a watch
 // parks and swaps (swapSessionView). A field either boundary writes on the Model itself would stand
 // across a watch unparked: the watched run would paint the owner's, and the owner's would come back
 // changed by the watch. So every Model field the two write, through every Model method they call,
@@ -1821,7 +1821,7 @@ func TestSessionViewHoldsEveryFieldTheBoundariesReset(t *testing.T) {
 	}
 
 	written := map[string]bool{}
-	for _, boundary := range []string{"resetSessionView", "resumeLoaded"} {
+	for _, boundary := range []string{"seatSession", "resumeLoaded"} {
 		for field := range fieldsWritten(methods, boundary, map[string]bool{}) {
 			written[field] = true
 		}

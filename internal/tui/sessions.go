@@ -875,9 +875,10 @@ func (m Model) loadSession(id string, keep bool) tea.Cmd {
 // is refused by the host as a load error, so its refusal — the host's own line, naming the fork as
 // the way to work alongside — is what the load note carries. Only on success does it QUEUE the
 // activation of the loaded session (redirecting future saves, once everything already queued against
-// the outgoing record has landed) and reset the view like startNewSession — reseed the start-up box, repaint the stored scrollback (a decode failure or a
-// legacy empty blob degrades to an honest no-scrollback note), relight the gauge from the stored
-// fill, and re-arm the same field set startNewSession resets. A session restored mid-task gets the
+// the outgoing record has landed) and seat the view from the record through the one session seat
+// /clear takes too (seatSession) — reseed the start-up box, repaint the stored scrollback (a decode
+// failure or a legacy empty blob degrades to an honest no-scrollback note), relight the gauge from
+// the stored fill, and re-arm the same field set /clear resets. A session restored mid-task gets the
 // interrupted note (item 8 supplies the step-only /continue drive that finishes it).
 //
 // The repaint itself and the three resume notices are replayScrollback's, shared with the --resume
@@ -937,84 +938,12 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// saves resolve against. Nothing else in this fold waits on it: the view below repaints from the
 	// record already in hand, not from the host.
 	cmd := m.scheduleWrite(recordWrite{kind: writeActivate, meta: msg.rec.Meta})
-	// The engine now holds exactly the record's own payload, at the boundary it was stored at, so
-	// that payload IS this session's current boundary — cached here rather than re-Snapshotted,
-	// being already in hand and identical. Without it a delegation in the resumed session's first
-	// Turn would have no engine half to pair its live transcript with (progressSave).
-	m.cacheBoundary(msg.rec.Session)
-	// Saves now target a record that already HAS a name, so the automatic naming call is latched off
-	// for the rest of this session exactly as it is for a --resume start (replayResumed), and a title
-	// still waiting for an id is dropped: it was stashed for the session this restore just replaced.
-	//
-	// titleTouched is deliberately NOT re-armed here, where /clear does clear it: the flag's only
-	// effect is to DROP a late automatic title (never clobber), and the one automatic title that can
-	// still land after a restore is the outgoing session's own in-flight call — which must not name
-	// the record just reopened. Leaving a human's "I named a session" standing is the answer that
-	// keeps it from doing so, so the asymmetry with startNewSession is preserved as it stands.
-	m.autoTitleFired = true
-	m.pendingTitle.drop()
-	title := msg.rec.Meta.Title
-	m.nameSession(title) // the frame follows the restore, as it follows every other naming route
-	// The restored session reseeds the box and opens its own start-up log, as a launch does, before
-	// its first notice.
-	m.beginSession()
-	// The server's first-contact lines still describe the binding this session runs on, and were
-	// never in any record, so they come back under the box as a launch placed them.
-	m.replaceFirstContactLines()
-	// The side panel's folded state falls with the outgoing session, whose Events it was folded
-	// from — BEFORE the replay below, which rebuilds the resumed session's tasks and writes from
-	// its stored entries (replayScrollback).
-	m.panel = nil
-	m.resetPanelDisk()
-	// Repaint the stored scrollback and say what was reopened, through the one repaint a --resume
-	// start goes through too (replayScrollback): the facts are read off the record just loaded and
-	// off the live engine, the wording of all three notices is the shared function's.
-	m.replayScrollback(msg.rec.Transcript, title, m.eng.InExchange())
-	// An open run view survives exactly as far as the replayed scrollback carries its run: a record
-	// holding the same spawn id reopens on the same view, and anything else closes it (runview.go).
-	// It is asked AFTER the replay for that reason — judged against the empty list, every view would
-	// fall, including the one the restore just brought back.
-	m.reseatViewStack()
-	// A successful restore starts a new session, so the engine re-read the workspace context files
-	// (the resolved-live posture: a resumed session speaks from the CURRENT files, not the ones its
-	// snapshot was taken under) — the notice says what it is now carrying.
-	m.noteContextFiles()
-	// The suggestion band's spent set falls with the conversation it was advising (suggestband.go),
-	// for the same reason /clear drops it: the skills it named in the session just closed are advice
-	// the human has not been given in the one being reopened. Unconditional — a restore that got
-	// this far HAS replaced the conversation, and the set is never stored, so there is no resumed
-	// session's own spend to reopen at, only the outgoing one's to leave behind.
-	m.spentSkills = nil
-	// The /thinking and /advice boards fall for the same reason, through the one call /clear makes:
-	// neither is stored, so there is no resumed session's own to reopen them at (resetSessionBoards).
-	m.resetSessionBoards()
-	// The live reading belongs to the conversation that just went away, so it falls whole and the
-	// gauge is relit from the record — the same one call /clear makes, differing only in having a
-	// stored fill to reopen at (liveStats.reset).
-	m.liveStats.reset()
-	m.ctxUsed = msg.rec.Meta.CtxUsed               // relight the gauge near the resumed session's last fill
-	m.usageBase = domain.Usage(msg.rec.Meta.Usage) // …and reopen its accounting where the record left it
-	m.usage = m.usageBase                          // RestoreSession zeroed the engine's tally; the fold adds onto the base
-	// The delegate half is restored beside it as the fallback it is: the replayed scrollback below
-	// brings back the run heads that carry their own readings, and those replace this the moment
-	// one reports (delegateUsageTotal). A record whose blob no longer decodes keeps it instead.
-	m.delegateUsage = domain.Usage(msg.rec.Meta.DelegateUsage)
-	// The side panel's usage section reopens at the same accounting, now that it is all restored.
-	m.seedSidePanelUsage()
-	// A background workflow running across the switch spent its runs' readings so far in the session
-	// just left, whose record counted them: the view is rebased, as /clear rebases it, so the
-	// reopened session counts only what it spends from here (backgroundWorkflows.rebased).
-	m.workflows = m.workflows.rebased()
-	// The models that answered the resumed session come back with its tallies, for the same reason
-	// the base does: the host rebuilds Meta from what the renderer hands it on every save, so a set
-	// not carried in here would be dropped by the reopened session's first save.
-	m.servedModels = slices.Clone(msg.rec.Meta.ServedModels)
-	// …and so does the label its amount counts under, by the one rule the host's later saves follow
-	// (session.Meta.EffectiveCurrency): asked for the record's own label alone, so a record with no
-	// priced amount to keep answers "" and the view reads the configured label live.
-	m.sessionCurrency = stripEscapes(msg.rec.Meta.EffectiveCurrency(""))
-	m.detached = false // re-arm follow-the-tail: the resumed view opens at its tail like a launch
-	m.flash = ""
+	// The engine now holds exactly the record's own payload, so the view is seated from the record
+	// through the one session seat /clear takes too (seatSession): the box reseeded, the stored
+	// scrollback repainted with the resume notices (replayScrollback, shared with a --resume start),
+	// the gauge, the accounting and the label relit, the naming call latched off and the record's
+	// payload cached as the boundary a first-Turn delegation's progress save pairs with.
+	m.seatSession(recordSeed(msg.rec, m.eng.InExchange()))
 	return cmd // the queued Activate, when this fold's schedule found the queue idle
 }
 

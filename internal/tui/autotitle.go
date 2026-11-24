@@ -282,7 +282,7 @@ func (m *Model) applyTitle(name string, src titleSource) (cmd tea.Cmd, stashed b
 // machinery, and the ONLY writer of Model.sessionName. Every route that decides a name goes
 // through it: both naming calls and `/rename <text>` (applyTitle), the browser's `r` when the row
 // it renames is the live session, and both resume paths, which arrive with a name already chosen.
-// startNewSession clears the field directly, because "no name" is not a name.
+// seatSession's zero seed (/clear, /new) clears the field directly, because "no name" is not a name.
 //
 // A name that is empty or nothing but whitespace is refused rather than applied: the callers'
 // sanitizers can reduce a title to nothing, and a frame that went from naming the session to

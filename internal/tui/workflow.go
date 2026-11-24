@@ -218,7 +218,7 @@ func (b backgroundWorkflows) withReading(id string, run runRef, reading domain.U
 }
 
 // rebased returns b with every live view's base moved to what its runs have spent so far: the
-// session boundary a workflow runs across (resetSessionView, resumeLoaded). The closed session's
+// session boundary a workflow runs across (seatSession, at /clear and a restore alike). The closed session's
 // record already counted that spend, so the view — its /usage row, and the finish line it ends on —
 // counts only what its runs spend from here.
 func (b backgroundWorkflows) rebased() backgroundWorkflows {
