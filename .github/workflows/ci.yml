@@ -64,7 +64,7 @@ jobs:
         with:
           # This job runs Go tooling only and needs no git credential.
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           # A cache key of this job's own. The lint, vulncheck and cross jobs hash go.sum alone,
@@ -147,7 +147,7 @@ jobs:
         with:
           # This job runs Go tooling only and needs no git credential.
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
       - name: golangci-lint
@@ -169,7 +169,7 @@ jobs:
         with:
           # This job runs Go tooling only and needs no git credential.
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
       - name: govulncheck
@@ -198,7 +198,7 @@ jobs:
         with:
           # This job runs Go tooling only and needs no git credential.
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
       - name: build all packages
@@ -214,7 +214,7 @@ jobs:
         with:
           # This job runs Go tooling only and needs no git credential.
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
       - name: go test (race, ConPTY packages)
