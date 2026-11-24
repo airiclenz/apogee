@@ -32,8 +32,9 @@ import (
 //
 // It is called after hostToolchain.start: the read-roots func it composes lists the toolchain
 // roots the probe answers, and a caller that composed it first would mount a library that never
-// fills. Both Drivers already start the probe before they reach this — a session in newRootWiring,
-// a Firing in firingConfig — so the order is a fact about them, stated here so it stays one.
+// fills. Both Drivers already start the probe before they reach this — a session in
+// newRootWiringOn, over the host openDriverHost opened, and a Firing in firingConfig — so the order
+// is a fact about them, stated here so it stays one.
 func projectConfig(
 	opts config.Options,
 	roots stateRoots,

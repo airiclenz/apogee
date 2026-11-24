@@ -32,7 +32,6 @@ import (
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
-	"github.com/airiclenz/apogee/internal/tui"
 	"github.com/airiclenz/apogee/internal/undo"
 )
 
@@ -277,47 +276,38 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// resolves to the live session to watch instead (w.watch), with w.resumed nil: everything below
 	// builds a fresh start, which the TUI opens watching.
 	//
-	// With `sessions.share-group:` set the store writes every session file for that group, and the
-	// one start-up fact that owes the human — a config.yaml the shared home now exposes — is said
-	// here, before the alternate screen, through the same seam as the confinement sentences.
-	storeOpts, shareWarning, err := sessionStoreOptions(w.opts.Sessions, w.roots.config)
-	if err != nil {
-		return err
-	}
-	if shareWarning != "" {
-		w.announce(tui.Notice{Text: shareWarning, Kind: tui.NoticeShareGroupConfig})
-	}
-	w.store = session.NewStore(w.roots.sessions, storeOpts...)
+	// The Driver host opens the store (driverhost.go). With `sessions.share-group:` set the store
+	// writes every session file for that group, and the one start-up fact that owes the human — a
+	// config.yaml the shared home now exposes — is said here, before the alternate screen, through
+	// the same seam as the confinement sentences.
+	//
 	// The configured watched homes (`sessions.watch-homes:`, ADR 0103 decision 7), each behind a
 	// read-only store: --resume looks in them for an id this home lacks, and the host lists them
 	// for /sessions. Building them touches no disk.
 	watched := watchedHomesOf(w.opts.Sessions.WatchHomes)
-	w.resumed, w.watch, err = resolveResume(w.store, watched, w.opts.Resume, w.opts.ContinueSession,
-		w.roots.workspace)
+	// The resume is resolved inside the open, as the id the host's two startup sweeps must keep —
+	// the session sweep and then the undo stores' — and this is the one thing that cannot move
+	// earlier: --continue names no id, so the record it resolves to is only known once
+	// resolveResume has run. Swept at the boot beat instead, a policy tight enough to reach that
+	// record would delete it a moment before it is read and `apogee --continue` would die on "no
+	// saved sessions for this workspace". Keeping the resolved id is what makes the manual's "never
+	// removes the session being resumed" true for both --resume <id> and --continue, and it keeps
+	// that session's undo history too. The snapshot sweep follows the session sweep, so a record it
+	// just pruned is already gone when the snapshot sweep looks for it, which is what lets a retired
+	// session's objects go with it rather than a boot later.
+	store, err := w.boot.openStore(w.announce, func(store *session.Store) ([]string, error) {
+		var err error
+		w.resumed, w.watch, err = resolveResume(store, watched, w.opts.Resume, w.opts.ContinueSession,
+			w.roots.workspace)
+		if err != nil || w.resumed == nil {
+			return nil, err
+		}
+		return []string{w.resumed.Meta.ID}, nil
+	})
 	if err != nil {
 		return err
 	}
-
-	// The startup session sweep (wire.go), the scratch sweep's sibling — and the one thing that
-	// cannot move earlier: --continue names no id, so the record it resolves to is only known once
-	// resolveResume has run. Swept at wire.go's boot beat instead, a policy tight enough to reach
-	// that record would delete it a moment before it is read and `apogee --continue` would die on
-	// "no saved sessions for this workspace". Running it HERE, with the resolved id passed as the
-	// one to keep, is what makes the manual's "never removes the session being resumed" true for
-	// both --resume <id> and --continue.
-	var keepSessions []string
-	if w.resumed != nil {
-		keepSessions = append(keepSessions, w.resumed.Meta.ID)
-	}
-	gcSessions(w.store, w.opts.Sessions, keepSessions...)
-
-	// The undo stores' own sweep, HERE rather than at the boot beat beside gcScratchDirs for the
-	// session sweep's reason: one of its two rules asks the session store whether a record still
-	// exists, and the store — and the resolved id this run must not lose — only exist from this
-	// line on (wire.go). It runs after the session sweep so a record that sweep just pruned is
-	// already gone when this one looks for it, which is what lets a retired session's objects go
-	// with it rather than a boot later.
-	gcSnapshotDirs(w.roots.snapshots, w.store, time.Now(), keepSessions...)
+	w.store = store
 
 	// The engine seam the renderer drives. It is a HOLDER rather than the Agent itself, because
 	// construction is no longer something startup always gets to do: with no startup server

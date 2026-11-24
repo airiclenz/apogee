@@ -18,6 +18,23 @@ import (
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
+// newRootWiring opens a run over roots a test already resolved, the way runRootWith does over the
+// Driver host it opens: the host is built over those roots (newDriverHost — no sweep, no config
+// source walked) and the wiring is opened on it. The runner and the confinement backend are the
+// production ones; newRootWiringWith is the same opening with both stated.
+func newRootWiring(opts config.Options, mode apogee.Mode, roots stateRoots) *rootWiring {
+	return newRootWiringWith(opts, mode, roots, rootDeps{})
+}
+
+// newRootWiringWith is newRootWiring with the host's runner and Confiner constructor stated by the
+// test (rootDeps): a boot test dictates the backend's capability matrix through it and asks its
+// gating question on every host. Zero deps resolve to the production values.
+func newRootWiringWith(opts config.Options, mode apogee.Mode, roots stateRoots, deps rootDeps) *rootWiring {
+	host := newDriverHost(roots, opts, deps.confiner)
+	host.files = opts.Files
+	return newRootWiringOn(opts, mode, host, deps)
+}
+
 // captureStderr swaps the process os.Stderr for a pipe, runs f, and returns everything f wrote to
 // stderr. The caller must NOT be a parallel test: os.Stderr is a process-global, so this is only
 // race-free during the sequential test phase (parallel tests are paused until it finishes).

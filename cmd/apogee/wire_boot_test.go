@@ -591,6 +591,43 @@ func TestRunRootConfinementStartupNotices(t *testing.T) {
 	}
 }
 
+// A session started with no workspace stated takes the working directory as its workspace and the
+// repository top above it as its Project root — the config source's answer, reached through the
+// Driver host (openDriverHost resolves an empty workspace to the working directory before it walks
+// for the root). A boot that resolved the roots without the source would hand the renderer no
+// Project root, and skills under the repository's .apogee/ would be labelled "elsewhere".
+func TestRunRootTakesTheProjectRootWithNoWorkspace(t *testing.T) {
+	// Deliberately NOT parallel: t.Chdir moves the process-wide working directory.
+	repo := t.TempDir()
+	for _, dir := range []string{".git", ".apogee", filepath.Join("src", "pkg")} {
+		if err := os.MkdirAll(filepath.Join(repo, dir), 0o700); err != nil {
+			t.Fatalf("MkdirAll(%s): %v", dir, err)
+		}
+	}
+	t.Chdir(filepath.Join(repo, "src", "pkg"))
+	wantRoot, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+
+	rec := &recordingLauncher{}
+	opts := config.Options{
+		Endpoint:     "http://127.0.0.1:1111",
+		Model:        "fake",
+		StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+		Mode:         "ask-before",
+		ConfigDir:    t.TempDir(),
+	}
+	deps := rootDeps{confiner: hostConfiner(fenceableHost)}
+	if err := runRootWith(context.Background(), opts, config.ProjectOffer{}, rec.launch, deps); err != nil {
+		t.Fatalf("runRootWith: %v", err)
+	}
+
+	if rec.opts.ProjectRoot != wantRoot {
+		t.Errorf("the renderer's Project root = %q, want the repository top %q", rec.opts.ProjectRoot, wantRoot)
+	}
+}
+
 // assertResidualLogWording checks the one residual notice runRoot announced: stderr carries
 // probe.ResidualNotice's text byte for byte, the notice carrying it names the residual kind (whose
 // transcript wording the TUI composes), and opts.Confinement hands the TUI the fake backend's name

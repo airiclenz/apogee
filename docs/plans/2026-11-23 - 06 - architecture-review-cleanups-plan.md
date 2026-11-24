@@ -587,7 +587,12 @@ NOTES (2026-11-24): deleting TestServerStatsOffWritesNothing left headlessStatsR
 - `! grep -nE 'resolveRoots|sessionRoots|gcScratchDirs|gcSnapshotDirs|gcSessions|newStatsRecorder|platform\.NewConfiner|sessionStoreOptions|ConfinementTeardownNotice|ResidualNotice|unconfinedAutoWarning' cmd/apogee/headless.go`
 **Commit:** `refactor(headless): open the headless run's process-scope facilities through the Driver host`
 
-## 25. The TUI opens its facilities through the Driver host
+## 25. The TUI opens its facilities through the Driver host — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): the local host variable in runRootWith is named `boot` (the plan's `h`), since `w.host` is already the session host; the rootWiring field is `boot` as the plan names it.
+NOTES (2026-11-24): the two comments that said a session starts the toolchain probe "in newRootWiring" (wire_config.go projectConfig, wire_boot.go resolveConfig) now name `newRootWiringOn`, not `openDriverHost` as the regression guard words it — hostToolchain.start runs in newRootWiringOn, so naming the host there would be false; the comments about the Confiner constructor (wire.go rootDeps, newRootWiringOn) name `openDriverHost`.
+NOTES (2026-11-24): the test-only newRootWiringWith also records opts.Files on the host it builds over newDriverHost, so a fixture's host carries the same config source runRootWith's would.
+NOTES (2026-11-24): consequential edit — cmd/apogee/wire.go: the file header's wire_boot.go entry now says the Confiner and stats recorder are the Driver host's, made necessary by newRootWiringOn taking them from the host.
 
 **What:** Recast at the regression check (2026-11-23). Depends on item 22.
 **Goal:** the TUI builds no roots, sweeps, store, confiner or recorder of its own; `startupNotices` and stderr order unchanged; no Driver body calls a sweep directly.

@@ -4,8 +4,9 @@ package main
 //
 // What one run owns before a session exists — the skill catalogue, the Bridge the renderer is
 // late-bound through, the presentation ladder this host can walk, the confinement backend it runs
-// behind — then the base [apogee.Config] assembled from them, and the sentences this host's
-// confinement posture owes the user while stderr is still a safe place to write.
+// behind (the Driver host's, driverhost.go) — then the base [apogee.Config] assembled from them,
+// and the sentences this host's confinement posture owes the user while stderr is still a safe
+// place to write.
 
 import (
 	"fmt"
@@ -15,8 +16,6 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/platform"
-	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tui"
@@ -50,23 +49,20 @@ func shouldPrewarmLabelWalk(mode apogee.Mode, confineToWorkspace, fsWrite bool) 
 	return mode == domain.ModeAuto && confineToWorkspace && fsWrite
 }
 
-// newRootWiring opens the run: the four host facilities that outlive everything below them, in the
-// order the composition root has always built them. Nothing here can fail and nothing here reaches
-// the network — which is why runRoot can register the teardown for all of it in one defer before
-// the first fallible step. The runner and the confinement backend are the production ones;
-// newRootWiringWith is the same opening with both stated.
-func newRootWiring(opts config.Options, mode apogee.Mode, roots stateRoots) *rootWiring {
-	return newRootWiringWith(opts, mode, roots, rootDeps{})
-}
-
-// newRootWiringWith is newRootWiring with the host's runner and Confiner constructor stated by the
-// caller (rootDeps): a boot test dictates the backend's capability matrix through it and asks its
-// gating question on every host. Zero deps resolve to the production values.
-func newRootWiringWith(opts config.Options, mode apogee.Mode, roots stateRoots, deps rootDeps) *rootWiring {
+// newRootWiringOn opens the run over the Driver host the boot opened (openDriverHost): the
+// facilities that outlive everything below them, in the order the composition root has always
+// built them. The host has already resolved the roots and built the confinement backend and the
+// stats recorder; the wiring holds them from it, and builds the rest here. Nothing here can fail
+// and nothing here reaches the network — which is why runRoot can register the teardown for all of
+// it in one defer before the first fallible step. The runner and the MCP login come from the
+// host's rootDeps; zero deps resolve to the production values.
+func newRootWiringOn(opts config.Options, mode apogee.Mode, h *driverHost, deps rootDeps) *rootWiring {
+	roots := h.roots
 	w := &rootWiring{
 		opts:       opts,
 		mode:       mode,
 		roots:      roots,
+		boot:       h,
 		runner:     deps.runner,
 		mcpLogin:   deps.mcpLogin,
 		reloadWake: newReloadWake(),
@@ -124,20 +120,17 @@ func newRootWiringWith(opts config.Options, mode apogee.Mode, roots stateRoots, 
 		opts.Present, roots.workspace, runtime.GOOS, os.Getenv, w.bridge.SetPresentation)
 
 	// The host's real Confiner backend, held on the wiring so its Capabilities() can be read by the
-	// degradation notice below and by the /confine surface the renderer is handed — the backend
-	// probes once at construction, so this is the same value the engine's dispatch disposition will
-	// consult.
-	//
-	// It is built through the constructor the host handed this boot (rootDeps), for the reason
+	// /confine surface the renderer is handed — the backend probes once at construction, so this is
+	// the same value the engine's dispatch disposition will consult. It is the Driver host's, built
+	// by openDriverHost through the constructor the host handed this boot (rootDeps), for the reason
 	// that dependency exists: what a backend can enforce is a property of the MACHINE, so a fixture
 	// whose question is about GATING rather than fencing dictates the capability matrix and asks
-	// its question on every host. A nil constructor is the production route, platform.NewConfiner,
-	// resolved here and not earlier.
-	buildConfiner := deps.confiner
-	if buildConfiner == nil {
-		buildConfiner = platform.NewConfiner
-	}
-	w.confiner = buildConfiner()
+	// its question on every host.
+	w.confiner = h.confiner
+	// The per-server stats recorder (ADR 0085) is the host's too: built whatever the `server-stats:`
+	// key says, because the key is live-editable — an off recorder opens nothing and records nothing
+	// until the `/settings` row switches it on. resolveConfig wraps this session's sink in it.
+	w.stats = h.stats
 
 	return w
 }
@@ -248,7 +241,7 @@ func (w *rootWiring) resolveConfig() error {
 
 	// The keys both Drivers fill identically come off the one projection (wire_config.go); what a
 	// watched session adds on top is the binding it starts on and the human seams the Bridge stands
-	// behind. hostToolchain.start has already run (newRootWiring), so the read-roots func the
+	// behind. hostToolchain.start has already run (newRootWiringOn), so the read-roots func the
 	// projection composes lists the toolchain roots as soon as the probe answers.
 	w.cfg = projectConfig(w.opts, w.roots, w.confiner, w.mode, w.skillProvider)
 	w.cfg.Endpoint = w.opts.Endpoint
@@ -277,12 +270,10 @@ func (w *rootWiring) resolveConfig() error {
 	// restart needed. The host's MCP half holds the same cue for an observe `mcp:` entry, which
 	// never reaches the Agent.
 	w.reactionHost.Install(&w.cfg)
-	// The per-server stats recorder (ADR 0085) decorates the Runner in turn: every Event still
-	// reaches the Runner — and so the renderer — first and unchanged, and an UpstreamAttemptEvent is
-	// then appended to ~/.apogee/server-stats.jsonl while `server-stats:` is on. It is built whatever
-	// the key says, because the key is live-editable: an off recorder opens nothing and records
-	// nothing until the `/settings` row switches it on.
-	w.stats = newStatsRecorder(serverStatsPath(w.roots.config), w.opts.ServerStats)
+	// The per-server stats recorder (ADR 0085, the Driver host's — newRootWiringOn) decorates the
+	// Runner in turn: every Event still reaches the Runner — and so the renderer — first and
+	// unchanged, and an UpstreamAttemptEvent is then appended to ~/.apogee/server-stats.jsonl while
+	// `server-stats:` is on.
 	// And the live Event journal's sink outermost over both (ADR 0103 decision 1): every Event a
 	// watcher may follow is recorded into the session's `<id>.events.jsonl` while one is open, and
 	// reaches the recorder — and so the Runner and the renderer — unchanged. It sits over the chain,
@@ -352,18 +343,23 @@ func (w *rootWiring) resolveConfig() error {
 // human's first look at the session would otherwise never show what was said (apogee-2sj). The
 // stderr line stays — headless and daemon runs have no transcript, and a scrollback keeps it.
 func (w *rootWiring) announceConfinement() {
+	// What the Driver host's backend says about this mode under `confine-to-workspace:` — every
+	// sentence the posture owes, as a value. Ruling on it is the TUI's: each sentence is a notice
+	// here, and the session still starts.
+	posture := w.boot.posture(w.mode, w.opts.ConfineToWorkspace)
+
 	// A per-session startup warning whenever Auto runs unconfined (ADR 0012): confine=false
 	// is safe only inside a VM, and it is the only blanket loosen in the system.
-	if w.mode == domain.ModeAuto && !w.opts.ConfineToWorkspace {
-		w.announce(tui.Notice{Text: unconfinedAutoWarning, Kind: tui.NoticeAutoUnconfined})
+	if posture.unconfined != "" {
+		w.announce(tui.Notice{Text: posture.unconfined, Kind: tui.NoticeAutoUnconfined})
 	}
 
 	// The mirror branch: Auto WITH confinement asked for, on a host whose backend cannot
 	// enforce it. The ladder gates every terminal command instead — correct, but silent until
 	// now, which is what made Auto look broken (the issue register, 2026-07-21). Say it once,
 	// name the backend, and point at /confine.
-	if notice := probe.DegradedNotice(probe.BackendName(w.confiner), w.confiner.Capabilities(), w.mode, w.opts.ConfineToWorkspace); notice != "" {
-		w.announce(tui.Notice{Text: notice, Kind: tui.NoticeAutoDegraded})
+	if posture.degraded != "" {
+		w.announce(tui.Notice{Text: posture.degraded, Kind: tui.NoticeAutoDegraded})
 	}
 
 	// The third cell, and the sibling of the branch above rather than a third exclusive one: a
@@ -380,8 +376,8 @@ func (w *rootWiring) announceConfinement() {
 	// (its kind's): it composes probe.ResidualNotes from the same backend and capabilities handed it
 	// as tui.Options.Confinement, since stderr's header over indented clause lines reads as one
 	// run-on sentence once folded into a single note.
-	if notice := probe.ResidualNotice(probe.BackendName(w.confiner), w.confiner.Capabilities(), w.mode, w.opts.ConfineToWorkspace); notice != "" {
-		w.announce(tui.Notice{Text: notice, Kind: tui.NoticeFenceResidual})
+	if posture.residual != "" {
+		w.announce(tui.Notice{Text: posture.residual, Kind: tui.NoticeFenceResidual})
 	}
 
 	// The unknown-window honesty line used to print here, before the alt-screen. It has moved into
@@ -399,9 +395,10 @@ func (w *rootWiring) announceConfinement() {
 	// already-ratified label pass, never WHAT is labelled (Close still reverts at shutdown),
 	// consistent with the owner's "keep semantics". It is a genuine no-op on every other host:
 	// PrewarmLabelWalk is empty off Windows, and the Windows backend refuses when FSWrite is false —
-	// the same host probe.DegradedNotice above speaks for.
-	if shouldPrewarmLabelWalk(w.mode, w.opts.ConfineToWorkspace, w.confiner.Capabilities().FSWrite) {
-		platform.PrewarmLabelWalk(w.confiner, w.roots.workspace, os.Stderr)
+	// the same host the degradation notice above speaks for. It runs through the Driver host's
+	// prewarmLabelWalk seam (driverhost.go), so a test can prove a confined-Auto boot reaches it.
+	if posture.prewarm {
+		w.boot.prewarm(w.roots.workspace, os.Stderr)
 	}
 }
 

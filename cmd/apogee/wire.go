@@ -9,8 +9,9 @@ package main
 // The phases, in the order runRoot walks them:
 //
 //   - wire_boot.go — the host facilities one run owns before a session exists (skills, Bridge,
-//     presentation ladder, Confiner), the base [apogee.Config] built from them, and what this host's
-//     confinement posture says for itself on stderr.
+//     presentation ladder, and the Driver host's Confiner and stats recorder — driverhost.go), the
+//     base [apogee.Config] built from them, and what this host's confinement posture says for itself
+//     on stderr.
 //   - wire_live.go — the live-session assembly: the MCP connections, the tool registry, the
 //     retired-roll notices, the session store, the engine and Upstream holders and the bind
 //     that fills them, the live-settings holder, the config watcher, and the out-of-band work.
@@ -63,7 +64,6 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/mcp"
-	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/run"
@@ -97,7 +97,7 @@ var _ tui.Engine = (*apogee.Agent)(nil)
 //
 // A nil field is the production value, resolved where it is used and never at construction: a nil
 // runner leaves rootWiring.runner nil and raise runs the Firing through run.Once; a nil confiner
-// builds the backend through platform.NewConfiner when newRootWiring gets there.
+// builds the backend through the production constructor when openDriverHost gets there.
 type rootDeps struct {
 	// runner is what a Firing raised inside this session runs through (firingInputs.runner).
 	runner func(context.Context, run.Spec) (run.Result, error)
@@ -132,22 +132,22 @@ func runRootWith(ctx context.Context, opts config.Options, offer config.ProjectO
 		return err
 	}
 
-	// The roots this run lives in, its Project root the one the config source names, and that
-	// source recorded on opts (a resolution has already recorded it; a hand-built opts takes the one
-	// walked here), so every later re-read of this session reads the files the boot read.
-	roots, files, err := sessionRoots(opts)
+	// The Driver host (driverhost.go): the roots this run lives in, its Project root the one the
+	// config source names, the startup scratch sweep — stale per-session scratch dirs go before this
+	// run's own is created (wireSession) — the confinement backend and the stats recorder. The
+	// config source is recorded on opts (a resolution has already recorded it; a hand-built opts
+	// takes the one walked here), so every later re-read of this session reads the files the boot
+	// read.
+	boot, err := openDriverHost(opts, true, deps.confiner)
 	if err != nil {
 		return err
 	}
-	opts.Files = files
-
-	// The startup scratch sweep: stale per-session scratch dirs go before this run's own is
-	// created (wireSession), best-effort and silent — GC is never a reason a start fails.
-	gcScratchDirs(roots.scratch, time.Now())
+	opts.Files = boot.files
 
 	// The facilities this run owns for its whole life, and — in one defer, before the first
-	// fallible step — the teardown for everything the phases below reach (wire_boot.go).
-	w := newRootWiringWith(opts, mode, roots, deps)
+	// fallible step — the teardown for everything the phases below reach (wire_boot.go), the host's
+	// among them.
+	w := newRootWiringOn(opts, mode, boot, deps)
 	w.offer = offer
 	defer w.close()
 
@@ -226,7 +226,11 @@ type rootWiring struct {
 
 	bridge       *tui.Bridge
 	presentation *livePresentation
-	confiner     domain.Confiner
+	// boot is the Driver host this run was opened on (openDriverHost): the roots, the confinement
+	// backend and the stats recorder below are its, it opens the session store (wireSession), and
+	// close tears its backend down.
+	boot     *driverHost
+	confiner domain.Confiner
 	// runner is what a Firing raised inside this session is handed to once its gates have passed —
 	// the boot's half of rootDeps, held so the `/schedule` wiring can read it where it composes its
 	// firingInputs. nil is the production value, resolved by raise when the Firing is raised.
@@ -366,18 +370,16 @@ func (w *rootWiring) close() {
 
 	// A backend that mutated the machine to build its box has to put it back. Only the
 	// Windows token backend does: it expresses the box's writable half as a mandatory label
-	// on the disk and reverts it here (ADR 0020 §2). domain.Confiner deliberately does NOT
-	// grow a teardown method for one OS — it is a public interface (ADR 0010) — so the hook
-	// is an optional-interface assertion at the composition root, beside the other Closes.
+	// on the disk and reverts it here (ADR 0020 §2), through the Driver host's close, which also
+	// stops the stats recorder again (already stopped above, so that half is a no-op here).
 	// A teardown that could not put the disk back is the ONE confinement failure with no other
 	// surface: the session is ending, the TUI is gone, and the labels are still there. Discarding
 	// it would leave the user with a silently mutated disk, so it goes to stderr naming the
 	// journal that survived the failure and ADR 0020 §2's manual remedy (the wording lives in
-	// internal/platform beside the host report's, so both read the same).
-	if closer, ok := w.confiner.(interface{ Close() error }); ok {
-		if notice := platform.ConfinementTeardownNotice(closer.Close()); notice != "" {
-			fmt.Fprintln(os.Stderr, notice)
-		}
+	// internal/platform beside the host report's, so both read the same). The host hands that
+	// sentence back rather than printing it: the stream it goes on is this Driver's to choose.
+	if notice := w.boot.close(); notice != "" {
+		fmt.Fprintln(os.Stderr, notice)
 	}
 
 	// The doc server's listener is owned by the app: it binds lazily on the first served
