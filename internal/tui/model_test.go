@@ -8871,7 +8871,7 @@ func vs16WideModel(t *testing.T) Model {
 // wideAssistantLine returns the index of the FIRST stored line of the fixture's over-wide answer —
 // the line the painter's reserve broke it at — and asserts the reserve did its work: the line ends
 // on the first `⚠️` and fits the viewport's own width in the widget's measure, which is what leaves
-// the widget's clip nothing to cut.
+// the body's cut nothing to cut (transcriptBody).
 func wideAssistantLine(t *testing.T, m Model) int {
 	t.Helper()
 	for i, ln := range m.lines {
@@ -8906,7 +8906,7 @@ func TestViewportRowsStayOneForOneWithStoredLines(t *testing.T) {
 		t.Errorf("the viewport holds %d rows for %d stored lines; the over-wide line at %d was re-wrapped",
 			got, want, wide)
 	}
-	if got, want := len(strings.Split(m.viewport.View(), "\n")), m.viewport.Height(); got != want {
+	if got, want := len(strings.Split(m.transcriptBody(m.viewport), "\n")), m.viewport.Height(); got != want {
 		t.Errorf("the viewport drew %d rows on a %d-row widget", got, want)
 	}
 
@@ -8928,11 +8928,12 @@ func TestViewportRowsStayOneForOneWithStoredLines(t *testing.T) {
 }
 
 // drawnRow returns the viewport row the given text is DRAWN on — the screen row a human aiming at
-// that text would click. It is deliberately not screenRow, which converts a stored-line index and so
+// that text would click — read off the body View composes (transcriptBody), since the widget itself
+// holds only blank placeholders. It is deliberately not screenRow, which converts a stored-line index and so
 // assumes the very 1:1 mapping these tests are here to prove.
 func drawnRow(t *testing.T, m Model, want string) int {
 	t.Helper()
-	for row, ln := range strings.Split(m.viewport.View(), "\n") {
+	for row, ln := range strings.Split(m.transcriptBody(m.viewport), "\n") {
 		if strings.Contains(strip(ln), want) {
 			return row
 		}
@@ -8947,13 +8948,13 @@ func drawnRow(t *testing.T, m Model, want string) int {
 // content the painter drew and the reader never saw. The painter therefore reserves the widget's
 // extra cells (reserveWidgetCells, render.go): it breaks such a line into stored lines of its own,
 // so every glyph is still drawn, no drawn row is over the viewport's width in the widget's measure,
-// and the clip finds nothing to cut.
+// and the body's cut (transcriptBody) finds nothing to cut.
 func TestPainterReservesTheCellsTheWidgetMeasuresOver(t *testing.T) {
 	t.Parallel()
 	m := vs16WideModel(t)
 	wide := wideAssistantLine(t, m)
 
-	rows := strings.Split(m.viewport.View(), "\n")
+	rows := strings.Split(m.transcriptBody(m.viewport), "\n")
 	row := rows[wide-m.viewport.YOffset()]
 	if got := ansi.StringWidth(row); got > m.viewport.Width() {
 		t.Errorf("the drawn row is %d grapheme cells on a %d-cell viewport; the reserve did not hold",
@@ -8967,7 +8968,7 @@ func TestPainterReservesTheCellsTheWidgetMeasuresOver(t *testing.T) {
 	if next := strip(rows[wide+1-m.viewport.YOffset()]); !strings.Contains(next, "⚠") {
 		t.Errorf("row %d is %q; the glyph the reserve broke off is not drawn anywhere", wide+1, next)
 	}
-	if n := strings.Count(strip(m.viewport.View()), "⚠"); n != 2 {
+	if n := strings.Count(strip(m.transcriptBody(m.viewport)), "⚠"); n != 2 {
 		t.Errorf("the frame draws %d ⚠️ glyphs, want the 2 the answer committed", n)
 	}
 	if got := m.viewport.XOffset(); got != 0 {
@@ -9009,7 +9010,7 @@ func TestFullWidthLineKeepsItsTrailingWideMeasuredGlyph(t *testing.T) {
 			"(the edge the reserve has to leave alone)", line, got, m.viewport.Width())
 	}
 
-	rows := strings.Split(m.viewport.View(), "\n")
+	rows := strings.Split(m.transcriptBody(m.viewport), "\n")
 	if got := strip(rows[line-m.viewport.YOffset()]); !strings.HasSuffix(got, vs16Warning) {
 		t.Errorf("the drawn row is %q; its trailing ⚠️ was clipped", got)
 	}
@@ -9059,7 +9060,7 @@ func TestReserveWidgetCellsMovesTargetsAndSpansWithTheRows(t *testing.T) {
 	if !slices.Equal(got.userBlocks, wantBlocks) {
 		t.Errorf("userBlocks = %+v, want %+v", got.userBlocks, wantBlocks)
 	}
-	// Nothing the pass returns is over the limit in the measure the widget would cut it in.
+	// Nothing the pass returns is over the limit in the measure the body would cut it in (transcriptBody).
 	for i, ln := range got.lines {
 		if w := ansi.StringWidth(ln); w > limit {
 			t.Errorf("line %d %q is %d grapheme cells, over the %d-cell limit", i, strip(ln), w, limit)

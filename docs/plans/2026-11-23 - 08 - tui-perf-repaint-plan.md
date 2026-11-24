@@ -85,7 +85,19 @@ The comments stating that `layout()` repaints are superseded — `doc.go`'s posi
 - `go test -run '^$' -bench 'PerfAuditType' -benchmem ./internal/tui/` — flat in N (record before/after)
 **Commit:** `perf(tui): skip the transcript repaint when a draft edit leaves the frame key unchanged`
 
-## 3. The viewport gets placeholder lines; the body is composed from m.lines
+## 3. The viewport gets placeholder lines; the body is composed from m.lines — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): benchmark `go test -run '^$' -bench 'PerfAuditBlocks/repaint' -benchmem ./internal/tui/` (dev box, no -race) — before: N=48 3.97 ms/op 318 KB 5698 allocs; N=300 14.21 ms/op 1.13 MB 7407 allocs; N=900 38.57 ms/op 3.09 MB 11426 allocs. After: N=48 2.45 ms/op 317 KB 5697 allocs; N=300 4.04 ms/op 1.11 MB 7404 allocs; N=900 8.09 ms/op 3.07 MB 11422 allocs.
+
+NOTES (2026-11-24): the eight golden frames under internal/tui/testdata/frames were captured with `-update` at the pre-change tree (HEAD 7bf66fefb) before model.go was touched, and pass unchanged after it.
+
+NOTES (2026-11-24): the placeholder store is the package-level `atomic.Pointer` option (`placeholderStore`, swapped only by CAS to a larger fully-built array; slices handed out are capped `[:n:n]`), not the per-Model pointer — no Model field and no newModel change were needed.
+
+NOTES (2026-11-24): `transcriptBody` keeps the widget's clip as a backstop but cuts only a visible row measured over the width (the widget cut every visible row once ANY stored line was over); the painter's reserve leaves no such row, and the over-wide corpus case of TestTranscriptBodyMatchesTheViewportPass matches the widget byte for byte.
+
+NOTES (2026-11-24): consequential edit — internal/tui/render.go: made necessary by the widget no longer drawing the body (the file-header paragraph naming viewport.SetContentLines as the line consumer, and reserveWidgetCells' comments naming the widget's clip, now name transcriptBody).
+
+NOTES (2026-11-24): the composed body is not a repaint helper, so TestArmsLeaveLayoutToTail's name list is unchanged.
 
 **What:**
 **Goal:** a repaint performs no width pass over unchanged scrollback lines, and the frame (body, scroll bar, sticky header, highlights) is byte-identical to the pre-change frame on every golden fixture; follow, detach, PgUp/PgDn, wheel and the block cursor behave as before.

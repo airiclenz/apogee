@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"charm.land/bubbles/v2/textarea"
@@ -15,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
@@ -785,11 +787,13 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// into two screen rows, and every reader of `contentLineAt(row) = YOffset() + row` below it (the
 	// sticky header, the anchored refresh, the block cursor, the selection highlight, the mouse's own
 	// hit test) then addressed the line one row off. With the wrap off, nothing the painter drew is
-	// ever re-flowed and the row map cannot drift. The widget would CLIP a line it measures wider
-	// than its width — the tail simply gone — so the painter reserves the widget's extra cells and
-	// breaks such a line into stored lines itself before the viewport ever sees it
-	// (reserveWidgetCells, render.go). The clip stays as the widget's own backstop and has nothing
-	// left to cut.
+	// ever re-flowed and the row map cannot drift. The widget no longer draws those rows at all: it
+	// holds blank placeholder lines of the same count and keeps only the scroll state, and View
+	// composes the visible body from m.lines itself (refreshViewport, transcriptBody). That
+	// composition pads each row in the widget's measure (ansi.StringWidth) and CUTS a row it measures
+	// wider than the width — the tail simply gone — so the painter reserves those extra cells and
+	// breaks such a line into stored lines itself before View ever draws it (reserveWidgetCells,
+	// render.go). The cut stays as transcriptBody's own backstop and has nothing left to cut.
 	vp.SoftWrap = false
 	// Horizontal scrolling is off with it: the transcript's x-offset stays 0 for the life of the
 	// session. A step of 0 disables the viewport's Left/Right keys, its wheel-left/right notches and
@@ -3416,9 +3420,18 @@ func (m Model) hiddenDraftRows() int {
 // submit re-arms following. The body is rendered to transcriptWidth — the viewport's width less
 // the right gutter — and the viewport does not wrap at all: its rows ARE the stored lines, one for
 // one (newModel). The paint is then held to the viewport's own width in the widget's measure
-// (reserveWidgetCells, render.go), so the widget's clip finds nothing to cut: a line the painter
-// filled to the column and the widget measures wider — a full line ending in a VS16 glyph — is
-// broken into stored lines HERE rather than losing its tail at the right edge.
+// (reserveWidgetCells, render.go), so the body's cut finds nothing to cut (transcriptBody): a line
+// the painter filled to the column and that measure counts wider — a full line ending in a VS16
+// glyph — is broken into stored lines HERE rather than losing its tail at the right edge.
+//
+// The widget itself is handed BLANK placeholder lines of the same count (placeholderLines), never
+// the paint: it keeps the scroll state — the offset, the bottom, the line count the scroll bar and
+// the mouse read — and nothing it does costs a width pass over the scrollback. Handed the real
+// lines, SetContentLines measured every one of them (its longest-line scan) on every repaint, for
+// a horizontal scroll apogee keeps switched off. View composes the visible rows from m.lines
+// instead ([Model.transcriptBody]). That is why no stored line may carry a "\r" or "\n": the widget
+// would split it into extra rows of the real content but not of the placeholders, and the counts
+// would part.
 //
 // It is also where a live transcript drag-selection lives or dies, by the keep-if-unchanged rule
 // (transcriptSel.spanUnchanged, mouse.go): the predicate is evaluated against the OUTGOING lines
@@ -3446,8 +3459,88 @@ func (m *Model) refreshViewport() {
 	// cursor standing in a transcript that has no stop left is handed to the side panel's
 	// (seatBlockCursor).
 	m.cursor = m.seatBlockCursor()
-	m.viewport.SetContentLines(rendered.lines)
+	m.viewport.SetContentLines(placeholderLines(rendered.lines))
 	m.seatViewportOffset()
+}
+
+// placeholderStore is the shared backing array placeholderLines slices: blank strings, never
+// written once built. It is swapped only for a LARGER fully-built array, never grown in place, so a
+// slice an earlier Model value (or a parallel test's Model) still holds keeps pointing at blanks.
+var placeholderStore atomic.Pointer[[]string]
+
+// placeholderLines is what refreshViewport hands the viewport widget in place of the paint: as many
+// blank lines as lines holds, sliced from one shared array, so the widget's line count, bottom and
+// offset clamp are the paint's while its longest-line scan measures nothing but "". The slice is
+// capped at its length, so nothing appended to it can reach the shared array; and a blank line
+// holds no "\r\n" for SetContentLines to split, so the widget never writes into it.
+//
+// A paint of at most one line is handed over as it is: the widget turns a lone zero-width line
+// into NO content (SetContentLines), and a lone blank placeholder standing for a non-blank line
+// would make it count none where the paint has one.
+func placeholderLines(lines []string) []string {
+	n := len(lines)
+	if n <= 1 {
+		return lines
+	}
+	for {
+		cur := placeholderStore.Load()
+		if cur != nil && len(*cur) >= n {
+			return (*cur)[:n:n]
+		}
+		size := n
+		if cur != nil {
+			size = max(n, 2*len(*cur))
+		}
+		grown := make([]string, size)
+		if placeholderStore.CompareAndSwap(cur, &grown) {
+			return grown[:n:n]
+		}
+	}
+}
+
+// transcriptBody is the transcript's visible rows as the viewport widget's View drew them before
+// the widget was handed placeholders (refreshViewport): the window of m.lines from vp's offset, as
+// tall as vp, padded to vp's width and height by the same lipgloss pass (bubbles/v2@v2.1.0
+// viewport.go View, visibleLines). vp is the viewport the frame is drawn at — View's local copy,
+// sized to the rows the overlays leave — so the window and the scroll bar read one geometry.
+//
+// Only the visible rows are measured, which is the point: the widget's own pass started with a
+// width scan of every stored line. A row measured wider than the width is cut to it — the widget's
+// old clip, kept as a backstop the painter's reserve leaves nothing for (reserveWidgetCells,
+// render.go); without it lipgloss would wrap the row and the body would outgrow its height.
+func (m Model) transcriptBody(vp viewport.Model) string {
+	w, h := vp.Width(), vp.Height()
+	if sw := vp.Style.GetWidth(); sw != 0 {
+		w = min(w, sw)
+	}
+	if sh := vp.Style.GetHeight(); sh != 0 {
+		h = min(h, sh)
+	}
+	if w == 0 || h == 0 {
+		return ""
+	}
+	contentWidth := w - vp.Style.GetHorizontalFrameSize()
+	contentHeight := h - vp.Style.GetVerticalFrameSize()
+	var window []string
+	if contentWidth > 0 && contentHeight > 0 {
+		top := min(vp.YOffset(), len(m.lines))
+		window = m.lines[top:min(top+contentHeight, len(m.lines))]
+		cut := false
+		for i, ln := range window {
+			if ansi.StringWidth(ln) <= contentWidth {
+				continue
+			}
+			if !cut { // never write through to m.lines: the stash is shared by every Model copy
+				window, cut = slices.Clone(window), true
+			}
+			window[i] = ansi.Cut(ln, 0, contentWidth)
+		}
+	}
+	contents := lipgloss.NewStyle().
+		Width(contentWidth).
+		Height(contentHeight).
+		Render(strings.Join(window, "\n"))
+	return vp.Style.UnsetWidth().UnsetHeight().Render(contents)
 }
 
 // seatViewportOffset is the tail every lay-out of the transcript ends in, repaint or not
@@ -3820,7 +3913,7 @@ func (m Model) View() tea.View {
 	if transcriptHeight > 0 {
 		vp := m.viewport
 		vp.SetHeight(transcriptHeight)
-		body := m.applyStickyHeader(vp.View())
+		body := m.applyStickyHeader(m.transcriptBody(vp))
 		body = m.highlightTranscript(body)  // overlay any transcript drag-selection on the composed rows
 		body = m.highlightBlockCursor(body) // and the keyboard cursor's bar (blockcursor.go — they never coexist)
 		if !m.opts.UI.ShowScrollbar {

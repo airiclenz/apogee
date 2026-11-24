@@ -4,13 +4,14 @@ package tui
 // The line-oriented transcript renderer (P2.7 — TUI presentation pass)
 // ----------------------------------------------------------------------------
 //
-// The renderer turns the transcript into the flat slice of physical lines the viewport
+// The renderer turns the transcript into the flat slice of physical lines the transcript
 // shows. It returns []string (not a joined string) for two reasons: tool results carry
-// embedded newlines, so the caller feeds viewport.SetContentLines without re-splitting; and
-// the sticky-header overlay and the mouse both address the paint by physical line, which
-// they can only do over the exact lines the viewport stores. Every element is a single
-// physical line (no embedded newline), so a line index means the same thing to the painter,
-// the viewport and a click.
+// embedded newlines, so the caller hands the viewport a same-count run of placeholders and
+// View draws the window straight from the slice without re-splitting (refreshViewport,
+// transcriptBody); and the sticky-header overlay and the mouse both address the paint by
+// physical line, which they can only do over the exact lines the frame draws. Every element
+// is a single physical line (no embedded newline), so a line index means the same thing to
+// the painter, the viewport's scroll state and a click.
 //
 // The look mirrors layout.md: the last user prompt is a full-width white-on-dark-gray block
 // padded by a ▄ half row above and a ▀ half row below; the assistant and tool headers lead with ✦;
@@ -511,18 +512,19 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 // It is the painter reserving the widget's extra cells, and it is here because the two measures in
 // play disagree about exactly the clusters ADR 0030's Context names. The painter wraps in its own
 // measure — ansi.WcWidth until a terminal answers mode 2027 — where a VARIATION SELECTOR-16 glyph
-// (⚠️ ✔️ ℹ️) is ONE cell; the viewport reads its longest line with ansi.StringWidth and cuts every
-// drawn row with ansi.Cut (bubbles/v2@v2.1.0 viewport.go:762, :362), both hard-wired to
-// ansi.GraphemeWidth, where the same glyph is TWO. With the widget's soft wrap off (newModel) a
-// line the painter had filled to the column and the widget measured wider than its width had its
-// tail CUT — the trailing glyph the painter drew never reached the screen at all. Breaking the line
-// here gives that glyph a row instead, and the row map stays 1:1 because the break makes it a
-// stored line rather than a second row of one.
+// (⚠️ ✔️ ℹ️) is ONE cell; the transcript body is drawn in the viewport widget's measure — View
+// composes it the way bubbles/v2@v2.1.0 viewport.go's View did ([Model.transcriptBody]): it
+// measures each visible row with ansi.StringWidth and cuts one over the width with ansi.Cut, both
+// hard-wired to ansi.GraphemeWidth, where the same glyph is TWO. With the widget's soft wrap off
+// (newModel) a line the painter had filled to the column and that measure counted wider than the
+// width had its tail CUT — the trailing glyph the painter drew never reached the screen at all.
+// Breaking the line here gives that glyph a row instead, and the row map stays 1:1 because the
+// break makes it a stored line rather than a second row of one.
 //
 // The break MIRRORS the widget (ADR 0030 §6 — a mirror's oracle is the widget, never the painter):
 // it asks ansi.StringWidth and cuts with ansi.Cut, the very two calls the viewport's own wrap made,
-// so the painter breaks precisely where the widget would have cut and a broken row is styled the
-// way that wrap styled it. And it is the LAST thing that happens to the paint, after every block is
+// so the painter breaks precisely where the body's cut would have fallen and a broken row is styled
+// the way that wrap styled it. And it is the LAST thing that happens to the paint, after every block is
 // composed: the wrap the painter CHOSE is untouched, so a surface whose own limit is narrower than
 // the frame — a table cell, a pop-up body — keeps breaking in the painter's measure exactly as
 // ADR 0030 §7 decided, and only a line that would really have lost cells is re-laid. On content the
@@ -552,7 +554,7 @@ func (r renderedTranscript) reserveWidgetCells(limit int) renderedTranscript {
 		}
 		return widgetWidth(r.lines[i])
 	}
-	// first is the first line the widget would cut — nothing above it moves — and firstWidth its
+	// first is the first line the body would cut — nothing above it moves — and firstWidth its
 	// width, so the line that settles the question is not measured twice. The byte length is asked
 	// before any width, as overWidgetWidth asks it.
 	first, firstWidth := -1, 0
@@ -671,7 +673,7 @@ func measuredCells(lines []string, width int) []int {
 // dropBlankTail drops the rows a break opened for cells that show NOTHING — the trailing pad of a
 // squared line (squareLine, boxdraw.go), counted in the painter's measure and therefore counted
 // higher by the widget. Spending a row of the transcript on a run of spaces would put a blank line
-// through the middle of a block where the widget's clip simply ended the row, and the reserve is
+// through the middle of a block where the body's cut simply ended the row, and the reserve is
 // here to keep GLYPHS on the screen, not padding.
 func dropBlankTail(segs []string) []string {
 	for len(segs) > 1 && strings.TrimSpace(ansi.Strip(segs[len(segs)-1])) == "" {
