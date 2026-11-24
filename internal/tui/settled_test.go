@@ -56,10 +56,13 @@ const layoutCallFile = "model.go"
 // model.go: the arm reads geometry after the call, and the comment says what.
 const geometryMark = "// geometry:"
 
-// layoutCallNames are the methods that lay the transcript out — the two that may repaint it and the
-// offset seat every lay-out ends in ([Model.seatViewportOffset]) — and so the calls the arm scan
-// holds to doc.go's "an arm mutates".
-var layoutCallNames = map[string]bool{"layout": true, "refreshViewport": true, "seatViewportOffset": true}
+// layoutCallNames are the methods that lay the transcript out — the two that may repaint it, the
+// stream-only paint the repaint splices ([Model.splicedPaint]) and the offset seat every lay-out
+// ends in ([Model.seatViewportOffset]) — and so the calls the arm scan holds to doc.go's "an arm
+// mutates".
+var layoutCallNames = map[string]bool{
+	"layout": true, "refreshViewport": true, "splicedPaint": true, "seatViewportOffset": true,
+}
 
 // TestArmsLeaveLayoutToTail pins doc.go's "an arm mutates; Update's tail lays out and repaints"
 // structurally: every non-test file in this package other than model.go is scanned, and a

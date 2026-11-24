@@ -1369,8 +1369,8 @@
 // transcript, opens or closes a pane, writes the input box, and returns: it never calls
 // [Model.layout] or [Model.refreshViewport] to make the frame agree with what it changed. That is
 // the tail's job ([Model.settle], deferred by Update itself): a moved paint input — the transcript
-// generation, the theme, the width, the scrollbar, a blink over an open call, the back hint
-// ([frameKey]) — lays out, and under an unchanged paint a height gone stale — a pane's rows, the
+// generation or its pure-append streamGen, the theme, the width, the scrollbar, a blink over an
+// open call, the back hint ([frameKey]) — lays out, and under an unchanged paint a height gone stale — a pane's rows, the
 // draft's rows — or the box's text width its overflow bar moved ([Model.freshenTranscriptClamp])
 // lays out too, so every pane open and every editor write is carried by the tail rather than by a
 // call each arm has to remember. An arm calls layout() (or refreshViewport) itself only when it

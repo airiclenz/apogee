@@ -436,8 +436,13 @@ func (c *paintCache) clear() {
 // signature term for term rather than trusting a fold to have asked for its own repaint.
 type frameKey struct {
 	// generation is the transcript's write counter ([transcript.generation]): the entries, the live
-	// buffer, the root and the fold seed, folded into one integer by the writers themselves.
+	// buffer, the root and the fold seed, folded into one integer by the writers themselves — every
+	// write but a pure append to the live buffer, which streamGen counts.
 	generation uint64
+	// streamGen is the transcript's pure-append counter ([transcript.streamGen]): a key that moved in
+	// it alone moved only the preview's text, which is what lets the repaint splice the preview onto
+	// the paint on screen instead of walking the scrollback ([Model.splicedPaint]).
+	streamGen uint64
 	// scheme, glyphs, measure and padPrompts are the theme's identity: the palette is rebuilt whole
 	// on a scheme switch (applyColorScheme), the drawn marks swap on a `ui.glyphs` switch
 	// (settingsApplyLocal), the measure moves on the terminal's mode-2027 answer (foldModeReport)
@@ -472,6 +477,7 @@ type frameKey struct {
 func (m Model) frameKey() frameKey {
 	return frameKey{
 		generation:     m.transcript.generation,
+		streamGen:      m.transcript.streamGen,
 		scheme:         m.opts.UI.ColorScheme,
 		glyphs:         m.th.glyphs,
 		measure:        m.th.measure,

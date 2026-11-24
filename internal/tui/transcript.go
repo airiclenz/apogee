@@ -139,14 +139,22 @@ type transcript struct {
 	now func() time.Time
 	// generation counts the writes to what [transcript.renderView] reads — entries, pending (with
 	// its streaming and pendingRun halves), root, stage, taskListOpen, toolsOpen, toolsFoldOver,
-	// toolsAutoCollapse and turnLive. Every `func (t *transcript)` that
-	// writes one of those fields bumps it ([transcript.touch]), so "has the paint's input moved since
-	// the last repaint?" is one integer compare at the end of every Update ([Model.settle]) rather
-	// than a repaint every arm has to remember to ask for. It is a plain counter riding the
-	// value-copied Model (ADR 0011): a copy that is discarded takes its bump with it, exactly as it
-	// takes the write. parked is deliberately outside it — the painter reads the live buffer alone —
-	// and so is the paint cache, which is a memo of the paint and not an input to it.
+	// toolsAutoCollapse and turnLive — save the one write streamGen counts instead. Every
+	// `func (t *transcript)` that writes one of those fields bumps one of the two ([transcript.touch]),
+	// so "has the paint's input moved since the last repaint?" is one compare at the end of every
+	// Update ([Model.settle]) rather than a repaint every arm has to remember to ask for. It is a
+	// plain counter riding the value-copied Model (ADR 0011): a copy that is discarded takes its bump
+	// with it, exactly as it takes the write. parked is deliberately outside it — the painter reads
+	// the live buffer alone — and so is the paint cache, which is a memo of the paint and not an
+	// input to it.
 	generation uint64
+	// streamGen counts the PURE APPENDS to the live buffer: a token for the run already holding the
+	// slot, moving nothing but pending's text ([transcript.appendToken]). It is generation's other
+	// half, kept apart so the repaint can tell "only the preview's text moved" from every other write
+	// and re-render the preview alone onto the paint already on screen ([Model.splicedPaint]). Every
+	// other write to pending — the first token, a park, a reset, a commit, a block the text settles —
+	// still moves generation, and with it the whole paint.
+	streamGen uint64
 	// wave is the top-level delegation group the engine last ANNOUNCED (domain.SubAgentGroupEvent):
 	// how many members it will run, and which drawn head it opens. It is what lets inFlightFanOut
 	// count the members a serial group has not drawn yet ([transcript.inFlightFanOut]). It is
@@ -175,9 +183,11 @@ func (w announcedWave) anchors(e entry) bool {
 }
 
 // touch marks the paint's input as moved: the one bump every writer of a field renderView reads
-// makes, so the rule "a write is a repaint" is stated by the counter and not by the call sites. It
-// is called only from the writers, and only where something actually moved — a setter refused by
-// its own guard does not touch — so the compare that reads it never repaints for nothing.
+// makes — save a pure append to the live buffer, which moves streamGen instead
+// ([transcript.appendToken]) — so the rule "a write is a repaint" is stated by the counter and not
+// by the call sites. It is called only from the writers, and only where something actually moved —
+// a setter refused by its own guard does not touch — so the compare that reads it never repaints
+// for nothing.
 func (t *transcript) touch() {
 	t.generation++
 }
@@ -1700,7 +1710,15 @@ func (t *transcript) openSubAgentHead(run runRef) *entry {
 // and does not spring back. Reasoning never reaches this buffer and blank chunks never
 // flip it, so neither settles anything. The walk to the run's last entry runs once per streamed
 // reply, on that one transition, never per token.
+//
+// A PURE append — the run already holds the slot (streaming, and pendingRun is run) and no block
+// is settled by it — moves only the preview's text, so it bumps streamGen rather than generation:
+// the repaint keeps the settled paint above the preview and re-renders the preview alone
+// ([Model.splicedPaint]). Every other append — the first token, a resume after a park, one that
+// settles a block — touches.
 func (t *transcript) appendToken(text string, run runRef) {
+	pure := t.streaming && t.pendingRun == run
+	settled := t.generation
 	t.displace(run)
 	if !t.streaming {
 		t.pending = t.unpark(run) // resume what this run streamed before it lost the slot
@@ -1711,6 +1729,10 @@ func (t *transcript) appendToken(text string, run runRef) {
 	t.pending.append(stripEscapes(text))
 	if wasBlank && t.pending.nonBlank {
 		t.passBlock(run)
+	}
+	if pure && t.generation == settled {
+		t.streamGen++
+		return
 	}
 	t.touch()
 }

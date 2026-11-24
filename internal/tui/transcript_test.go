@@ -4274,7 +4274,7 @@ func TestTranscriptWritersBumpTheGeneration(t *testing.T) {
 		{"addNote", func(tr *transcript) { tr.addNote("a host note") }},
 		{"addStartup", func(tr *transcript) { tr.addStartup(startupView{}) }},
 		{"refreshStartup", func(tr *transcript) { tr.refreshStartup(startupView{Host: "elsewhere"}) }},
-		{"appendToken", func(tr *transcript) { tr.appendToken("ence", runRef{}) }},
+		{"appendToken for another run", func(tr *transcript) { tr.appendToken("aside", runRef{depth: 1, spawn: "s1"}) }},
 		{"discardPending", func(tr *transcript) { tr.discardPending(runRef{}) }},
 		{"commitAssistant", func(tr *transcript) { tr.commitAssistant("the whole sentence", runRef{}) }},
 		{"finalizeNarration", func(tr *transcript) { tr.finalizeNarration(runRef{}) }},
@@ -4342,15 +4342,49 @@ func TestTranscriptWritersBumpTheGeneration(t *testing.T) {
 		t.Run("holds: "+tc.name, func(t *testing.T) {
 			t.Parallel()
 			tr := seed()
-			before := tr.generation
+			before, streamed := tr.generation, tr.streamGen
 
 			tc.act(tr)
 
 			if tr.generation != before {
 				t.Errorf("%s moved the generation %d → %d without writing what the paint reads", tc.name, before, tr.generation)
 			}
+			if tr.streamGen != streamed {
+				t.Errorf("%s moved streamGen %d → %d without appending to the live buffer", tc.name, streamed, tr.streamGen)
+			}
 		})
 	}
+
+	// The live buffer's two kinds of append. A PURE one — the run already holding the slot, settling
+	// no block — moves only the preview's text, and says so on streamGen alone, which is what lets
+	// the repaint splice the preview instead of walking the scrollback (Model.splicedPaint). The
+	// first token opens the preview, so it is a write to the paint like any other.
+	t.Run("appendToken on the streaming run moves streamGen and holds the generation", func(t *testing.T) {
+		t.Parallel()
+		tr := seed()
+		before, streamed := tr.generation, tr.streamGen
+
+		tr.appendToken("ence", runRef{})
+
+		if tr.generation != before {
+			t.Errorf("a pure append moved the generation %d → %d: the whole scrollback repaints per token", before, tr.generation)
+		}
+		if tr.streamGen == streamed {
+			t.Errorf("a pure append left streamGen at %d: the preview's text moved and no repaint will follow", streamed)
+		}
+	})
+	t.Run("appendToken's first token moves the generation", func(t *testing.T) {
+		t.Parallel()
+		tr := seed()
+		tr.commitAssistant("half a sentence", runRef{})
+		before := tr.generation
+
+		tr.appendToken("a new reply", runRef{})
+
+		if tr.generation == before {
+			t.Errorf("the first token left the generation at %d: the preview opened and the paint was not told", before)
+		}
+	})
 }
 
 // ----------------------------------------------------------------------------

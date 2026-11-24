@@ -608,6 +608,13 @@ type Model struct {
 	// miss, which is what makes a repaint a CONSEQUENCE of a fold rather than a call each arm has
 	// to remember. A comparable struct, so the compare is one `!=`.
 	painted frameKey
+	// previewRows is how many rows at the end of lines are the live buffer's preview, laid last by
+	// the paint (renderedTranscript.previewRows, after the reserve), and 0 when they are not; and
+	// paintedLimit is the widget width those lines were held to (reserveWidgetCells). Together with
+	// painted they are what a stream-only repaint splices onto ([Model.splicedPaint]). Plain ints,
+	// stashed beside the lines they describe and only there (refreshViewport).
+	previewRows  int
+	paintedLimit int
 	// header is the sticky header the PAINT owns rather than the scrollback: the three-row
 	// breadcrumb band of a transcript rooted at one run and the blank spacer beneath it
 	// (renderedTranscript.header, render.go), and the zero value while
@@ -1418,8 +1425,8 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if switched, ok := msg.Event.(domain.UpstreamSwitchedEvent); ok && switched.Seat == domain.UpstreamSeatSession {
 			m, followed = m.followFallback(switched)
 		}
-		// Nothing is laid out here: the fold moved the transcript's generation, and the repaint tail
-		// (settleFrame, deferred above) lays out from that. An Event also feeds the Inspector's ring
+		// Nothing is laid out here: the fold moved the transcript's generation (a pure token append,
+		// its streamGen), and the repaint tail (settleFrame, deferred above) lays out from that. An Event also feeds the Inspector's ring
 		// (foldWire) and the /usage accounting, and both panes derive their rows — and so their drawn
 		// height — from what it just wrote; the tail's height half (freshenTranscriptClamp) catches a
 		// report pane that grew under an unchanged paint, so the widget's height never goes stale
@@ -3449,14 +3456,24 @@ func (m Model) hiddenDraftRows() int {
 // dropped instead of left pointing at text that has moved. A COLLAPSED span — a press whose button
 // is still down — is exempt and always survives: it shades nothing, and the release still needs the
 // line the press named to toggle the block under it (spanUnchanged, mouse.go).
+//
+// A repaint whose key moved only in the live buffer's pure appends (frameKey.streamGen) does not
+// walk the scrollback at all: it keeps every row above the preview and re-renders the preview
+// alone ([Model.splicedPaint]). Everything after the paint — the selection rule, the restash, the
+// cursor seat — is the same for both, and stated once, here.
 func (m *Model) refreshViewport() {
-	rendered := m.transcript.renderView(m.th, m.transcriptWidth(), m.liveStarBlink(), m.backHint()).
-		reserveWidgetCells(m.viewport.Width())
+	rendered, spliced := m.splicedPaint()
+	if !spliced {
+		rendered = m.transcript.renderView(m.th, m.transcriptWidth(), m.liveStarBlink(), m.backHint()).
+			reserveWidgetCells(m.viewport.Width())
+	}
 	if !m.transcriptSel.spanUnchanged(m.lines, rendered.lines) {
 		m.transcriptSel = transcriptSel{} // the ground under the span moved: let go (mouse.go)
 	}
 	m.lines = rendered.lines // stashed for the sticky-header overlay (View)
 	m.painted = m.frameKey() // the key these lines answer to: what settle compares against (paintcache.go)
+	m.previewRows = rendered.previewRows
+	m.paintedLimit = m.viewport.Width()
 	m.userBlocks = rendered.userBlocks
 	m.header = rendered.header       // a rooted paint's breadcrumb, and nothing at all otherwise
 	m.lineTargets = rendered.targets // the paint's own click surface, for the mouse (render.go)
@@ -3470,6 +3487,52 @@ func (m *Model) refreshViewport() {
 	m.cursor = m.seatBlockCursor()
 	m.viewport.SetContentLines(placeholderLines(rendered.lines))
 	m.seatViewportOffset()
+}
+
+// splicedPaint is the stream-only repaint: the paint on screen with its preview rows re-rendered
+// ([transcript.renderPreview]) and every row above them kept, and false where that would not be
+// the paint renderView gives — then refreshViewport renders in full. It splices only when all of
+// these hold:
+//
+//   - the frame key moved, and moved ONLY in streamGen: a pure append to the live buffer, which
+//     moves nothing renderView reads but the preview's text (transcript.appendToken);
+//   - the paint on screen ends in the preview (previewRows): a preview laid mid-list — a parallel
+//     sibling talking inside its own span — has blocks below it that a splice would drop, and a
+//     paint with no preview has nothing to splice at;
+//   - the lines were held to the widget width they would be held to now (paintedLimit), and no
+//     swap has forgotten the frame they were painted under ([Model.forgetPaintedFrame]).
+//
+// The rows above the preview are a function of the settled transcript alone — its separator
+// included, which joins the block above to a preview depth a pure append cannot move — so they are
+// the rows a full paint would lay again. The result is built in FRESH slices: the viewport's
+// placeholders and spanUnchanged read m.lines, and every Model copy shares its backing array, so
+// nothing is ever appended to the stash in place (ADR 0011).
+func (m Model) splicedPaint() (renderedTranscript, bool) {
+	now, was := m.frameKey(), m.painted
+	keep := len(m.lines) - m.previewRows
+	if m.previewRows == 0 || keep < 0 || was == (frameKey{}) || was.streamGen == now.streamGen ||
+		m.paintedLimit != m.viewport.Width() ||
+		len(m.lineTargets) != len(m.lines) || len(m.pads) != len(m.lines) || len(m.padSeps) != len(m.lines) {
+		return renderedTranscript{}, false
+	}
+	was.streamGen = now.streamGen
+	if was != now {
+		return renderedTranscript{}, false
+	}
+	tail, ok := m.transcript.renderPreview(m.th, m.transcriptWidth(), m.liveStarBlink())
+	if !ok {
+		return renderedTranscript{}, false
+	}
+	tail = tail.reserveWidgetCells(m.viewport.Width())
+	return renderedTranscript{
+		lines:       slices.Concat(m.lines[:keep], tail.lines),
+		targets:     slices.Concat(m.lineTargets[:keep], tail.targets),
+		pads:        slices.Concat(m.pads[:keep], tail.pads),
+		padSeps:     slices.Concat(m.padSeps[:keep], tail.padSeps),
+		userBlocks:  m.userBlocks,
+		header:      m.header,
+		previewRows: tail.previewRows,
+	}, true
 }
 
 // placeholderStore is the shared backing array placeholderLines slices: blank strings, never

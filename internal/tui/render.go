@@ -71,6 +71,13 @@ type renderedTranscript struct {
 	// decided (appendJoined), so a copy reads the separator's own depth rather than guessing it
 	// from the rows around it ([padRows.copyText]).
 	padSeps []int
+	// previewRows is how many rows at the END of lines are the live buffer's preview — its own rows,
+	// the separator above it not counted — and 0 when the paint holds no preview or another block
+	// follows it. It is what a stream-only repaint splices at ([Model.splicedPaint]): everything above
+	// those rows is a function of the settled transcript alone, so a pure append keeps it and
+	// re-renders the preview ([transcript.renderPreview]). reserveWidgetCells carries it across the
+	// rows its breaks add.
+	previewRows int
 }
 
 // blockPaint is one painted block: its physical lines and, parallel to them, what each line is to
@@ -213,6 +220,31 @@ func (p blockPaint) retargeted(kind targetKind) blockPaint {
 	return blockPaint{lines: p.lines, targets: marks, cells: p.cells}
 }
 
+// eachBlockRow hands row each of block's own lines as the paint lays it down: the line, its click
+// target resolved against head (the block's first entry), its stored widget width (-1 where the
+// block measured none) and whether it is a prompt's half row. It is the one statement of how a
+// block's rows enter the paint, shared by the whole walk ([transcript.renderView]) and the preview
+// spliced alone ([transcript.renderPreview]), so the two lay identical rows.
+//
+// The line and its mark are handed over TOGETHER, and the mark is read defensively, so the map is
+// exactly as long as the lines whatever a painter handed over. That length is the mouse's whole
+// safety: a target index that outlived its line is a click toggling some other block, on a path
+// where the alternative to a rule is a panic mid-repaint.
+func eachBlockRow(head int, block blockPaint, row func(ln string, target lineTarget, cell int, pad bool)) {
+	for i, ln := range block.lines {
+		target := lineTarget{}
+		if i < len(block.targets) && block.targets[i].kind != targetNone {
+			mark := block.targets[i]
+			target = lineTarget{kind: mark.kind, entry: head + mark.member, stage: mark.stage}
+		}
+		cell := -1
+		if i < len(block.cells) {
+			cell = block.cells[i]
+		}
+		row(ln, target, cell, i < len(block.targets) && block.targets[i].pad)
+	}
+}
+
 // renderView renders the committed entries plus any in-progress assistant buffer into the
 // viewport's lines, recording the line range of every user block. Blocks are separated by one
 // line (layout.md), railed at the depth the two blocks share so a sub-agent run's frame is
@@ -240,9 +272,14 @@ func (p blockPaint) retargeted(kind targetKind) blockPaint {
 // the plain [breadcrumbHint]; empty paints the trail with no hint at all (breadcrumbRow).
 //
 // What this reads of the transcript — entries, the live buffer, root and the fold preferences — is
-// under [transcript.generation]: every writer of those fields bumps it, and the
-// Update tail repaints on the bump ([Model.settle], [frameKey]). A new field read here is a field
-// whose writers must touch.
+// under [transcript.generation] and, for a pure append to the live buffer, [transcript.streamGen]:
+// every writer of those fields bumps one of the two, and the Update tail repaints on the bump
+// ([Model.settle], [frameKey]). A new field read here is a field whose writers must touch.
+//
+// When the preview is the LAST block the paint lays down, the paint says how many of its trailing
+// rows it is (renderedTranscript.previewRows): a bump of streamGen alone moves only those rows, so
+// the repaint re-renders them ([transcript.renderPreview]) onto the rows above instead of calling
+// this ([Model.splicedPaint]).
 func (t *transcript) renderView(th theme, width int, blink bool, backHint string) renderedTranscript {
 	if width < 1 {
 		width = 1
@@ -317,26 +354,13 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		if isUser && !root.rooted() {
 			userBlocks = append(userBlocks, userBlock{start: len(lines), count: len(block.lines)})
 		}
-		// The line and its mark are appended in ONE loop, and the mark is read defensively, so the
-		// map is exactly as long as the lines whatever a painter handed over. That length is the
-		// mouse's whole safety: a target index that outlived its line is a click toggling some
-		// other block, on a path where the alternative to a rule is a panic mid-repaint.
-		for i, ln := range block.lines {
+		eachBlockRow(head, block, func(ln string, target lineTarget, cell int, pad bool) {
 			lines = append(lines, ln)
-			target := lineTarget{}
-			if i < len(block.targets) && block.targets[i].kind != targetNone {
-				mark := block.targets[i]
-				target = lineTarget{kind: mark.kind, entry: head + mark.member, stage: mark.stage}
-			}
 			targets = append(targets, target)
-			cell := -1
-			if i < len(block.cells) {
-				cell = block.cells[i]
-			}
 			cells = append(cells, cell)
-			pads = append(pads, i < len(block.targets) && block.targets[i].pad)
+			pads = append(pads, pad)
 			padSeps = append(padSeps, -1)
-		}
+		})
 		if standIn >= 0 && standIn < len(padSeps) {
 			padSeps[standIn] = min(prevBlockDepth, depth) // railJoin's spacer depth: no closer is stood in for
 		}
@@ -404,21 +428,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		}
 	}
 
-	// previewAt is the index the live buffer paints AT — the end of the run that filled it
-	// (transcript.runEnd), which is where that run's blocks end rather than where the list does. In
-	// a serial session, and for the human's own conversation, the two are the same index and the
-	// preview lands exactly where it always did; while siblings run at once it lands inside the
-	// child that is talking instead of after whichever child was announced last. −1 means the
-	// buffer is not painted this frame at all: nothing is streaming, or the run holding it is
-	// collapsed and its whole span elided with it.
-	//
-	// A rooted paint asks one question more, and asks it first: whether the run holding the buffer is
-	// the view's own or one of its descendants (runUnder). A sibling's tokens land at an index this
-	// walk never reaches, and the parent's at the end of a span the walk stops inside — either would
-	// paint another agent's live sentence into this run's view.
-	//
-	// A stage view paints no preview at all: it lists item rows, each eliding its own run, and the
-	// run the stage's workflow stands in is not on screen.
+	// A stage view paints no preview at all ([transcript.previewAt]); its rows are its own walk.
 	if root.stage.isStage() {
 		t.paintStage(th, width, blink, root, appendJoined)
 		return renderedTranscript{
@@ -426,28 +436,15 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 			pads: pads, padSeps: padSeps,
 		}
 	}
-	previewAt := -1
-	if t.streaming && runUnder(t.entries, t.pendingRun, root.ref) &&
-		!insideCollapsedRun(t.entries, t.pendingRun, root.ref) {
-		previewAt = t.runEnd(t.pendingRun)
-	}
-	// paintPreview appends the in-progress buffer as a block of its own run, at index at. What it
-	// paints is previewTail over the buffer's own tail — the buffer hands out only the lines the
-	// preview can need (streamBuf.tail), and previewTail then holds the trailing blank lines back
-	// and keeps its last previewTailLines raw lines, so a repaint costs a viewport rather than a
-	// whole reply at both seams. Both cuts are display-only: the buffer itself keeps every byte. An empty buffer still renders its
-	// lone marker line, so the human sees that streaming has begun.
+	previewAt := t.previewAt(root)
+	// paintPreview appends the in-progress buffer as a block of its own run, at index at
+	// ([transcript.previewBlock]), and records the span its own rows hold: should nothing follow
+	// them, they are the paint's previewRows.
+	previewStart, previewEnd := -1, -1
 	paintPreview := func(at int) {
-		// The live buffer is painted at the depth that FILLED it (transcript.pendingRun), like every
-		// committed block above: its own rail is what says which run is talking, and a delegate that
-		// streams before producing any entry needs nothing else to announce the level.
-		depth := t.pendingRun.depth - root.depth
-		preview := renderEntryLines(th, paintInput{
-			kind:  entryAssistant,
-			text:  previewTail(t.pending.tail(previewTailLines)),
-			depth: depth,
-		}, width, blink)
+		depth, preview := t.previewBlock(th, width, blink, root)
 		appendJoined(false, false, depth, at, preview)
+		previewStart, previewEnd = len(lines)-len(preview.lines), len(lines)
 	}
 
 	// records is the walk's one painter-record buffer: a block states its records into it
@@ -501,10 +498,94 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 	if previewAt >= 0 {
 		paintPreview(root.last)
 	}
+	previewRows := 0
+	if previewEnd == len(lines) { // the preview is the last block laid down: no separator, no row after it
+		previewRows = previewEnd - previewStart
+	}
 	return renderedTranscript{
 		lines: lines, userBlocks: userBlocks, targets: targets, header: header, cells: cells,
-		pads: pads, padSeps: padSeps,
+		pads: pads, padSeps: padSeps, previewRows: previewRows,
 	}
+}
+
+// previewAt is the index the live buffer paints AT — the end of the run that filled it
+// (transcript.runEnd), which is where that run's blocks end rather than where the list does. In a
+// serial session, and for the human's own conversation, the two are the same index and the preview
+// lands exactly where it always did; while siblings run at once it lands inside the child that is
+// talking instead of after whichever child was announced last. −1 means the buffer is not painted
+// this frame at all: nothing is streaming, or the run holding it is collapsed and its whole span
+// elided with it.
+//
+// A rooted paint asks one question more, and asks it first: whether the run holding the buffer is
+// the view's own or one of its descendants (runUnder). A sibling's tokens land at an index the walk
+// never reaches, and the parent's at the end of a span the walk stops inside — either would paint
+// another agent's live sentence into this run's view.
+//
+// A stage view paints no preview at all: it lists item rows, each eliding its own run, and the run
+// the stage's workflow stands in is not on screen.
+func (t *transcript) previewAt(root paintRoot) int {
+	if root.stage.isStage() || !t.streaming || !runUnder(t.entries, t.pendingRun, root.ref) ||
+		insideCollapsedRun(t.entries, t.pendingRun, root.ref) {
+		return -1
+	}
+	return t.runEnd(t.pendingRun)
+}
+
+// previewBlock paints the in-progress buffer as a block of its own run, and the depth it is laid
+// at. What it paints is previewTail over the buffer's own tail — the buffer hands out only the lines
+// the preview can need (streamBuf.tail), and previewTail then holds the trailing blank lines back
+// and keeps its last previewTailLines raw lines, so a repaint costs a viewport rather than a whole
+// reply at both seams. Both cuts are display-only: the buffer itself keeps every byte. An empty
+// buffer still renders its lone marker line, so the human sees that streaming has begun.
+//
+// The live buffer is painted at the depth that FILLED it (transcript.pendingRun), like every
+// committed block above: its own rail is what says which run is talking, and a delegate that
+// streams before producing any entry needs nothing else to announce the level.
+func (t *transcript) previewBlock(th theme, width int, blink bool, root paintRoot) (int, blockPaint) {
+	depth := t.pendingRun.depth - root.depth
+	return depth, renderEntryLines(th, paintInput{
+		kind:  entryAssistant,
+		text:  previewTail(t.pending.tail(previewTailLines)),
+		depth: depth,
+	}, width, blink)
+}
+
+// renderPreview is the preview's own rows alone — what renderView lays down for the live buffer
+// when it is the last block, the separator above it excluded — as a paint of their own
+// (previewRows covering all of them), and false where renderView would paint no preview at all. It
+// is the stream-only repaint's half of the paint ([Model.splicedPaint]): a pure append moves
+// nothing above those rows (transcript.streamGen), so the rows the last full paint laid above them
+// stand and these replace the old preview. The rows go through renderView's own [eachBlockRow], so
+// the two lay the same bytes and the same click map; the head index handed it is the preview's own
+// (previewAt), where renderView hands the walk's index at or past it — a difference no row spends,
+// since an answer's paint marks no click surface (renderEntryLines, plainPaint).
+func (t *transcript) renderPreview(th theme, width int, blink bool) (renderedTranscript, bool) {
+	if width < 1 {
+		width = 1
+	}
+	root := t.paintRoot()
+	at := t.previewAt(root)
+	if at < 0 {
+		return renderedTranscript{}, false
+	}
+	_, preview := t.previewBlock(th, width, blink, root)
+	n := len(preview.lines)
+	out := renderedTranscript{
+		lines:   make([]string, 0, n),
+		targets: make([]lineTarget, 0, n),
+		cells:   make([]int, 0, n),
+		pads:    make([]bool, 0, n),
+		padSeps: make([]int, 0, n),
+	}
+	eachBlockRow(at, preview, func(ln string, target lineTarget, cell int, pad bool) {
+		out.lines = append(out.lines, ln)
+		out.targets = append(out.targets, target)
+		out.cells = append(out.cells, cell)
+		out.pads = append(out.pads, pad)
+		out.padSeps = append(out.padSeps, -1)
+	})
+	out.previewRows = n
+	return out, true
 }
 
 // reserveWidgetCells holds every rendered line inside limit columns in the measure the VIEWPORT
@@ -642,9 +723,16 @@ func (r renderedTranscript) reserveWidgetCells(limit int) renderedTranscript {
 	if header.count > 0 {
 		header = moved(header)
 	}
+	// The preview's rows end the paint, so they still do: what they grew by is the rows added from
+	// their first line on.
+	previewRows := 0
+	if r.previewRows > 0 && r.previewRows <= len(r.lines) {
+		start := len(r.lines) - r.previewRows
+		previewRows = len(lines) - (start + shift[start])
+	}
 	return renderedTranscript{
 		lines: lines, userBlocks: blocks, targets: targets, header: header, pads: pads,
-		padSeps: padSeps,
+		padSeps: padSeps, previewRows: previewRows,
 	}
 }
 

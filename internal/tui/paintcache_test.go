@@ -564,6 +564,123 @@ func TestPaintCacheRepaintsOnlyTheStreamingTail(t *testing.T) {
 	sameRender(t, "the identical second render", second, appended)
 }
 
+// fullRepaint is the paint a model's lines must equal: the transcript the model holds rendered whole
+// with NO cache behind it, and held to the widget's width by the same reserve refreshViewport
+// applies — the oracle a spliced repaint is checked against, both sides after the reserve.
+func fullRepaint(m Model) renderedTranscript {
+	cold := m.transcript
+	cold.paints = nil
+	return cold.renderView(m.th, m.transcriptWidth(), m.liveStarBlink(), m.backHint()).
+		reserveWidgetCells(m.viewport.Width())
+}
+
+// sameAsFullRepaint fails when anything refreshViewport stashed differs from the full repaint of the
+// same model: the lines, the click map, the half rows and their separators, the user blocks, the
+// sticky header, and where the preview's rows start.
+func sameAsFullRepaint(t *testing.T, what string, m Model) {
+	t.Helper()
+	want := fullRepaint(m)
+	sameRender(t, what, renderedTranscript{lines: m.lines, targets: m.lineTargets}, want)
+	if !slices.Equal(m.pads, want.pads) {
+		t.Errorf("%s: the half-row map differs from a full repaint", what)
+	}
+	if !slices.Equal(m.padSeps, want.padSeps) {
+		t.Errorf("%s: the stood-in separators differ from a full repaint", what)
+	}
+	if !slices.Equal(m.userBlocks, want.userBlocks) || m.header != want.header {
+		t.Errorf("%s: user blocks %v / header %v; a full repaint gives %v / %v",
+			what, m.userBlocks, m.header, want.userBlocks, want.header)
+	}
+	if m.previewRows != want.previewRows {
+		t.Errorf("%s: previewRows = %d; a full repaint gives %d", what, m.previewRows, want.previewRows)
+	}
+}
+
+// TestStreamSpliceMatchesAFullRepaint pins the stream-only repaint (Model.splicedPaint): a pure
+// append re-renders the preview alone onto the rows above it, and every frame it lays is the frame
+// a full, cache-less repaint lays. The paint cache's counters are the instrument for which path ran:
+// the splice consults no cache at all, and a full repaint consults it for every settled block.
+func TestStreamSpliceMatchesAFullRepaint(t *testing.T) {
+	t.Parallel()
+
+	// paintsConsulted is how many cache lookups the transcript's paint has made so far.
+	paintsConsulted := func(m Model) int { return m.transcript.paints.hits + m.transcript.paints.misses }
+
+	t.Run("the preview ends the paint: each pure append splices", func(t *testing.T) {
+		t.Parallel()
+		m := paModel(t, 30)
+		m.state = stateRunning
+		deltas := []string{
+			"## Step 7\n\n",
+			"The fold turns each `domain.Event` ",
+			"into a transcript entry.\n\n- a list item\n",
+			// A row the painter fills in its own measure and the widget counts wider (a VS16 glyph
+			// is one cell to the one, two to the other): the reserve breaks it, so the splice's
+			// reserve is held to the whole paint's.
+			strings.Repeat("⚠️", 100) + "\n\n",
+			"```go\nfunc paint() {}\n",
+			"```\n\nThat keeps a repaint cheap.",
+		}
+		for i, delta := range deltas {
+			before := paintsConsulted(m)
+			m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: delta}})
+			what := fmt.Sprintf("delta %d", i)
+			sameAsFullRepaint(t, what, m)
+			if m.previewRows == 0 {
+				t.Errorf("%s: the paint records no preview rows at its end", what)
+			}
+			consulted := paintsConsulted(m) - before
+			switch {
+			case i == 0 && consulted == 0:
+				t.Errorf("%s: the first token opened the preview without a full repaint", what)
+			case i > 0 && consulted != 0:
+				t.Errorf("%s: a pure append consulted the paint cache %d times — it walked the scrollback instead of splicing the preview", what, consulted)
+			}
+		}
+		raw := m.transcript
+		raw.paints = nil
+		if unreserved := raw.renderView(m.th, m.transcriptWidth(), m.liveStarBlink(), m.backHint()); len(unreserved.lines) == len(m.lines) {
+			t.Fatal("fixture: the reserve broke no preview row, so the splice's reserve went unchecked")
+		}
+	})
+
+	t.Run("a parallel sibling's preview mid-list falls back to a full repaint", func(t *testing.T) {
+		t.Parallel()
+		m := newModel(context.Background(), &fakeEngine{}, testOpts, nil)
+		m = step(t, m, tea.WindowSizeMsg{Width: paWidth, Height: paHeight})
+		m.state = stateRunning
+		subAgentCall(&m.transcript, "s1", "survey the tests", 0)
+		subAgentCall(&m.transcript, "s2", "survey the docs", 0)
+		subAgentStarted(&m.transcript, "s1", 1)
+		subAgentStarted(&m.transcript, "s2", 1)
+		readCall(&m.transcript, "c2", "b.go", 1, 5, 1)
+		// Both members open, so the first one's words paint inside its own span — above the second
+		// member's, which is a block the splice would drop.
+		for i := range m.transcript.entries {
+			if m.transcript.entries[i].opensRun() {
+				m.transcript.entries[i].expanded = true
+			}
+		}
+		m.transcript.touch()
+		m = step(t, m, eventMsg{Event: domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "child "}})
+		for i, delta := range []string{"words ", "and more ", "words"} {
+			before := paintsConsulted(m)
+			m = step(t, m, eventMsg{Event: domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: delta}})
+			what := fmt.Sprintf("sibling delta %d", i)
+			sameAsFullRepaint(t, what, m)
+			if m.previewRows != 0 {
+				t.Errorf("%s: previewRows = %d for a preview with a block below it; want 0", what, m.previewRows)
+			}
+			if paintsConsulted(m) == before {
+				t.Errorf("%s: the repaint consulted no cache — it spliced a preview that is not the last block", what)
+			}
+		}
+		if !strings.Contains(strip(strings.Join(m.lines, "\n")), "child words and more words") {
+			t.Fatal("fixture: the member's words are not on the paint")
+		}
+	})
+}
+
 // BenchmarkRenderViewStreaming is the evidence line for the item's perf claim: what ONE repaint of a
 // long scrollback costs while a reply streams, with the cache behind it and without. The streamed
 // token is what puts this render on a hot loop — the sink delivers a batch, refreshViewport repaints,

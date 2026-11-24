@@ -168,7 +168,25 @@ The reserve relies on the store-time split only when its limit equals `key.width
 - `go test -run '^$' -bench 'ReserveWidgetCellsAllHit' -benchmem ./internal/tui/` (record before/after)
 **Commit:** `perf(tui): split overrunning lines once, when a block's paint is stored`
 
-## 6. A streamed batch re-renders only the preview tail
+## 6. A streamed batch re-renders only the preview tail — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): benchmark `go test -run '^$' -bench 'PerfAuditStream' -benchtime=1x -benchmem ./internal/tui/` (Pi 5, no -race, one op = 4096 deltas) — before (HEAD 6335abe58): session=0 2.86 ms/delta, 1.50 GB/op, 23.95 M allocs/op; session=300 5.16 ms/delta, 5.21 GB/op, 32.38 M allocs/op. After: session=0 2.46 ms/delta, 1.44 GB/op, 23.47 M allocs/op; session=300 2.64 ms/delta, 2.24 GB/op, 23.54 M allocs/op.
+
+NOTES (2026-11-24): the splice keeps the preview's SEPARATOR in the kept prefix rather than re-rendering it (the plan's approach recorded the start "separator included"): the separator and the half-row stand-in depth it may write onto the row above are functions of the block above and of the preview's depth, which a pure append cannot move, so the stash is `renderedTranscript.previewRows` / `Model.previewRows` — the count of the preview's own trailing rows after the reserve — and 0 (never a valid-looking index) means "no splice". A preview with no rows also counts as invalid.
+
+NOTES (2026-11-24): shape of the seam — `transcript.previewAt` / `previewBlock` are extracted from renderView (same code), `eachBlockRow` is renderView's per-row loop extracted so the whole walk and `transcript.renderPreview` lay rows one way; `Model.splicedPaint` decides and builds fresh slices with `slices.Concat`; refreshViewport keeps the one restash, cursor seat and selection rule. Besides the key moving only in streamGen and `previewRows > 0`, the splice also requires the stashed widget width (`Model.paintedLimit`) to match and refuses a forgotten frame (`painted == frameKey{}`, watch.go's forgetPaintedFrame).
+
+NOTES (2026-11-24): readers of `transcript.generation` checked — only frameKey (now with streamGen) and usage.go's delegate-spend memo, which reads entries only, so neither needs streamGen.
+
+NOTES (2026-11-24): `TestTranscriptWritersBumpTheGeneration` — the `appendToken` row of the writes table (a pure append on the streaming seed) becomes two subtests (pure append: streamGen moved, generation held; first token after a commit: generation moved), the table gains "appendToken for another run" (a park), and the holds now also assert streamGen held.
+
+NOTES (2026-11-24): `TestE2EStreamIntoALongSessionMatchesAColdRender` builds its stubllm Script in Go inside the test file (as e2e_copy/e2e_advise do) rather than as a testdata fixture, keeping to the item's file list; the stream is held open after its visible text by 30000 whitespace-only deltas (a trailing blank line the preview holds back), so the spliced frame and the full repaint after a resize away and back are of the same live state, and the test cancels the run once it has both.
+
+NOTES (2026-11-24): consequential edit — internal/tui/doc.go: made necessary by the pure-append counter (the "an arm mutates" invariant named only the transcript generation as the transcript's paint input).
+
+NOTES (2026-11-24): consequential edit — internal/tui/settled_test.go: made necessary by the new repaint helper `splicedPaint` (the plan's standing requirement adds it to `layoutCallNames`).
+
+NOTES (2026-11-24): retry fix — `steadyTranscriptRows` in cmd/apogee/e2e_stream_splice_test.go now also waits on `paintedAtWidth`: every transcript row from the top to the reply's last visible line must reach the frame's last column (the rules and scrollbar track of a paint at that width), so the widened-but-stale 70-column paint after the resize back is no longer accepted by the two-equal-reads check; the e2e passed 10/10 under -race and 5/5 without.
 
 **What:** Depends on items 3 and 5.
 **Goal:** a streamed delta at 300 tool blocks costs close to the empty-session cost, and every frame while streaming is byte-identical to a full repaint.
