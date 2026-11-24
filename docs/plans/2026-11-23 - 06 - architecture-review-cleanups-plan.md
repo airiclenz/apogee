@@ -194,7 +194,11 @@ NOTES (2026-11-24): a prompt claim now goes through claimKey, so the transcript 
 **Closes:** question-pane-key-rung
 **Commit:** `refactor(tui): give the question pane its own key rung`
 
-## 7. Text walks the pane table
+## 7. Text walks the pane table — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): the ask-at-an-image-path case of TestNoModalPaneLetsAPasteReachTheDraft is its own top-level test, TestNoModalPaneLetsAPasteReachTheDraftAskAttachesAnImagePath (matched by the Acceptance -run pattern), because it needs a vision-server model rather than a paneFixtures row.
+NOTES (2026-11-24): pasteIntoBox now returns (Model, tea.Cmd) instead of (tea.Model, tea.Cmd) so the ask's text answer can hand it back in the row's three-part currency; the /settings row's text answer (settingsText) lives in panes.go beside promptText, since settings.go is not in the item's Files and its two routes (settingsPaste, settingsEditorMsg) are unchanged.
+NOTES (2026-11-24): TestEveryModalRowGatesItsText also pins that every modal row has a keyOpen gate, since walkText's modal swallow is gated only by keyOpen.
 
 **What:** Depends on item 6. Behaviour change (owner call): a ctrl+v clipboard reply that arrives after a pane opened walks the table instead of landing in the hidden draft.
 **Goal:** `foldPaste`, `foldWidgetMsg` and `foldClipboardText` each ask `walkText` before the box; `listPaste` and the hand-ordered chains are gone; no modal row the walk reaches lets pasted text into the draft (ADR 0053 amend-1014 rule 9); the /settings key list keeps its own adapter.

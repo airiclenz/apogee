@@ -540,9 +540,9 @@ func (m Model) foldKeyboardEnhancements(msg tea.KeyboardEnhancementsMsg) (tea.Mo
 	return m, nil
 }
 
-// foldPaste folds one bracketed paste into whichever surface is being typed at: the /settings pane
-// first, then the approval pane's rule field, then an open picker, /sessions browser or /workflows
-// view (listPaste), then the prompt box wherever it is editable.
+// foldPaste folds one bracketed paste into whichever surface is being typed at: the pane table is
+// walked first ([Model.walkText] — the /settings pane, a list pane's filter or field, the approval's
+// rule field, the ask's borrowed box), and otherwise the paste goes into the draft (pasteIntoDraft).
 //
 // Bracketed paste (default-on in bubbletea v2) is an edit, so it must run the same post-edit
 // refresh a keypress does — without it a multi-line paste renders unwrapped until the next key, the
@@ -552,20 +552,21 @@ func (m Model) foldKeyboardEnhancements(msg tea.KeyboardEnhancementsMsg) (tea.Mo
 // interjection (ADR 0025) — and is dropped at the inert states, exactly as keys are. Mirrors
 // handleKey's edit path.
 //
-// The /settings pane is asked FIRST and for the same reason handleKey asks it first: while it is
-// open it is the surface the human is typing at, and the box below is one they cannot see
-// (settings.go). The filtering lists are asked before the box for the same reason: they are modal,
-// and nothing is typed into the prompt box while a pop-up is up (layout.md).
+// The panes are asked FIRST and in the order the keys ask them, for the reason handleKey asks them
+// first: while a modal pane is up it is the surface the human is typing at, and nothing is typed into
+// the prompt box while a pop-up is up (layout.md) — the /settings pane hides the box altogether.
 func (m Model) foldPaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
-	if next, cmd, claimed := m.settingsPaste(msg); claimed {
+	if next, cmd, claimed := m.walkText(msg); claimed {
 		return next, cmd
 	}
-	if next, cmd, claimed := m.projectRuleMsg(msg); claimed {
-		return next, cmd // the approval pane's rule field is the surface being typed at (approval.go)
-	}
-	if next, cmd, claimed := m.listPaste(msg); claimed {
-		return next, cmd // a filtering list's paste is typing into it, never into the box (listsurface.go)
-	}
+	return m.pasteIntoDraft(msg)
+}
+
+// pasteIntoDraft lands a bracketed paste in the prompt draft wherever the box is editable: as an
+// attached image when it is exactly an image file's path (attachPastedImage), and otherwise typed into
+// the box (pasteIntoBox). It is the box's half of [Model.foldPaste], and the ask's borrowed box takes a
+// paste through it too ([Model.promptText]).
+func (m Model) pasteIntoDraft(msg tea.PasteMsg) (Model, tea.Cmd) {
 	if !m.inputEditable() {
 		return m, nil
 	}
@@ -580,7 +581,7 @@ func (m Model) foldPaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 // share, so both recompute the autocomplete overlay and reschedule the skill-hint band. It asks
 // inputEditable itself, because a ctrl+v's text arrives after a clipboard read the box may have
 // stopped being editable during.
-func (m Model) pasteIntoBox(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+func (m Model) pasteIntoBox(msg tea.PasteMsg) (Model, tea.Cmd) {
 	if !m.inputEditable() {
 		return m, nil
 	}
@@ -633,15 +634,13 @@ func (m Model) attachPastedImage(content string) (Model, tea.Cmd, bool) {
 // The cursor is no longer among them: with the virtual cursor retired no blink Msg is ever
 // scheduled, and the real cursor is placed by View rather than driven by a Msg chain.
 //
-// "The focused input" is the /settings field while the pane has one open, and this fold is the only
-// route such a field can be reached by: the clipboard reply its own ctrl+v asks for is a Msg of the
+// The pane table is walked first ([Model.walkText]): "the focused input" is the /settings field while
+// the pane has one open, or the approval's rule field, and this walk is the only route such a field can
+// be reached by: the clipboard reply its own ctrl+v asks for is a Msg of the
 // widget package's own unexported type, which no arm of the switch can name (settingsEditorMsg,
 // lineEditor.editMsg).
 func (m Model) foldWidgetMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if next, cmd, claimed := m.settingsEditorMsg(msg); claimed {
-		return next, cmd
-	}
-	if next, cmd, claimed := m.projectRuleMsg(msg); claimed {
+	if next, cmd, claimed := m.walkText(msg); claimed {
 		return next, cmd
 	}
 	m.fitWrapMemo() // the widget rebuilds its wrap memo to MaxHeight on Update (lineeditor.go)

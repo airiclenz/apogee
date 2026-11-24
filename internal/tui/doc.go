@@ -1143,9 +1143,9 @@
 // window, click, wheel), written once and named once — each kind one row of [reportRows] and one case of [Model.reportState] — with every rectangle in the transcript-side slot a
 // lookup into the geometry View publishes while it stacks that slot (model.go) rather than a prefix
 // sum of its own; panes.go the pane table — one [paneSpec] row per framePane ({name, slot, modal,
-// open, render, key, keyOpen, click, wheel, hover, rank}, filled in init() and read at call time), which is
+// open, render, key, keyOpen, text, click, wheel, hover, rank}, filled in init() and read at call time), which is
 // what [Model.openPanes], the overlay builder and the transcript-side slot walk each iterate, and what
-// the key precedence ([keyClaimOrder], through [paneClaimant]) and the pointer chain ([pointerPanes])
+// the key precedence ([keyClaimOrder], through [paneClaimant]), the text walk ([Model.walkText]) and the pointer chain ([pointerPanes])
 // read each pane's answers off — both chains derived in that same init() from each row's [paneRank] —
 // so a pane is one row and the framePane order is the one order the frame both gives way and stacks in;
 // pointershape.go the pointer-shape classifier — [Model.pointerShapeAt], which answers default, text or

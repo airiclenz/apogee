@@ -332,7 +332,7 @@ func (m Model) listKey(
 // same field and the same rule rather than each keeping a string and a clamp of its own.
 //
 // change is the edit itself, and only two kinds reach it: a keystroke the surface routes here (a
-// printable keypress or backspace, listKey), and a bracketed paste (listPaste), which the field folds
+// printable keypress or backspace, listKey), and pasted text (pickerPaste, sessionBrowserPaste), which the field folds
 // onto its one line ([lineEditor.editMsg]). Both land at the end of the value where the caret stands.
 // Everything else is swallowed whole by the modal above (listKey) — the field is what EDITS, never
 // what decides which keys are the overlay's.
@@ -363,34 +363,20 @@ func (m Model) typeIntoOverlayFilter(
 	return cmd
 }
 
-// listPaste routes a bracketed paste while a list pane owns the keyboard — in a filtering one the
-// paste is TYPING there (ADR 0053, 2026-10-14 amendment): into the open pane's filter, folded onto
-// one line, with the highlight re-seated as a keystroke re-seats it. A pane that asks rather than
-// lists (a question kind, pickerOffering.filters) drops it; the /sessions browser routes it by its
-// own sub-step (sessionBrowserPaste), and the /workflows view — which lists without a filter — by
-// its own (workflowsPaste). Either way it is CLAIMED, never handed on: the panes are modal, and a
-// paste falling through would fill the prompt draft — or stage an interjection mid-run — behind a
-// pane the human is looking at instead.
-//
-// Each pane is gated by its own key gate (paneSpecs keyOpen), not by its open flag, so the paste
-// follows exactly the rule the keys follow: an approval or ask raised above a mid-run picker leaves
-// the picker's gate shut, and the paste goes to the surface the keys go to.
-func (m Model) listPaste(msg tea.PasteMsg) (Model, tea.Cmd, bool) {
-	paste := func(f *lineEditor) tea.Cmd { return f.editMsg(msg) }
-	switch {
-	case paneSpecs[paneBrowser].keyOpen(m):
-		return m.sessionBrowserPaste(paste)
-	case paneSpecs[panePicker].keyOpen(m):
-		offering := pickerOfferings[m.picker.kind]
-		if !offering.filters {
-			return m, nil, true // a question pane has no filter to type into
-		}
-		cmd := m.typeIntoOverlayFilter(&m.picker.listSurface, m.pickerOfferingRows(), offering.matched, paste)
-		return m, cmd, true
-	case paneSpecs[paneWorkflows].keyOpen(m):
-		return m.workflowsPaste(paste)
+// pickerPaste lands pasted text where the picker's keys would land it — the picker row's text answer
+// ([pastedInto], the pane table's walk [Model.walkText]). In a filtering picker the paste is TYPING
+// (ADR 0053, 2026-10-14 amendment): into the filter, folded onto one line, with the highlight re-seated
+// as a keystroke re-seats it. A pane that asks rather than lists (a question kind,
+// pickerOffering.filters) drops it. Either way it is CLAIMED, never handed on: the picker is modal, and
+// a paste falling through would fill the prompt draft — or stage an interjection mid-run — behind a
+// pane the human is looking at instead. paste is the edit that carries the text into the field.
+func (m Model) pickerPaste(paste func(*lineEditor) tea.Cmd) (Model, tea.Cmd, bool) {
+	offering := pickerOfferings[m.picker.kind]
+	if !offering.filters {
+		return m, nil, true // a question pane has no filter to type into
 	}
-	return m, nil, false
+	cmd := m.typeIntoOverlayFilter(&m.picker.listSurface, m.pickerOfferingRows(), offering.matched, paste)
+	return m, cmd, true
 }
 
 // pickerView is a list's FILTERED view of the rows it was given, and the ONE seam its consumers

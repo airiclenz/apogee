@@ -2,6 +2,7 @@ package tui
 
 import (
 	"math"
+	"path/filepath"
 	"runtime/metrics"
 	"slices"
 	"strings"
@@ -418,4 +419,155 @@ func heapAllocsInSizeClassOf(size float64) (count uint64, ok bool) {
 		}
 	}
 	return 0, false
+}
+
+// pasteProbes are the two Msgs that are typed text rather than keystrokes (pastedText): the terminal's
+// bracketed paste and the clipboard text a ctrl+v read.
+func pasteProbes(text string) []tea.Msg {
+	return []tea.Msg{tea.PasteMsg{Content: text}, clipboardTextMsg{text: text}}
+}
+
+// widgetProbeMsg is a widget Msg no arm of Update names and no pane's text answer recognises: what
+// foldWidgetMsg routes, which a modal pane must let walk on to the box.
+type widgetProbeMsg struct{}
+
+// No modal row of the pane table lets typed text into the prompt draft behind it (ADR 0053 amend-1014
+// rule 9): a paste and a ctrl+v's clipboard text over every modal fixture leave the draft as it was —
+// except at an ask, where the box IS the surface being typed at, and the text lands in it.
+func TestNoModalPaneLetsAPasteReachTheDraft(t *testing.T) {
+	t.Parallel()
+	for _, fx := range paneFixtures() {
+		if !paneSpecs[fx.pane].modal {
+			continue
+		}
+		for _, probe := range pasteProbes("pasted") {
+			t.Run(fx.name, func(t *testing.T) {
+				t.Parallel()
+				m := fx.build(t)
+				before := m.input.Value()
+
+				m = step(t, m, probe)
+
+				got := m.input.Value()
+				if m.state == stateAwaitingAsk {
+					if !strings.Contains(got, "pasted") {
+						t.Errorf("%T at the ask: box = %q, want the pasted text in the borrowed box", probe, got)
+					}
+					return
+				}
+				if got != before {
+					t.Errorf("%T over the %s: draft = %q, want it untouched (%q)", probe, fx.name, got, before)
+				}
+			})
+		}
+	}
+}
+
+// At an ask the box the pane borrows takes a bracketed paste by the draft's own path: a paste that is
+// exactly an image file's path attaches the image on a vision server, and types nothing.
+func TestNoModalPaneLetsAPasteReachTheDraftAskAttachesAnImagePath(t *testing.T) {
+	t.Parallel()
+	m, _, workspace := visionModel(t)
+	m = streamOneScreen(t, m)
+	m = step(t, m, askReqMsg{Request: domain.AskRequest{Question: "Which screenshot?"}, Reply: make(chan domain.AskAnswer, 1)})
+	if m.state != stateAwaitingAsk {
+		t.Fatalf("state = %v, want the ask up", m.state)
+	}
+
+	m = step(t, m, tea.PasteMsg{Content: filepath.Join(workspace, "shot.png")})
+
+	if got := m.input.Value(); got != "" {
+		t.Errorf("box = %q, want nothing typed — the path attached", got)
+	}
+	if len(m.images) != 1 || m.images[0].Name != "shot.png" {
+		t.Errorf("images = %+v, want shot.png attached", m.images)
+	}
+}
+
+// The approval's rule field is reached by the text walk: a paste and a ctrl+v's clipboard text both
+// land in the open field, folded onto its line, and neither reaches the draft.
+func TestTextWalkLandsAPasteInTheApprovalRuleField(t *testing.T) {
+	t.Parallel()
+	for _, probe := range pasteProbes(" ./...") {
+		m, _, _ := projectRulePane(t, terminalGate("go test ./..."), nil)
+		m = step(t, m, keyRune('p'))
+		if !m.editingProjectRule() {
+			t.Fatal("`p` did not open the rule field")
+		}
+		before := m.input.Value()
+
+		m = step(t, m, probe)
+
+		if got := m.ruleEdit.field.value(); got != "go test ./..." {
+			t.Errorf("%T: the field holds %q, want %q", probe, got, "go test ./...")
+		}
+		if got := m.input.Value(); got != before {
+			t.Errorf("%T: draft = %q, want it untouched (%q)", probe, got, before)
+		}
+	}
+}
+
+// Every modal row is gated — a key gate stands before its text answer and the walk's swallow, so a
+// closed or shut pane takes no text — and the list panes' gates let a widget Msg that is not text walk
+// on past them to the box, while the typed text they are sent is theirs.
+func TestEveryModalRowGatesItsText(t *testing.T) {
+	t.Parallel()
+	for p := framePane(0); p < paneKinds; p++ {
+		if row := paneSpecs[p]; row.modal && row.keyOpen == nil {
+			t.Errorf("modal row %q has no key gate: the text walk would swallow every paste while it is closed", row.name)
+		}
+	}
+	for _, fx := range paneFixtures() {
+		switch fx.pane {
+		case paneBrowser, panePicker, paneWorkflows:
+		default:
+			continue
+		}
+		t.Run(fx.name, func(t *testing.T) {
+			t.Parallel()
+			m := fx.build(t)
+			if _, _, claimed := m.walkText(widgetProbeMsg{}); claimed {
+				t.Errorf("a non-text widget Msg was claimed by the %s; want it to walk on to the box", fx.name)
+			}
+			for _, probe := range pasteProbes("x") {
+				if _, _, claimed := m.walkText(probe); !claimed {
+					t.Errorf("%T over the %s walked on; want it claimed by the modal pane", probe, fx.name)
+				}
+			}
+		})
+	}
+}
+
+// A ctrl+v's clipboard text arrives after a clipboard read, and a pane that opened meanwhile is where
+// the human is now typing: the text lands in the open pane's filter, never in the draft hidden behind it.
+func TestLateClipboardTextLandsInTheOpenPane(t *testing.T) {
+	t.Parallel()
+	t.Run("sessions browser", func(t *testing.T) {
+		t.Parallel()
+		m, _ := filterableBrowser(t)
+		m.input.SetValue("keep")
+
+		m = step(t, m, clipboardTextMsg{text: "the\nparser"})
+
+		if got := m.sessionBrowser.filter.value(); got != "the parser" {
+			t.Errorf("filter = %q, want the clipboard text folded onto one line (%q)", got, "the parser")
+		}
+		if got := m.input.Value(); got != "keep" {
+			t.Errorf("prompt draft = %q, want it untouched by clipboard text over the browser", got)
+		}
+	})
+	t.Run("picker", func(t *testing.T) {
+		t.Parallel()
+		m, _ := openModePicker(t, domain.ModePlan)
+		m.input.SetValue("keep")
+
+		m = step(t, m, clipboardTextMsg{text: "auto"})
+
+		if got := m.picker.filter.value(); got != "auto" {
+			t.Errorf("filter = %q, want the clipboard text (%q)", got, "auto")
+		}
+		if got := m.input.Value(); got != "keep" {
+			t.Errorf("prompt draft = %q, want it untouched by clipboard text over the picker", got)
+		}
+	})
 }

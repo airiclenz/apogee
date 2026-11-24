@@ -184,12 +184,35 @@ func (m Model) foldClipboardImage(msg clipboardImageMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// foldClipboardText pastes the clipboard text a ctrl+v read into the prompt box through the
-// bracketed paste's edit path (Model.pasteIntoBox) — never through attachPastedImage: ctrl+v of
-// text that names an image file stays the text the human copied, and only a bracketed paste (a
-// terminal's drag-and-drop) attaches the file it names.
+// foldClipboardText pastes the clipboard text a ctrl+v read where the human is typing. The pane table
+// is walked first ([Model.walkText]): the text arrives after a clipboard read, and a pane that opened
+// meanwhile — a picker, the /sessions browser — is the surface the human is now looking at, so the text
+// lands in it, or is swallowed by it, as a bracketed paste would be; it never reaches the draft hidden
+// behind a modal pane. Otherwise it goes into the prompt box through the bracketed paste's edit path
+// (Model.pasteIntoBox) — never through attachPastedImage: ctrl+v of text that names an image file
+// stays the text the human copied, and only a bracketed paste (a terminal's drag-and-drop) attaches
+// the file it names.
 func (m Model) foldClipboardText(msg clipboardTextMsg) (tea.Model, tea.Cmd) {
-	return m.pasteIntoBox(tea.PasteMsg{Content: msg.text})
+	if next, cmd, claimed := m.walkText(msg); claimed {
+		return next, cmd
+	}
+	text, _ := pastedText(msg)
+	return m.pasteIntoBox(text)
+}
+
+// pastedText recognises a Msg that is TEXT the human typed in one go rather than a keystroke — the
+// terminal's bracketed paste, and the clipboard text a ctrl+v read — and returns it as the bracketed
+// paste every field's edit door takes ([lineEditor.editMsg]). It is the one test of "is this typed
+// text" the pane table's walk ([Model.walkText]) and its rows' text answers share, so a modal pane
+// swallows exactly the Msgs a field would have taken.
+func pastedText(msg tea.Msg) (tea.PasteMsg, bool) {
+	switch msg := msg.(type) {
+	case tea.PasteMsg:
+		return msg, true
+	case clipboardTextMsg:
+		return tea.PasteMsg{Content: msg.text}, true
+	}
+	return tea.PasteMsg{}, false
 }
 
 // noVisionNote is the flash a clipboard image meets on a server that does not accept images when

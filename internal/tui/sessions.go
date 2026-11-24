@@ -693,7 +693,8 @@ func (m *Model) refuseWatchedVerb(meta session.Meta) bool {
 	return true
 }
 
-// sessionBrowserPaste lands a bracketed paste where the browser's keys would land it (listPaste):
+// sessionBrowserPaste lands pasted text where the browser's keys would land it — the browser row's text
+// answer in the pane table's walk ([pastedInto], [Model.walkText]):
 // in the rename field while a rename is open, folded onto its one line like the filter
 // ([lineEditor.editMsg]); nowhere during a delete-confirm, whose only answers are y and n and which
 // no pasted text may answer, nor while the pane is loading, which has no rows to filter yet; and in

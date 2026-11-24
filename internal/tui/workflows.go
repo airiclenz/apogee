@@ -456,7 +456,8 @@ func (m Model) workflowsNameKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// workflowsPaste lands a bracketed paste where the view's keys would land it (listPaste): in the save
+// workflowsPaste lands pasted text where the view's keys would land it — the view row's text answer in
+// the pane table's walk ([pastedInto], [Model.walkText]): in the save
 // row's name field while it is open, folded onto its one line ([lineEditor.editMsg]) as the
 // /sessions rename folds one (sessionBrowserPaste); nowhere otherwise, since the view lists without
 // a filter and no pasted text is one of its verbs. paste is the edit that carries the text into the

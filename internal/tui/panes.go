@@ -64,6 +64,14 @@ const (
 // carries no side effect, and it answers through the hit predicate the pane's click decides by,
 // never a restatement of it ([paneHit]). Every pane has one, as it has a click and a wheel.
 //
+// text is what [Model.walkText] asks of the pane while its key gate stands open: the pane's answer to
+// a Msg that is TEXT rather than a keystroke — a bracketed paste, a ctrl+v's clipboard text
+// ([pastedText]) — and, for the two panes whose fields take every Msg their widget asks for (the
+// /settings field, the approval's rule field), to the widget's own Msgs as well. It speaks the click's
+// currency: the Model, a tea.Cmd and whether the pane CLAIMED the Msg. nil means the pane has no field
+// to type into. A modal row that declines typed text still swallows it — the walk's rule, not the
+// row's — so no text reaches the draft behind a pane that owns the keyboard (ADR 0053 amend-1014).
+//
 // rank is WHEN the pane is asked: its rung of [keyClaimOrder] and its place in [pointerPanes], the two
 // gesture chains. Both lists are derived from the rows' ranks in init(), so where a pane rises and
 // falls in either chain is stated on its row beside what it does there ([paneRank]).
@@ -76,6 +84,7 @@ type paneSpec struct {
 	height  func(Model) int                                                  // the rows render's block takes, without rendering it; 0 where render is ""
 	key     func(Model, tea.KeyPressMsg) (Model, tea.Cmd, bool)              // its key claim, in claimant currency
 	keyOpen func(Model) bool                                                 // the key claim's gate; nil = always ask
+	text    func(Model, tea.Msg) (Model, tea.Cmd, bool)                      // its answer to pasted text; nil = no field
 	click   func(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) // its answer to a left-click on the frame
 	wheel   func(Model, tea.MouseWheelMsg) (Model, bool)                     // its answer to a wheel notch on the frame
 	hover   func(pre Model, x, y int) (pointerShape, bool)                   // the pointer shape a click at (x, y) implies; false asks the next pane
@@ -136,6 +145,7 @@ func init() {
 			height:  Model.promptHeight,
 			key:     paneClaim(Model.promptKey),
 			keyOpen: Model.promptOpen,
+			text:    Model.promptText,
 			click:   promptPointerClick,
 			wheel:   Model.promptWheel,
 			hover:   promptHover,
@@ -161,6 +171,7 @@ func init() {
 			height:  Model.sessionBrowserHeight,
 			key:     modalClaim(Model.sessionBrowserKey),
 			keyOpen: func(m Model) bool { return m.state == stateIdle && m.sessionBrowser.open },
+			text:    pastedInto(Model.sessionBrowserPaste),
 			click:   Model.handleBrowserClick,
 			wheel:   Model.browserWheel,
 			hover:   browserHover,
@@ -185,6 +196,7 @@ func init() {
 			// modal the human cannot answer. The older kinds are unaffected: their verbs are idle-only,
 			// and a picker cannot be open when a worker STARTS, since it owns ⏎ for as long as it is up.
 			keyOpen: func(m Model) bool { return m.state.live() && m.picker.open },
+			text:    pastedInto(Model.pickerPaste),
 			click:   Model.handlePickerClick,
 			wheel:   Model.pickerWheel,
 			hover:   pickerHover,
@@ -207,6 +219,7 @@ func init() {
 			height:  Model.workflowsHeight,
 			key:     modalClaim(Model.workflowsKey),
 			keyOpen: func(m Model) bool { return m.state.live() && m.workflowsPane.open },
+			text:    pastedInto(Model.workflowsPaste),
 			click:   Model.handleWorkflowsClick,
 			wheel:   Model.workflowsWheel,
 			hover:   workflowsHover,
@@ -229,6 +242,7 @@ func init() {
 			height:  Model.settingsHeight,
 			key:     modalClaim(Model.settingsKey),
 			keyOpen: Model.settingsOwnsInput,
+			text:    Model.settingsText,
 			click:   settingsPointerClick,
 			wheel:   Model.settingsWheel,
 			hover:   settingsHover,
@@ -309,6 +323,7 @@ func init() {
 			rank: paneRank{key: 5, pointer: 11},
 		},
 	}
+	keyPanes = panesRankedBy(func(r paneRank) int { return r.key })
 	keyClaimOrder = keyClaimRungs()
 	pointerPanes = panesRankedBy(func(r paneRank) int { return r.pointer })
 }
@@ -328,16 +343,100 @@ func panesRankedBy(by func(paneRank) int) []framePane {
 	return ps
 }
 
-// keyClaimRungs is [keyClaimOrder] derived: the panes that have a key rung, in rank order, each read
+// keyPanes is every pane that has a key rung, in rank order: the ONE order a keystroke
+// ([keyClaimOrder]) and a Msg that is text ([Model.walkText]) ask the panes in, so a paste goes where
+// the keys go. It is derived from the rows in init(), before keyClaimOrder, which reads it.
+var keyPanes []framePane
+
+// keyClaimRungs is [keyClaimOrder] derived: the panes that have a key rung ([keyPanes]), each read
 // off its row ([paneClaimant]), followed by the surfaces that are not panes ([transcriptClaimants]) —
 // the run view, then navigation mode.
 func keyClaimRungs() []keyClaimant {
-	panes := panesRankedBy(func(r paneRank) int { return r.key })
-	order := make([]keyClaimant, 0, len(panes)+len(transcriptClaimants))
-	for _, p := range panes {
+	order := make([]keyClaimant, 0, len(keyPanes)+len(transcriptClaimants))
+	for _, p := range keyPanes {
 		order = append(order, paneClaimant(p))
 	}
 	return append(order, transcriptClaimants...)
+}
+
+// walkText asks the panes, in the key order ([keyPanes]), for a Msg that is text rather than a
+// keystroke — the walk [Model.foldPaste], [Model.foldClipboardText] and [Model.foldWidgetMsg] each make
+// before the prompt box is asked. A row whose key gate is shut is skipped, exactly as a keystroke skips
+// it, so a paste follows the rule the keys follow: an approval raised above a mid-run picker shuts the
+// picker's gate, and the paste goes to the surface the keys go to. An open row is asked its text
+// answer ([paneSpec] text) and the first claim answers. A MODAL row that declines swallows typed text
+// ([pastedText]) all the same — the pane owns the keyboard, and text falling through would fill the
+// draft, or stage an interjection, behind a pane the human is looking at (ADR 0053 amend-1014: nothing
+// is typed or pasted into the prompt box while a pop-up is up) — while any other widget Msg walks on to
+// the box. claimed false leaves the Msg to the box.
+func (m Model) walkText(msg tea.Msg) (Model, tea.Cmd, bool) {
+	_, typed := pastedText(msg)
+	for _, p := range keyPanes {
+		row := paneSpecs[p]
+		if row.keyOpen != nil && !row.keyOpen(m) {
+			continue
+		}
+		if row.text != nil {
+			if next, cmd, claimed := row.text(m, msg); claimed {
+				return next, cmd, true
+			}
+		}
+		if row.modal && typed {
+			return m, nil, true
+		}
+	}
+	return m, nil, false
+}
+
+// pastedInto adapts a list pane's paste — the edit that lands pasted text in whichever of its fields
+// the keys would land it in — to a row's text answer: it claims only what [pastedText] recognises and
+// declines any other Msg, which walks on.
+func pastedInto(paste func(Model, func(*lineEditor) tea.Cmd) (Model, tea.Cmd, bool)) func(Model, tea.Msg) (Model, tea.Cmd, bool) {
+	return func(m Model, msg tea.Msg) (Model, tea.Cmd, bool) {
+		text, ok := pastedText(msg)
+		if !ok {
+			return m, nil, false
+		}
+		return paste(m, func(f *lineEditor) tea.Cmd { return f.editMsg(text) })
+	}
+}
+
+// promptText is the decision prompt's text answer: the approval's rule field while it is open takes
+// whatever its widget is sent ([Model.projectRuleMsg]) — typed text as a paste — and at an ask the
+// borrowed answer box takes typed text by the edit path it arrived for: a bracketed paste through
+// [Model.pasteIntoDraft] (an image path attaches), a ctrl+v's clipboard text through
+// [Model.pasteIntoBox] alone (foldClipboardText's rule: ctrl+v text never attaches). Anything else is
+// declined, and the row's modality swallows declined text ([Model.walkText]).
+func (m Model) promptText(msg tea.Msg) (Model, tea.Cmd, bool) {
+	text, typed := pastedText(msg)
+	field := msg
+	if typed {
+		field = text
+	}
+	if next, cmd, claimed := m.projectRuleMsg(field); claimed {
+		return next, cmd, true
+	}
+	if m.state != stateAwaitingAsk || !typed {
+		return m, nil, false
+	}
+	if paste, bracketed := msg.(tea.PasteMsg); bracketed {
+		next, cmd := m.pasteIntoDraft(paste)
+		return next, cmd, true
+	}
+	next, cmd := m.pasteIntoBox(text)
+	return next, cmd, true
+}
+
+// settingsText is the /settings pane's text answer: typed text ([pastedText]) by the pane's paste rule
+// ([Model.settingsPaste] — the open field, the key list's filter, or nowhere), and any other Msg to the
+// open field the widget asked it for ([Model.settingsEditorMsg]). The key list keeps its own filter
+// adapter (settingsTypeFilter) rather than the list panes' (typeIntoOverlayFilter), by the rule it
+// filters its full rows by.
+func (m Model) settingsText(msg tea.Msg) (Model, tea.Cmd, bool) {
+	if text, typed := pastedText(msg); typed {
+		return m.settingsPaste(text)
+	}
+	return m.settingsEditorMsg(msg)
 }
 
 // reportPaneRow is the row of one report pane: open, render, key, click, wheel and hover all resolve
