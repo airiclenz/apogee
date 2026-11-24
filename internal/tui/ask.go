@@ -36,18 +36,18 @@ func (m Model) foldAskRequest(msg askReqMsg) (tea.Model, tea.Cmd) {
 	latch := m.openDecisionLatch()
 	// The terminal hears that apogee waits on the human (notify.go).
 	notify := m.notifyDecisionOpened(msg.Workflow, notifyQuestionText)
-	m.dismissAutocomplete() // a stale menu never shares the frame with a decision surface
 	// The box is BORROWED, not repossessed: whatever the human was part-way through typing is
 	// stashed and handed back when the question lets go of it (restoreAskDraft). Emptying it
-	// without that stash discarded an unsent message outright.
+	// without that stash discarded an unsent message outright. The empty is an edit like any other
+	// ([Model.editDraft]): it drops a stale selection and any walk in progress, since the box now
+	// belongs to the question, and it dismisses the overlay — a stale menu never shares the frame
+	// with a decision surface.
 	m.askDraft = m.input.Value()
-	m.input.Reset()
+	edit := m.editDraft(emptyDraft, draftDismiss)
 	// The box is borrowed for the answer, so ⏎ sends rather than queues: the legend says so for as
 	// long as the question stands, derived from the state at paint ([Model.legend]) — and hands the
 	// box back the moment submitAnswer moves the state on.
-	m.sel = fieldSel{} // the input was emptied for the answer; drop any stale selection
-	m.dropRecall()     // and any walk in progress: the box now belongs to the question
-	return m, tea.Batch(m.input.Focus(), latch, notify)
+	return m, tea.Batch(m.input.Focus(), latch, notify, edit)
 }
 
 // askKey is the ask pane's keypress half — the arm of the prompt's key rung ([Model.promptKey]) that
@@ -170,18 +170,18 @@ func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
 		answer = strings.TrimSpace(m.input.Value())
 	}
 	if origin := m.pendingAsk.Workflow; origin != nil {
-		m.input.Reset()
+		edit := m.editDraft(emptyDraft, draftKeep)
 		m.answerWorkflowPrompt(*origin, domain.WorkflowPromptAnswer{Text: answer})
-		return m, nil
+		return m, edit
 	}
 	m.pendingAsk.Reply <- domain.AskAnswer{Text: answer}
 	// The next request this Exchange folds finds the human here (notify.go).
 	m.answeredInExchange = true
 	// The answer has gone out, so the box is emptied before the question lets go of it: the message
 	// it interrupted comes back alone, and the box is the human's own again — ⏎ queues from here.
-	m.input.Reset()
+	edit := m.editDraft(emptyDraft, draftKeep)
 	tick := m.resumeAfterQuestion()
-	return m, tick
+	return m, tea.Batch(edit, tick)
 }
 
 // checkedLabels returns the escape-stripped labels ticked on a multi-select ask_user question, in
@@ -230,8 +230,7 @@ func (m *Model) restoreAskDraft() {
 	if answer := m.input.Value(); answer != "" {
 		draft += "\n" + answer
 	}
-	m.input.SetValue(draft)
-	m.input.MoveToEnd()
+	m.editDraft(draftTo(draft), draftKeep) // a whole-value set asks for no Cmd, and keep adds none
 }
 
 // maxAskChoiceRows caps how many ask_user choice rows the popup shows at once (the

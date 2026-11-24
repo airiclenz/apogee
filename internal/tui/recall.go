@@ -160,10 +160,10 @@ func (m Model) showRecall(i int) Model {
 		return m
 	}
 	i = clampInt(i, 0, len(m.recall.entries)-1)
-	m.input.SetValue(m.recall.entries[i])
-	m.input.MoveToEnd()
+	m.editDraft(draftTo(m.recall.entries[i]), draftDismiss) // a whole-value set asks for no Cmd
+	// The walk is marked live AFTER the edit: editDraft ends recall mode first, as every edit does,
+	// so a marker set ahead of it would be cleared and the next ↑ would restart at the newest entry.
 	m.recall.pos, m.recall.active = i, true
-	m.dismissAutocomplete()
 	return m
 }
 
@@ -172,9 +172,7 @@ func (m Model) showRecall(i int) Model {
 // they started from without deleting the recalled text by hand — and it mirrors what a terminal's
 // own history does at the newest entry.
 func (m Model) recallPastNewest() Model {
-	m.input.Reset()
-	m.dropRecall()
-	m.dismissAutocomplete()
+	m.editDraft(emptyDraft, draftDismiss) // ends the walk and closes the overlay with the empty
 	return m
 }
 

@@ -585,17 +585,112 @@ func (m Model) pasteIntoBox(msg tea.PasteMsg) (Model, tea.Cmd) {
 	if !m.inputEditable() {
 		return m, nil
 	}
-	m.sel = fieldSel{} // the value is about to change; drop the selection before its coords go stale
-	m.dropRecall()     // a paste is an edit: the recalled entry is now the human's own draft
-	m.fitWrapMemo()    // the widget rebuilds its wrap memo to MaxHeight on Update (lineeditor.go)
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-	if m.state.live() {
-		var reload tea.Cmd
-		m, reload = m.recomputeAutocomplete() // re-derive the overlay from the pasted-into input
-		cmd = tea.Batch(cmd, reload)          // a "/" menu the paste opened owes a catalog re-scan, off the loop
-	}
+	cmd := m.editDraft(draftMsg(msg), draftRederive)
 	return m, cmd
+}
+
+// draftOverlay is what a draft edit does to the autocomplete overlay once the text has changed — the
+// one after-edit duty [Model.editDraft] cannot decide for its caller, because the right answer turns
+// on what the edit MEANT rather than on what it wrote.
+type draftOverlay uint8
+
+const (
+	// draftRederive re-derives the overlay from the edited draft in the live states
+	// (recomputeAutocomplete) — what a typed key, a paste and a popped interjection owe it, since
+	// each can leave the caret in a region the box was not in before. A completion splice re-derives
+	// in every state and so keeps the overlay here and recomputes itself (spliceCompletion).
+	draftRederive draftOverlay = iota
+
+	// draftDismiss closes the overlay (dismissAutocomplete) — a draft the question borrowed, a
+	// recalled entry whose "/command" would otherwise pop a menu that steals the walk's ↑/↓, and a
+	// command token cut out of the draft because running it consumed it.
+	draftDismiss
+
+	// draftKeep leaves the overlay exactly as it stands — the ask's answer and restore (the overlay
+	// was dismissed when the question borrowed the box) and a popped queued command, which is
+	// complete as restored and invites ⏎ rather than a menu. A completion splice keeps it too, then
+	// re-derives it itself in every state (spliceCompletion).
+	draftKeep
+)
+
+// editDraft is the one door every write to the prompt draft goes through: it runs the duties every
+// edit owes, then change, then the overlay policy the caller names, and returns whatever Cmd the
+// change and the policy ask for.
+//
+// The duties, in order, and why each runs BEFORE the value changes:
+//   - the drag-selection is dropped: its cached visual offsets name the old text, and a later copy
+//     would take the wrong runes (mouse.go);
+//   - recall mode ends: whatever the box holds after an edit is the human's own draft, not an
+//     untouched recalled entry (dropRecall). A caller that is ENTERING recall marks the walk after
+//     this returns (showRecall) — a marker set ahead of the call would be cleared here;
+//   - the widget's wrap memo is sized to the draft (fitWrapMemo), since an Update rebuilds it to
+//     MaxHeight.
+//
+// The send-boundary empty ([promptEditor.reset]) is not an edit and does not come here, and neither
+// does a Msg the widget is only told about ([Model.foldWidgetMsg]). The re-layout the box's new
+// height owes stays with the caller, which knows whether the frame is laid out again anyway.
+func (m *Model) editDraft(change func(*promptEditor) tea.Cmd, overlay draftOverlay) tea.Cmd {
+	m.sel = fieldSel{}
+	m.dropRecall()
+	m.fitWrapMemo()
+	cmd := change(&m.promptEditor)
+	switch overlay {
+	case draftRederive:
+		if m.state.live() {
+			var reload tea.Cmd
+			*m, reload = m.recomputeAutocomplete()
+			cmd = tea.Batch(cmd, reload) // a "/" menu the edit opened owes a catalog re-scan, off the loop
+		}
+	case draftDismiss:
+		m.dismissAutocomplete()
+	case draftKeep:
+	}
+	return cmd
+}
+
+// draftMsg is the edit a keypress or a paste makes: the Msg is handed to the widget, which types it
+// at the caret, and whatever Cmd the widget asks for is carried out.
+func draftMsg(msg tea.Msg) func(*promptEditor) tea.Cmd {
+	return func(e *promptEditor) tea.Cmd {
+		var cmd tea.Cmd
+		e.input, cmd = e.input.Update(msg)
+		return cmd
+	}
+}
+
+// emptyDraft is the edit that empties the box — the ask borrowing it and handing it back answered,
+// and ↓ walking off the newest recalled entry.
+func emptyDraft(e *promptEditor) tea.Cmd {
+	e.input.Reset()
+	return nil
+}
+
+// draftTo is the edit that replaces the whole draft with s, caret at its end ([lineEditor.setValue]).
+func draftTo(s string) func(*promptEditor) tea.Cmd {
+	return func(e *promptEditor) tea.Cmd {
+		e.setValue(s)
+		return nil
+	}
+}
+
+// draftSpliced is the edit that replaces the whole draft with s and seats the caret at byte offset
+// caret — a completion written over, or cut out of, the middle of a draft, where the end of the text
+// is the wrong place for the caret ([lineEditor.caretToOffset]).
+func draftSpliced(s string, caret int) func(*promptEditor) tea.Cmd {
+	return func(e *promptEditor) tea.Cmd {
+		e.input.SetValue(s)
+		e.caretToOffset(caret)
+		return nil
+	}
+}
+
+// draftCut is the edit Backspace and Del make while the box holds a drag-selection: the span is cut
+// out and the caret left where it began ([lineEditor.deleteSelection]).
+func draftCut(sel fieldSel) func(*promptEditor) tea.Cmd {
+	return func(e *promptEditor) tea.Cmd {
+		e.deleteSelection(sel)
+		return nil
+	}
 }
 
 // attachPastedImage claims a bracketed paste that is exactly the path of an image file

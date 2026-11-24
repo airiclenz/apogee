@@ -217,7 +217,10 @@ NOTES (2026-11-24): TestEveryModalRowGatesItsText also pins that every modal row
 - `! grep -n 'listPaste' internal/tui/*.go`
 **Commit:** `refactor(tui): route paste and widget text through the pane table`
 
-## 8. One edit operation for the prompt draft
+## 8. One edit operation for the prompt draft — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): consequential edit — internal/tui/lineeditor.go: made necessary by the fitWrapMemo doc naming handleKey's fall-through and foldPaste as the prompt's widget routes; it now names Model.editDraft (and foldWidgetMsg)
+NOTES (2026-11-24): the edits are named funcs in prompteditor.go (draftMsg, emptyDraft, draftTo, draftSpliced, draftCut) rather than inline closures, so no caller file writes the widget at all; spliceCompletion edits with draftKeep and then runs its own recomputeAutocomplete in every state, as before, because its menu can still be accepted (by click) after a run ends — at errored the accept must close it (TestAcceptingACompletionAtErroredClosesTheMenu)
 
 **What:** Depends on items 4 and 7.
 **Goal:** outside prompteditor.go no file calls `m.input.SetValue`, `Reset` or `Update`; every draft write goes through `editDraft` and names its overlay policy.

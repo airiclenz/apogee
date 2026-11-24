@@ -216,7 +216,7 @@ const (
 
 // fitWrapMemo sizes the widget's wrap memo to the draft it holds, and runs right before EVERY
 // textarea Update — lineEditor.editKey and editMsg here, and the prompt's own routes that reach the
-// widget without them (Model.handleKey's fall-through, Model.foldPaste, Model.foldWidgetMsg).
+// widget without them (Model.editDraft, the door every draft edit takes, and Model.foldWidgetMsg).
 //
 // Why it has to: bubbles recreates its wrap memo at capacity MaxHeight at the top of every Update
 // whenever the two differ, and MaxHeight defaults to 99. A draft past 99 logical lines therefore

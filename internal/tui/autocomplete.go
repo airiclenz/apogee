@@ -973,9 +973,7 @@ func (m Model) removeCompletionToken() Model {
 	if head != "" && tail != "" && refs.IsSpace(head[len(head)-1]) && refs.IsSpace(tail[0]) {
 		tail = tail[1:] // collapse the doubled separator the cut would otherwise leave
 	}
-	m.input.SetValue(head + tail)
-	m.caretToOffset(len(head))
-	m.dismissAutocomplete()
+	m.editDraft(draftSpliced(head+tail, len(head)), draftDismiss) // a whole-value splice asks for no Cmd
 	return m
 }
 
@@ -1020,10 +1018,13 @@ func (m Model) spliceCompletion(token string) (Model, tea.Cmd) {
 	if tail != "" && refs.IsSpace(tail[0]) {
 		sep = "" // the draft already separates this token from what follows it
 	}
-	m.input.SetValue(head + lead + token + sep + tail)
-	m.caretToOffset(len(head) + len(lead) + len(token) + len(sep))
+	caret := len(head) + len(lead) + len(token) + len(sep)
+	m.editDraft(draftSpliced(head+lead+token+sep+tail, caret), draftKeep) // a whole-value splice asks for no Cmd
+	// The re-derive runs in EVERY state, not only the live ones draftRederive gates on: a menu still
+	// open when a turn ended (an accept by click at errored) must close with the token it completed.
+	// The separator ends the token, so this closes the overlay.
 	var reload tea.Cmd
-	m, reload = m.recomputeAutocomplete() // the separator ends the token, so this closes the overlay
+	m, reload = m.recomputeAutocomplete()
 	return m, reload
 }
 

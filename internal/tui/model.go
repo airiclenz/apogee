@@ -2262,13 +2262,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if sel.nonEmpty() {
 			switch msg.String() {
 			case "backspace", "delete":
-				m.deleteSelection(sel)
-				var reload tea.Cmd
-				if m.state.live() {
-					m, reload = m.recomputeAutocomplete() // the value changed: re-derive the overlay, as a typed edit does
-				}
-				m.layout() // re-flow: the box shrinks as the cut unwraps rows
-				return m, reload
+				cmd := m.editDraft(draftCut(sel), draftRederive) // the value changed: re-derive the overlay, as a typed edit does
+				m.layout()                                       // re-flow: the box shrinks as the cut unwraps rows
+				return m, cmd
 			}
 		}
 		if m.input.Value() == "" && msg.String() == "backspace" {
@@ -2303,15 +2299,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if next, handled := m.recallKey(msg, rec); handled {
 			return next, nil
 		}
-		m.fitWrapMemo() // the widget rebuilds its wrap memo to MaxHeight on Update (lineeditor.go)
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(msg)
-		if m.state.live() {
-			var reload tea.Cmd
-			m, reload = m.recomputeAutocomplete() // re-derive the overlay from the edited input
-			cmd = tea.Batch(cmd, reload)          // a "/" menu this keystroke opened owes a catalog re-scan, off the loop
-		}
-		m.layout() // re-flow: the input box auto-grows as the message wraps to more rows
+		cmd := m.editDraft(draftMsg(msg), draftRederive) // type the key, then re-derive the overlay from the edited input
+		m.layout()                                       // re-flow: the input box auto-grows as the message wraps to more rows
 		return m, cmd
 	}
 	// At the inert states — errored (⏎ dismisses) and a live approval whose rung declined the key

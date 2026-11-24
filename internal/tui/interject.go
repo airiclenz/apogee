@@ -362,8 +362,7 @@ func (m Model) popDeferredCommand() (Model, bool) {
 	if len(m.deferredCommands) == 0 {
 		m.deferredCommands = nil
 	}
-	m.input.SetValue(commandLine(parsed))
-	m.input.MoveToEnd()
+	m.editDraft(draftTo(commandLine(parsed)), draftKeep) // a whole-value set asks for no Cmd, and keep adds none
 	return m, true
 }
 
@@ -595,10 +594,7 @@ func (m Model) popInterjection() (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	m.pendingInterjections = m.pendingInterjections[:n-1]
-	m.input.SetValue(row.raw)
-	m.input.MoveToEnd()
-	var reload tea.Cmd
-	m, reload = m.recomputeAutocomplete() // the restored text may re-open the overlay it was typed with
+	reload := m.editDraft(draftTo(row.raw), draftRederive) // the restored text may re-open the overlay it was typed with
 	return m, reload, true
 }
 

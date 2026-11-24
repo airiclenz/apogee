@@ -862,3 +862,155 @@ func TestAttachLineGivesWayToTheApprovalPrompt(t *testing.T) {
 		})
 	}
 }
+
+// TestDraftEditRunsEveryAfterEditDuty pins [Model.editDraft], the one door every write to the
+// prompt draft goes through: whatever the overlay policy, the edit drops a standing drag-selection
+// (its cached offsets name the old text), ends a live recall walk (the box is the human's own draft
+// now) and sizes the widget's wrap memo before the change — and then the policy, and only the
+// policy, decides the overlay: rederive re-computes it from the new draft, dismiss closes it, keep
+// leaves it exactly as it stood. Each case starts from all three duties owed and a stale overlay
+// that matches nothing the new draft holds, so a duty or a policy a caller relied on cannot go
+// missing unseen.
+func TestDraftEditRunsEveryAfterEditDuty(t *testing.T) {
+	t.Parallel()
+
+	const edited = "/comp"
+	stale := autocompleteState{active: true, kind: acFile, tokenStart: 1, tokenEnd: 4}
+
+	owing := func(t *testing.T) Model {
+		t.Helper()
+		m := modelWithInput(t, "a draft")
+		m.sel = fieldSel{active: true, anchorOff: 0, headOff: 3}
+		m.recall = promptRecall{entries: []string{"a draft"}, pos: 0, active: true}
+		m.autocomplete = stale
+		m.fileRegion = true
+		m.input.MaxHeight = 1 // below wrapMemoFloor: only a fitWrapMemo raises it back
+		return m
+	}
+
+	cases := []struct {
+		name    string
+		overlay draftOverlay
+		check   func(t *testing.T, m Model)
+	}{
+		{"rederive", draftRederive, func(t *testing.T, m Model) {
+			if !m.autocomplete.active || m.autocomplete.kind != acCommand {
+				t.Errorf("overlay = %+v, want the command menu re-derived from %q", m.autocomplete, edited)
+			}
+		}},
+		{"dismiss", draftDismiss, func(t *testing.T, m Model) {
+			if m.autocomplete.active || m.skillRegion || m.fileRegion {
+				t.Errorf("overlay = %+v (skillRegion %v, fileRegion %v), want it closed with its region triggers",
+					m.autocomplete, m.skillRegion, m.fileRegion)
+			}
+		}},
+		{"keep", draftKeep, func(t *testing.T, m Model) {
+			if !reflect.DeepEqual(m.autocomplete, stale) || !m.fileRegion {
+				t.Errorf("overlay = %+v (fileRegion %v), want it left exactly as it stood", m.autocomplete, m.fileRegion)
+			}
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			m := owing(t)
+
+			m.editDraft(draftTo(edited), c.overlay)
+
+			if got := m.input.Value(); got != edited {
+				t.Fatalf("draft = %q, want the change applied: %q", got, edited)
+			}
+			if m.sel != (fieldSel{}) {
+				t.Errorf("selection = %+v, want it dropped before the value changed", m.sel)
+			}
+			if m.recall.active || m.recall.pos != 0 {
+				t.Errorf("recall = active %v pos %d, want the walk ended by the edit", m.recall.active, m.recall.pos)
+			}
+			if len(m.recall.entries) != 1 {
+				t.Errorf("recall entries = %v, want them kept: they are the workspace's record, not the mode", m.recall.entries)
+			}
+			if m.input.MaxHeight < wrapMemoFloor {
+				t.Errorf("wrap memo MaxHeight = %d, want it fitted to the draft (>= %d)", m.input.MaxHeight, wrapMemoFloor)
+			}
+			c.check(t, m)
+		})
+	}
+
+	// Outside the live states the rederive policy re-derives nothing: the box belongs to a decision
+	// there, and a menu over it would compete with the decision surface for the same rows.
+	t.Run("rederive outside the live states", func(t *testing.T) {
+		t.Parallel()
+		m := owing(t)
+		m.state = stateAwaitingAsk
+
+		m.editDraft(draftTo(edited), draftRederive)
+
+		if !reflect.DeepEqual(m.autocomplete, stale) {
+			t.Errorf("overlay = %+v, want it untouched outside the live states", m.autocomplete)
+		}
+	})
+}
+
+// TestAskDraftRestoreDropsAStaleSelection pins the change the ask's restore took by going through
+// [Model.editDraft]: a drag-selection made in the borrowed box names offsets into the ANSWER, and
+// when the Exchange dies under the question the box is rebuilt as the stashed draft above that
+// answer — so the span must go with the old value, or a later copy or Backspace would take runes the
+// human never highlighted.
+func TestAskDraftRestoreDropsAStaleSelection(t *testing.T) {
+	t.Parallel()
+	const draft = "the message the question interrupted"
+
+	m := typeInput(t, newTestModel(t), draft)
+	reply := make(chan domain.AskAnswer, 1)
+	m = step(t, m, askReqMsg{Request: domain.AskRequest{Question: "which way?"}, Reply: reply})
+	m = armAsk(t, m)
+	startStubWorker(t, &m)
+	m = typeInput(t, m, "tea")
+	m = dragSelect(t, m, 0, 2)
+	if !m.sel.nonEmpty() {
+		t.Fatalf("the drag armed no selection in the borrowed box: %+v", m.sel)
+	}
+
+	m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
+
+	if want := draft + "\ntea"; m.input.Value() != want {
+		t.Fatalf("box = %q, want %q — the draft handed back above the half-typed answer", m.input.Value(), want)
+	}
+	if m.sel != (fieldSel{}) {
+		t.Errorf("selection = %+v, want it dropped with the answer-only value it named", m.sel)
+	}
+}
+
+// TestAcceptingACompletionAtErroredClosesTheMenu pins that a completion splice re-derives the
+// overlay in EVERY state, not only the live ones a draft edit's rederive policy gates on: a "/" menu
+// still open when the run errors can still be accepted (a click on its row), and the token it
+// completes ends the region, so the menu must close with it rather than stand over the finished
+// command.
+func TestAcceptingACompletionAtErroredClosesTheMenu(t *testing.T) {
+	t.Parallel()
+
+	m := newDropdownModel(t, testOpts)
+	m.input.SetValue("open the exchange")
+	m, _ = stepCmd(t, m, keyEnter())
+	if m.state != stateRunning {
+		t.Fatalf("precondition: state = %v, want running", m.state)
+	}
+	m = typeText(t, m, "/confi")
+	if !m.dropdownOpen() {
+		t.Fatalf("precondition: the \"/\" menu is closed after typing %q while running", m.input.Value())
+	}
+	m, _ = stepCmd(t, m, errMsg{Err: errors.New("upstream fell over")})
+	if m.state != stateErrored || !m.dropdownOpen() {
+		t.Fatalf("precondition: state = %v, menu open %v; want errored with the menu still open", m.state, m.dropdownOpen())
+	}
+
+	next, _ := m.acceptAutocomplete()
+	m = next.(Model)
+
+	if m.dropdownOpen() {
+		t.Errorf("menu still open after accepting at errored (draft %q): the completed token ends the region", m.input.Value())
+	}
+	if got := m.input.Value(); !strings.HasPrefix(got, "/confi") || !strings.HasSuffix(got, " ") || got == "/confi " {
+		t.Errorf("draft = %q, want the accepted completion written in, ended by its separator", got)
+	}
+}
