@@ -58,7 +58,7 @@ type sessionBriefing struct {
 	// opening, or the overflow bridge of a mid-Exchange fold. A boundary and close discard it.
 	compaction sessionAdviseLane
 
-	// call is the handler call every run makes (Agent.callSessionAdvice), injected by the top-level
+	// call is the handler call every run makes (Agent.callAdvise), injected by the top-level
 	// Agent's seed. A delegate's briefing opens no window and stages no fold, so it never calls it.
 	call adviseCaller
 }
@@ -75,7 +75,7 @@ type sessionArmed struct {
 
 // adviseCaller calls one run's handler, under ctx, for Turn turn, with doc — the run's seam
 // document — and answers what the handler answered: the Outcome's Inject is the advice, empty is
-// silence. Production's is Agent.callSessionAdvice.
+// silence. Production's is Agent.callAdvise, the one advise call every advise Moment answers through.
 type adviseCaller func(ctx context.Context, turn int, doc domain.SeamPayload, r domain.Reaction) (domain.Outcome, error)
 
 // adviceLanding lands one joined run on the user-role message that just entered the request —

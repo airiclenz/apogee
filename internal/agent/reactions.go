@@ -505,12 +505,18 @@ func (a *Agent) bookFiring(
 		result.Retry, result.Inject = true, out.Inject
 	}
 	result.Edited = result.Edited || out.Edited
+	*fired = append(*fired, r.spec.ID)
+	a.emitFiring(turn, m, r, out)
+}
 
+// emitFiring emits the ReactionFiredEvent one acted firing is booked under: a builtin's own action
+// label, or the one its Outcome derives (reactionAction). It is bookFiring's emit, and the session
+// advise lanes' too (attachSessionAdvice), which book an answer that has no cascade result to fold.
+func (a *Agent) emitFiring(turn int, m domain.Moment, r armedReaction, out domain.Outcome) {
 	label := r.action
 	if label == "" {
 		label = reactionAction(m, r.spec, out)
 	}
-	*fired = append(*fired, r.spec.ID)
 	a.cfg.Events.Emit(domain.ReactionFiredEvent{
 		EventBase: a.base(turn),
 		Reaction:  r.spec.ID,
@@ -543,26 +549,17 @@ func acted(out domain.Outcome) bool {
 // is somewhere to speak — a tool result at post-tool-result, the outgoing request's tail at
 // pre-request (adviseRequest) and at post-response (the next request's, routeAdvice), the
 // session's next user message at session-started, or the user-role message after a fold at
-// compaction-finished (the session advise lanes, sessionadvise.go) — and a non-empty Inject is the
-// text itself. Of the builtins only the context-fill notice satisfies it — the one engine reaction
+// compaction-finished (the session advise lanes, sessionadvise.go); the advise Moments are domain's
+// one list (Moment.TakesAdvise), which a cascade never fires at file-changed, the post-tool-result
+// narrowing — and a non-empty Inject is the text itself. Of the builtins only the context-fill notice satisfies it — the one engine reaction
 // of class advise (ADR 0077); the seven Floor guards are shape-view and contribute no advice.
 //
 // At post-response a Retry takes the Inject: there it is the correction the re-stream carries
 // (applyRetry), so an advise-class Outcome asking for both is a retry — booked under its retry
 // label and injected once, onto the retried request — and never held as advice as well.
 func isAdvice(m domain.Moment, r domain.Reaction, out domain.Outcome) bool {
-	if r.Class != domain.ClassAdvise || out.Inject == "" {
-		return false
-	}
-	switch m {
-	case domain.MomentPostToolResult, domain.MomentPreRequest,
-		domain.MomentSessionStarted, domain.MomentCompactionFinished:
-		return true
-	case domain.MomentPostResponse:
-		return !out.Retry
-	default:
-		return false
-	}
+	return r.Class == domain.ClassAdvise && out.Inject != "" && m.TakesAdvise() &&
+		(m != domain.MomentPostResponse || !out.Retry)
 }
 
 // adviceOf turns one advise firing into the slot entry its seam renders, and reports
@@ -587,44 +584,82 @@ func adviceOf(turn int, m domain.Moment, r domain.Reaction, out domain.Outcome) 
 	}, true
 }
 
-// adviseUser is the USER half of the advise slot: one `advise:` entry's command runs out of
-// process, its webhook is POSTed to, or its MCP tool is called, while the loop waits, and what it
-// answered becomes the advice the model reads (ADR 0076 D2, D6, adr-0076-amend-1029). It is called
-// from the three in-loop seams with an advise slot — post-tool-result, whose closing tool result
-// takes the trailer; pre-request, whose outgoing request's tail takes the fence (adviseRequest);
-// and post-response, whose advice the next request's tail takes (routeAdvice) — and dispatches
-// on the handler's KIND: a command's standard output, a webhook's
-// reply body and an MCP tool's text answer are the same text to everything below.
+// adviseUser is the USER half of the advise slot at the in-loop seams: one `advise:` entry's
+// command runs out of process, its webhook is POSTed to, or its MCP tool is called, while the loop
+// waits, and what it answered becomes the advice the model reads (ADR 0076 D2, D6,
+// adr-0076-amend-1029). It is called from the three in-loop seams with an advise slot —
+// post-tool-result, whose closing tool result takes the trailer; pre-request, whose outgoing
+// request's tail takes the fence (adviseRequest); and post-response, whose advice the next
+// request's tail takes (routeAdvice) — and is the cascade's landing for the one advise call
+// (callAdvise), which dispatches on the handler's KIND and redacts.
 //
-// It is FAIL-OPEN in both directions it decides (D7), and each of them costs the Turn nothing: a
-// command that failed, timed out or was refused a permit — a webhook whose request failed, timed
-// out, was answered with a non-2xx or named an unset `headers-env:` variable — an MCP call that
-// failed or could not be resolved — contributes nothing and is reported on the sync lane's terms
-// (reportSyncFailure: one operator line and one "failed" firing, except that an MCP entry that could
-// not be resolved is reported once per entry on this Agent, and one in a Driver that dials no MCP
-// server not at all — that Driver's own notice owns it); a handler
-// that answered nothing contributes nothing, so an entry that only sometimes has something to say
-// is silent the rest of the time rather than injecting an empty fence. The third silence — a
-// file-changed entry on a call that changed no file — is decided BEFORE this route is reached
-// (hearsCall), because it is the whole advise class's rule and not the handler's.
-//
-// The answer is REDACTED before it is anything else. It is the one place a configured secret's
-// value can re-enter apogee from a process the scrub kept it out of, or from a server the request
-// carried it to, and the redaction has to land before the text is capped, fenced, booked as a
-// firing's Detail, or written to a transcript. The CAP is not applied here: every advise route
-// meets it once, downstream, where the span is collected (adviceOf), so no route can render a span
-// that skipped it. The webhook's read is bounded at one byte past that cap (adviseReplyCap) — enough
-// for the downstream cap to see the reply ran over and mark the truncation, and no more, so a
-// server that streams without end cannot hold the Turn's memory.
+// It is FAIL-OPEN (D7) and the failure costs the Turn nothing: a command that failed, timed out or
+// was refused a permit — a webhook whose request failed, timed out, was answered with a non-2xx or
+// named an unset `headers-env:` variable — an MCP call that failed or could not be resolved —
+// contributes nothing and is reported at once on the sync lane's terms (reportSyncFailure: one
+// operator line and one "failed" firing, except that an MCP entry that could not be resolved is
+// reported once per entry on this Agent, and one in a Driver that dials no MCP server not at all —
+// that Driver's own notice owns it). The third silence — a file-changed entry on a call that
+// changed no file — is decided BEFORE this route is reached (hearsCall), because it is the whole
+// advise class's rule and not the handler's.
 func (a *Agent) adviseUser(
 	ctx context.Context,
 	turn int,
-	r domain.Reaction,
 	doc domain.SeamPayload,
+	r domain.Reaction,
+) (domain.Outcome, error) {
+	out, err := a.callAdvise(ctx, turn, doc, r)
+	if err != nil {
+		a.reportSyncFailure(turn, r, doc.Event, err)
+		return domain.Outcome{}, nil
+	}
+	return out, nil
+}
+
+// adviseReplyCap bounds the bytes read off an advise webhook's reply: the advice cap plus one, so
+// the downstream cap (adviceOf → domain.CapAdvice) still sees a reply that ran over and appends the
+// truncation marker, while nothing past that byte is ever held.
+const adviseReplyCap = domain.AdviceCap + 1
+
+// callAdvise is the one advise call: it calls advise Reaction r for Turn turn with doc, the seam
+// document, and answers what the handler answered as a VALUE — the Outcome's Inject is the advice,
+// empty is silence. Every advise Moment reaches its handler through it: the in-loop seams through
+// adviseUser, the session advise lanes as the session briefing's adviseCaller
+// (sessionBriefing.call), on the boundary's background goroutine.
+//
+// It dispatches on the handler's KIND: a Go handler the lanes know — a SessionStartedFunc, the
+// shape the bench arms — is called directly and its Outcome kept as it answered, Detail and all;
+// a command, a webhook or an MCP tool goes through the sync lane's executor (runSyncArgv /
+// runSyncWebhook / runSyncMCP), whose standard output, reply body and text answer are the same
+// text to everything below; any other handler is an engine mis-wiring (wrongHandler).
+//
+// It never emits and never reports: a failure is only returned, and the caller lands it —
+// adviseUser reports it at once, the session lanes at the join (attachSessionAdvice). That is
+// ADR 0076 D7's fail-open shape: a handler that failed, timed out or answered nothing adds nothing.
+//
+// An out-of-process answer is REDACTED before it is anything else. It is the one place a
+// configured secret's value can re-enter apogee from a process the scrub kept it out of, or from a
+// server the request carried it to, and the redaction has to land before the text is capped,
+// fenced, booked as a firing's Detail, or written to a transcript. The CAP is not applied here:
+// every advise route meets it once, downstream, where the span is collected (adviceOf), so no
+// route can render a span that skipped it. The webhook's read is bounded at one byte past that cap
+// (adviseReplyCap) — enough for the downstream cap to see the reply ran over and mark the
+// truncation, and no more, so a server that streams without end cannot hold the Turn's memory.
+func (a *Agent) callAdvise(
+	ctx context.Context,
+	turn int,
+	doc domain.SeamPayload,
+	r domain.Reaction,
 ) (domain.Outcome, error) {
 	var answer string
 	var err error
-	switch r.Handler.(type) {
+	switch handler := r.Handler.(type) {
+	case domain.SessionStartedFunc:
+		out, err := handler(ctx, doc.Start)
+		if err != nil {
+			return domain.Outcome{}, err
+		}
+		return domain.Outcome{Inject: out.Inject, Detail: out.Detail}, ctx.Err()
 	case domain.ArgvHandler:
 		answer, err = a.runSyncArgv(ctx, turn, r, doc)
 	case domain.WebhookHandler:
@@ -635,21 +670,10 @@ func (a *Agent) adviseUser(
 		return domain.Outcome{}, wrongHandler(doc.Event, r.Handler)
 	}
 	if err != nil {
-		a.reportSyncFailure(turn, r, doc.Event, err)
-		return domain.Outcome{}, nil
+		return domain.Outcome{}, err
 	}
-
-	text := tools.RedactSecrets(answer, a.cfg.SecretEnvNames())
-	if text == "" {
-		return domain.Outcome{}, nil
-	}
-	return domain.Outcome{Inject: text}, nil
+	return domain.Outcome{Inject: tools.RedactSecrets(answer, a.cfg.SecretEnvNames())}, nil
 }
-
-// adviseReplyCap bounds the bytes read off an advise webhook's reply: the advice cap plus one, so
-// the downstream cap (adviceOf → domain.CapAdvice) still sees a reply that ran over and appends the
-// truncation marker, while nothing past that byte is ever held.
-const adviseReplyCap = domain.AdviceCap + 1
 
 // hearsCall is the advise lane's file-changed NARROWING — the half that pays for subscribes'
 // widening. It reports whether advise reaction r, which subscribes told the cascade fires at
@@ -780,10 +804,10 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 				if r.Class == domain.ClassAdvise {
 					switch r.Handler.(type) {
 					case domain.ArgvHandler, domain.WebhookHandler, domain.MCPHandler:
-						return a.adviseUser(ctx, turn, r, domain.SeamPayload{
+						return a.adviseUser(ctx, turn, domain.SeamPayload{
 							Event: domain.MomentPreRequest,
 							Value: reactions.ProjectRequest(req),
-						})
+						}, r)
 					}
 				}
 				fn, ok := r.Handler.(domain.PreRequestFunc)
@@ -812,10 +836,10 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 				if r.Class == domain.ClassAdvise {
 					switch r.Handler.(type) {
 					case domain.ArgvHandler, domain.WebhookHandler, domain.MCPHandler:
-						return a.adviseUser(ctx, turn, r, domain.SeamPayload{
+						return a.adviseUser(ctx, turn, domain.SeamPayload{
 							Event: domain.MomentPostResponse,
 							Value: reactions.ProjectResponse(p),
-						})
+						}, r)
 					}
 				}
 				fn, ok := r.Handler.(domain.PostResponseFunc)
@@ -870,7 +894,7 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 					}
 					switch r.Handler.(type) {
 					case domain.ArgvHandler, domain.WebhookHandler, domain.MCPHandler:
-						return a.adviseUser(ctx, turn, r, adviseDocument(p, path))
+						return a.adviseUser(ctx, turn, adviseDocument(p, path), r)
 					}
 				}
 				fn, ok := r.Handler.(domain.PostToolResultFunc)

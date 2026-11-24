@@ -70,7 +70,10 @@
 - 24 (re-check, regression-8 G: lines): guard folded
 - 25 (re-check, regression-8 G: lines): guard folded
 
-## 1. One advise call answers every advise Moment as a value
+## 1. One advise call answers every advise Moment as a value — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): adviseUser now lands every callAdvise error through reportSyncFailure, wrongHandler included (it used to return that one error unreported); the seams route only command/webhook/MCP handlers to it, so the branch is unreachable there and no behaviour changes.
+NOTES (2026-11-24): isAdvice now reads domain's advise list (Moment.TakesAdvise), which also names file-changed; a cascade never fires at file-changed (subscribes widens it onto post-tool-result), so no firing's label or advice changes.
 
 **What:**
 **Goal:** one function in `internal/agent` switches on advise handler kind and redacts; `callSessionAdvice` is gone; `attachSessionAdvice` calls no `bookFiring`; `isAdvice` names no Moment list of its own; every existing advise test passes unchanged.

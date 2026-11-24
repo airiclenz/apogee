@@ -226,6 +226,32 @@ func TestMomentIsNotice(t *testing.T) {
 	}
 }
 
+// TestMomentTakesAdvise pins the advise Moments over the whole vocabulary: the tool-result
+// trailer's two, the background briefings' two and the request-tail slot's two take advise, and
+// every other Moment — history-rewrite, pre-tool-exec, every other notice, and a spelling outside
+// the vocabulary — does not.
+func TestMomentTakesAdvise(t *testing.T) {
+	t.Parallel()
+
+	takes := []Moment{
+		MomentPostToolResult,
+		MomentFileChanged,
+		MomentSessionStarted,
+		MomentCompactionFinished,
+		MomentPreRequest,
+		MomentPostResponse,
+	}
+	for _, m := range append(append(Seams(), Notices()...), "not-a-moment", "") {
+		t.Run(string(m), func(t *testing.T) {
+			t.Parallel()
+
+			if got, want := m.TakesAdvise(), slices.Contains(takes, m); got != want {
+				t.Errorf("Moment(%q).TakesAdvise() = %v, want %v", string(m), got, want)
+			}
+		})
+	}
+}
+
 // TestClosingMapsEverySeamToItsNotice walks the whole vocabulary: each of the five seams answers
 // its own `<seam>-finished` notice, that answer is itself a notice and never a seam, and every
 // notice — plus a spelling outside the vocabulary — answers the zero Moment.

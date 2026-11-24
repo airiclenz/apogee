@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // The session advise lanes (ADR 0076 D6, 2026-10-19 and 2026-10-21 amendments): ADR 0076's non-tool
@@ -29,13 +28,13 @@ import (
 // later boundary discards is never booked. And the join is ctx-aware, so a cancel (Esc) ends the
 // wait and leaves the runs for the next opening.
 //
-// The lane dispatches by handler KIND itself rather than through adviseUser, whose default branch
-// refuses everything but a command, a webhook and an MCP tool: an engine-origin Go handler
-// (SessionStartedFunc, the shape the bench arms) is called directly, and a command, webhook or MCP
-// tool goes through the sync lane's executor (runSyncArgv / runSyncWebhook / runSyncMCP) and the
-// secret redaction adviseUser applies, so admitting the user's `advise:` key on session-started
-// stays a validation change only.
-//
+// The lane calls its handlers through the one advise call (callAdvise), as the in-loop seams do:
+// it dispatches by handler KIND — an engine-origin Go handler (SessionStartedFunc, the shape the
+// bench arms) is called directly, and a command, webhook or MCP tool goes through the sync lane's
+// executor (runSyncArgv / runSyncWebhook / runSyncMCP) and the secret redaction — and answers as a
+// value, so admitting the user's `advise:` key on session-started stays a validation change only.
+// Where the seams report a failure at once (adviseUser), the lane reports it at the join.
+
 // The compaction lane serves the compaction-finished notice the same way, keyed by its own Moment
 // and holding its own runs (sessionBriefing.compaction). A top-level fold that passes its gate
 // starts each armed advise entry on compaction-finished in the background as the fold BEGINS
@@ -216,42 +215,6 @@ func newSessionAdviseRuns(specs []domain.Reaction, doc domain.SeamPayload) []*se
 	return runs
 }
 
-// callSessionAdvice is the session briefing's adviseCaller: it dispatches one lane's advise reaction by its handler KIND: a Go handler — a
-// SessionStartedFunc, the one the lanes know — is called directly, a command, a webhook or an MCP
-// tool goes through the sync lane's executor with doc, the lane's seam document, and its answer is
-// secret-redacted as adviseUser's is. The Outcome's Inject is the advice; empty is silence. A
-// failure is only returned — this runs on the boundary's background goroutine, which never reports —
-// and the join reports it (attachSessionAdvice).
-func (a *Agent) callSessionAdvice(
-	ctx context.Context,
-	turn int,
-	doc domain.SeamPayload,
-	r domain.Reaction,
-) (domain.Outcome, error) {
-	var answer string
-	var err error
-	switch handler := r.Handler.(type) {
-	case domain.SessionStartedFunc:
-		out, err := handler(ctx, doc.Start)
-		if err != nil {
-			return domain.Outcome{}, err
-		}
-		return domain.Outcome{Inject: out.Inject, Detail: out.Detail}, ctx.Err()
-	case domain.ArgvHandler:
-		answer, err = a.runSyncArgv(ctx, turn, r, doc)
-	case domain.WebhookHandler:
-		answer, err = a.runSyncWebhook(ctx, turn, r, doc, adviseReplyCap)
-	case domain.MCPHandler:
-		answer, err = a.runSyncMCP(ctx, turn, r, doc)
-	default:
-		return domain.Outcome{}, wrongHandler(doc.Event, r.Handler)
-	}
-	if err != nil {
-		return domain.Outcome{}, err
-	}
-	return domain.Outcome{Inject: tools.RedactSecrets(answer, a.cfg.SecretEnvNames())}, nil
-}
-
 // join is the lanes' one join, onto the user-role message that just entered the request
 // (sessionBriefing.joinOpening, joinBridge). It waits for each pending run of every lane until it
 // answers or its deadline passes — never longer, so a slow handler costs the request only what is
@@ -358,9 +321,7 @@ func (a *Agent) attachSessionAdvice(turn, target int, run *sessionAdviseRun) boo
 	}
 	a.retireStaleAdvice(target, m, run.spec.ID)
 	a.conv.AdviseUserMessage(target, adv.span, adv.text)
-	var result domain.Outcome
-	var fired []string
-	a.bookFiring(turn, m, armedReaction{spec: run.spec}, domain.Outcome{Inject: adv.text, Detail: adv.bookedDetail(run.out.Detail)}, &result, &fired)
+	a.emitFiring(turn, m, armedReaction{spec: run.spec}, domain.Outcome{Inject: adv.text, Detail: adv.bookedDetail(run.out.Detail)})
 	return true
 }
 

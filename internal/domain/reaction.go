@@ -433,8 +433,10 @@ var adviseMoments = []Moment{
 	MomentPostResponse,
 }
 
-// takesAdvise reports whether an out-of-process advise handler may fire at m.
-func takesAdvise(m Moment) bool {
+// TakesAdvise reports whether m is an advise Moment: one an out-of-process advise handler may fire
+// at, and where an advise-class answer has a slot to land in. The Validate rule and the engine's
+// advise-injection rule (agent's isAdvice) both read this one list.
+func (m Moment) TakesAdvise() bool {
 	return slices.Contains(adviseMoments, m)
 }
 
@@ -672,7 +674,7 @@ func (r Reaction) Validate() error {
 		if async {
 			switch r.Class {
 			case ClassAdvise:
-				if !takesAdvise(m) {
+				if !m.TakesAdvise() {
 					return fmt.Errorf("%w %q: %s", ErrInvalidReaction, r.ID, adviseMomentRefusal(m))
 				}
 			case ClassGate:

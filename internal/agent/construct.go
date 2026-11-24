@@ -244,7 +244,7 @@ func (a *Agent) seedTopLevel(cfg domain.Config) {
 	a.delegation = &delegationLatch{}                      // an empty Delegation-target latch: no routing until the host pushes one (ADR 0045)
 	a.journal = undo.New()                                 // the per-Exchange undo record (ADR 0051)
 	a.consoles = console.New()                             // the engine's live Consoles (ADR 0059)
-	a.briefing.call = a.callSessionAdvice                  // the session briefing's runs call this Agent's handlers
+	a.briefing.call = a.callAdvise                         // the session briefing's runs call this Agent's handlers
 	a.runIDs = newRunIDMinter(randomRunIDPrefix())         // the run-id minter every delegation in this tree draws from, prefix drawn once for this root
 	a.workflowLive = a.background.isLive                   // the tree's workflow liveness is this root's background set
 	a.now = time.Now                                       // the request-render clock for the system prompt's {{datetime}}
