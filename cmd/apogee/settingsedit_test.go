@@ -21,6 +21,11 @@ import (
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
+// The two stubs that make ApplyConfig resolve from the FILE alone: no flag was set on this
+// invocation, and no variable is in the environment.
+func noFlagChanged(string) bool   { return false }
+func noEnvironment(string) string { return "" }
+
 // The editor ladder has four rungs (ADR 0041 decision 2): the `editor` key, then $VISUAL, then
 // $EDITOR, then the platform's own default opener. The key outranks the environment because it is
 // the only rung set for apogee, a rung carrying flags is honoured as the command line it is rather
@@ -245,7 +250,7 @@ func TestExternalEditReloadReportsAllowForAProposedOnlyAddition(t *testing.T) {
 			home, root := t.TempDir(), t.TempDir()
 			writeSettingsFixture(t, filepath.Join(home, "config.yaml"), "mode: ask-before\n")
 			writeProjectConfig(t, root, tc.before)
-			opts := config.Options{ConfigDir: home, Workspace: root, ProjectRoot: root, ProjectRootPinned: true}
+			opts := config.Options{ConfigDir: home, Workspace: root, Files: config.FilesAt(home, root, root)}
 			e := newExternalEdit(opts, config.ProjectOffer{}, root, noEnvironment)
 
 			writeProjectConfig(t, root, tc.after)
@@ -523,7 +528,7 @@ func pinnedRootFixture(t *testing.T) (home, root, workspace string) {
 func TestExternalEditReloadKeepsThePinnedProjectRoot(t *testing.T) {
 	t.Parallel()
 	home, root, workspace := pinnedRootFixture(t)
-	opts := config.Options{ConfigDir: home, Workspace: workspace, ProjectRoot: root, ProjectRootPinned: true}
+	opts := config.Options{ConfigDir: home, Workspace: workspace, Files: config.FilesAt(home, workspace, root)}
 	e := newExternalEdit(opts, config.ProjectOffer{}, workspace, func(string) string { return "" })
 
 	if err := os.Mkdir(filepath.Join(workspace, ".apogee"), 0o700); err != nil {

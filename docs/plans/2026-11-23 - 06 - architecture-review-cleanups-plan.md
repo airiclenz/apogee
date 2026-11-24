@@ -352,7 +352,15 @@ NOTES (2026-11-24): scripts/test-timings.seed still lists the renamed test under
 **Closes:** exchange-hold-subsets
 **Commit:** `refactor(tui): every Exchange opener asks the one hold question`
 
-## 14. One config source: `config.Files`, resolved once and carried on Options
+## 14. One config source: `config.Files`, resolved once and carried on Options — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): consequential edit — internal/config/doc.go: made necessary by the new files.go (TestDocMapNamesEveryFile's package map).
+NOTES (2026-11-24): consequential edit — internal/config/allow_test.go: made necessary by resolveOptions gaining its mayMigrate parameter (one test call site passes `true`, the startup pass it always was).
+NOTES (2026-11-24): consequential edit — internal/config/execlayer_test.go: made necessary by resolveOptions gaining its mayMigrate parameter (one test call site passes `true`).
+NOTES (2026-11-24): consequential edit — .capcom/knowledge/glossary/glossary-safety/project-root.md: made necessary by deleting `Options.ProjectRoot`/`ProjectRootPinned`, which the Project root Note named as the mechanism; it now names `config.Options.Files`.
+NOTES (2026-11-24): `projectRootNotice` moved from layer.go to files.go with `resolveProjectRoot`, its only user; `noFlagChanged`/`noEnvironment` moved from settingsedit.go to settingsedit_test.go, since no production caller remains (the re-read now runs inside config as `Files.Reread`, with its own no-flag/no-env stubs).
+NOTES (2026-11-24): probeconfig's line-25 comment now names `config.Files.Layered` (it named `config.LoadLayeredOffer`, which this item stopped calling there), so item 18's comment sweep finds nothing left in that file. `apogee probe config` now announces under `notices` a current directory that cannot be resolved (ResolveFiles' skip notice); the old `probeProjectRoot` dropped that case silently.
+NOTES (2026-11-24): `Files.Reread` on the zero Files reads nothing and answers the zero values (pinned in TestZeroFilesReadsNothing); no production caller can reach it, since `Options.ConfigFiles()` never answers the zero source.
 
 **What:**
 **Goal:** `config.Files` exists (`ResolveFiles`, `FilesAt`); every resolution records the Files it read on `Options.Files` and reuses one already set; the non-migrating re-read is `Files.Reread`; `Options.ProjectRoot`, `ProjectRootPinned` and `LiveReread` are gone; `apogee probe config` takes its root from `config.ResolveFiles`.

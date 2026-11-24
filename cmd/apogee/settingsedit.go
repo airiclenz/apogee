@@ -171,9 +171,9 @@ type fileProjection struct {
 // would report none at all and swallow the human's edit whole.
 // workspace is passed separately from opts because it is the resolved root, not the option: the
 // caller has already turned `--workspace` (or its absence) into an absolute path, and that is the
-// one the editor's program is fenced against. The Project root travels ON opts, as a pin
-// (config.Options.ProjectRootPinned), because it is the session's boot answer every re-read must
-// reuse; an unpinned opts walks to it from the workspace on each read.
+// one the editor's program is fenced against. The config source travels ON opts
+// (config.Options.Files), because it is the session's boot answer every re-read must reuse; an
+// opts no resolution filled walks to its Project root from the workspace on each read.
 func newExternalEdit(opts config.Options, offer config.ProjectOffer, workspace string,
 	getenv func(string) string) *externalEdit {
 	e := &externalEdit{
@@ -406,7 +406,7 @@ func appliedValue(row tui.SettingRow) string {
 
 // projection reads the config files — the global file with the Project config layered over it, and
 // nothing else — into the two views the diff needs. It runs
-// the STARTUP resolution (ApplyConfig) with no flags and no environment, which is what makes the two
+// the STARTUP resolution (config.Files.Reread) with no flags and no environment, which is what makes the two
 // sides of the diff comparable and the validation the real one rather than a second, weaker copy of
 // it; the rows come off that same resolution (settingsRows), so a key added to the registry is
 // diffed the day it is added rather than the day someone remembers. What that resolution has to say
@@ -418,38 +418,25 @@ func appliedValue(row tui.SettingRow) string {
 // holds it (root.go): resolution succeeded, it simply could not name a server, and a config being
 // edited towards its first `servers:` entry is in that state by definition.
 //
-// It is NOT the startup pass in one respect: it never migrates. The read is marked LiveReread, so a
+// It is NOT the startup pass in one respect: it never migrates. The read is a re-read, so a
 // file saved mid-session in a retired shape (`hooks:`, the top-level `endpoint:` keys) is refused
 // with config.ErrRetiredShape — bytes untouched, no `config.yaml.bak-*` — rather than rewritten out
 // from under the running session; the fold waits for the next startup.
 //
-// Nor does it walk to the Project root afresh: it carries the root the session pinned at boot, so a
-// `.apogee/` or `git init` that appears below that root mid-session never moves, drops or adds the
-// project layer a re-read applies — the layer stays the one every other reader of the root uses.
+// Nor does it walk to the Project root afresh: it reads the config source the session fixed at boot
+// (config.Options.ConfigFiles), so a `.apogee/` or `git init` that appears below that root
+// mid-session never moves, drops or adds the project layer a re-read applies — the layer stays the
+// one every other reader of the root uses.
 func (e *externalEdit) projection() (fileProjection, error) {
-	next := config.Options{
-		ConfigDir:         e.opts.ConfigDir,
-		Workspace:         e.opts.Workspace,
-		ServerFlagBound:   e.opts.ServerFlagBound,
-		LiveReread:        true,
-		ProjectRoot:       e.opts.ProjectRoot,
-		ProjectRootPinned: e.opts.ProjectRootPinned,
-	}
 	var notices []string
 	collect := func(notice string) { notices = append(notices, notice) }
-	offer, err := config.ApplyConfigOffer(&next, noFlagChanged, noEnvironment, os.ReadFile, collect)
+	next, offer, err := e.opts.ConfigFiles().Reread(e.opts.ServerFlagBound, os.ReadFile, collect)
 	var undetermined *config.StartupUndetermined
 	if err != nil && !errors.As(err, &undetermined) {
 		return fileProjection{}, err
 	}
 	return fileProjection{rows: settingsRowsOffered(next, offer), opts: next, offer: offer, notices: notices}, nil
 }
-
-// The two stubs that make ApplyConfig resolve from the FILE alone: no flag was set on this
-// invocation, and no variable is in the environment. They are the file layer's own view of the
-// config, which is the only view two reads of the same file can be compared in.
-func noFlagChanged(string) bool   { return false }
-func noEnvironment(string) string { return "" }
 
 // editorArgv is the editor an edit opens in, resolved down the four rungs of ADR 0041 decision 2 —
 // the `editor` key, then $VISUAL, then $EDITOR, then the platform's own default opener — and

@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/airiclenz/apogee/internal/config"
-	"github.com/airiclenz/apogee/internal/projectroot"
 	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
@@ -22,7 +21,7 @@ const maskedValue = "••••"
 // probeConfigCommand builds `apogee probe config` — the fourth subject of `probe`, on the FREE side
 // of its split (ADR 0021 §1): no agent, no model, no write. It reads config.yaml with the Project
 // config of the current directory's Project root layered over it (ADR 0096 §6), the way a LIVE
-// re-read of a saved file reads them (config.LoadLayeredOffer — the files the watcher re-reads)
+// re-read of a saved file reads them (config.Files.Layered — the files the watcher re-reads)
 // rather than the way startup does, so a file still written in a retired shape is reported as
 // needing the migration a startup makes instead of being migrated here: the one migrating read is
 // the startup pass, and a diagnostic that rewrote the file it was asked to describe would be the
@@ -71,7 +70,7 @@ func probeConfigCommand() *cobra.Command {
 			if configDir == "" {
 				configDir = os.Getenv(config.EnvConfig)
 			}
-			report, err := configReport(configDir, probeProjectRoot(), os.ReadFile)
+			report, err := configReport(configDir, os.ReadFile)
 			if err != nil {
 				return err
 			}
@@ -91,19 +90,11 @@ func probeConfigCommand() *cobra.Command {
 	return cmd
 }
 
-// probeProjectRoot is the Project root the report layers: the current directory's, resolved by the
-// same walk a session started here resolves it by. A directory that cannot be named is no project
-// layer — the report then reads the global file alone, as a session with no Project root does.
-func probeProjectRoot() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	return projectroot.Resolve(cwd, userHome())
-}
-
-// configReport reads the config.yaml of the apogee home configDir, with the Project config of
-// projectRoot layered over it, through the live reader and renders the report. A refusal of a
+// configReport reads the config.yaml of the apogee home configDir, with the Project config of the
+// current directory's Project root layered over it, through the live reader and renders the report.
+// The two files are named once (config.ResolveFiles), by the same walk a session started here
+// resolves its root by; a directory that cannot be named is no project layer, announced under
+// `notices`, and the report then reads the global file alone, as a session with no Project root does. A refusal of a
 // retired shape is a FINDING the report states under `migration`, not a failure of the command.
 // Every other refusal — the reader's (a malformed global file, a value a key refuses) or, once the
 // reader has passed the files, the startup resolution's (startupRefusal) — is the command's own, in
@@ -111,19 +102,20 @@ func probeProjectRoot() string {
 // it reaches the report under `notices`; a project value the reader accepts but a startup refuses
 // fails the command like a global one. The notices of both passes are listed in arrival order, each
 // once: the startup pass re-reads the same files, so it announces the reader's notices again.
-func configReport(configDir, projectRoot string, readFile func(string) ([]byte, error)) (string, error) {
+func configReport(configDir string, readFile func(string) ([]byte, error)) (string, error) {
 	var notices []string
 	collect := func(msg string) {
 		if !slices.Contains(notices, msg) {
 			notices = append(notices, msg)
 		}
 	}
-	o, offer, err := config.LoadLayeredOffer(config.FilePath(configDir), projectRoot, readFile, collect)
+	files := config.ResolveFiles(configDir, "", false, collect)
+	o, offer, err := files.Layered(readFile, collect)
 	if err != nil && !errors.Is(err, config.ErrRetiredShape) {
 		return "", err
 	}
 	if err == nil {
-		if refusal := startupRefusal(configDir, projectRoot, readFile, collect); refusal != nil {
+		if refusal := startupRefusal(files, readFile, collect); refusal != nil {
 			return "", refusal
 		}
 	}
@@ -152,23 +144,17 @@ func configReport(configDir, projectRoot string, readFile func(string) ([]byte, 
 	return strings.Join(lines, "\n"), nil
 }
 
-// startupRefusal runs the startup resolution (config.ApplyConfigOffer) over the two files the
-// report reads and answers what it refuses: every block validator and the host-bound checks a
-// launch would fail on, which the live reader never reaches. It is the pass the watcher's re-read
-// runs (externalEdit.projection): no flag set and no environment, so it resolves from the files
-// alone; LiveReread, so a retired shape is refused rather than migrated and nothing is written; the
-// Project root pinned to the one the report layers, so both passes read the same project file. Its
-// notices go to notify. A config that cannot name a startup server (config.StartupUndetermined) is
-// no refusal here, as it is none to the TUI, which starts pre-bound on it.
-func startupRefusal(configDir, projectRoot string, readFile func(string) ([]byte, error),
+// startupRefusal runs the startup resolution over files, the two files the report reads
+// (config.Files.Reread), and answers what it refuses: every block validator and the host-bound
+// checks a launch would fail on, which the live reader never reaches. It is the pass the watcher's
+// re-read runs (externalEdit.projection): no flag set and no environment, so it resolves from the
+// files alone; a re-read, so a retired shape is refused rather than migrated and nothing is written;
+// the same source the report layers, so both passes read the same project file. Its notices go to
+// notify. A config that cannot name a startup server (config.StartupUndetermined) is no refusal
+// here, as it is none to the TUI, which starts pre-bound on it.
+func startupRefusal(files config.Files, readFile func(string) ([]byte, error),
 	notify func(string)) error {
-	startup := config.Options{
-		ConfigDir:         configDir,
-		LiveReread:        true,
-		ProjectRoot:       projectRoot,
-		ProjectRootPinned: true,
-	}
-	_, err := config.ApplyConfigOffer(&startup, noFlagChanged, noEnvironment, readFile, notify)
+	_, _, err := files.Reread(false, readFile, notify)
 	var undetermined *config.StartupUndetermined
 	if errors.As(err, &undetermined) {
 		return nil

@@ -487,7 +487,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// never a fresh walk, so a `.apogee/` or `git init` appearing in a subfolder workspace mid-session
 	// cannot move the layer out from under every other reader of roots.project.
 	editOpts := w.opts
-	editOpts.ProjectRoot, editOpts.ProjectRootPinned = w.roots.project, true
+	editOpts.Files = config.FilesAt(w.opts.ConfigDir, w.opts.Workspace, w.roots.project)
 	w.externalEdits = newExternalEdit(editOpts, w.offer, w.roots.workspace, os.Getenv)
 
 	// The other trigger for that same round trip (ADR 0041 decision 3): the file itself. An editor's

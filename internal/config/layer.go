@@ -10,7 +10,6 @@ import (
 
 	"github.com/airiclenz/apogee/internal/adoption"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/projectroot"
 	"gopkg.in/yaml.v3"
 )
 
@@ -59,9 +58,6 @@ const dangerousRulesPath = "dangerous-rules"
 // allowPath is the `allow:` key's registry path, the granting key whose project rules the layer
 // carries apart to the adoption record.
 const allowPath = "allow"
-
-// projectRootNotice is the line a workspace whose Project root cannot be resolved costs.
-const projectRootNotice = "apogee: project config: %v; the project layer is skipped"
 
 // projectGlobalOnlyNotice is the one line naming every global-only key the project file stated:
 // the project path, "key" or "keys", the quoted names, and the global file that does set them.
@@ -354,44 +350,6 @@ func projectFilePath(projectRoot string) string {
 		return ""
 	}
 	return filepath.Join(projectRoot, projectConfigDirName, projectConfigFileName)
-}
-
-// layerProjectRoot is the Project root opts reads its project layer from: the pinned root when a
-// running session pinned one (Options.ProjectRootPinned), else the root walked from the workspace.
-func layerProjectRoot(opts *Options, notify func(string)) string {
-	if opts.ProjectRootPinned {
-		return opts.ProjectRoot
-	}
-	return resolveProjectRoot(opts.Workspace, notify)
-}
-
-// resolveProjectRoot is the Project root of workspace — the current directory when it is empty, as
-// resolveRoots resolves it — or "" when there is no project layer to read. A workspace that cannot
-// be read (a `--workspace` that does not exist yet) skips the layer with a notice rather than
-// guessing at a root above a folder that is not there.
-func resolveProjectRoot(workspace string, notify func(string)) string {
-	if workspace == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			notify(fmt.Sprintf(projectRootNotice, fmt.Errorf("resolve working directory: %w", err)))
-			return ""
-		}
-		workspace = cwd
-	}
-	abs, err := filepath.Abs(workspace)
-	if err != nil {
-		notify(fmt.Sprintf(projectRootNotice, fmt.Errorf("resolve workspace %s: %w", workspace, err)))
-		return ""
-	}
-	if _, err := os.Stat(abs); err != nil {
-		notify(fmt.Sprintf(projectRootNotice, err))
-		return ""
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "" // only the home guard is lost; the walk still stops at the git top-level
-	}
-	return projectroot.Resolve(abs, home)
 }
 
 // readProjectLayer reads the project file at path and checks it alone, answering the layer and

@@ -3763,9 +3763,9 @@ func applyFile(o *Options, fc fileConfig) error {
 // at the four lines that ARE the configuration. This reader never writes: the /settings applies
 // re-read their block through it under a running session, and apogee does not rewrite a config file
 // out from under a session, so the refusal spells the replacement out instead. The whole-file live
-// re-read (the /settings and file-watcher reload) refuses the same way, through ResolveOptions with
-// opts.LiveReread set. The one migrating read is ResolveOptions' startup pass — LiveReread unset —
-// which performs the one-time fold of ADR 0036 decision 9 and announces it through notify.
+// re-read (the /settings and file-watcher reload) refuses the same way, through [Files.Reread].
+// The one migrating read is ResolveOptions' startup pass, which performs the one-time fold of ADR
+// 0036 decision 9 and announces it through notify.
 func LoadFileConfig(path string, readFile func(string) ([]byte, error), notify func(string)) (Options, error) {
 	fc, err := parseConfigFile(path, readFile, notify, false)
 	if err != nil {
@@ -4108,33 +4108,37 @@ func overrideSources(changed func(string) bool, getenv func(string) string) map[
 // can name the key and the value.
 func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string) string,
 	readFile func(string) ([]byte, error), notify func(string), hostID string) ([]string, error) {
-	notices, _, err := resolveOptions(opts, changed, getenv, readFile, notify, hostID)
+	notices, _, err := resolveOptions(opts, changed, getenv, readFile, notify, hostID, true)
 	return notices, err
 }
 
 // resolveOptions is [ResolveOptions] answering, beside the notices, the [ProjectOffer] the same
 // read resolved — the Project config's proposed and rejected entries, which opts never carries.
-// Any error answers the zero offer.
+// Any error answers the zero offer. mayMigrate says whether this is the startup pass, the one read
+// that may fold a retired shape.
 func resolveOptions(opts *Options, changed func(string) bool, getenv func(string) string,
-	readFile func(string) ([]byte, error), notify func(string), hostID string) ([]string, ProjectOffer, error) {
+	readFile func(string) ([]byte, error), notify func(string), hostID string,
+	mayMigrate bool) ([]string, ProjectOffer, error) {
 	opts.ConfigDir = resolveConfigDir(opts.ConfigDir, changed, getenv)
 	if !changed("workspace") {
 		if v := getenv(EnvWorkspace); v != "" {
 			opts.Workspace = v
 		}
 	}
+	// Which files this resolution reads: the source already recorded on opts — a re-read under a
+	// running session reads the files its session booted on — or the one the home and workspace
+	// name, walked once here. Recorded before any refusal, so every return leaves it standing.
+	if opts.Files.IsZero() {
+		opts.Files = ResolveFiles(opts.ConfigDir, opts.Workspace, opts.GlobalConfigOnly, notify)
+	}
 	// The one reader that may MIGRATE — and only as the startup pass: a config still written in a
 	// retired shape is folded here and announced through notify. A live re-read under a running
-	// session (opts.LiveReread — the /settings and file-watcher reload) refuses it with
+	// session ([Files.Reread] — the /settings and file-watcher reload) refuses it with
 	// ErrRetiredShape instead, as LoadFileConfig does, so a file a session is running on is never
 	// rewritten and no backup is written. The migration is the global file's alone: the Project
 	// config is layered over the migrated global document (layer.go) and is never rewritten.
-	projectRoot := ""
-	if !opts.GlobalConfigOnly {
-		projectRoot = layerProjectRoot(opts, notify)
-	}
-	fc, stated, err := parseLayeredConfig(FilePath(opts.ConfigDir), projectRoot, readFile, notify,
-		!opts.LiveReread)
+	fc, stated, err := parseLayeredConfig(opts.Files.GlobalPath(), opts.Files.ProjectRoot(), readFile,
+		notify, mayMigrate)
 	if err != nil {
 		return nil, ProjectOffer{}, err
 	}
@@ -4229,7 +4233,7 @@ func resolveOptions(opts *Options, changed func(string) bool, getenv func(string
 // the resolved `servers:` entries this session starts on. notify receives resolution's soft notices
 // — a malformed acknowledgement is reported and skipped, never fatal — on stderr, like the other
 // pre-TUI startup lines. The one-time legacy migration announces itself the same way — it is made
-// by ResolveOptions' startup pass (opts.LiveReread unset), the one migrating read: a file apogee
+// by ResolveOptions' startup pass, the one migrating read: a file apogee
 // rewrote on the user's behalf must say so where they will see it.
 //
 // One error is deliberately returned LAST, after every value has been written back:
@@ -4246,10 +4250,19 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 // ApplyConfigOffer is [ApplyConfig] answering, beside the error, the [ProjectOffer] the same read
 // resolved — the Project config's proposed and rejected entries, which opts never carries — built
 // fresh, so it shares no backing array with opts. [StartupUndetermined] still comes back LAST with
-// the offer filled, as opts is; any other error answers the zero offer.
+// the offer filled, as opts is; any other error answers the zero offer. Every return leaves the
+// files it read recorded on opts ([Options.Files]).
 func ApplyConfigOffer(opts *Options, changed func(string) bool, getenv func(string) string,
 	readFile func(string) ([]byte, error), notify func(string)) (ProjectOffer, error) {
-	notices, offer, err := resolveOptions(opts, changed, getenv, readFile, notify, platform.HostID())
+	return applyConfigOffer(opts, changed, getenv, readFile, notify, true)
+}
+
+// applyConfigOffer is [ApplyConfigOffer] told whether it is the startup pass (mayMigrate), the one
+// read that may fold a retired shape; a re-read under a running session ([Files.Reread]) is not.
+func applyConfigOffer(opts *Options, changed func(string) bool, getenv func(string) string,
+	readFile func(string) ([]byte, error), notify func(string), mayMigrate bool) (ProjectOffer, error) {
+	notices, offer, err := resolveOptions(opts, changed, getenv, readFile, notify, platform.HostID(),
+		mayMigrate)
 	for _, n := range notices {
 		notify(n)
 	}

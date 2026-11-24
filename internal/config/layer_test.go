@@ -379,9 +379,10 @@ func TestResolveOptionsTakesNoProjectLayerWhenGlobalConfigOnly(t *testing.T) {
 	}
 }
 
-// A pinned Project root outranks the walk from the workspace: a running session's re-read takes the
-// layer from the root it booted on, even when the workspace now holds a `.apogee/` of its own, and a
-// pinned empty root — the home-folder workspace's answer — takes no layer at all.
+// A config source already set on opts (Options.Files) outranks the walk from the workspace: a
+// running session's re-read takes the layer from the root it booted on, even when the workspace now
+// holds a `.apogee/` of its own, and a source with an empty root — the home-folder workspace's
+// answer — takes no layer at all.
 func TestResolveOptionsReadsThePinnedProjectRoot(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -403,10 +404,12 @@ func TestResolveOptionsReadsThePinnedProjectRoot(t *testing.T) {
 				t.Fatalf("create workspace: %v", err)
 			}
 			writeLayerFile(t, projectFilePath(workspace), "workflow-retries: 9\n")
-			opts := Options{ConfigDir: filepath.Dir(globalPath), Workspace: workspace, ProjectRootPinned: true}
+			pinned := ""
 			if tt.pinBootRoot {
-				opts.ProjectRoot = bootRoot
+				pinned = bootRoot
 			}
+			opts := Options{ConfigDir: filepath.Dir(globalPath), Workspace: workspace,
+				Files: FilesAt(filepath.Dir(globalPath), workspace, pinned)}
 
 			if _, err := ResolveOptions(&opts, func(string) bool { return false },
 				func(string) string { return "" }, os.ReadFile, noNotify, testHostID); err != nil {
@@ -480,7 +483,7 @@ func overlayOnStartup(t *testing.T, global, project string) (base, overlaid Opti
 // sansRoots is o without the fields that name where its files sit and which Driver resolved it, so
 // two resolutions of the same files from two temp dirs compare equal.
 func sansRoots(o Options) Options {
-	o.ConfigDir, o.Workspace, o.GlobalConfigOnly = "", "", false
+	o.ConfigDir, o.Workspace, o.GlobalConfigOnly, o.Files = "", "", false, Files{}
 	return o
 }
 

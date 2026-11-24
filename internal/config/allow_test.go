@@ -309,7 +309,7 @@ func TestResolveOptionsResolvesTheEffectiveAllowRules(t *testing.T) {
 	opts := Options{ConfigDir: filepath.Dir(globalPath), Workspace: projectRoot}
 
 	_, offer, err := resolveOptions(&opts, func(string) bool { return false }, func(string) string { return "" },
-		os.ReadFile, func(string) {}, testHostID)
+		os.ReadFile, func(string) {}, testHostID, true)
 
 	if err != nil {
 		t.Fatalf("ResolveOptions: %v", err)

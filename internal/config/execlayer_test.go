@@ -160,7 +160,7 @@ func resolveOfferAt(t *testing.T, globalPath, projectRoot string, globalOnly boo
 
 	opts := Options{ConfigDir: filepath.Dir(globalPath), Workspace: projectRoot, GlobalConfigOnly: globalOnly}
 	_, offer, err := resolveOptions(&opts, func(string) bool { return false },
-		func(string) string { return "" }, os.ReadFile, noNotify, testHostID)
+		func(string) string { return "" }, os.ReadFile, noNotify, testHostID, true)
 	if err != nil {
 		t.Fatalf("ResolveOptions: %v", err)
 	}
