@@ -1700,7 +1700,7 @@ type Options struct {
 	// bound to, as a fact and never as a request: offline true with the monitor's failure text when
 	// the debounced offline crossing lands ([Model.foldBeatFailure] — offlineFailureThreshold
 	// consecutive failed IDLE beats, a failed beat during a busy Exchange or an actuation ignored,
-	// one failure on a cold start), false with no text when a beat lands after an offline stretch
+	// one failure on a cold start and after a launcher verb's release), false with no text when a beat lands after an offline stretch
 	// ([Model.foldBeat]) and when a `/server` switch resets the heartbeat to cold
 	// ([Model.foldServerSwitch]). It is called from the Update loop at exactly those crossings, so
 	// a listener sees each one once and nothing between them.

@@ -712,9 +712,9 @@ func (m Model) flushInterjections() (tea.Model, tea.Cmd) {
 // flushAfterFold is the Update tail's flush retry: a completion flush a refusing hold turned away
 // (flushPending) goes at the first fold that finds the hold released, the session idle with nothing
 // ahead of it (engineHolds.canRetryFlush) and something to send to (blockedUpstream). After a
-// launcher verb that means a beat folded since its release, so a stopped server is not sent to on
-// the latch's word alone. The retry is silent — the hold's note was said when the flush was turned
-// away — and the latch clears once nothing is staged any more, whether the retry or a ⏎ sent them.
+// launcher verb that means a beat sent since its release has folded, so a stopped server is not
+// sent to on the latch's word alone. The retry is silent — the hold's note was said when the flush
+// was turned away — and the latch clears once nothing is staged any more, whether the retry or a ⏎ sent them.
 // Anything but the Model, or a Model with no retry pending, passes through untouched.
 func flushAfterFold(next tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 	m, ok := next.(Model)

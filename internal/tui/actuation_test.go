@@ -476,8 +476,9 @@ func TestActuationStaleGenerationIsInert(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // A failed beat while an actuation is in flight counts toward NOTHING: the server is expected to be
-// down mid-restart. Once the latch releases the ordinary debounce applies again, unchanged — the
-// downtime after a /stop-server is real and crosses offline the ordinary way.
+// down mid-restart. Once the latch releases the failures count again — the downtime after a
+// /stop-server is real and crosses offline (at the first failure, since the release primed the count:
+// TestFailedOwedBeatHoldsTheFlush).
 func TestActuationShadowsFailedBeats(t *testing.T) {
 	t.Parallel()
 
@@ -697,14 +698,15 @@ func TestProfileLoadCommitsTheMoveOnTheUpdateGoroutine(t *testing.T) {
 
 // A move the engine refuses leaves the session exactly where it was — Agent.SwitchUpstream is
 // validate-then-commit — and the note says both halves of the truth: the profile IS loaded, and the
-// session did not follow it. Nothing is armed, because nothing moved.
+// session did not follow it. The one beat fired is the one every release owes ([Model.armOwedBeat]),
+// on the server the session never left.
 func TestProfileLoadMoveRefusedKeepsTheSession(t *testing.T) {
 	t.Parallel()
 
 	fake := newLauncher()
 	fake.follows(ServerSwitchResult{}, errors.New("an exchange is still open"))
 	m, _ := wireLauncher(t, fake)
-	before, beforeGen := m.opts, m.hb.gen
+	before := m.opts
 	m, cmd := startLoad(t, m, "beta")
 
 	m, cmd = driveActuation(t, m, cmd)
@@ -712,13 +714,10 @@ func TestProfileLoadMoveRefusedKeepsTheSession(t *testing.T) {
 	if m.actuation.inFlight {
 		t.Fatal("a refused move left the latch held")
 	}
-	if m.opts.Endpoint != before.Endpoint || m.opts.Model != before.Model || m.hb.gen != beforeGen {
-		t.Errorf("the session moved on a refused move: endpoint %q, model %q, gen %d",
-			m.opts.Endpoint, m.opts.Model, m.hb.gen)
+	if m.opts.Endpoint != before.Endpoint || m.opts.Model != before.Model {
+		t.Errorf("the session moved on a refused move: endpoint %q, model %q", m.opts.Endpoint, m.opts.Model)
 	}
-	if cmd != nil {
-		t.Error("a refused move fired a beat; the session is on the server it always was")
-	}
+	assertArmsOwedBeat(t, m, cmd)
 	want := "profile beta loaded, but the session could not follow it: an exchange is still open"
 	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
 		t.Errorf("notes = %v, want %q", got, want)
@@ -756,7 +755,8 @@ func TestProfileLoadLeavesExactlyOneBeatChain(t *testing.T) {
 }
 
 // A failed load says the launcher's own words and releases the latch. Notices recorded before the
-// failure still travel: a load that failed after warning about the config still warned.
+// failure still travel: a load that failed after warning about the config still warned. A failed
+// launch may still have stopped the server it was restarting, so the release fires the beat it owes.
 func TestProfileLoadFailureReleasesTheLatch(t *testing.T) {
 	t.Parallel()
 
@@ -773,9 +773,7 @@ func TestProfileLoadFailureReleasesTheLatch(t *testing.T) {
 	if m.actuation.inFlight {
 		t.Fatal("a failed load left the latch held")
 	}
-	if cmd != nil {
-		t.Error("a failed load fired a beat; nothing moved to observe")
-	}
+	assertArmsOwedBeat(t, m, cmd)
 	want := []string{
 		"starting llamacpp",
 		"config: unknown key 'thraeds'",
@@ -983,8 +981,8 @@ func TestProfileRecordingAnswerIsBelieved(t *testing.T) {
 }
 
 // The two verbs that act on the session's own server report one note per recorded step and then
-// leave the display to the heartbeat. The steps travel even beside an error — how far a stop got
-// before it failed is exactly what the human needs.
+// leave the display to the heartbeat, firing the beat the release owes. The steps travel even beside
+// an error — how far a stop got before it failed is exactly what the human needs.
 func TestServerActuationNotesEveryStep(t *testing.T) {
 	t.Parallel()
 
@@ -1015,9 +1013,7 @@ func TestServerActuationNotesEveryStep(t *testing.T) {
 			if m.actuation.inFlight {
 				t.Fatal("the latch was not released")
 			}
-			if cmd != nil {
-				t.Error("an actuation on the session's own server fired a beat of its own")
-			}
+			assertArmsOwedBeat(t, m, cmd)
 			if got := fake.actuated(); !reflect.DeepEqual(got, []string{testOpts.Endpoint}) {
 				t.Errorf("actuated = %v, want the session's endpoint", got)
 			}
@@ -1110,9 +1106,7 @@ func TestUnloadAndStopActOnTheSessionsServer(t *testing.T) {
 			if m.actuation.inFlight {
 				t.Fatal("the latch was not released by the completion")
 			}
-			if cmd != nil {
-				t.Error("an actuation on the session's own server fired a beat of its own")
-			}
+			assertArmsOwedBeat(t, m, cmd)
 			if got := unloader.actuated(); !reflect.DeepEqual(got, tc.unloads) {
 				t.Errorf("unload seam called with %v, want %v", got, tc.unloads)
 			}
@@ -1308,9 +1302,9 @@ func TestUnloadAndStopWithTheLauncherSwitchedOff(t *testing.T) {
 	}
 }
 
-// After a /stop-server the downtime is REAL, and the display says so the ordinary way: the latch released
-// with the completion, so the beat shadow is gone and the same debounce that narrates a server dying
-// on its own crosses this session offline.
+// After a /stop-server the downtime is REAL, and the display says so: the latch released with the
+// completion, so the beat shadow is gone and the failed beats cross this session offline, narrated
+// once however many follow.
 func TestStopThenBeatFailuresCrossOffline(t *testing.T) {
 	t.Parallel()
 
@@ -1344,6 +1338,13 @@ func TestStopThenBeatFailuresCrossOffline(t *testing.T) {
 // the verb's pump.
 func stopServerMidRun(t *testing.T) (Model, tea.Cmd) {
 	t.Helper()
+	return launcherVerbMidRun(t, "/stop-server")
+}
+
+// launcherVerbMidRun is [stopServerMidRun] for either verb that acts on the session's own server,
+// `/stop-server` or `/unload-model`, typed as line.
+func launcherVerbMidRun(t *testing.T, line string) (Model, tea.Cmd) {
+	t.Helper()
 	fake := newLauncher()
 	fake.actResult = ActuationResult{
 		Steps: []string{"Sending stop signal"}, ServerStopped: true, Backend: "llamacpp", Addr: "localhost:1234",
@@ -1353,7 +1354,7 @@ func stopServerMidRun(t *testing.T) (Model, tea.Cmd) {
 	if m.state != stateRunning {
 		t.Fatalf("precondition: state = %v, want running", m.state)
 	}
-	m = stageRow(t, m, "/stop-server")
+	m = stageRow(t, m, line)
 	m = stageRow(t, m, "and the docs")
 	if len(m.deferredCommands) != 1 || len(m.pendingInterjections) != 1 {
 		t.Fatalf("precondition: %d commands queued, %d rows staged; want one of each",
@@ -1361,7 +1362,7 @@ func stopServerMidRun(t *testing.T) (Model, tea.Cmd) {
 	}
 	m, cmd := stepCmd(t, m, exchangeDoneMsg{})
 	if !m.actuation.inFlight {
-		t.Fatal("precondition: the drained /stop-server did not take the latch")
+		t.Fatalf("precondition: the drained %s did not take the latch", line)
 	}
 	return m, cmd
 }
@@ -1418,6 +1419,49 @@ func TestCompletionFlushWaitsOutTheActuationLatch(t *testing.T) {
 	assertFlushed(t, m, "and the docs")
 }
 
+// assertArmsOwedBeat fails unless a released latch fired the beat it owes on a FRESH chain: the Cmd is
+// that chain's first beat, and a tick of the chain that ran under the latch schedules nothing — so a
+// beat sent before the release is inert, and exactly one chain polls the server afterwards.
+func assertArmsOwedBeat(t *testing.T, m Model, cmd tea.Cmd) {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("the release fired no beat; the one it owes would wait out a whole Interval")
+	}
+	if beat, ok := cmd().(beatMsg); !ok || beat.gen != m.hb.gen {
+		t.Fatalf("the release's Cmd yielded %T, want the armed chain's first beat", cmd())
+	}
+	if _, stale := stepCmd(t, m, heartbeatTickMsg{gen: m.hb.gen - 1}); stale != nil {
+		t.Error("a tick from the chain that ran under the latch still scheduled a beat — two chains poll one server")
+	}
+}
+
+// A beat that was already on its way when a /stop-server or /unload-model released the latch does not
+// pay the beat the release owes: it was sent while the server was still going down, so it says
+// nothing about what the verb left behind. Only a beat sent after the release lets the staged row go.
+func TestStaleBeatDoesNotPayTheOwedBeat(t *testing.T) {
+	t.Parallel()
+	for _, line := range []string{"/stop-server", "/unload-model"} {
+		t.Run(strings.TrimPrefix(line, "/"), func(t *testing.T) {
+			t.Parallel()
+			m, cmd := launcherVerbMidRun(t, line)
+			sentUnderTheLatch := m.hb.gen // the chain a beat in flight across the release was sent on
+
+			m, cmd = driveActuation(t, m, cmd)
+			assertArmsOwedBeat(t, m, cmd)
+			m = step(t, m, beatMsg{gen: sentUnderTheLatch, beat: twoModelBeat()})
+
+			assertFlushHeld(t, m, "after a beat sent before the release")
+			if !m.actuation.beatOwed {
+				t.Error("a beat sent before the release paid the owed beat")
+			}
+
+			m = foldBeatMsg(t, m, twoModelBeat())
+
+			assertFlushed(t, m, "and the docs")
+		})
+	}
+}
+
 // A completion under a session load leaves the row staged with the load's note and flushes it at
 // the fold that lands the record.
 func TestCompletionFlushWaitsOutASessionLoad(t *testing.T) {
@@ -1466,6 +1510,116 @@ func TestWakeWaitsOutTheActuationLatch(t *testing.T) {
 
 	if eng.wakes() != 1 || m.wakePending {
 		t.Errorf("Wake calls %d, pending %v; want one wake once the beat folded", eng.wakes(), m.wakePending)
+	}
+}
+
+// The beat a /stop-server or /unload-model release owes is believed when it fails: the server the
+// human just stopped is not given the offline debounce's second chance, so the session crosses
+// offline at once and the staged row stays staged instead of opening into it. A beat that lands
+// afterwards brings the server back and lets the row go.
+func TestFailedOwedBeatHoldsTheFlush(t *testing.T) {
+	t.Parallel()
+	for _, line := range []string{"/stop-server", "/unload-model"} {
+		t.Run(strings.TrimPrefix(line, "/"), func(t *testing.T) {
+			t.Parallel()
+			m, cmd := launcherVerbMidRun(t, line)
+			m, _ = driveActuation(t, m, cmd)
+
+			m = foldBeatMsg(t, m, downBeat("connection refused"))
+
+			assertFlushHeld(t, m, "after the owed beat failed")
+			if !m.hb.offline {
+				t.Error("the failed owed beat left the session online; the debounce outlived the verb")
+			}
+			if n := countNotes(m, "server offline"); n != 1 {
+				t.Errorf("offline notes = %d, want the crossing narrated once", n)
+			}
+
+			m = foldBeatMsg(t, m, twoModelBeat())
+
+			assertFlushed(t, m, "and the docs")
+		})
+	}
+}
+
+// The release's belief lasts until a beat lands: a server the verb left answering earns the ordinary
+// debounce back, so one failure after that landing does not cross offline.
+func TestLandedBeatAfterReleaseRestoresTheDebounce(t *testing.T) {
+	t.Parallel()
+	fake := newLauncher()
+	fake.actResult = ActuationResult{Steps: []string{"Unloaded"}, Backend: "llamacpp", Addr: "localhost:1234"}
+	m, _ := wireLauncher(t, fake)
+	m, cmd := typeCommand(t, m, "/unload-model")
+	m, _ = driveActuation(t, m, cmd)
+
+	m = foldBeatMsg(t, m, twoModelBeat())
+	m = foldBeatMsg(t, m, downBeat("discovery timed out"))
+
+	if m.hb.offline {
+		t.Error("one failure after a landed beat crossed offline; the release's belief outlived the landing")
+	}
+	m = foldBeatMsg(t, m, downBeat("discovery timed out"))
+	if !m.hb.offline {
+		t.Error("the ordinary debounce did not cross offline at its threshold")
+	}
+}
+
+// A background workflow that ends while /stop-server runs does not wake the agent on the failed beat
+// the release owes: the session has crossed offline, so the wake waits until a beat lands.
+func TestFailedOwedBeatHoldsTheWake(t *testing.T) {
+	t.Parallel()
+	fake := newLauncher()
+	fake.actResult = ActuationResult{ServerStopped: true, Backend: "llamacpp", Addr: "localhost:1234"}
+	m, _ := wireLauncher(t, fake)
+	eng := m.eng.(*fakeEngine)
+	eng.wakeFn = func(context.Context) (bool, error) { return true, nil }
+	m, cmd := typeCommand(t, m, "/stop-server")
+	m = finishBackground(t, m)
+	m, _ = driveActuation(t, m, cmd)
+
+	m = foldBeatMsg(t, m, downBeat("connection refused"))
+
+	if eng.wakes() != 0 || !m.wakePending {
+		t.Fatalf("Wake calls %d, pending %v; want the wake held after the owed beat failed", eng.wakes(), m.wakePending)
+	}
+
+	m = foldBeatMsg(t, m, twoModelBeat())
+
+	if eng.wakes() != 1 || m.wakePending {
+		t.Errorf("Wake calls %d, pending %v; want one wake once a beat landed", eng.wakes(), m.wakePending)
+	}
+}
+
+// Outside any launcher verb, a wake asks the same question a human send does: while the footer says
+// offline it waits, silently, and it goes at the beat that brings the server back.
+func TestWakeWaitsWhileOffline(t *testing.T) {
+	t.Parallel()
+	m, _ := wireLauncher(t, newLauncher())
+	eng := m.eng.(*fakeEngine)
+	eng.wakeFn = func(context.Context) (bool, error) { return true, nil }
+	for range offlineFailureThreshold {
+		m = foldBeatMsg(t, m, downBeat("connection refused"))
+	}
+	if !m.hb.offline {
+		t.Fatal("precondition: the session did not cross offline")
+	}
+	notes := len(noteTexts(m))
+
+	m = finishBackground(t, m)
+
+	if eng.wakes() != 0 || !m.wakePending {
+		t.Fatalf("Wake calls %d, pending %v; want the wake held while offline", eng.wakes(), m.wakePending)
+	}
+	for _, note := range noteTexts(m)[notes:] {
+		if strings.Contains(note, "offline") {
+			t.Errorf("the held wake said %q, want it to wait silently", note)
+		}
+	}
+
+	m = foldBeatMsg(t, m, twoModelBeat())
+
+	if eng.wakes() != 1 || m.wakePending {
+		t.Errorf("Wake calls %d, pending %v; want one wake once the server came back", eng.wakes(), m.wakePending)
 	}
 }
 

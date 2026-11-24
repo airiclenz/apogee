@@ -51,11 +51,13 @@ type actuation struct {
 	// events is the pump's channel — the blocking verb's goroutine writes, the listen Cmd reads.
 	// nil when nothing is in flight.
 	events chan actuationEvent
-	// beatOwed says the latch was released and no beat has folded since (foldActuationDone sets it
-	// when the heartbeat is wired, foldBeatMsg clears it). The completion flush's retry and a pending
-	// wake wait for that beat (engineHolds.canRetryFlush, engineHolds.canOpenWake): a /stop-server or
-	// /unload-model releases the latch while the heartbeat, its failures ignored under the latch, has
-	// not yet seen the server gone.
+	// beatOwed says the latch was released and no beat SENT since has folded (foldActuationDone sets
+	// it when the heartbeat is wired, foldBeatMsg clears it). The completion flush's retry and a
+	// pending wake wait for that beat (engineHolds.canRetryFlush, engineHolds.canOpenWake): a
+	// /stop-server or /unload-model releases the latch while the heartbeat, its failures ignored under
+	// the latch, has not yet seen the server gone. Every release arms a fresh tick chain
+	// ([Model.armOwedBeat], or the load paths' own armBeat), so a beat sent before the release lands
+	// on a retired generation and is inert: it cannot pay a debt it says nothing about.
 	beatOwed bool
 }
 
@@ -380,9 +382,11 @@ func (m Model) foldActuation(msg actuationMsg) (tea.Model, tea.Cmd) {
 // consolation.
 func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 	verb, profile := m.actuation.verb, m.actuation.profile
-	// Released on EVERY path, generation kept, with a beat owed before an automatic opener may send
-	// to the server this verb just moved.
+	// Released on EVERY path, actuation generation kept, with a beat owed before an automatic opener
+	// may send to the server this verb just moved. Every return below arms a fresh tick chain for that
+	// beat, so one the running chain sent under the latch cannot pay it ([Model.armOwedBeat]).
 	m.actuation = actuation{gen: m.actuation.gen, beatOwed: m.observesUpstream()}
+	m.primeOfflineCrossing()
 
 	// The launcher's notices (config warnings, the drift notice a non-restarting activation emits)
 	// and a stop's recorded steps are the same kind of thing: what the library did, in its words.
@@ -448,18 +452,20 @@ func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 			note += startupTimeoutCoda
 		}
 		m.transcript.addNote(note)
-		return m, nil
+		beat := m.armOwedBeat()
+		return m, beat
 	}
 	if verb != verbLoad {
 		// `/stop-server` has already said everything it did — the heading and the steps beneath it — while
 		// `/unload-model` owes one more sentence, because its two outcomes look identical in the steps and
 		// only one of them leaves the session without a server. Then the display's next move belongs
-		// to the heartbeat (a stopped server crosses offline the ordinary way, which is now honest —
-		// the latch is released and the downtime is real).
+		// to the heartbeat (a stopped server crosses offline at the first failed beat, which is now
+		// honest — the latch is released, the downtime is real, and the release primed the count).
 		if verb == verbUnload {
 			m.transcript.addNote(stripEscapes(unloadOutcome(ev.result)))
 		}
-		return m, nil
+		beat := m.armOwedBeat()
+		return m, beat
 	}
 	m.transcript.addNote("profile " + stripEscapes(profile) + " loaded — waiting for the beat")
 	// The other commit: the load landed on the very server this session is on, so the profile it now
@@ -469,6 +475,35 @@ func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 	// bump has to land on the Model this returns (the spinnerAnim.arm convention, [Model.armBeat]).
 	beat := m.armBeat()
 	return m, beat
+}
+
+// primeOfflineCrossing leaves the offline debounce one failure short at a launcher verb's release
+// (stop-flush-under-debounce): the verb may have stopped the server, so the first idle beat that
+// fails after it is believed at once, as a cold start's and a `/server` switch's are, rather than
+// given the second chance a server that merely went quiet earns. Without it that one failure left
+// the footer online for another Interval, and the flush retry and a pending wake, which wait only
+// for the owed beat and then ask blockedUpstream, opened into the server the human just stopped.
+// A beat that lands resets the count, so a server the verb left running is not called offline; a
+// beat ignored under a running Exchange leaves the count primed for the next one.
+func (m *Model) primeOfflineCrossing() {
+	if m.actuation.beatOwed && m.hb.everOnline {
+		m.hb.failures = max(m.hb.failures, offlineFailureThreshold-1)
+	}
+}
+
+// armOwedBeat opens a fresh tick chain for the beat a release owes, on the completion paths that arm
+// none of their own (every failure, and a /stop-server or /unload-model that succeeded). The
+// generation bump is the point: a beat the running chain sent while the latch was held — while the
+// server was still going down — lands inert ([Model.heartbeatLive]) instead of paying the debt, so
+// only a beat sent after the release can let the flush retry or a wake go (actuation.beatOwed). The
+// beat it fires now rather than one Interval from now is that beat. It arms nothing when no beat is
+// owed (an unwired monitor), and like [Model.armBeat] it takes a pointer so the bump lands on the
+// caller's copy, which arms in a statement of its own.
+func (m *Model) armOwedBeat() tea.Cmd {
+	if !m.actuation.beatOwed {
+		return nil
+	}
+	return m.armBeat()
 }
 
 // ----------------------------------------------------------------------------

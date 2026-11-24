@@ -115,7 +115,7 @@ type engineHolds struct {
 	hasQueuedCommands bool
 	// isModalPaneOpen reports a pane that owns the keyboard is up ([Model.modalPaneOpen]).
 	isModalPaneOpen bool
-	// isBeatOwed reports a launcher verb has released the latch and no beat has folded since
+	// isBeatOwed reports a launcher verb has released the latch and no beat sent since has folded
 	// (actuation.beatOwed): the server it restarted or stopped is not yet observed, so an automatic
 	// opener waits for that beat.
 	isBeatOwed bool

@@ -559,8 +559,9 @@ func wakeAfterFold(next tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 // engine), a /bg launch (it reads the Agent off the loop), a queued record write or fork (it
 // snapshots the engine at idle), a held message (the human's next ⏎ sends it, and the note rides
 // with it), or a modal pane the human is answering. The wake itself asks one thing more, since it
-// opens an Exchange: no refusing hold and no beat owed after a launcher verb's release
-// (engineHolds.canOpenWake); the waiting prompt and the adoption pane, which open none, ask this.
+// opens an Exchange: no refusing hold, no beat owed after a launcher verb's release
+// (engineHolds.canOpenWake) and a server to send to (blockedUpstream); the waiting prompt and the
+// adoption pane, which open none, ask this.
 func (m Model) canWake() bool {
 	return m.engineHolds().canWake()
 }
@@ -575,18 +576,19 @@ func (m Model) modalPaneOpen() bool {
 	return false
 }
 
-// wakeIfIdle tries the wake a background workflow's end asked for, once, when canWake allows it
-// and no refusing hold stands nor a beat is owed after a launcher verb's release
-// (engineHolds.canOpenWake, adr-0029-amend-1123); until then the request is held, silently, and the
-// next fold asks again. Engine.Wake queues the held finish
-// notes as a new Exchange's opening message and reports whether it did — it declines, leaving them
-// held, under `workflow-wake: off` (they ride the next message) or when a running Exchange's drain
-// already took them — and on a wake the Exchange is launched exactly as a typed prompt's is: the
+// wakeIfIdle tries the wake a background workflow's end asked for, once, when canWake allows it,
+// no refusing hold stands nor a beat is owed after a launcher verb's release
+// (engineHolds.canOpenWake, adr-0029-amend-1123), and there is something to send to
+// (blockedUpstream, as a human send asks); until then the request is held, silently, and the
+// next fold asks again — the beat that brings the server back among them. Engine.Wake queues the
+// held finish notes as a new Exchange's opening message and reports whether it did — it declines,
+// leaving them held, under `workflow-wake: off` (they ride the next message) or when a running
+// Exchange's drain already took them — and on a wake the Exchange is launched exactly as a typed prompt's is: the
 // tail followed, a depth-0 prompt row, a worker with a mailbox. The boundary a wake's progress saves
 // pair with is the one before Wake queued its opening, as a typed prompt's is the one before its
 // Submit, so a record saved mid-wake never carries the queued opening as pending input.
 func (m Model) wakeIfIdle() (Model, tea.Cmd) {
-	if !m.engineHolds().canOpenWake() {
+	if !m.engineHolds().canOpenWake() || m.blockedUpstream() {
 		return m, nil
 	}
 	m.wakePending = false

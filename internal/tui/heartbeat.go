@@ -163,7 +163,8 @@ type rebindIntent struct {
 // server actually went away, at worst twice that interval plus that timeout (~90–150 s at today's
 // values). The window widened with the probe budget, which is the price of not calling a saturated
 // local server dead — this supersedes ADR 0024's "~15–25 s" debounce line. Before any beat has landed there is nothing to weigh against, so a cold start says so
-// on the first failure — see foldBeatFailure.
+// on the first failure, and a launcher verb's release starts the count one short, so the first idle
+// failure after it says so too — see foldBeatFailure.
 const offlineFailureThreshold = 2
 
 // onlineNote and offlineNote word the two transitions, each recorded exactly once per crossing
@@ -272,6 +273,8 @@ func (m Model) foldBeatMsg(msg beatMsg) (tea.Model, tea.Cmd) {
 	}
 	// A live beat has folded, so the one a launcher verb's release owed the automatic openers is
 	// paid: from here the heartbeat's own state says whether the server is there (blockedUpstream).
+	// Live means sent after the release, because every release arms a fresh chain and a beat the
+	// retired chain sent under the latch failed the guard above ([Model.armOwedBeat]).
 	m.actuation.beatOwed = false
 	// A beat that MOVED something — the offline state, a binding, the rows of an open picker — is
 	// laid out by Update's tail ([Model.settle]): its notes move the transcript generation, and a
@@ -822,6 +825,9 @@ func serverSwitchNote(from string, to Options, saved bool) string {
 //     driven into an engine the completion may be about to re-point (observeBinding).
 //   - Before any beat has ever landed, one failure is enough: a cold start against a server that
 //     is not running should say so at once rather than after a debounce it has no evidence for.
+//     The first idle failure after a launcher verb's release is believed at once too, because the
+//     release primed the count one short ([Model.primeOfflineCrossing]): the verb may have stopped
+//     the server, and the human who ran it is owed no second chance for it.
 //   - Otherwise the crossing waits for offlineFailureThreshold consecutive idle failures.
 //
 // The crossing is noted exactly once — and published once, through [Options.ReportUpstream] —
@@ -863,7 +869,8 @@ func (m Model) foldBeatFailure(failure string) Model {
 // the flush needs this guard too. Its RETRY is gated (flushAfterFold, adr-0029-amend-1123): a
 // flush a refusing hold turned away goes at a later fold, by which time a launcher verb may have
 // stopped the server, so the retry waits for a beat after the latch's release and then for this to
-// say there is something to send to.
+// say there is something to send to. A background workflow's WAKE is a fifth opener and asks this
+// at every try (wakeIfIdle), waiting silently while it holds.
 //
 // With the monitor unwired it is always false: nothing observes the server, so the TUI has no
 // standing to refuse anything (and every pre-heartbeat test keeps its behaviour).

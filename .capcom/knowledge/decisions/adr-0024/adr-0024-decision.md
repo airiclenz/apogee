@@ -153,6 +153,12 @@ degrades.** Three rules, in order:
   — `offlineFailureThreshold`, `internal/tui/heartbeat.go`), so one five-second
   discovery timeout under load cannot flicker the footer.
 
+  > **Amended 2026-11-24 (`stop-flush-under-debounce`, owner call).** A launcher verb's release
+  > (`/stop-server`, `/unload-model`, a `/model <profile>` load; ADR 0029) is a third case believed
+  > at once: the release primes the count one failure short (`Model.primeOfflineCrossing`), so the
+  > first idle failure after it crosses offline. The verb may have stopped the server, and the human
+  > who ran it is owed no debounce. A beat that lands resets the count, restoring this rule.
+
 Each crossing is noted **exactly once**, both ways (the `saveFailing` fail-once posture). While
 there is nothing to send to — offline, or no model bound yet — the three paths that would open an
 Exchange (a message, `/continue`, `/compact`) are refused with a transcript note naming the

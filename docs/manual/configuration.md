@@ -3092,8 +3092,8 @@ Apogee imports it as a library, so three commands act on this machine's servers:
 - **`/unload-model`** — free the model of the server this session is on. On a *managed*
   llama.cpp server the model is baked into the process, so unloading it stops the
   server — the transcript says which of the two happened.
-- **`/stop-server`** — stop the server this session is on; the footer's ordinary offline
-  handling narrates the rest.
+- **`/stop-server`** — stop the server this session is on; the footer turns offline at the
+  first heartbeat that cannot reach it, and nothing is sent to it until it answers again.
 
 All three are ordinary menu rows. The last two name what they act on, which is what makes
 them safe to offer: neither can touch anything but the server this session is talking to.

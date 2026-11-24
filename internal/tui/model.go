@@ -400,7 +400,8 @@ type Model struct {
 	//
 	// wakePending says a background workflow has ended since the last wake was tried: the Update
 	// tail asks the engine to wake on its finish note at the first idle fold with no idle-only
-	// operation in flight and no refusing hold standing (wakeIfIdle), and clears it on that one try.
+	// operation in flight, no refusing hold standing, no beat owed after a launcher verb's release
+	// and a server to send to (wakeIfIdle), and clears it on that one try.
 	//
 	// flushPending says a completion flush found a refusing hold standing (exchangeRefusal) and left
 	// the staged rows where they were under the hold's note: the Update tail retries the flush at

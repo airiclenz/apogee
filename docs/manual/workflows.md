@@ -433,7 +433,8 @@ the session server instead. A run that could not proceed is the one line
 `sub_agent <name> failed — <why>`. Then:
 
 - an **idle** agent is woken: apogee opens a turn of its own on the note, shown as a
-  `(background workflow report)` prompt row, which `esc` cancels like any other;
+  `(background workflow report)` prompt row, which `esc` cancels like any other. While the
+  footer says the server is offline, the wake waits and goes once the server answers again;
 - a **busy** agent gets the note at its next pause between tool calls;
 - under `workflow-wake: off` (a file-only key, `on` or `off`, default `on`) nothing is woken, and
   the note rides your next message instead.

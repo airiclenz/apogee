@@ -636,7 +636,8 @@
 // prevent, one seam across. What a beat MEANS is [Model.foldBeat] — a failure while an Exchange is in flight is
 // IGNORED (a streaming reply is stronger evidence that the server is there than a timed-out probe
 // on a saturated one), a failure before any beat has ever landed is believed at once (a cold start
-// against a stopped server should say so), and otherwise the offline crossing waits for
+// against a stopped server should say so), so is the first idle failure after a launcher verb's
+// release ([Model.primeOfflineCrossing]: the verb may have stopped the server), and otherwise the offline crossing waits for
 // offlineFailureThreshold consecutive idle failures, each crossing noted exactly once (the
 // saveFailing fail-once posture). The consequence is [Model.blockedUpstream]: the three paths a
 // HUMAN opens an Exchange with — a message, /continue, /compact — are refused with a note while
@@ -649,7 +650,8 @@
 // Exchange is ignored — means the offline state cannot have moved since the Exchange that just
 // completed was allowed to start. Its retry, after a refusing hold turned it away, is gated
 // ([flushAfterFold], adr-0029-amend-1123): by then a launcher verb may have stopped the server, so
-// the retry waits for a beat folded since the latch's release and for blockedUpstream to clear. An
+// the retry waits for a beat sent since the latch's release and for blockedUpstream to clear. A
+// background workflow's wake ([Model.wakeIfIdle]) asks blockedUpstream too, and waits silently. An
 // unwired seam arms no chain, folds nothing and blocks nothing, which is exactly the pre-heartbeat
 // renderer.
 //

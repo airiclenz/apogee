@@ -49,6 +49,11 @@ report path.
 - **The agent is idle:** the Driver opens a new Exchange on the note itself. This is the **wake**.
   The wake's reply is bounded by the Mode and the approval rules like any other reply.
 
+  > **Amended 2026-11-24 (`stop-flush-under-debounce`, owner call).** In the TUI the wake waits,
+  > silently, while there is nothing to send to — the footer says offline, or no model is bound yet —
+  > as a typed message is refused then (`blockedUpstream`, ADR 0024 D7). It fires at the first fold
+  > that finds the server back. It used to open its Exchange into the absent server and fail.
+
 The engine only emits the event; the Driver decides to wake (ADR 0031's wire-silent engine). The
 `workflow-wake` config key, `on` by default, turns the wake off. With it off, the TUI shows the
 finish and the note rides on the user's next message. ADR 0007 is amended: an Exchange may open on
