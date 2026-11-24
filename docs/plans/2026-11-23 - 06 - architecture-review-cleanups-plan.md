@@ -3,7 +3,13 @@
 **Goal:** close the ten remaining architecture-review cleanups: one advise call, one publish-step row, a run view's `~` estimate, a question pane that is one module, paste on the pane table with one draft edit door, one session seat, one Exchange-hold question, one config source with per-key provenance, and one Driver host. Behaviour changes only where a ratified call below says so.
 
 **Date:** 2026-11-23
-**Status:** unexecuted
+**Status:** in progress (2026-11-24) — items 1–14 done on the run branch, items 15–25 to do
+**Resume (2026-11-24):**
+- Run branch: local `implement-plan/2026-11-23_-_06_-_architecture-review-cleanups-plan`, cut from `main`; items 1–14 are one commit each there (1 `59d0d6d04` … 14 `d1b2bfd0b`). `main` is untouched and nothing is pushed.
+- Next is item 15 (its dependency, item 14, is done).
+- To resume: check out the run branch and invoke `/implement-plan 06` (or with this plan's path). The skill picks the branch up, skips the items marked done and continues at item 15; it takes a fresh capcom tree lock.
+- Run state lives in `docs/skill-runs/implement-plan/2026-11-23_-_06_-_architecture-review-cleanups-plan/` (`ledger.md`, `notes-<id>.md`). That directory is git-ignored (`/docs/skill-runs/` in `.gitignore`), so it exists only on this machine and must survive here: it is the only copy of the pending CHANGELOG entries and ticket closes.
+- Deferred to the closeout: each done item's CHANGELOG entry and the capcom tickets it closes (both held in the `notes-<id>.md` sidecars), and one non-blocking DEFER finding to file in capcom — item 12: with /stop-server or /unload-model, a heartbeat sent before the hold's release but folded after it also clears `beatOwed` (the beat chain is not re-armed at release); this matches the plan's "a beat has folded since the release" rule.
 **sized for:** ~200k-context host
 **base:** e3079a0c
 
