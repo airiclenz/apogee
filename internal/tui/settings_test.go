@@ -281,7 +281,7 @@ func TestSettingsDisplayRowsInterleaveSectionHeaders(t *testing.T) {
 	rows := []SettingRow{
 		{Path: "endpoint", Section: "Upstream", Value: "http://h:1111", Editable: true},
 		{Path: "mode", Section: "Upstream", Value: "auto", Editable: true,
-			Source: SettingFromEnv, SourceName: "APOGEE_MODE"},
+			Source: SettingFromEnv, SourceName: "APOGEE_MODE", OutranksGlobal: true, OutranksProject: true},
 		{Path: "servers", Section: "Upstream", Value: "3 servers", EditPointer: "⏎ opens $EDITOR", ExternalEdit: true},
 		{Path: "ui.spinner", Section: "Interface", Value: "snake", Editable: true},
 	}
@@ -2177,8 +2177,8 @@ func TestSettingsPaneOverriddenRowSaysTheOverrideOutranksItAtTheNextStart(t *tes
 	t.Parallel()
 	rows := []SettingRow{{
 		Path: "bypass", Section: "Mechanisms", Kind: SettingBool, Value: "true", Default: "false",
-		Source: SettingFromEnv, SourceName: "APOGEE_BYPASS", Editable: true,
-		Desc: "Run with Mechanisms off.",
+		Source: SettingFromEnv, SourceName: "APOGEE_BYPASS", OutranksGlobal: true, OutranksProject: true,
+		Editable: true, Desc: "Run with Mechanisms off.",
 	}}
 	log := &settingsWriteLog{}
 	m, _ := settingsEditModel(t, rows, log)
@@ -2212,7 +2212,7 @@ func TestSettingsPaneProjectRowSaysTheProjectConfigOutranksItAtTheNextStart(t *t
 	t.Parallel()
 	rows := []SettingRow{{
 		Path: "retries", Section: "Session", Kind: SettingBool, Value: "true", Default: "false",
-		Source: SettingFromProject, Editable: true, Desc: "Retries.",
+		Source: SettingFromProject, OutranksGlobal: true, Editable: true, Desc: "Retries.",
 	}}
 	log := &settingsWriteLog{}
 	m, _ := settingsEditModel(t, rows, log)
@@ -2236,7 +2236,7 @@ func TestSettingsPaneProjectRowReReadSaysNothingOutranksIt(t *testing.T) {
 	t.Parallel()
 	rows := []SettingRow{{
 		Path: "retries", Section: "Session", Kind: SettingBool, Value: settingFalse, Default: settingFalse,
-		Source: SettingFromProject, Editable: true, Desc: "Retries.",
+		Source: SettingFromProject, OutranksGlobal: true, Editable: true, Desc: "Retries.",
 	}}
 	edit := &externalEditLog{applied: []AppliedSetting{{Path: "retries", Value: settingTrue}}}
 
@@ -2311,7 +2311,8 @@ func TestSettingsPaneNeverDefersToTheNextLaunch(t *testing.T) {
 		{Path: "api-key", Section: "Upstream", Kind: SettingString, Value: "••••",
 			Editable: true, Masked: true, Desc: "Bearer token."},
 		{Path: "bypass", Section: "Mechanisms", Kind: SettingBool, Value: "true", Default: "false",
-			Source: SettingFromEnv, SourceName: "APOGEE_BYPASS", Editable: true, Desc: "Mechanisms off."},
+			Source: SettingFromEnv, SourceName: "APOGEE_BYPASS", OutranksGlobal: true, OutranksProject: true,
+			Editable: true, Desc: "Mechanisms off."},
 		{Path: "context-files.enable", Section: "System prompt", Kind: SettingBool, Value: "false",
 			Default: "true", Editable: true, Desc: "Fold the workspace context files in."},
 	}
@@ -4657,6 +4658,9 @@ func settingsProjectBoolRow(source SettingSource) SettingRow {
 		Path: "use-project-skills", Section: "Tools & skills", Kind: SettingBool, Value: "true",
 		Default: "true", Source: source, Editable: true, ProjectCapable: true,
 		Desc: "Discover skills from the workspace's bare skills/ folder as well as the libraries.",
+
+		// The binary's precedence answer for this row: a project value outranks the global file.
+		OutranksGlobal: source == SettingFromProject,
 	}
 }
 
@@ -4769,7 +4773,7 @@ func TestSettingsPaneProjectResetAppliesTheLayeredValue(t *testing.T) {
 func TestSettingsPaneGlobalSaveUnderAProjectValueNotesTheProjectOutranksIt(t *testing.T) {
 	t.Parallel()
 	log := &settingsWriteLog{layered: func(settingEdit) SettingOutcome {
-		return SettingOutcome{Value: "true", Source: SettingFromProject}
+		return SettingOutcome{Value: "true", Source: SettingFromProject, Outranked: true}
 	}}
 	m, _ := settingsEditModel(t, []SettingRow{settingsProjectBoolRow(SettingFromProject)}, log)
 
@@ -5010,7 +5014,7 @@ func TestSettingsPaneListsRepoServersWithState(t *testing.T) {
 	t.Parallel()
 	rows := []SettingRow{
 		{Path: "mcp-servers", Section: "Tools & skills", Kind: SettingStructured, Value: "2 servers",
-			Source: SettingFromProject, EditPointer: "set in the project config"},
+			Source: SettingFromProject, OutranksGlobal: true, EditPointer: "set in the project config"},
 		settingsProposalRow(domain.ProposalMCPServer, "wiki", SettingRuleAdopted),
 		settingsProposalRow(domain.ProposalMCPServer, "tracker", SettingRuleProposed),
 		settingsProposalRow(domain.ProposalMCPServer, "scraper", SettingRuleRejected),

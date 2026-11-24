@@ -153,20 +153,23 @@ func settingsRowsOffered(opts config.Options, offer config.ProjectOffer) []tui.S
 			pointer, external = pointerProject, false
 		}
 		rows = append(rows, tui.SettingRow{
-			Path:         k.Path,
-			Section:      section,
-			Kind:         settingKind(k.Kind),
-			Value:        value,
-			Text:         text,
-			Default:      k.Default,
-			Source:       tui.SettingSource(provenance.Source),
-			SourceName:   provenance.Name,
-			EnumValues:   k.EnumValues,
-			Editable:     k.Editable,
-			Masked:       k.Masked,
-			EditPointer:  pointer,
-			ExternalEdit: external,
-			Desc:         k.Desc,
+			Path:       k.Path,
+			Section:    section,
+			Kind:       settingKind(k.Kind),
+			Value:      value,
+			Text:       text,
+			Default:    k.Default,
+			Source:     tui.SettingSource(provenance.Source),
+			SourceName: provenance.Name,
+			// The precedence answer the pane reads instead of ranking sources itself.
+			OutranksGlobal:  provenance.Source.Outranks(config.SourceGlobal),
+			OutranksProject: provenance.Source.Outranks(config.SourceProject),
+			EnumValues:      k.EnumValues,
+			Editable:        k.Editable,
+			Masked:          k.Masked,
+			EditPointer:     pointer,
+			ExternalEdit:    external,
+			Desc:            k.Desc,
 			// A key a project may state is offered the project target wherever this pane writes it;
 			// the host takes the offer back in a session with no Project config (withoutProjectTarget).
 			ProjectCapable: k.Editable && k.ProjectSettable(),

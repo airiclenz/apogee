@@ -263,8 +263,9 @@ func otherSettingTarget(target SettingTarget) SettingTarget {
 // to the project keeps the global entries in force, a global save under a project value leaves the
 // project's in force, and a project reset falls back to the global file's (ADR 0096 §6).
 //
-// The edit is journaled with the file chosen and the source that now supplies the key, which is what
-// the row's source mark and its note report from then on (settingsSourceOf, settingsOutranksNote).
+// The edit is journaled with the file chosen, the source that now supplies the key and whether that
+// source outranks the file chosen (the binary's [SettingOutcome.Outranked]), which is what the row's
+// source mark and its note report from then on (settingsSourceOf, settingsOutranksNote).
 // It counts as a reset only where it returned the key to its default; a reset that uncovered the
 // other file's value is that value, landed like any other.
 //
@@ -279,11 +280,12 @@ func (m Model) settingsSaveToTarget(row SettingRow) (tea.Model, tea.Cmd) {
 	}
 	m.settings.kind, m.settings.editor = settingsKeyList, copyOnWriteField{}
 	m, cmd := m.settingsApplied(row, settingEdit{
-		path:   row.Path,
-		value:  outcome.Value,
-		reset:  pending.reset && outcome.Source == SettingFromDefault,
-		target: pending.target,
-		source: outcome.Source,
+		path:      row.Path,
+		value:     outcome.Value,
+		reset:     pending.reset && outcome.Source == SettingFromDefault,
+		target:    pending.target,
+		source:    outcome.Source,
+		outranked: outcome.Outranked,
 	})
 	return m, cmd
 }

@@ -606,7 +606,7 @@ func (h settingsHost) SaveTo(target tui.SettingTarget, key, value string) (tui.S
 	if target == tui.SettingTargetProject {
 		fallback.Source = tui.SettingFromProject
 	}
-	return h.landed(key, fallback), nil
+	return h.landed(target, key, fallback), nil
 }
 
 // ResetIn is Reset in the file target names, answered the same way: what the files say once the
@@ -628,7 +628,7 @@ func (h settingsHost) ResetIn(target tui.SettingTarget, key string) (tui.Setting
 	if k, ok := config.LookupKey(key); ok {
 		fallback.Value = k.Default
 	}
-	return h.landed(key, fallback), nil
+	return h.landed(target, key, fallback), nil
 }
 
 // projectSaveRoot is the Project root a `/settings` save to this project may write under, or "" when
@@ -671,10 +671,12 @@ func (h settingsHost) notHeldByProject(key string) error {
 }
 
 // landed re-takes the external-edit baseline over both files and answers what that reading says for
-// key: its row's value, in the spelling a re-read applies (appliedValue), and the file that supplies
-// it. fallback stands in when the files cannot be projected — the write itself landed, so the pane
+// key: its row's value, in the spelling a re-read applies (appliedValue), the file that supplies it,
+// and whether that source outranks the file target names — the row's own precedence flag for that
+// file, so a global save or reset under a project value answers Outranked and a project one does
+// not. fallback stands in when the files cannot be projected — the write itself landed, so the pane
 // still applies what it asked for, the pre-layering answer, rather than failing a save that happened.
-func (h settingsHost) landed(key string, fallback tui.SettingOutcome) tui.SettingOutcome {
+func (h settingsHost) landed(target tui.SettingTarget, key string, fallback tui.SettingOutcome) tui.SettingOutcome {
 	if h.edits == nil {
 		return fallback
 	}
@@ -684,7 +686,11 @@ func (h settingsHost) landed(key string, fallback tui.SettingOutcome) tui.Settin
 	}
 	for _, row := range projected.rows {
 		if row.Path == key {
-			return tui.SettingOutcome{Value: appliedValue(row), Source: row.Source}
+			outranked := row.OutranksGlobal
+			if target == tui.SettingTargetProject {
+				outranked = row.OutranksProject
+			}
+			return tui.SettingOutcome{Value: appliedValue(row), Source: row.Source, Outranked: outranked}
 		}
 	}
 	return fallback

@@ -216,17 +216,19 @@ type settingsPendingSave struct {
 // the file the human chose, and the file that supplies the key once the save landed. The row's own
 // [SettingRow.Source] agrees from the next paint, because the provider marks every row off the files
 // as they stand now; source is the journal's copy of the same answer. Both are empty for every other
-// edit.
+// edit. outranked is the same save's [SettingOutcome.Outranked]: the binary's answer that the source
+// now supplying the key outranks the file chosen, false for every other edit.
 type settingEdit struct {
-	path     string
-	value    string
-	note     string
-	reset    bool
-	watched  bool
-	reread   bool
-	unstated bool
-	target   SettingTarget
-	source   SettingSource
+	path      string
+	value     string
+	note      string
+	reset     bool
+	watched   bool
+	reread    bool
+	unstated  bool
+	target    SettingTarget
+	source    SettingSource
+	outranked bool
 }
 
 // settingFailure is the last write this pane was REFUSED, and by what — a read-only config home, a
@@ -433,33 +435,39 @@ func settingsSourceMarker(source SettingSource) string {
 	return "(" + string(source) + ")"
 }
 
-// settingsOverride reports whether a source is an override — an environment variable or a flag —
-// which outranks both config files whichever one this pane writes.
-func settingsOverride(source SettingSource) bool {
-	return source == SettingFromEnv || source == SettingFromFlag
+// settingsOutranksBoth reports whether a row's source outranks both config files whichever one this
+// pane writes — an override, an environment variable or a flag — by the binary's own answer
+// ([SettingRow.OutranksGlobal], [SettingRow.OutranksProject]).
+func settingsOutranksBoth(row SettingRow) bool {
+	return row.OutranksGlobal && row.OutranksProject
 }
 
 // settingsOutranksNote is what an edited row says about a source that sits above the file its edit
 // was written to, or "" when nothing does:
 //
-//   - an override (env, flag) wins again at the next start, though the edit applied now — "APOGEE_MODE
-//     outranks at next launch";
-//   - a save to the GLOBAL file under a value the Project config sets changes nothing in force: the
-//     pane applied the layered value, which is still the project's (settingsSaveToTarget), so the
-//     note says where the save went and what kept it from mattering;
-//   - an untargeted in-pane write — which lands in the global file — of a row the Project config
-//     supplies is outranked at the next start like an override's.
+//   - a source that outranks both files (an override: env, flag) wins again at the next start, though
+//     the edit applied now — "APOGEE_MODE outranks at next launch";
+//   - a targeted save the binary answered as outranked ([SettingOutcome.Outranked]) — a save to the
+//     GLOBAL file under a value the Project config sets — changes nothing in force: the pane applied
+//     the layered value, which is still the project's (settingsSaveToTarget), so the note says where
+//     the save went and what kept it from mattering;
+//   - an untargeted in-pane write — which lands in the global file — of a row whose source outranks
+//     the global file ([SettingRow.OutranksGlobal]: the Project config) is outranked at the next
+//     start like an override's.
+//
+// Every precedence fact here is the binary's (config's rank order), carried on the row and the
+// outcome: the pane ranks no [SettingSource] itself.
 //
 // A save to the file that now supplies the key, every edit of a default or global row, and every
 // re-read of the files says nothing: the next start reads exactly what was written, and a re-read
 // applied the layered value the next start resolves, whichever file the row's mark now names.
 func settingsOutranksNote(row SettingRow, edit settingEdit) string {
 	switch {
-	case settingsOverride(row.Source):
+	case settingsOutranksBoth(row):
 		return settingsSourceLabel(row) + " outranks at next launch"
-	case edit.target == SettingTargetGlobal && edit.source == SettingFromProject:
+	case edit.outranked:
 		return settingsProjectOutranksNote
-	case edit.target == "" && !edit.reread && row.Source == SettingFromProject:
+	case edit.target == "" && !edit.reread && row.OutranksGlobal:
 		return settingsSourceLabel(row) + " outranks at next launch"
 	}
 	return ""
@@ -471,9 +479,9 @@ const settingsProjectOutranksNote = "saved to global; the project config outrank
 // settingsSourceOf is the source mark a row paints: the source a targeted save left supplying the key
 // (settingEdit.source) once one has landed, else the row's own — the provider's, read off the files
 // as they stand now. The two agree once the provider has re-read; the journal's copy answers the same
-// keypress. An override keeps its mark whatever was saved, because it outranks both files.
+// keypress. A source that outranks both files (an override) keeps its mark whatever was saved.
 func (m *Model) settingsSourceOf(row SettingRow) SettingSource {
-	if settingsOverride(row.Source) {
+	if settingsOutranksBoth(row) {
 		return row.Source
 	}
 	if edit, ok := m.settingEditOf(row.Path); ok && edit.source != "" {

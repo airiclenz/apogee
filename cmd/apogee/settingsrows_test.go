@@ -608,6 +608,21 @@ func TestSettingsRowsMarkOverriddenKeys(t *testing.T) {
 			t.Errorf("row %q source = {%q %q}; want {%q \"\"}", path, got.Source, got.SourceName, want)
 		}
 	}
+	// The precedence answer rides on every row, so the pane ranks no source itself: an override
+	// outranks both files, a project value the global file only, and nothing outranks a global or
+	// default row's file.
+	for path, want := range map[string][2]bool{
+		"mode":             {true, true},
+		"server":           {true, true},
+		"workflow-retries": {true, false},
+		"servers":          {false, false},
+		"auto-compact":     {false, false},
+	} {
+		if got := byPath[path]; [2]bool{got.OutranksGlobal, got.OutranksProject} != want {
+			t.Errorf("row %q outranks {global %v project %v}; want {global %v project %v}",
+				path, got.OutranksGlobal, got.OutranksProject, want[0], want[1])
+		}
+	}
 	if got := byPath["workflow-retries"]; got.Editable || got.EditPointer != pointerProject || got.ExternalEdit {
 		t.Errorf("workflow-retries row = {editable %v pointer %q externalEdit %v}; want read-only, "+
 			"pointing at the project config, opening no editor", got.Editable, got.EditPointer, got.ExternalEdit)
@@ -919,7 +934,8 @@ func TestSettingsHostSavesAParamKeyToTheProjectConfig(t *testing.T) {
 	if global, _ := os.ReadFile(h.configPath); strings.Contains(string(global), "use-project-skills: false") {
 		t.Errorf("the project save reached the global file:\n%s", global)
 	}
-	if want := (tui.SettingOutcome{Value: "false", Source: tui.SettingFromProject}); outcome != want {
+	// Nothing outranks the project file the save landed in: the saved value is the one in force.
+	if want := (tui.SettingOutcome{Value: "false", Source: tui.SettingFromProject, Outranked: false}); outcome != want {
 		t.Errorf("outcome = %+v, want %+v", outcome, want)
 	}
 	if reload, err := h.edits.changed(); err != nil || len(reload.Applied) != 0 {
@@ -960,7 +976,7 @@ func TestSettingsHostResetInAnswersTheLayeredValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResetIn(global): %v", err)
 	}
-	if want := (tui.SettingOutcome{Value: "true", Source: tui.SettingFromProject}); underProject != want {
+	if want := (tui.SettingOutcome{Value: "true", Source: tui.SettingFromProject, Outranked: true}); underProject != want {
 		t.Errorf("global reset outcome = %+v, want the project's %+v", underProject, want)
 	}
 

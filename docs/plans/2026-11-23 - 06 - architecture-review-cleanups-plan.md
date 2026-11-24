@@ -492,7 +492,9 @@ NOTES (2026-11-24): `externalEdit.fileLayers()` returns a `config.Options` carry
 - `! grep -n 'ClassProjectParam\|ClassTightenOnly' internal/config/projectwrite.go cmd/apogee/settingsrows.go && ! grep -n 'func withBootUnreportedKeys\|func settingSource\|func savableToProject' cmd/apogee/*.go`
 **Commit:** `refactor(config): a key's layer and winning source are config's answer`
 
-## 20. The settings pane reads config's precedence answer
+## 20. The settings pane reads config's precedence answer — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): `settingsOverride` is replaced by `settingsOutranksBoth(row)` (`OutranksGlobal && OutranksProject`), the one predicate both `settingsSourceOf` and `settingsOutranksNote`'s first case read. `settingsDefaultTarget`'s `== SettingFromProject` (which file supplies the key, not a rank) and `settingsSourceLabel`'s are left as they were. The Allow-rule and repo-entry rows (`allowRuleRow`, `repoEntryRow`) carry no flags: they journal no `settingEdit`, so no note reads them.
 
 **What:** Depends on item 19.
 **Goal:** internal/tui compares no `SettingSource` values to decide precedence; `settingsOverride` is gone; `settingsSourceOf` and `settingsOutranksNote` read only row and outcome fields; notes on screen unchanged.

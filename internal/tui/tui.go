@@ -2124,9 +2124,14 @@ const (
 // falls back to the global file's, and a tighten-only list saved to the project is the union of
 // both files' entries. The pane applies and journals this, so the running session and the row
 // agree with what the next start will resolve from the files.
+//
+// Outranked is the binary's precedence answer for the save: whether the source that now supplies the
+// key outranks the file the save or reset was made in — a global save under a project value, which
+// leaves the project's value in force. The pane reads it rather than ranking sources itself.
 type SettingOutcome struct {
-	Value  string        // the layered value, in the spelling [SettingsHost.Apply] takes and the row shows
-	Source SettingSource // the file that now supplies it: default, global or project
+	Value     string        // the layered value, in the spelling [SettingsHost.Apply] takes and the row shows
+	Source    SettingSource // the file that now supplies it: default, global or project
+	Outranked bool          // a source above the target file supplies the key: what was written is not in force
 }
 
 // SettingRow is one row of the `/settings` pane: a config key as the binary resolved it this run.
@@ -2166,6 +2171,14 @@ type SettingRow struct {
 	// SourceName is empty for every source but [SettingFromEnv] and [SettingFromFlag].
 	Source     SettingSource
 	SourceName string
+
+	// OutranksGlobal and OutranksProject are the binary's precedence answer for this row: whether
+	// its Source outranks a value written to the global file, and to the Project config. An override
+	// (env, flag) outranks both, a Project config value the global file only. The pane reads these
+	// rather than ranking [SettingSource] values itself; a row whose provider set neither has
+	// nothing above the file an edit lands in.
+	OutranksGlobal  bool
+	OutranksProject bool
 
 	EnumValues  []string // the closed vocabulary, non-empty exactly for [SettingEnum] ([SettingServer] reads ServerHost.List instead)
 	Editable    bool     // this pane may write the key — and, since ADR 0037, apply it on the same ⏎
