@@ -69,7 +69,10 @@
 // dropped with a notice, and `dangerous-rules:` carried apart: its `add:` to the security seam as the
 // project's additions, its `remove:` dropped with a notice. files.go is the one config source
 // ([Files]): which global file and which Project root a resolution reads, walked once and carried
-// on Options so every later read of the session asks the same files. allow.go is the `allow:` key, the one
+// on Options so every later read of the session asks the same files. provenance.go is per-key
+// provenance ([Options.ProvenanceOf]): which source supplied a key's value, what an override is
+// called, and the one rank order of the sources ([Source.Outranks]), so a surface that marks a row
+// reads config's answer instead of re-deriving it. allow.go is the `allow:` key, the one
 // granting key (ADR 0096 §2, §4): the on-disk Allow rules, the global file's live as written, the
 // Project config's carried apart from the merge and sorted by the user's adoption record
 // (internal/adoption) — only the adopted ones join the effective set, the rest are reported as
