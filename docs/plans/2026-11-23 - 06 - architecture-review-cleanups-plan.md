@@ -432,7 +432,10 @@ NOTES (2026-11-24): `refuseUnadoptedRepoServer` drops its now-unused `roots` par
 - `! grep -rn 'projectConfigWatchPath' --include=*.go cmd`
 **Commit:** `refactor(cmd): project-file locations are the config source's`
 
-## 17. The Adoption snapshot and project rules read through the source
+## 17. The Adoption snapshot and project rules read through the source — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): `Files.ProjectAlone(readFile)` takes no notify, as the plan spells it: it drops the read's notices itself (the held check always dropped them via `noNotice`). `heldPrints` keeps `isSameFile` (stat-based) against `files.GlobalPath()` on top of `ProjectPath()`'s cleaned-path check, so a project file reaching the global file through a symlink still holds no entry.
+NOTES (2026-11-24): answer_test.go's `answerFixture` gains a `files` field built once as `config.FilesAt(filepath.Dir(globalPath), root, root)` rather than repeating that expression at each of the eight `Load`/`Answer` call sites; snapshot_test.go builds the same value once in `loadFixture`. `projectAdoptTarget.files` is the `files` `sessionRoots(*opts)` answers (`opts.ConfigFiles()`, i.e. `opts.Files` after the resolution).
 
 **What:** Depends on item 15.
 **Goal:** `project.Load` and `project.Answer` take a `config.Files`; internal/project names no `config.LoadLayeredOffer`.

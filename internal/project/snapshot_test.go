@@ -46,7 +46,8 @@ func loadFixture(t *testing.T) Snapshot {
 		}
 	}
 
-	unanswered, err := Load(globalPath, root, os.ReadFile, noNotify)
+	files := config.FilesAt(filepath.Dir(globalPath), root, root)
+	unanswered, err := Load(files, os.ReadFile, noNotify)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -66,7 +67,7 @@ func loadFixture(t *testing.T) Snapshot {
 		}
 	}
 
-	snapshot, err := Load(globalPath, root, os.ReadFile, noNotify)
+	snapshot, err := Load(files, os.ReadFile, noNotify)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}

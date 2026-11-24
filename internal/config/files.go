@@ -93,6 +93,16 @@ func (f Files) Layered(readFile func(string) ([]byte, error),
 	return LoadLayeredOffer(f.GlobalPath(), f.ProjectRoot(), readFile, notify)
 }
 
+// ProjectAlone reads f's Project config on its own, with no global file and so no adoption record
+// (ADR 0096 §4): every entry the project file holds comes back as it stands, unsorted by any answer
+// the user gave — the read an adoption's held check makes. The read's notices are dropped, so a
+// project file the layer skips answers no entry, and the loader's error comes back as it is. The
+// zero value and a source with no Project root read nothing and answer the options of no file at
+// all.
+func (f Files) ProjectAlone(readFile func(string) ([]byte, error)) (Options, ProjectOffer, error) {
+	return LoadLayeredOffer("", f.ProjectRoot(), readFile, func(string) {})
+}
+
 // GlobalDocument reads f's global file once, for the overlays a Driver layering many projects over
 // one startup resolution makes ([ReadGlobalDocument]): it never migrates, and an absent file is the
 // empty document. The zero value reads nothing and answers the empty document.

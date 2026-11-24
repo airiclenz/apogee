@@ -14,10 +14,11 @@ import (
 )
 
 // answerFixture is a global config and a Project config side by side under one temp dir, with the
-// Project root's adoption store; nothing is answered yet.
+// Project root's adoption store, and the config source naming both files; nothing is answered yet.
 type answerFixture struct {
 	globalPath string
 	root       string
+	files      config.Files
 	store      *adoption.Store
 }
 
@@ -37,7 +38,13 @@ func newAnswerFixture(t *testing.T) answerFixture {
 	if err != nil {
 		t.Fatalf("adoption.New: %v", err)
 	}
-	f := answerFixture{globalPath: filepath.Join(home, "config.yaml"), root: root, store: store}
+	globalPath := filepath.Join(home, "config.yaml")
+	f := answerFixture{
+		globalPath: globalPath,
+		root:       root,
+		files:      config.FilesAt(filepath.Dir(globalPath), root, root),
+		store:      store,
+	}
 	f.writeGlobal(t, "mode: plan\n")
 	f.writeProject(t, snapshotProjectYAML)
 	return f
@@ -70,7 +77,7 @@ func (f answerFixture) removeProject(t *testing.T) {
 // entries is what the Project config offers now: every entry of snapshotProjectYAML before an answer.
 func (f answerFixture) entries(t *testing.T) []domain.Proposal {
 	t.Helper()
-	snapshot, err := Load(f.globalPath, f.root, os.ReadFile, noNotify)
+	snapshot, err := Load(f.files, os.ReadFile, noNotify)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -120,7 +127,7 @@ func TestAnswerAdoptRecordsEachKindTheFileHolds(t *testing.T) {
 	f := newAnswerFixture(t)
 	entries := f.entries(t)
 
-	next, notHeld, err := Answer(f.globalPath, f.root, os.ReadFile, f.store, entries, true)
+	next, notHeld, err := Answer(f.files, os.ReadFile, f.store, entries, true)
 
 	if err != nil || len(notHeld) != 0 {
 		t.Fatalf("Answer(adopt) = notHeld %+v, err %v; want every entry adopted", notHeld, err)
@@ -169,7 +176,7 @@ func TestAnswerAdoptRefusesWhatTheFileNoLongerHolds(t *testing.T) {
 			entries := f.entries(t)
 			f.writeProject(t, tc.edited)
 
-			_, notHeld, err := Answer(f.globalPath, f.root, os.ReadFile, f.store, entries, true)
+			_, notHeld, err := Answer(f.files, os.ReadFile, f.store, entries, true)
 
 			if err != nil {
 				t.Fatalf("Answer(adopt): %v", err)
@@ -198,7 +205,7 @@ func TestAnswerAdoptWithNothingHeldWritesNoRecord(t *testing.T) {
 	entries := f.entries(t)
 	f.removeProject(t)
 
-	next, notHeld, err := Answer(f.globalPath, f.root, os.ReadFile, f.store, entries, true)
+	next, notHeld, err := Answer(f.files, os.ReadFile, f.store, entries, true)
 
 	if err != nil {
 		t.Fatalf("Answer(adopt): %v", err)
@@ -219,7 +226,7 @@ func TestAnswerRejectRecordsWithoutAHeldCheck(t *testing.T) {
 	entries := f.entries(t)
 	f.removeProject(t)
 
-	_, notHeld, err := Answer(f.globalPath, f.root, os.ReadFile, f.store, entries, false)
+	_, notHeld, err := Answer(f.files, os.ReadFile, f.store, entries, false)
 
 	if err != nil || notHeld != nil {
 		t.Fatalf("Answer(reject) = notHeld %+v, err %v; want every entry rejected", notHeld, err)
@@ -292,7 +299,7 @@ func TestAnswerUnderABrokenGlobalOrStore(t *testing.T) {
 		entries := f.entries(t)
 		f.writeGlobal(t, "model: [unclosed\n")
 
-		_, notHeld, err := Answer(f.globalPath, f.root, os.ReadFile, f.store, entries, true)
+		_, notHeld, err := Answer(f.files, os.ReadFile, f.store, entries, true)
 
 		var loadErr *NextLoadError
 		if !errors.As(err, &loadErr) {
@@ -320,7 +327,7 @@ func TestAnswerUnderABrokenGlobalOrStore(t *testing.T) {
 			t.Fatalf("break the record: %v", err)
 		}
 
-		_, _, err := Answer(f.globalPath, f.root, os.ReadFile, f.store, entries, true)
+		_, _, err := Answer(f.files, os.ReadFile, f.store, entries, true)
 
 		var loadErr *NextLoadError
 		var heldErr *HeldCheckError
@@ -346,7 +353,7 @@ func TestAnswerAdoptsARepoServerAGlobalOneShadows(t *testing.T) {
 	}
 	f.writeGlobal(t, "mode: plan\nmcp-servers:\n  - name: srv-a\n    transport: stdio\n    command: global-srv\n")
 
-	_, notHeld, err := Answer(f.globalPath, f.root, os.ReadFile, f.store, []domain.Proposal{server}, true)
+	_, notHeld, err := Answer(f.files, os.ReadFile, f.store, []domain.Proposal{server}, true)
 
 	if err != nil || len(notHeld) != 0 {
 		t.Fatalf("Answer(adopt srv-a) = notHeld %+v, err %v; want it adopted", notHeld, err)

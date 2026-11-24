@@ -21,14 +21,15 @@ type Snapshot struct {
 	entries []domain.Proposal
 }
 
-// Load reads one Snapshot: the global config at globalPath with the Project config of root layered
-// over it, sorted by root's adoption record (config.LoadLayeredOffer). readFile reads every file and
-// notify hears the loader's notices; an empty root is no project layer.
+// Load reads one Snapshot from the config source files: its global config with its Project config
+// layered over it, sorted by the Project root's adoption record (config.Files.Layered). readFile
+// reads every file and notify hears the loader's notices; a source with no Project root is no
+// project layer.
 //
 // Errors: the loader's, unwrapped — a global config that does not resolve. A Project config that
 // does not parse is a notice, and the global file alone answers.
-func Load(globalPath, root string, readFile func(string) ([]byte, error), notify func(string)) (Snapshot, error) {
-	options, offer, err := config.LoadLayeredOffer(globalPath, root, readFile, notify)
+func Load(files config.Files, readFile func(string) ([]byte, error), notify func(string)) (Snapshot, error) {
+	options, offer, err := files.Layered(readFile, notify)
 	if err != nil {
 		return Snapshot{}, err
 	}

@@ -126,7 +126,7 @@ func (w *rootWiring) answerProjectRules(proposals []apogee.Proposal, adopt bool)
 		return err
 	}
 	old := w.inForce()
-	next, notHeld, err := project.Answer(w.configPath(), w.roots.project, w.fileReader(), store, proposals, adopt)
+	next, notHeld, err := project.Answer(w.files(), w.fileReader(), store, proposals, adopt)
 	refused := notHeldRefusals(notHeld)
 	var stale *project.NextLoadError
 	switch {
@@ -238,7 +238,7 @@ func (w *rootWiring) recordAnswer(entries []adoption.Entry, reply project.Reply)
 // force stay as they were. installSnapshot's otherwise.
 func (w *rootWiring) settleAllowRules(old project.Snapshot) error {
 	w.refreshBaseline()
-	next, err := project.Load(w.configPath(), w.roots.project, w.fileReader(), func(string) {})
+	next, err := project.Load(w.files(), w.fileReader(), func(string) {})
 	if err != nil {
 		return staleRulesError(err)
 	}
@@ -419,7 +419,7 @@ func (w *rootWiring) proposedRules() ([]apogee.Proposal, error) {
 // watched refresh holds and the proposed-entries read reports. The loader's notices are not
 // repeated here: the watched re-read says them (ConfigHost.ReloadConfig).
 func (w *rootWiring) loadSnapshot() (project.Snapshot, error) {
-	return project.Load(w.configPath(), w.roots.project, w.fileReader(), func(string) {})
+	return project.Load(w.files(), w.fileReader(), func(string) {})
 }
 
 // bootSnapshot is the Snapshot of the resolution this run made at launch — w.opts with the offer

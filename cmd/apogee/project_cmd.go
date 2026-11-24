@@ -109,14 +109,13 @@ func projectAdoptCommand(deps projectAdoptDeps) *cobra.Command {
 
 // projectAdoptTarget is what one `apogee project adopt` asks about: the Project config's path, the
 // entries it proposes (project.EntriesOf's order — the Allow rules, then the servers and
-// reactions), the record their answers go into, and the Project root and global config path each
-// answer is given through (project.Answer).
+// reactions), the record their answers go into, and the config source each answer is given through
+// (project.Answer).
 type projectAdoptTarget struct {
-	path        string
-	proposed    []apogee.Proposal
-	store       *adoption.Store
-	projectRoot string
-	globalPath  string
+	path     string
+	proposed []apogee.Proposal
+	store    *adoption.Store
+	files    config.Files
 }
 
 // adoptProjectRules is the verb: resolve the config the way a session does, report a Project root
@@ -173,13 +172,7 @@ func resolveProjectAdoption(cmd *cobra.Command, opts *config.Options) (projectAd
 	if err != nil {
 		return projectAdoptTarget{}, err
 	}
-	return projectAdoptTarget{
-		path:        path,
-		proposed:    proposed,
-		store:       store,
-		projectRoot: files.ProjectRoot(),
-		globalPath:  files.GlobalPath(),
-	}, nil
+	return projectAdoptTarget{path: path, proposed: proposed, store: store, files: files}, nil
 }
 
 // projectAnswer is one reply to a rule's question.
@@ -294,8 +287,7 @@ func adoptHeldRule(out io.Writer, target projectAdoptTarget, proposal apogee.Pro
 //
 // Errors: Answer's, but for the post-write load error.
 func answerProposal(target projectAdoptTarget, proposal apogee.Proposal, adopt bool) ([]apogee.Proposal, error) {
-	_, notHeld, err := project.Answer(target.globalPath, target.projectRoot, os.ReadFile, target.store,
-		[]apogee.Proposal{proposal}, adopt)
+	_, notHeld, err := project.Answer(target.files, os.ReadFile, target.store, []apogee.Proposal{proposal}, adopt)
 	var stale *project.NextLoadError
 	if errors.As(err, &stale) {
 		return notHeld, nil

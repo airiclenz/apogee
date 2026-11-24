@@ -42,8 +42,8 @@ func (e *NextLoadError) Error() string {
 // Unwrap is the loader's error.
 func (e *NextLoadError) Unwrap() error { return e.Err }
 
-// Answer records the user's answer to entries — proposals the Project config of root offered — in
-// store, and returns the Snapshot loaded after the write (Load, its notices dropped) with the
+// Answer records the user's answer to entries — proposals the Project config of the config source
+// files offered — in store, and returns the Snapshot loaded after the write (Load, its notices dropped) with the
 // entries an adoption refused.
 //
 // A yes (adopt) answers the file as it stands, not as it was offered: the Project config is re-read
@@ -63,7 +63,7 @@ func (e *NextLoadError) Unwrap() error { return e.Err }
 // returned as they are (nothing recorded); and a *NextLoadError — the answer IS recorded, but the
 // next snapshot could not be loaded.
 func Answer(
-	globalPath, root string,
+	files config.Files,
 	readFile func(string) ([]byte, error),
 	store *adoption.Store,
 	entries []domain.Proposal,
@@ -77,7 +77,7 @@ func Answer(
 	reply := Reply((*adoption.Store).Reject)
 	if adopt {
 		reply = (*adoption.Store).Adopt
-		held, err := heldPrints(globalPath, root, readFile)
+		held, err := heldPrints(files, readFile)
 		if err != nil {
 			return Snapshot{}, nil, &HeldCheckError{Err: err}
 		}
@@ -90,7 +90,7 @@ func Answer(
 	if err := Record(store, records, reply); err != nil {
 		return Snapshot{}, notHeld, err
 	}
-	next, err = Load(globalPath, root, readFile, noNotice)
+	next, err = Load(files, readFile, noNotice)
 	if err != nil {
 		return Snapshot{}, notHeld, &NextLoadError{Err: err}
 	}
@@ -146,18 +146,19 @@ func keepHeld(
 	return kept, notHeld
 }
 
-// heldPrints is the pin (adoption.Fingerprint) of every entry the Project config of root holds now —
-// Allow rules, MCP servers and reactions, in force, proposed or rejected alike — read from the
-// project file alone, with the record off (no global path, so no workspaces dir). A Project config
-// that is the global file at globalPath itself holds no entry, as the layered load treats it.
+// heldPrints is the pin (adoption.Fingerprint) of every entry the Project config of files holds now
+// — Allow rules, MCP servers and reactions, in force, proposed or rejected alike — read from the
+// project file alone, with the record off (config.Files.ProjectAlone). A source with no Project
+// config holds no entry, and neither does a Project config that is the source's global file itself,
+// as the layered load treats it.
 //
-// Errors: a project layer the loader refuses.
-func heldPrints(globalPath, root string, readFile func(string) ([]byte, error)) (map[string]bool, error) {
-	path := config.ProjectFilePath(root)
-	if path == "" || isSameFile(path, globalPath) {
+// Errors: the loader's.
+func heldPrints(files config.Files, readFile func(string) ([]byte, error)) (map[string]bool, error) {
+	path := files.ProjectPath()
+	if path == "" || isSameFile(path, files.GlobalPath()) {
 		return nil, nil
 	}
-	resolved, offer, err := config.LoadLayeredOffer("", root, readFile, noNotice)
+	resolved, offer, err := files.ProjectAlone(readFile)
 	if err != nil {
 		return nil, err
 	}

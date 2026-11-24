@@ -7,7 +7,7 @@
 // A Snapshot is read once ([Load]) and never changes: its options, the Project config's offer and
 // the entries that offer asks the user about all come from that one resolution, and every accessor
 // hands out a copy. The record itself stays in internal/adoption; this package reads it through the
-// layered loader (config.LoadLayeredOffer) and pins answers with adoption.Fingerprint.
+// one config source a Driver resolved (config.Files) and pins answers with adoption.Fingerprint.
 //
 // Files:
 //   - doc.go: this map.
