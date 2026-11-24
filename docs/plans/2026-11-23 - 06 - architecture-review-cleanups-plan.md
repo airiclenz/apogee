@@ -511,7 +511,9 @@ NOTES (2026-11-24): `settingsOverride` is replaced by `settingsOutranksBoth(row)
 **Closes:** setting-source-split
 **Commit:** `refactor(tui): the settings pane reads config's precedence answer`
 
-## 21. Reopen ADR 0083 part 5 narrowly with a dated amendment
+## 21. Reopen ADR 0083 part 5 narrowly with a dated amendment — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): the amendment's refs are cmd/apogee/wire.go, headless.go, daemon.go, daemonfire.go and wire_firing.go (all existing today; driverhost.go is named in prose only, per the regression guard); no CHANGELOG entry, as the item is knowledge-only.
 
 **What:**
 **Goal:** `capcom know show "ADR 0083" --with-children` prints `adr-0083-amend-1123`; adr-0083's Status line and reading-order list name it; part 5 carries a dated pointer to it.

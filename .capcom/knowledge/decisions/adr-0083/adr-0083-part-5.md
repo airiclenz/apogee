@@ -33,3 +33,9 @@ snapshot-sweep kind, where a step one Driver runs and another silently does not.
 > workspace since 2026-09-27 (7b9d9469; `cmd/apogee/probe.go`, `cmd/apogee/probemodel.go`), so
 > only the daemon now differs, because it has no one boot-time root. The difference in kind this
 > section relies on still holds for the daemon.
+
+> **Amended 2026-11-23 (adr-0083-amend-1123).** The snapshot-sweep reopening trigger fired
+> (`6de72666`, then `d00f0f9c`: the daemon's missing stats recorder), and the owner reopened this
+> section for the shared boot steps only: one cmd-internal Driver host opens the roots, sweeps,
+> confiner, stats recorder and session store. The verdicts that differ in kind stay per Driver,
+> the daemon keeps its per-Firing fenced key resolver, and the rest of `hostBoot` stays denied.
