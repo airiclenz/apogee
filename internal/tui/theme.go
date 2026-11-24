@@ -2,6 +2,7 @@ package tui
 
 import (
 	"image/color"
+	"strings"
 
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
@@ -269,6 +270,12 @@ type theme struct {
 	// a test — holds nil here, so it must not reach a style.
 	*themeStyles
 
+	// spans is the tool rows' bare roles as span painters (toolSpans): styles of themeStyles, painting
+	// a short span without lipgloss's block pipeline. It is a pointer of its own for themeStyles'
+	// reason — some of those styles again — and under its discipline: built from those styles in
+	// newTheme, shared by every copy and never written after. A zero theme holds nil here too.
+	spans *toolSpans
+
 	// measure is the TUI's display-width authority (width.go): the one answer to "how many
 	// terminal columns does this occupy", following whatever measure the painter itself uses. It
 	// rides on the theme because the theme is already handed to every free renderer function, so
@@ -432,6 +439,83 @@ type themeStyles struct {
 	gaugeTrack lipgloss.Style // the gauge's empty track (dark-gray background)
 }
 
+// The two texts a spanPainter renders through lipgloss when it is built. spanProbe is the one its
+// role's SGR open and close are read off — any text works that cannot occur inside an SGR sequence.
+// spanCheck is a second span of another width, with a space in it, painted to prove the open and
+// close fit it too: a style that pads, aligns, frames or styles spaces apart paints it some other
+// way, and is then not bare.
+const (
+	spanProbe = "x"
+	spanCheck = "x y"
+)
+
+// spanPainter paints one BARE role — a foreground, a weight, nothing that lays out — onto a span of
+// text byte-identically to that role's lipgloss.Style.Render, without paying for the style's block
+// pipeline (border, padding, margin and alignment passes, each of which a bare role skips only after
+// asking) on every call. A cold repaint paints thousands of such spans, one per segment of every
+// tool row, and that pipeline was the bulk of what it cost.
+//
+// The SGR it wraps a span in is derived once, from lipgloss itself, by rendering spanProbe: whatever
+// lipgloss writes around the probe is what it writes around any single line of text a bare role is
+// handed. The fast path holds only for that input — one line, no tab — because lipgloss rewrites
+// the rest (a tab expands to its tab width, each line of a multi-line text is wrapped on its own),
+// so a span carrying a tab or a newline is handed to the style's own Render instead. A style that is
+// not bare — one whose open and close do not also paint spanCheck exactly — always falls back.
+// TestSpanPainterMatchesLipgloss proves the identity for every role toolSpans holds.
+type spanPainter struct {
+	style lipgloss.Style
+	open  string
+	close string
+	bare  bool
+}
+
+// newSpanPainter derives style's span painter. It renders style twice, so it belongs where the
+// styles are built (newTheme) and never in a paint path.
+func newSpanPainter(style lipgloss.Style) spanPainter {
+	open, close, found := strings.Cut(style.Render(spanProbe), spanProbe)
+	bare := found && style.Render(spanCheck) == open+spanCheck+close
+	return spanPainter{style: style, open: open, close: close, bare: bare}
+}
+
+// Render paints text in the painter's role: byte-identical to the role's lipgloss.Style.Render of
+// the same text, cheaply on a single tab-free line and through that Render otherwise.
+func (p spanPainter) Render(text string) string {
+	if !p.bare || strings.ContainsAny(text, "\t\n") {
+		return p.style.Render(text)
+	}
+	return p.open + text + p.close
+}
+
+// toolSpans is the bare roles a tool row paints its segments in — the leader row (leaderRowIn), its
+// right-edge indicator (indicatorRow) and the headers above them (renderToolBlock, umbrellaHeader,
+// renderSuperGroup's type rows) — each as a spanPainter over the [themeStyles] role it names.
+type toolSpans struct {
+	toolStar         spanPainter
+	toolLabel        spanPainter
+	toolHeader       spanPainter
+	toolIndicator    spanPainter
+	toolLeader       spanPainter
+	toolMarker       spanPainter
+	toolMarkerBright spanPainter
+	errorText        spanPainter
+	successMark      spanPainter
+}
+
+// newToolSpans derives the tool rows' span painters from the styles they paint.
+func newToolSpans(styles *themeStyles) *toolSpans {
+	return &toolSpans{
+		toolStar:         newSpanPainter(styles.toolStar),
+		toolLabel:        newSpanPainter(styles.toolLabel),
+		toolHeader:       newSpanPainter(styles.toolHeader),
+		toolIndicator:    newSpanPainter(styles.toolIndicator),
+		toolLeader:       newSpanPainter(styles.toolLeader),
+		toolMarker:       newSpanPainter(styles.toolMarker),
+		toolMarkerBright: newSpanPainter(styles.toolMarkerBright),
+		errorText:        newSpanPainter(styles.errorText),
+		successMark:      newSpanPainter(styles.successMark),
+	}
+}
+
 // modeColor maps an autonomy mode to its footer-marker colour. An unknown mode falls back to the
 // muted tone, so an off-ladder value is never invisible.
 func (th theme) modeColor(m domain.Mode) color.Color {
@@ -507,7 +591,7 @@ func newTheme(s scheme.Scheme) theme {
 		selectionFill  = lipgloss.Color(s.Selection)
 	)
 
-	return theme{
+	th := theme{
 		// The painter's own starting measure. It moves only when the terminal tells the program
 		// the painter moved (Update's tea.ModeReportMsg case) — which makes every rebuild of a
 		// theme on a LIVE screen the second mover, in the opposite direction: applyColorScheme
@@ -654,6 +738,8 @@ func newTheme(s scheme.Scheme) theme {
 			gaugeTrack:    lipgloss.NewStyle().Background(chrome),
 		},
 	}
+	th.spans = newToolSpans(th.themeStyles)
+	return th
 }
 
 // padsPrompts says whether a terminal of this colour profile paints a sent prompt block's half rows.

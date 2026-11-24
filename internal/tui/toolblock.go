@@ -72,18 +72,18 @@ func renderToolBlock(th theme, view toolView, width int, state blockState) block
 	// block emits, so the header, the branches and the body cannot come to disagree about whether
 	// this block is clickable.
 	toggle := targetNone
-	label := th.toolLabel.Render(view.Label)
+	label := th.spans.toolLabel.Render(view.Label)
 	// A card that counts itself wears the count beside its label in the faint tone every group
 	// count wears — the tone the umbrella's "(3 Read, 4 Terminal)" breakdown is in too
 	// (renderSuperGroup), worn here by one call about its own rows (toolView.count) — and BEFORE
 	// any ▶/▼ the targetless shape hangs on the header, so the indicator stays the row's last word.
 	if view.count != "" {
-		label += " " + th.toolIndicator.Render("("+view.count+")")
+		label += " " + th.spans.toolIndicator.Render("("+view.count+")")
 	}
 	if state.elides || blockHidesWhenCollapsed(th, []toolView{view}, width) {
 		toggle = targetHeader
 		if view.Target == "" {
-			label += " " + th.toolIndicator.Render(stateIndicator(th, state.expanded))
+			label += " " + th.spans.toolIndicator.Render(stateIndicator(th, state.expanded))
 		}
 	}
 	var out blockPaint
@@ -196,10 +196,11 @@ func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState,
 	at := 0 // the run head's offset from the umbrella's own head
 	for i, r := range runs {
 		views := guardPromotions(th, r.views, room, superMemberMarker(true))
-		row := leaderRowIn(th, typeRowText(views), typeRowPaint(th, views),
+		row, cells := leaderRowInCells(th, typeRowText(views), typeRowPaint(th, views),
 			runAggregate(views), branchMarker(i == len(runs)-1), paintRowMarker, room, r.expanded,
 			noRemainder)
-		rows.addFor(at, []string{indicatorRow(th, row, width, stateIndicator(th, r.expanded))}, targetType)
+		rows.addFor(at, []string{indicatorRowCells(th, row, cells, width, stateIndicator(th, r.expanded))},
+			targetType)
 		if r.expanded {
 			for k, tv := range views {
 				lines, hides := renderGroupMember(th, tv, superMemberMarker(k == len(views)-1),
@@ -231,9 +232,9 @@ func umbrellaHeader(th theme, runs []toolRunView, state blockState, room, width 
 	marker := state.star(th) + " "
 	summary := buildGroupSummary(th, umbrellaGroupCalls(runs),
 		leaderTargetBudget(leaderAvail(th, marker, room), 0))
-	row := leaderRowIn(th, summary.text(), umbrellaHeaderPaint(th, summary), branchSummary{}, marker,
-		paintHeaderMarker, room, open, noRemainder)
-	return indicatorRow(th, row, width, stateIndicator(th, open))
+	row, cells := leaderRowInCells(th, summary.text(), umbrellaHeaderPaint(th, summary), branchSummary{},
+		marker, paintHeaderMarker, room, open, noRemainder)
+	return indicatorRowCells(th, row, cells, width, stateIndicator(th, open))
 }
 
 // umbrellaGroupCalls is the umbrella's members as the Group summary reads them (buildGroupSummary):
@@ -281,7 +282,7 @@ func umbrellaHeaderPaint(th theme, summary groupSummary) func(string) string {
 			}
 		}
 		if rest != "" {
-			b.WriteString(th.toolLabel.Render(rest))
+			b.WriteString(th.spans.toolLabel.Render(rest))
 		}
 		return b.String()
 	}
@@ -301,11 +302,11 @@ func paintGroupSegment(th theme, seg groupSegment) string {
 		}
 		count := strings.TrimLeft(seg.text, " ")
 		lead := seg.text[:len(seg.text)-len(count)]
-		return th.toolHeader.Render(lead) + band.Inherit(th.toolLabel).Render(count)
+		return th.spans.toolHeader.Render(lead) + band.Inherit(th.toolLabel).Render(count)
 	case groupToneOutcome:
-		return th.errorText.Render(seg.text)
+		return th.spans.errorText.Render(seg.text)
 	default:
-		return th.toolLabel.Render(seg.text)
+		return th.spans.toolLabel.Render(seg.text)
 	}
 }
 
@@ -315,9 +316,9 @@ func paintGroupSegment(th theme, seg groupSegment) string {
 // nothing to split on, and the survivor is painted as the label it began as (typeRowPaint's rule).
 func umbrellaCountPaint(th theme, clipped string) string {
 	if rest, ok := strings.CutPrefix(clipped, superGroupLabel+" "); ok {
-		return th.toolLabel.Render(superGroupLabel) + " " + th.toolIndicator.Render(rest)
+		return th.spans.toolLabel.Render(superGroupLabel) + " " + th.spans.toolIndicator.Render(rest)
 	}
-	return th.toolLabel.Render(clipped)
+	return th.spans.toolLabel.Render(clipped)
 }
 
 // paintHeaderMarker dresses the umbrella header's star in the star's own tone (paintStar) and the
@@ -326,9 +327,9 @@ func umbrellaCountPaint(th theme, clipped string) string {
 // leaderRowIn's marker painter for that one row; every other leader row passes paintRowMarker.
 func paintHeaderMarker(th theme, marker string, _ bool) string {
 	if rest, ok := strings.CutPrefix(marker, th.glyphs.assistant); ok {
-		return paintStar(th, th.glyphs.assistant) + th.toolHeader.Render(rest)
+		return paintStar(th, th.glyphs.assistant) + th.spans.toolHeader.Render(rest)
 	}
-	return th.toolHeader.Render(marker)
+	return th.spans.toolHeader.Render(marker)
 }
 
 // paintStar dresses a tool block's header star (blockState.star) in the tools header colour
@@ -340,7 +341,7 @@ func paintStar(th theme, star string) string {
 	if star != th.glyphs.assistant {
 		return star
 	}
-	return th.toolStar.Render(star)
+	return th.spans.toolStar.Render(star)
 }
 
 // typeRowText is a type row's left content as it is MEASURED: the run's label, and the "(N)" beside
@@ -368,9 +369,9 @@ func typeRowPaint(th theme, views []toolView) func(string) string {
 	}
 	return func(clipped string) string {
 		if head, ok := strings.CutSuffix(clipped, count); ok && count != "" {
-			return th.toolLabel.Render(head) + th.toolIndicator.Render(count)
+			return th.spans.toolLabel.Render(head) + th.spans.toolIndicator.Render(count)
 		}
-		return th.toolLabel.Render(clipped)
+		return th.spans.toolLabel.Render(clipped)
 	}
 }
 
@@ -434,14 +435,14 @@ func superRunViews(ins []paintInput, g superGroup) []toolRunView {
 // row sits one level deeper than a member of a plain group and both frames have to reach the same
 // painter (superMemberMarker, renderSuperGroup).
 func renderGroupMember(th theme, tv toolView, marker, gutter string, width, room int, expanded bool) (lines []string, hides bool) {
-	row := leaderRow(th, tv, marker, room, expanded, noRemainder)
+	row, cells := leaderRowCells(th, tv, marker, room, expanded, noRemainder)
 	if hides = tv.Details.len() > 0; !hides {
 		return []string{row}, false
 	}
 	if expanded {
 		return renderExpandedMember(th, tv, marker, gutter, width, room), true
 	}
-	return []string{indicatorRow(th, row, width, th.glyphs.collapsed)}, true
+	return []string{indicatorRowCells(th, row, cells, width, th.glyphs.collapsed)}, true
 }
 
 // renderExpandedMember paints an OPEN member of a grouped block — the sketch's "middle one
@@ -473,8 +474,8 @@ func renderGroupMember(th theme, tv toolView, marker, gutter string, width, room
 // (renderGroupMember, subagentblock.go); the spanned member loop is deliberately not wired, as it
 // paints the sub_agent call's own report and no region can reach it.
 func renderExpandedMember(th theme, tv toolView, marker, gutter string, width, room int) []string {
-	row := leaderRow(th, tv, marker, room, true, noRemainder)
-	out := []string{indicatorRow(th, row, width, glyphExpanded)}
+	row, cells := leaderRowCells(th, tv, marker, room, true, noRemainder)
+	out := []string{indicatorRowCells(th, row, cells, width, glyphExpanded)}
 	out = append(out, paintToolBody(th, tv, tv.Details.all(), openMemberFrame(gutter), room)...)
 	return append(out, seeLessRow(th, gutter, width))
 }
@@ -525,8 +526,15 @@ func gutteredWrap(th theme, style lipgloss.Style, marker, gutter, text string, w
 // styled row (th.measure strips ANSI, width.go), so a row carrying colour lands in the same column
 // as a plain one.
 func indicatorRow(th theme, row string, width int, glyph string) string {
-	pad := strings.Repeat(" ", max(0, width-th.measure.Width(glyph)-th.measure.Width(row)))
-	return row + pad + th.toolIndicator.Render(glyph)
+	return indicatorRowCells(th, row, th.measure.Width(row), width, glyph)
+}
+
+// indicatorRowCells is indicatorRow for a row whose cell count the caller already holds — a leader
+// row's, which its arithmetic sums as it lays the row out (leaderRowInCells) — so the styled row is
+// not measured a second time. rowCells must be what th.measure.Width(row) would answer.
+func indicatorRowCells(th theme, row string, rowCells, width int, glyph string) string {
+	pad := strings.Repeat(" ", max(0, width-th.measure.Width(glyph)-rowCells))
+	return row + pad + th.spans.toolIndicator.Render(glyph)
 }
 
 // seeLessRow is the row that closes an OPEN body: the gutter its block continues its rows under —

@@ -418,3 +418,73 @@ func TestGitCommitSlotIsTheShortHashAtEveryWidth(t *testing.T) {
 		})
 	}
 }
+
+// TestLeaderRowCellsMatchTheMeasure proves the cell count the leader row sums as it lays itself out
+// (leaderRowInCells) is the very count th.measure.Width reads off the painted row, so an indicator
+// seated by it (indicatorRowCells) lands where a re-measure would have put it. The corpus is the
+// inputs the sum could get wrong: a tab, which the measure counts as nothing and the styles expand,
+// VS16 and wide text, the finished ✓ the painter re-splits off the target, a slot or target cut to
+// fit, the umbrella's star and the side panel's title paint — in both measures the painter may use.
+func TestLeaderRowCellsMatchTheMeasure(t *testing.T) {
+	t.Parallel()
+
+	slot := func(text string) branchSummary { return branchSummary{detailLine: detailLine{Text: text}} }
+	failedSlot := func(text string) branchSummary {
+		failed := slot(text)
+		failed.failed = true
+		return failed
+	}
+	type leaderCase struct {
+		name string
+		row  func(th theme, room int) (string, int)
+	}
+	call := func(name string, tv toolView, expanded bool, remainder string) leaderCase {
+		return leaderCase{name, func(th theme, room int) (string, int) {
+			return leaderRowCells(th, tv, branchMarker(true), room, expanded, remainder)
+		}}
+	}
+	cases := []leaderCase{
+		call("plain call", toolView{Target: "internal/tui/render.go", Summary: slot("12 lines")},
+			false, noRemainder),
+		call("open call with a remainder",
+			toolView{Target: "main.go", Summary: slot("exit 0 · 1.2s")}, true, "+5 more lines"),
+		call("failed call", toolView{Target: "go test ./...", Summary: failedSlot("error: boom")},
+			false, noRemainder),
+		call("tab in the target", toolView{Target: "a\tb\tc", Summary: slot("done")}, false, noRemainder),
+		call("tab in the slot", toolView{Target: "grep", Summary: slot("col1\tcol2")}, false, noRemainder),
+		call("VS16 in the target", toolView{Target: "❤️ heart.txt", Summary: slot("1 line")},
+			false, noRemainder),
+		call("VS16 opening the target", toolView{Target: "️stray.txt"}, false, noRemainder),
+		call("wide target", toolView{Target: "宽字符/路径/文件.go", Summary: slot("3 lines")},
+			false, noRemainder),
+		call("finished ✓ split", toolView{Target: "survey", finished: true, Summary: slot("done")},
+			false, noRemainder),
+		call("targetless slot", toolView{Summary: slot("nothing to show")}, false, noRemainder),
+		{"panel title paint", func(th theme, room int) (string, int) {
+			return leaderRowInCells(th, "Tasks (2 of 5)", panelTitlePaint(th, "Tasks"), branchSummary{},
+				th.glyphs.panelOpen+" ", paintPanelPin, room, true, noRemainder)
+		}},
+		{"umbrella star", func(th theme, room int) (string, int) {
+			return leaderRowInCells(th, "Read 3 files, ran 2 commands", th.spans.toolLabel.Render, branchSummary{},
+				th.glyphs.assistant+" ", paintHeaderMarker, room, false, noRemainder)
+		}},
+		{"tab in the marker", func(th theme, room int) (string, int) {
+			return leaderRowInCells(th, "target", th.spans.toolLabel.Render, slot("ok"),
+				"\t", paintRowMarker, room, false, noRemainder)
+		}},
+	}
+
+	for _, method := range []ansi.Method{ansi.WcWidth, ansi.GraphemeWidth} {
+		th := newTheme(scheme.Default())
+		th.measure = widthAuthority{method: method}
+		for _, tc := range cases {
+			for _, room := range []int{4, 12, 24, 60, 119} {
+				row, cells := tc.row(th, room)
+				if want := th.measure.Width(row); cells != want {
+					t.Errorf("%s, method %d, room %d: cells = %d, the measure reads %d off %q",
+						tc.name, method, room, cells, want, row)
+				}
+			}
+		}
+	}
+}

@@ -206,7 +206,19 @@ The prose recording the live buffer under `generation` is superseded — `render
 - `go test -run '^$' -bench 'PerfAuditStream' -benchmem ./internal/tui/` — session=300 near session=0 (record before/after)
 **Commit:** `perf(tui): re-render only the preview tail on a streamed batch`
 
-## 7. Cheaper cold paint leaves
+## 7. Cheaper cold paint leaves — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): benchmark `go test -run '^$' -bench 'PerfAuditBlocks/resize' -benchmem ./internal/tui/` (Pi 5, no -race) — before (HEAD 3884de13d): N=48 11.06 ms/op, 1.34 MB/op, 18526 allocs/op; N=300 57.33 ms/op, 5.73 MB/op, 88082 allocs/op; N=900 166.6 ms/op, 16.23 MB/op, 254024 allocs/op. After: N=48 8.01 ms/op, 1.27 MB/op, 15964 allocs/op; N=300 38.36 ms/op, 5.34 MB/op, 71845 allocs/op; N=900 109.9 ms/op, 15.06 MB/op, 205314 allocs/op.
+
+NOTES (2026-11-24): the span painters live behind a pointer of their own on the theme header (`theme.spans *toolSpans`, built in newTheme from the styles) rather than in themeStyles: TestThemeHeaderFitsInAKilobyte holds themeStyles to lipgloss.Styles only, and a `spans` field there collided by name with local `spans` variables in footerfit.go/model.go under TestThemeStylesAreWrittenOnlyByNewTheme's by-name scan.
+
+NOTES (2026-11-24): a painter is bare (takes the fast path) only when its style's render of a second probe ("x y") equals open+probe+close, so a style that pads, aligns, frames or styles spaces apart always falls back to lipgloss; TestSpanPainterMatchesLipgloss proves both halves, and asserts every toolSpans role is bare so the fast path cannot silently go.
+
+NOTES (2026-11-24): the cell-count siblings are `leaderRowInCells` (of leaderRowIn), `leaderRowCells` (of leaderRow) and `indicatorRowCells` (of indicatorRow); all three originals keep their signatures. `summaryStyle` keeps its signature and now returns `summarySpan(...).style`, so the role choice is made in one place.
+
+NOTES (2026-11-24): internal/tui/toolbranch.go added to Files as a caller moved to the siblings (renderToolBranch's leader row + indicator), as the item's text provides.
+
+NOTES (2026-11-24): improvement idea, not done (outside Files): the detail tone (detailTone / paintRowMarker in toolbranch.go and leaderRow's target paint) still goes through lipgloss — about 4% of the resize profile; a `detailSpan` beside detailTone would take it.
 
 **What:**
 **Goal:** a cold repaint (one-column resize) at 900 tool blocks is measurably below 200 ms, every changed paint helper byte-identical to the lipgloss path.

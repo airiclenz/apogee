@@ -124,6 +124,15 @@ func guardRefuses(th theme, tv toolView, room int, marker string) bool {
 // the outcome slot rather than a row beneath it (slotText), which is what makes a collapsed lone
 // call ONE row of block plus its header.
 func leaderRow(th theme, tv toolView, marker string, room int, expanded bool, remainder string) string {
+	row, _ := leaderRowCells(th, tv, marker, room, expanded, remainder)
+	return row
+}
+
+// leaderRowCells is leaderRow with the painted row's cell count beside it, for the caller that goes
+// on to seat an indicator at the row's edge (indicatorRowCells) and would otherwise measure the
+// styled row it was just handed (leaderRowInCells).
+func leaderRowCells(th theme, tv toolView, marker string, room int, expanded bool,
+	remainder string) (string, int) {
 	tone := detailTone(th, expanded)
 	left, paint := expandTabs(tv.Target), func(s string) string { return tone.Render(s) }
 	if tv.finished && left != "" {
@@ -136,12 +145,12 @@ func leaderRow(th theme, tv toolView, marker string, room int, expanded bool, re
 		left += " " + th.glyphs.done
 		paint = func(s string) string {
 			if name, ok := strings.CutSuffix(s, " "+th.glyphs.done); ok {
-				return tone.Render(name) + " " + th.successMark.Render(th.glyphs.done)
+				return tone.Render(name) + " " + th.spans.successMark.Render(th.glyphs.done)
 			}
 			return tone.Render(s)
 		}
 	}
-	return leaderRowIn(th, left, paint, tv.Summary, marker, paintRowMarker, room, expanded, remainder)
+	return leaderRowInCells(th, left, paint, tv.Summary, marker, paintRowMarker, room, expanded, remainder)
 }
 
 // leaderRowIn is the leader arithmetic itself, with the row's LEFT content handed in rather than
@@ -168,6 +177,22 @@ func leaderRow(th theme, tv toolView, marker string, room int, expanded bool, re
 func leaderRowIn(th theme, left string, paint func(string) string, summary branchSummary,
 	marker string, paintMarker func(theme, string, bool) string, room int, expanded bool,
 	remainder string) string {
+	row, _ := leaderRowInCells(th, left, paint, summary, marker, paintMarker, room, expanded, remainder)
+	return row
+}
+
+// leaderRowInCells is leaderRowIn with the painted row's cell count beside it — the count
+// th.measure.Width would give the row, summed from the parts the arithmetic already measured rather
+// than re-read off the styled result, so a caller seating an indicator at the row's edge
+// (indicatorRowCells) does not walk the row's graphemes a second time.
+//
+// The sum holds because paint and paintMarker DRESS the text they are handed and never reword it
+// (leaderRowIn), and because the row's segments are measured where they are cut. The one input that
+// breaks it is a tab: the measure counts none for it while the styles expand it to four cells, so a
+// row whose marker, target or slot holds one is measured whole instead.
+func leaderRowInCells(th theme, left string, paint func(string) string, summary branchSummary,
+	marker string, paintMarker func(theme, string, bool) string, room int, expanded bool,
+	remainder string) (string, int) {
 	avail := leaderAvail(th, marker, room)
 	slot := affordableSlot(th, left, summary.Text, remainder, avail)
 	// The last resort under design call 4, past the point it words: an outcome WIDER than the row
@@ -201,11 +226,14 @@ func leaderRowIn(th theme, left string, paint func(string) string, summary branc
 	}
 	dots := max(leaderMinDots, avail-leadCells-tail)
 	row := paintMarker(th, marker, expanded) + lead +
-		th.toolLeader.Render(strings.Repeat(th.glyphs.leaderDot, dots))
+		th.spans.toolLeader.Render(strings.Repeat(th.glyphs.leaderDot, dots))
 	if slot != "" {
-		row += strings.Repeat(" ", leaderGap) + summaryStyle(th, summary, expanded).Render(slot)
+		row += strings.Repeat(" ", leaderGap) + summarySpan(th, summary, expanded).Render(slot)
 	}
-	return row
+	if strings.Contains(marker, "\t") || strings.Contains(target, "\t") || strings.Contains(slot, "\t") {
+		return row, th.measure.Width(row)
+	}
+	return row, th.measure.Width(marker) + leadCells + dots*th.measure.Width(th.glyphs.leaderDot) + tail
 }
 
 // leaderAvail is the cells a leader row lays its content out in: room less its leading marker,
@@ -314,15 +342,22 @@ func toolRowCells(th theme, width int) int {
 // slot, and a summary that changed voice with the kind of thing it summarises would make the row's
 // right edge a second, quieter place to read a body line from.
 func summaryStyle(th theme, s branchSummary, expanded bool) lipgloss.Style {
-	slot := th.toolMarker
+	return summarySpan(th, s, expanded).style
+}
+
+// summarySpan is summaryStyle's choice as the role's span painter (toolSpans) — the form the leader
+// row paints its slot with. The choice is made here alone, so the slot and every reader of
+// summaryStyle cannot come to disagree about which role a summary takes.
+func summarySpan(th theme, s branchSummary, expanded bool) spanPainter {
+	slot := th.spans.toolMarker
 	if expanded {
-		slot = th.toolMarkerBright
+		slot = th.spans.toolMarkerBright
 	}
 	if s.failed {
-		return th.errorText
+		return th.spans.errorText
 	}
 	if s.succeeded {
-		return th.successMark
+		return th.spans.successMark
 	}
 	return slot
 }

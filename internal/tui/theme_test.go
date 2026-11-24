@@ -586,3 +586,60 @@ func TestSchemeSwitchLeavesAnEarlierCopysStylesAlone(t *testing.T) {
 		t.Error("the switched copy still shares the earlier copy's themeStyles; a switch builds a new one")
 	}
 }
+
+// TestSpanPainterMatchesLipgloss proves the span painter's one promise (spanPainter): every role
+// toolSpans holds paints any text byte-identically to that role's own lipgloss.Style.Render — on the
+// single tab-free line it paints itself and on the tabs, newlines and line endings it hands back to
+// lipgloss alike. Two styles that are not bare ride along to prove the other half: one that lays
+// out and one that styles its spaces apart, neither of which may take the fast path at all.
+func TestSpanPainterMatchesLipgloss(t *testing.T) {
+	t.Parallel()
+
+	th := newTheme(scheme.Default())
+	padded := lipgloss.NewStyle().Foreground(lipgloss.Color("#123456")).Width(12)
+	underlined := lipgloss.NewStyle().Underline(true)
+	roles := []struct {
+		name   string
+		span   spanPainter
+		style  lipgloss.Style
+		isBare bool
+	}{
+		{"toolStar", th.spans.toolStar, th.toolStar, true},
+		{"toolLabel", th.spans.toolLabel, th.toolLabel, true},
+		{"toolHeader", th.spans.toolHeader, th.toolHeader, true},
+		{"toolIndicator", th.spans.toolIndicator, th.toolIndicator, true},
+		{"toolLeader", th.spans.toolLeader, th.toolLeader, true},
+		{"toolMarker", th.spans.toolMarker, th.toolMarker, true},
+		{"toolMarkerBright", th.spans.toolMarkerBright, th.toolMarkerBright, true},
+		{"errorText", th.spans.errorText, th.errorText, true},
+		{"successMark", th.spans.successMark, th.successMark, true},
+		{"a style that lays out", newSpanPainter(padded), padded, false},
+		{"a style that styles spaces apart", newSpanPainter(underlined), underlined, false},
+	}
+	const notRoles = 2
+	if got, want := len(roles)-notRoles, reflect.TypeOf(toolSpans{}).NumField(); got != want {
+		t.Fatalf("the table proves %d roles, toolSpans holds %d — a role is left unproven", got, want)
+	}
+	corpus := []string{
+		"", "main.go", " leading and trailing ", "internal/tui/render.go:42",
+		"a\ttab", "\t", "two\nlines", "trailing newline\n", "crlf\r\nline", "lone\rreturn",
+		"\x1b[1mbold\x1b[m inside", "\x1b[38;2;1;2;3mcoloured",
+		"宽字符 wide", "❤️ vs16", "️ leading vs16", "✓ ⋯ ✦ ▶ ▼", "· middle dot",
+	}
+
+	for _, role := range roles {
+		t.Run(role.name, func(t *testing.T) {
+			t.Parallel()
+
+			if role.span.bare != role.isBare {
+				t.Errorf("bare = %t, want %t — a role that is not bare pays the whole lipgloss pipeline on "+
+					"every span, and one that is wrongly bare paints the wrong bytes", role.span.bare, role.isBare)
+			}
+			for _, text := range corpus {
+				if got, want := role.span.Render(text), role.style.Render(text); got != want {
+					t.Errorf("Render(%q) = %q, lipgloss paints %q", text, got, want)
+				}
+			}
+		})
+	}
+}

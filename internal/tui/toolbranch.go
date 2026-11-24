@@ -83,9 +83,10 @@ func renderToolBranch(th theme, tv toolView, marker string, width int, expanded 
 	}
 	indent := th.measure.Width(marker)
 	var out blockPaint
-	row := leaderRow(th, tv, marker, toolRowCells(th, width), expanded, collapsedRemainder(tv, expanded))
+	row, cells := leaderRowCells(th, tv, marker, toolRowCells(th, width), expanded,
+		collapsedRemainder(tv, expanded))
 	if toggle != targetNone {
-		row = indicatorRow(th, row, width, stateIndicator(th, expanded))
+		row = indicatorRowCells(th, row, cells, width, stateIndicator(th, expanded))
 	}
 	out.add([]string{row}, toggle)
 	if expanded {
