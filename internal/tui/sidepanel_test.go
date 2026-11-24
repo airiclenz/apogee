@@ -1991,15 +1991,15 @@ func TestSidePanelRunViewFollowsTheViewedRun(t *testing.T) {
 }
 
 // TestSidePanelRunViewUsageMatchesTheGauge pins the usage fill inside a view to the gauge's own
-// figure ([Model.viewedFill]), on the two readings where a fold of its own could part from it: a
-// Maintenance reading, which moves neither, and a reading naming no window, which both measure
-// against the top-level window.
+// figure ([Model.viewedFill]), on the three events where a fold of its own could part from it: a
+// Maintenance reading, which moves neither, a reading naming no window, which both measure
+// against the top-level window, and an estimate newer than the reading, which both state `~`.
 func TestSidePanelRunViewUsageMatchesTheGauge(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
 		name    string
-		reading domain.UsageEvent
+		reading domain.Event
 		want    string
 	}{
 		{
@@ -2011,6 +2011,11 @@ func TestSidePanelRunViewUsageMatchesTheGauge(t *testing.T) {
 			name:    "a reading naming no window",
 			reading: runUsage(delegationBase("r1"), 7000, 0, false),
 			want:    format.Tokens(7000) + "/" + format.Tokens(testOpts.ContextWindow),
+		},
+		{
+			name:    "an estimate newer than the reading",
+			reading: domain.ContextEstimateEvent{EventBase: delegationBase("r1"), Tokens: 9000},
+			want:    "~" + format.Tokens(9000) + "/" + format.Tokens(16384),
 		},
 	}
 	for _, tc := range cases {

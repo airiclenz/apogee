@@ -838,6 +838,59 @@ func TestFoldStatsEstimateYieldsToTheNextReading(t *testing.T) {
 	}
 }
 
+// TestApplyEstimateMovesOnlyItsRunsHead pins a delegate's tool-result estimate on its own run's head
+// (transcript.applyEstimate, through the Event fold): it lands on the head of the run it names and
+// no sibling's, moves neither the top-level stats nor the paint's generation, survives a
+// Maintenance reading, and the run's next counting reading clears it.
+func TestApplyEstimateMovesOnlyItsRunsHead(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	m.transcript.reset()
+	m.transcript.addUser("survey the repo", nil)
+	subAgentCall(&m.transcript, "s1", "survey", 0)
+	subAgentCall(&m.transcript, "s2", "plan", 0)
+	viewedRunUsage(&m, "s1", 1, 5000, 16384)
+	viewedRunUsage(&m, "s2", 1, 3000, 16384)
+	first, second := domain.EventBase{Depth: 1, CallID: "s1"}, domain.EventBase{Depth: 1, CallID: "s2"}
+	generation := m.transcript.generation
+
+	m = m.foldEvent(domain.ContextEstimateEvent{EventBase: first, Tokens: 9000})
+
+	headEstimate := func(base domain.EventBase) int {
+		t.Helper()
+		head := m.transcript.openSubAgentHead(runOf(base))
+		if head == nil {
+			t.Fatalf("setup: no open head answers %+v", base)
+		}
+		return head.ctxEstimate
+	}
+	if got := headEstimate(first); got != 9000 {
+		t.Errorf("s1's head estimate = %d, want 9000", got)
+	}
+	if got := headEstimate(second); got != 0 {
+		t.Errorf("s2's head estimate = %d, want 0 — the estimate is s1's alone", got)
+	}
+	if got := statsOf(m); got != (statsFold{}) {
+		t.Errorf("top-level stats = %+v, want none — a delegate's estimate is its run's business", got)
+	}
+	if m.transcript.generation != generation {
+		t.Errorf("generation moved %d → %d; the estimate is outside the paint key", generation, m.transcript.generation)
+	}
+
+	maintenance := domain.UsageEvent{EventBase: first, TotalTokens: 12000, ContextWindow: 16384, Maintenance: true}
+	m = m.foldEvent(maintenance)
+
+	if got := headEstimate(first); got != 9000 {
+		t.Errorf("s1's head estimate after a Maintenance reading = %d, want 9000 standing", got)
+	}
+
+	m = m.foldEvent(domain.UsageEvent{EventBase: first, TotalTokens: 9500, ContextWindow: 16384})
+
+	if got := headEstimate(first); got != 0 {
+		t.Errorf("s1's head estimate after its next reading = %d, want 0 — the reading measures the fill", got)
+	}
+}
+
 // TestFoldStatsReasoningStartsTheGenerationClock pins the first half of the tok/s fix: the clock
 // starts on the Turn's first OUTPUT event, and a reasoning chunk is one. The server counts
 // reasoning in completion_tokens, so timing only from the first visible token divided the whole

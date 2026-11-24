@@ -2001,7 +2001,11 @@ runs before the model's first request) shows a fill rather than a hint. Between 
 moves too: each time a tool result lands in the top-level conversation the engine estimates the
 grown fill, and the gauge shows that `~` figure over the last reading until the next reply's usage
 reading measures it again (a compaction's maintenance reading does not); a watch follows the
-journal's `context_estimate` lines the same way. The estimate takes the slot
+journal's `context_estimate` lines the same way. Inside a run view a tool result in the viewed run
+moves its gauge the same way, to that run's `~` estimate against the same window, until the run's
+next usage reading — but only once the run has reported a reading at all: before its first reading
+the slot keeps `esc back`, and the run's own block in the transcript keeps stating its last
+reading. The estimate takes the slot
 from `esc×2 cancel` exactly as a reading does, and never from `enter dismiss`; with neither a reading
 nor an estimate the slot falls through to its hint. The armed-`esc` line reads `press esc again to cancel`, and while a pooled
 sub-agent group is in flight in the open Turn it says what the second press would do: `press esc

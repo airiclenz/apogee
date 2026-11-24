@@ -5474,7 +5474,10 @@ func (m Model) statusRight(room int) string {
 // Inside a run view (ADR 0063 D4, amended 2026-09-24) it is the viewed run's: its head's fill as
 // [transcript.applyUsage] froze it, against the window that run actually filled (childWindow) —
 // the top-level run's ([Model.topLevelWindow]) only when the reading named none. The top-level fill never shows there: a parent's
-// gauge above a child's transcript is a number about someone else. Until the viewed run has
+// gauge above a child's transcript is a number about someone else. A ContextEstimateEvent from the
+// viewed run puts its gauge on that run's `~` estimate over its standing reading
+// ([transcript.applyEstimate]), against the same limit, until its next counting reading clears it;
+// as at the top level, the estimate never takes stateErrored's `enter dismiss`. Until the viewed run has
 // reported usage — or when its head is gone ([Model.viewedChild]) — the gauge renders nothing, and
 // the slot falls through to its hints ([Model.statusRight]), which inside a view say `esc back`.
 // A stage level shows no gauge either: it lists runs and fills no window of its own
@@ -5506,6 +5509,9 @@ func (m Model) viewedFill() (contextUsage, bool) {
 	limit := head.ctxLimit
 	if limit == 0 {
 		limit = m.topLevelWindow()
+	}
+	if head.ctxUsed > 0 && head.ctxEstimate > 0 && m.state != stateErrored {
+		return contextUsage{Used: head.ctxEstimate, Limit: limit, Estimated: true}, true
 	}
 	return contextUsage{Used: head.ctxUsed, Limit: limit}, true
 }

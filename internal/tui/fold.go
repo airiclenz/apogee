@@ -97,6 +97,9 @@ func (m Model) foldEventAgainst(e domain.Event, window int, model string) Model 
 	// used oppositely — the window is the FALLBACK behind the reading's own (a routed child fills the
 	// Delegation target's window), the model the YARDSTICK the reading's own is measured against.
 	m.transcript.applyUsage(e, window, model)
+	// A delegate's estimate between two of its readings lands on the same head, for its run view's
+	// gauge; it needs neither the window nor the model, since it leaves the reading's limit standing.
+	m.transcript.applyEstimate(e)
 	// The band's half of the same delivery report the transcript just folded: a message the human
 	// addressed to a running child is accounted for by the engine (ADR 0063), so the staged row
 	// that stood for it comes off here rather than on a timer (interject.go).

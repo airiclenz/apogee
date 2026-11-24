@@ -684,6 +684,107 @@ func TestRunViewGaugeStatesTheViewedRun(t *testing.T) {
 	})
 }
 
+// runWithEstimate is a model whose top level has reported parentUsed and whose open run s1 — a
+// reading of childUsed of 8192 folded first where childUsed > 0, none otherwise — has since landed a
+// tool result the engine estimated at estimate tokens, through the Event fold as the engine emits
+// it. The run stays open (no report), since a done head takes no further readings or estimates.
+func runWithEstimate(t *testing.T, parentUsed, childUsed, estimate int) Model {
+	t.Helper()
+	m := newTestModel(t)
+	m.transcript.reset()
+	m.transcript.addUser("survey the repo", nil)
+	subAgentCall(&m.transcript, "s1", "survey", 0)
+	if childUsed > 0 {
+		viewedRunUsage(&m, "s1", 1, childUsed, 8192)
+	}
+	readCall(&m.transcript, "r1", "a.go", 1, 5, 1)
+	m = m.foldEvent(domain.ContextEstimateEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Tokens: estimate})
+	m.ctxUsed = parentUsed
+	m.refreshViewport()
+	return m
+}
+
+// TestRunViewGaugeStatesTheViewedRunsEstimate pins the run view's `~` gauge: a tool-result estimate
+// from the viewed run moves its gauge to `~<estimate>/<limit>` over a standing reading, against the
+// window that reading named; before the run's first reading the slot keeps `esc back` (ADR 0063,
+// amended 2026-09-24) and in stateErrored `enter dismiss`; the top-level gauge and the run block's
+// own fill cell never take the run's estimate.
+func TestRunViewGaugeStatesTheViewedRunsEstimate(t *testing.T) {
+	t.Parallel()
+
+	const parentUsed = 20000
+	parentGauge := fmt.Sprintf("%s/%s", format.Tokens(parentUsed), format.Tokens(testOpts.ContextWindow))
+	childReading := fmt.Sprintf("%s/%s", format.Tokens(7000), format.Tokens(8192))
+	childEstimate := fmt.Sprintf("~%s/%s", format.Tokens(7600), format.Tokens(8192))
+
+	openS1 := func(t *testing.T, m Model) Model {
+		t.Helper()
+		m = enterOnLastBlock(t, m)
+		if got := m.viewedRun().spawn; got != "s1" {
+			t.Fatalf("setup: ⏎ opened run %q; want s1", got)
+		}
+		return m
+	}
+
+	t.Run("over a reading the view states the run's estimate against its reading's window", func(t *testing.T) {
+		t.Parallel()
+		m := openS1(t, runWithEstimate(t, parentUsed, 7000, 7600))
+
+		if got := plainSlot(m.statusRight(m.width)); !strings.HasPrefix(got, childEstimate+" ") {
+			t.Errorf("the right slot inside s1's view is %q; want s1's estimate %q", got, childEstimate)
+		}
+	})
+
+	t.Run("before any reading the slot reads esc back", func(t *testing.T) {
+		t.Parallel()
+		m := openS1(t, runWithEstimate(t, parentUsed, 0, 7600))
+
+		got := plainSlot(m.statusRight(m.width))
+		if !strings.HasPrefix(got, breadcrumbHint) || strings.Contains(got, "~") {
+			t.Errorf("the right slot inside an unread run's view is %q; want the %q hint, no estimate", got, breadcrumbHint)
+		}
+	})
+
+	t.Run("in stateErrored the estimate never takes the slot", func(t *testing.T) {
+		t.Parallel()
+		cases := []struct {
+			name      string
+			childUsed int
+			want      string
+		}{
+			{name: "no reading leaves enter dismiss", want: "enter dismiss"},
+			{name: "a reading states itself", childUsed: 7000, want: childReading + " "},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				m := openS1(t, runWithEstimate(t, parentUsed, tc.childUsed, 7600))
+				m.state = stateErrored
+
+				if got := plainSlot(m.statusRight(m.width)); !strings.HasPrefix(got, tc.want) {
+					t.Errorf("the errored right slot inside s1's view is %q; want it to open %q", got, tc.want)
+				}
+			})
+		}
+	})
+
+	t.Run("the top level and the run's own fill cell keep their readings", func(t *testing.T) {
+		t.Parallel()
+		m := runWithEstimate(t, parentUsed, 7000, 7600)
+
+		if got := plainSlot(m.statusRight(m.width)); !strings.HasPrefix(got, parentGauge+" ") {
+			t.Errorf("the top-level right slot is %q; want the parent's gauge %q", got, parentGauge)
+		}
+		head := m.transcript.openSubAgentHead(runOf(domain.EventBase{Depth: 1, CallID: "s1"}))
+		if head == nil {
+			t.Fatal("setup: s1 has no open head")
+		}
+		if got := subAgentFill(head.painted()); got != childReading {
+			t.Errorf("s1's fill cell is %q; want its reading %q — the estimate is the gauge's alone", got, childReading)
+		}
+	})
+}
+
 // plainSlot is a status-line slot with its styling taken back off, for a claim about the exact words
 // it spends its columns on.
 func plainSlot(slot string) string {

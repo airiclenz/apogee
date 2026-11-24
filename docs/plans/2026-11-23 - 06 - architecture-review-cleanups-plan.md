@@ -111,7 +111,11 @@ NOTES (2026-11-24): isAdvice now reads domain's advise list (Moment.TakesAdvise)
 **Closes:** publish-step-tables
 **Commit:** `refactor(release): a publish step is one row`
 
-## 3. A run view's gauge shows the viewed run's `~` estimate
+## 3. A run view's gauge shows the viewed run's `~` estimate — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): the "before any child reading, against topLevelWindow" subtest the item says to replace does not exist in the tree; the "before any reading the slot reads esc back" case lands as a new subtest of TestRunViewGaugeStatesTheViewedRunsEstimate instead, and TestRunViewGaugeStatesTheViewedRun is unchanged.
+NOTES (2026-11-24): scopeFill's per-scope rule is factored into a plain function isEstimateShown (top level: no reading or newer; run scope: a standing reading and newer), per the regression guard's recast rather than dropping the scope condition.
+NOTES (2026-11-24): the stateErrored case is pinned both ways — with no child reading the slot reads `enter dismiss`; with a reading standing the gauge states that reading without `~`, matching the top level's "unless a reading stands" rule.
 
 **What:** Recast at the regression check (2026-11-23).
 **Goal:** inside a run view the gauge reads `~<est>/<limit>` once the viewed run's estimate is newer than its reading, and that run's next counting reading clears it; the top-level gauge, watch and transcript rows are byte-identical; the side panel's usage follows the gauge.

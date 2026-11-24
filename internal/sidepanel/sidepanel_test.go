@@ -662,6 +662,54 @@ func TestUsage_FillAndLiveRule(t *testing.T) {
 	}
 }
 
+// TestUsage_AChildScopeTakesItsEstimate pins a run scope's fill to the TUI's run-view gauge: the
+// run's estimate stands only over a reading it is newer than — never before the run's first
+// reading, where the top level would take it — and the run's next reading supersedes it.
+func TestUsage_AChildScopeTakesItsEstimate(t *testing.T) {
+	scout := child("r.1")
+	cases := []struct {
+		name     string
+		events   []domain.Event
+		wantFill sidepanel.Fill
+	}{
+		{
+			name:     "an estimate with no reading takes no estimate",
+			events:   []domain.Event{domain.ContextEstimateEvent{EventBase: scout, Tokens: 7000}},
+			wantFill: sidepanel.Fill{Window: 20000},
+		},
+		{
+			name: "an estimate newer than the reading stands over it",
+			events: []domain.Event{
+				domain.UsageEvent{EventBase: scout, TotalTokens: 2000, ContextWindow: 10000},
+				domain.ContextEstimateEvent{EventBase: scout, Tokens: 7000},
+			},
+			wantFill: sidepanel.Fill{Used: 7000, Window: 10000, IsEstimate: true},
+		},
+		{
+			name: "the next reading supersedes the estimate",
+			events: []domain.Event{
+				domain.UsageEvent{EventBase: scout, TotalTokens: 2000, ContextWindow: 10000},
+				domain.ContextEstimateEvent{EventBase: scout, Tokens: 7000},
+				domain.UsageEvent{EventBase: scout, TotalTokens: 7200, ContextWindow: 10000},
+			},
+			wantFill: sidepanel.Fill{Used: 7200, Window: 10000},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state, _ := newState(t)
+			state.SetFallbackWindow(20000)
+			for _, e := range tc.events {
+				state.Fold(e)
+			}
+
+			if got := state.Usage(sidepanel.RunOf(scout)).Fill; got != tc.wantFill {
+				t.Errorf("fill = %+v, want %+v", got, tc.wantFill)
+			}
+		})
+	}
+}
+
 func TestUsage_HistoryArithmetic(t *testing.T) {
 	state, _ := newState(t)
 	state.Fold(domain.UsageEvent{TotalTokens: 9000, ContextWindow: 20000})

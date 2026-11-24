@@ -527,6 +527,13 @@ type entry struct {
 	// the reading folded (applyUsage)
 	ctxUsed  int
 	ctxLimit int
+	// ctxEstimate is the head of a sub-agent run only: the engine's `~` estimate of the child's fill
+	// from a ContextEstimateEvent that landed after its last reading (applyEstimate), 0 once the
+	// run's next counting reading measures the fill again (applyUsage). It is what a run view's
+	// gauge states over the standing reading ([Model.viewedFill]). View-only and unpersisted:
+	// toWireEntry never projects it, and it stays out of the paint key because no transcript row
+	// paints it — the run block's own fill cell reads ctxUsed alone.
+	ctxEstimate int
 	// ctxModel is the head of a sub-agent run only, and only where it has something to say: the
 	// model the child ran on WHEN that was not the session's own at the moment the reading folded
 	// — a delegation routed to the Sub-agent server (ADR 0045) — and empty when the two matched.
@@ -1604,7 +1611,8 @@ func (t *transcript) applyUsage(e domain.Event, window int, sessionModel string)
 	}
 	t.touch() // head is a pointer into entries, and at least one of the two readings writes through it
 	if fills {
-		head.ctxUsed, head.ctxLimit = total, childWindow(usage, window)
+		// The measured fill supersedes any estimate that landed before it (applyEstimate).
+		head.ctxUsed, head.ctxLimit, head.ctxEstimate = total, childWindow(usage, window), 0
 	}
 	head.usage.Adopt(reading) // latest-wins; an uncounted reading leaves the standing total alone
 	// Taken from every reading this fold accepts that names a model, whether or not it moved the
@@ -1615,6 +1623,25 @@ func (t *transcript) applyUsage(e domain.Event, window int, sessionModel string)
 	// what the seams stored.
 	if usage.Model != "" && usage.Model != sessionModel {
 		head.ctxModel = stripEscapes(usage.Model)
+	}
+}
+
+// applyEstimate folds a delegated run's ContextEstimateEvent onto the open head of that run: the
+// engine's estimate of the child's fill after a tool-result append, which the run view's gauge
+// states `~` over the standing reading until the run's next counting reading clears it
+// (applyUsage). The top level's estimate is not the transcript's business — the gauge reads it off
+// the Model (foldStats) — and an estimate of nothing, or one for a run with no open head (it already
+// reported, or its call has not folded), folds nothing.
+//
+// It deliberately does not touch: ctxEstimate is outside the paint key, since no transcript row
+// paints it, so moving it is no repaint.
+func (t *transcript) applyEstimate(e domain.Event) {
+	estimate, ok := e.(domain.ContextEstimateEvent)
+	if !ok || estimate.Depth <= 0 || estimate.Tokens <= 0 {
+		return
+	}
+	if head := t.openSubAgentHead(runOf(estimate.EventBase)); head != nil {
+		head.ctxEstimate = estimate.Tokens
 	}
 }
 

@@ -680,15 +680,26 @@ func (v UsageView) WithFill(fill Fill) UsageView {
 	return v
 }
 
-// scopeFill is the fill the status-line gauge states for scope: at the top level the engine's
-// estimate wherever it is newer than the last reading (or no reading stands), inside a run that
-// run's reading alone — exactly as the TUI's contextGauge reads it.
+// scopeFill is the fill the status-line gauge states for scope, exactly as the TUI's contextGauge
+// reads it: the engine's estimate wherever it is newer than the last reading — at the top level
+// also where no reading stands yet, inside a run only over a standing reading, since a run that
+// has reported nothing states no fill at all — and otherwise the run's reading.
 func (s *State) scopeFill(scope RunKey, state *runState) Fill {
 	fill := s.readingFill(state)
-	if scope == (RunKey{}) && (state.readUsed == 0 || state.isEstimateNewer) && state.estimate > 0 {
+	if state.estimate > 0 && isEstimateShown(scope, state) {
 		fill.Used, fill.IsEstimate = state.estimate, true
 	}
 	return fill
+}
+
+// isEstimateShown reports whether scope's gauge states the run's estimate rather than its reading
+// (scopeFill): the top level's wherever no reading stands or the estimate is newer, a run's only
+// where it is newer than a reading that stands.
+func isEstimateShown(scope RunKey, state *runState) bool {
+	if scope == (RunKey{}) {
+		return state.readUsed == 0 || state.isEstimateNewer
+	}
+	return state.readUsed > 0 && state.isEstimateNewer
 }
 
 // readingFill is the run's latest reading against the window it named, or the fallback window.
