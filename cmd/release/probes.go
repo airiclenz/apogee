@@ -67,24 +67,6 @@ type stepReport struct {
 // checkout whose origin is apogee's repository.
 type stepProbe func(ctx context.Context, commands runner, dir string, version releaseVersion) stepReport
 
-// publishStep is one step publish runs, in order, with the probe that tells whether it is done.
-type publishStep struct {
-	name  string
-	probe stepProbe
-}
-
-// publishSteps are the steps publish runs, in the order it runs them. status and publish probe
-// through this one list, so what status reports done is exactly what publish skips.
-var publishSteps = []publishStep{
-	{name: stepTag, probe: probeTag},
-	{name: stepRelease, probe: probeRelease},
-	{name: stepPlaceholder, probe: probePlaceholder},
-	{name: stepHomebrew, probe: probeHomebrew},
-	{name: stepScoop, probe: probeScoop},
-	{name: stepWinget, probe: probeWinget},
-	{name: stepSmoke, probe: probeSmoke},
-}
-
 // formulaVersionPattern finds the version a Homebrew formula pins: its `version "X.Y.Z"` line.
 var formulaVersionPattern = regexp.MustCompile(`(?m)^\s*version\s+"([^"]*)"`)
 

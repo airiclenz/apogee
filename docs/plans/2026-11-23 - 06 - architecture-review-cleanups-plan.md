@@ -96,7 +96,7 @@ NOTES (2026-11-24): isAdvice now reads domain's advise list (Moment.TakesAdvise)
 **Closes:** advise-call-copied
 **Commit:** `refactor(agent): one advise call answers every advise Moment as a value`
 
-## 2. A publish step is one row
+## 2. A publish step is one row — ✅ DONE (2026-11-24)
 
 **What:**
 **Goal:** `cmd/release` has one step table `publishSteps []publishStep` whose rows carry name, probe, describe, converge and doneDetail; `publishAction`/`publishActions` and the by-name `slices.IndexFunc` join are gone; step names and order unchanged (JSON contract with the release skills, ADR 0098).
