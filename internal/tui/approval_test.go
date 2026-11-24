@@ -797,3 +797,56 @@ func TestModelApprovalRuleFieldSavesEachRuleOfTheLine(t *testing.T) {
 		t.Errorf("saved %+v, want %+v", *saved, want)
 	}
 }
+
+// answerWhenArmed is the one gate an answering gesture passes. Before the pane's latch opens it
+// hands the model back untouched and never runs the answer — so an answer's own side effects, the
+// spending of a click arm among them, do not happen — and once the latch opens the answer is the
+// gesture's whole effect.
+func TestAnswerWhenArmedSwallowsUntilTheLatchOpens(t *testing.T) {
+	t.Parallel()
+	m, reply := newUnarmedApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
+	m.clickArmed = clickArm{pane: panePrompt, row: 0, ok: true}
+
+	ran := false
+	spend := func(m Model) (tea.Model, tea.Cmd) {
+		ran = true
+		m.clickArmed = clickArm{}
+		return m.resolveApproval()
+	}
+
+	next, cmd := acceptedModel(m.answerWhenArmed(spend))
+	if ran {
+		t.Fatal("the answer ran before the latch opened")
+	}
+	if cmd != nil {
+		t.Error("an unarmed gesture returned a Cmd")
+	}
+	if !next.clickArmed.ok {
+		t.Error("an unarmed gesture spent the click arm; it must stay standing for the click after the tick")
+	}
+	if next.state != stateAwaitingApproval || next.pending == nil {
+		t.Fatalf("an unarmed gesture moved the pane (state %v)", next.state)
+	}
+	select {
+	case got := <-reply:
+		t.Fatalf("an unarmed gesture answered the pane (sent %q)", got)
+	default:
+	}
+
+	next = armApproval(t, next)
+	next, _ = acceptedModel(next.answerWhenArmed(spend))
+	if !ran {
+		t.Fatal("the answer did not run once the latch opened")
+	}
+	if next.clickArmed.ok {
+		t.Error("the armed answer's own effect did not land on the returned model")
+	}
+	select {
+	case got := <-reply:
+		if got != domain.ApprovalAllow {
+			t.Errorf("decision = %v, want ApprovalAllow (the highlighted row)", got)
+		}
+	default:
+		t.Error("the armed gesture sent no decision")
+	}
+}

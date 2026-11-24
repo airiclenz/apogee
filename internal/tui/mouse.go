@@ -1888,13 +1888,13 @@ func (m Model) handleAskClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd,
 		return m, nil, true // off its rows, the box holds a typed answer, or no choices are offered
 	}
 	if m.clickArmed.holds(panePrompt, hit.row) {
-		if !m.approvalArmed {
-			return m, nil, true // the latch, not the arm: the row stays armed for the click after the tick
-		}
 		// The row the POINTER highlighted, clicked again: the arm is spent here rather than left for
-		// the next keypress to drop, because the question it belonged to is over.
-		m.clickArmed = clickArm{}
-		next, cmd := acceptedModel(m.submitAnswer())
+		// the next keypress to drop, because the question it belonged to is over. Unarmed, the latch
+		// (not the arm) swallows the click and the row stays armed for the click after the tick.
+		next, cmd := acceptedModel(m.answerWhenArmed(func(m Model) (tea.Model, tea.Cmd) {
+			m.clickArmed = clickArm{}
+			return m.submitAnswer()
+		}))
 		return next, cmd, true
 	}
 	m.askSel.seat(hit.row, hit.count)
@@ -1978,13 +1978,13 @@ func (m Model) handleApprovalClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 		return m, nil, true // the pane's chrome, or the open rule field: claimed, with no row to take
 	}
 	if m.clickArmed.holds(panePrompt, hit.row) {
-		if !m.approvalArmed {
-			return m, nil, true // the latch, not the arm: the row stays armed for the click after the tick
-		}
 		// The row the POINTER highlighted, clicked again: the arm is spent here rather than left for
-		// the next gesture to drop, because the decision it belonged to is taken.
-		m.clickArmed = clickArm{}
-		next, cmd := acceptedModel(m.resolveApproval())
+		// the next gesture to drop, because the decision it belonged to is taken. Unarmed, the latch
+		// (not the arm) swallows the click and the row stays armed for the click after the tick.
+		next, cmd := acceptedModel(m.answerWhenArmed(func(m Model) (tea.Model, tea.Cmd) {
+			m.clickArmed = clickArm{}
+			return m.resolveApproval()
+		}))
 		return next, cmd, true
 	}
 	m.approvalSel.seat(hit.row, hit.count)

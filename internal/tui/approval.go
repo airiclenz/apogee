@@ -302,6 +302,23 @@ func (m Model) foldApprovalArmed(msg approvalArmedMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// answerWhenArmed is the one gate every ANSWERING gesture on a decision pane passes: ⏎ on the ask
+// and approval panes, the approval pane's decision letters, and the second click on either pane's
+// armed row. Before the pane's latch opens ([Model.foldInputDrained], [Model.foldApprovalArmed]) the
+// gesture is swallowed — the model comes back as it was, with no Cmd — and answer is never run, so
+// nothing it would have changed (a spent click arm included) moves. Once armed, answer is the
+// gesture's own effect.
+//
+// Only answering goes through it. A highlight move, a multi-select tick, typed text and esc stay
+// live while the pane is unarmed, and the latch-generic reads — [Model.startupLatchCmds] and
+// [picker.isArmed] — ask the latched surface directly, since they are not answering anything.
+func (m Model) answerWhenArmed(answer func(Model) (tea.Model, tea.Cmd)) (tea.Model, tea.Cmd) {
+	if !m.approvalArmed {
+		return m, nil
+	}
+	return answer(m)
+}
+
 // withdrawAbandonedDecision takes down a standing approval or ask pane whose parked call nobody is
 // left to answer, and hands the keys back to the prompt. That is what a stop of ONE delegation
 // leaves behind (ADR 0086 D4): the stop cancels the context the child's call waits under, so the
@@ -376,10 +393,9 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.scrollViewport(msg)
 	}
 	if opt, ok := m.approvalKeysFor(m.pending.Request)[msg.String()]; ok {
-		if !m.approvalArmed {
-			return m, nil
-		}
-		return m.takeApprovalOption(opt)
+		return m.answerWhenArmed(func(m Model) (tea.Model, tea.Cmd) {
+			return m.takeApprovalOption(opt)
+		})
 	}
 	menu := m.approvalMenuFor(m.pending.Request)
 	switch msg.String() {

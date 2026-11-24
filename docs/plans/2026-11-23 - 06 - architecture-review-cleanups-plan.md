@@ -155,7 +155,7 @@ NOTES (2026-11-24): the stateErrored case is pinned both ways — with no child 
 - `test "$(grep -hE '^\s*m\.pendingDecision\.reset\(\)' internal/tui/*.go | wc -l)" = 1 && test "$(grep -hE '^\s*m\.restoreAskDraft\(\)' internal/tui/*.go | wc -l)" = 1`
 **Commit:** `refactor(tui): close every question pane through one let-go`
 
-## 5. One armed gate for a question's answer
+## 5. One armed gate for a question's answer — ✅ DONE (2026-11-24)
 
 **What:** Depends on item 4.
 **Goal:** no `m.approvalArmed` read outside `answerWhenArmed`; the latch-generic reads (`startupLatchCmds`, `picker.isArmed`) stay; ⏎, the decision letters and the second click on both panes go through it; `picker.isArmed` is untouched.

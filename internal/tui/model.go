@@ -2209,10 +2209,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// offered the pane opens with the first one highlighted, so an ⏎ already in the buffer
 			// when the question appeared would send an answer nobody read. Unarmed it is swallowed;
 			// typed characters, ↑/↓ and a multi-select ␣ stay live, and so does esc (claimed above).
-			if !m.approvalArmed {
-				return m, nil
-			}
-			return m.submitAnswer()
+			return m.answerWhenArmed(Model.submitAnswer)
 		case stateAwaitingApproval:
 			// Take the approval menu's highlighted row. The menu IS the decision surface now — the
 			// legend that used to spell the letters out is gone, so ⏎ on the pointed-at row is the
@@ -2224,10 +2221,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// (approval.go). Esc, the safe direction, is claimed above and stays live throughout —
 			// as the double-tap it is everywhere a worker runs: one press arms, a second folded
 			// before escStopResetMsg disarms it stops. The ⏎-Cancel row below is the one-press spelling of it.
-			if !m.approvalArmed {
-				return m, nil
-			}
-			return m.resolveApproval()
+			return m.answerWhenArmed(Model.resolveApproval)
 		case stateErrored:
 			// Dismiss the error and return to idle so the next message can be sent. With a queue
 			// held by the fault (ADR 0025) that is deliberately TWO presses: this one clears the
