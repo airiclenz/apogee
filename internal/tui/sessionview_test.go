@@ -242,7 +242,7 @@ func TestBootResumeAndBrowserRestoreSeatAlike(t *testing.T) {
 	boot.Resumed = &ResumedSession{
 		Transcript: blob, Title: meta.Title, CtxUsed: meta.CtxUsed, Usage: meta.Usage,
 		DelegateUsage: meta.DelegateUsage, ServedModels: slices.Clone(meta.ServedModels),
-		Currency: meta.EffectiveCurrency(opts.Currency),
+		Currency: meta.Currency,
 	}
 	booted := step(t, newModel(context.Background(), &fakeEngine{}, boot, nil), size)
 
@@ -282,6 +282,36 @@ func TestBootResumeAndBrowserRestoreSeatAlike(t *testing.T) {
 	if booted.sessionCurrency != "EUR" || booted.sessionName != "prior work" || booted.panel == nil {
 		t.Errorf("sessionCurrency %q, sessionName %q, panel seeded %v: want the record's EUR, its title and a usage section",
 			booted.sessionCurrency, booted.sessionName, booted.panel != nil)
+	}
+}
+
+// TestBootResumeSeatsTheLabelByTheOneRule pins the --resume door to the one currency rule: the
+// binary hands the record's own stored label across unresolved (ResumedSession.Currency), and the
+// seat weighs it against the configured label (session.Meta.EffectiveCurrency) — a priced record
+// keeps its own label, a record with nothing priced reads the configured one.
+func TestBootResumeSeatsTheLabelByTheOneRule(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		usage session.Usage
+		want  string
+	}{
+		{"a priced EUR record keeps EUR", eurRecordUsage, "EUR"},
+		{"an unpriced EUR record reads the configured USD", session.Usage{Calls: 2, UnpricedCalls: 2}, "USD"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			opts := testOpts
+			opts.Currency = "USD"
+			opts.Resumed = &ResumedSession{Title: "prior work", Usage: tc.usage, Currency: "EUR"}
+
+			m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+
+			if got := m.currency(); got != tc.want {
+				t.Errorf("currency() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

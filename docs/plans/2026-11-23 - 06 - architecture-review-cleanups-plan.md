@@ -282,7 +282,12 @@ NOTES (2026-11-24): sessionview.go's usageBase/sessionCurrency field docs and se
 - `! grep -rn 'replayResumed' internal/ cmd/ .capcom/knowledge/`
 **Commit:** `refactor(tui): seat the boot resume through the session seat`
 
-## 11. A resumed session's currency label by one rule
+## 11. A resumed session's currency label by one rule — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): internal/tui/sessionview.go needed no edit — seatSession already held the one non-test EffectiveCurrency call (item 10) and its comments still hold; it is listed in the plan's Files but absent from FILES
+NOTES (2026-11-24): consequential edit — internal/tui/usage_test.go: made necessary by ResumedSession.Currency now carrying the record's own label; labelledResumeModel's doc said the binary had resolved the label
+NOTES (2026-11-24): consequential edit — .capcom/knowledge/decisions/adr-0093/adr-0093-amend-1004.md: made necessary by the payload no longer carrying the effective label; dated blockquote under the sentence that said it did
+NOTES (2026-11-24): consequential edit — .capcom/knowledge/decisions/adr-0093.md: made necessary by the amend-1004 blockquote; the Status line names it, as AGENTS.md requires
 
 **What:** Depends on item 10.
 **Goal:** `EffectiveCurrency` is called for the TUI's label in exactly one non-test place (`seatSession`); `resumedSession` takes no configured-currency argument; the label shown is unchanged.

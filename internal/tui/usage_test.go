@@ -820,7 +820,8 @@ var eurRecordUsage = session.Usage{
 }
 
 // labelledResumeModel builds a model configured for USD and opened by --resume on a record carrying
-// eurRecordUsage, the binary having resolved its label to label (ResumedSession.Currency).
+// eurRecordUsage and storing label as its own (ResumedSession.Currency), which the seat keeps since
+// the record is priced.
 func labelledResumeModel(t *testing.T, label string) Model {
 	t.Helper()
 	return newModel(context.Background(), &fakeEngine{}, Options{

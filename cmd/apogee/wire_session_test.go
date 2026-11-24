@@ -617,23 +617,23 @@ func TestRotateReturnsToTheConfiguredCurrency(t *testing.T) {
 	}
 }
 
-// The replay payload carries the label the resumed session counts under — the effective one the
-// host's Saves write — not the record's raw label.
-func TestResumedSessionPayloadCarriesTheEffectiveCurrency(t *testing.T) {
+// The replay payload carries the record's own stored label as written, priced or not: the TUI's
+// session seat weighs it against the configured label by the one rule, so the binary resolves nothing.
+func TestResumedSessionPayloadCarriesTheRecordsOwnLabel(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name   string
 		record session.Record
 		want   string
 	}{
-		{"a priced EUR record stays EUR", pricedEURRecord(), "EUR"},
-		{"an unpriced EUR record adopts USD", unpricedEURRecord(), "USD"},
+		{"a priced EUR record carries EUR", pricedEURRecord(), "EUR"},
+		{"an unpriced EUR record still carries EUR", unpricedEURRecord(), "EUR"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			rs := resumedSession(&tc.record, "USD", false)
+			rs := resumedSession(&tc.record, false)
 
 			if rs == nil || rs.Currency != tc.want {
 				t.Errorf("resumedSession currency = %+v; want %q", rs, tc.want)
@@ -691,7 +691,7 @@ func TestResolveResumeLegacyPath(t *testing.T) {
 	if len(rec.Transcript) != 0 {
 		t.Errorf("legacy Transcript = %s; want empty (no scrollback recorded)", rec.Transcript)
 	}
-	if rs := resumedSession(rec, "", false); rs == nil || len(rs.Transcript) != 0 {
+	if rs := resumedSession(rec, false); rs == nil || len(rs.Transcript) != 0 {
 		t.Errorf("resumedSession(legacy) = %+v; want a non-nil payload with an empty transcript", rs)
 	}
 }
@@ -901,7 +901,7 @@ func TestSessionHostStoresBothTokenAccountings(t *testing.T) {
 	if rec.Meta.Model != "model-x" {
 		t.Errorf("stored model = %q; want the bound profile model-x — the served set does not displace it", rec.Meta.Model)
 	}
-	rs := resumedSession(&rec, "", false)
+	rs := resumedSession(&rec, false)
 	if rs == nil || rs.Usage != main || rs.DelegateUsage != delegates {
 		t.Errorf("resumedSession = %+v; want both accountings carried into the replay payload", rs)
 	}
@@ -921,7 +921,7 @@ func TestResolveResumeFreshStart(t *testing.T) {
 	if rec != nil {
 		t.Errorf("resolveResume with neither flag = %+v; want nil", rec)
 	}
-	if got := resumedSession(nil, "", false); got != nil {
+	if got := resumedSession(nil, false); got != nil {
 		t.Errorf("resumedSession(nil) = %+v; want nil (a fresh start replays nothing)", got)
 	}
 }

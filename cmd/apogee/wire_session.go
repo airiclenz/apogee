@@ -980,10 +980,10 @@ func probeHold(store *session.Store, id string) error {
 // a fresh start. The renderer decodes the opaque transcript blob itself; the binary only carries it
 // across with the title, context fill, and message count the resume note and gauge need, plus
 // inExchange — the resumed Agent's open-Exchange state (agent.InExchange()) — so newModel can append
-// the interrupted note when the session died mid-task. currency is the configured `currency:`
-// label; the payload carries the session's EFFECTIVE label (session.Meta.EffectiveCurrency) — the
-// one the host's later Saves write — rather than the record's raw one.
-func resumedSession(rec *session.Record, currency string, inExchange bool) *tui.ResumedSession {
+// the interrupted note when the session died mid-task. The payload carries the record's own stored
+// currency label as written; the TUI's session seat weighs it against the configured `currency:` by
+// the one rule (session.Meta.EffectiveCurrency), so the binary never resolves the label for it.
+func resumedSession(rec *session.Record, inExchange bool) *tui.ResumedSession {
 	if rec == nil {
 		return nil
 	}
@@ -994,7 +994,7 @@ func resumedSession(rec *session.Record, currency string, inExchange bool) *tui.
 		Usage:         rec.Meta.Usage,
 		DelegateUsage: rec.Meta.DelegateUsage,
 		ServedModels:  rec.Meta.ServedModels,
-		Currency:      rec.Meta.EffectiveCurrency(currency),
+		Currency:      rec.Meta.Currency,
 		UserMsgs:      rec.Meta.UserMsgs,
 		InExchange:    inExchange,
 	}

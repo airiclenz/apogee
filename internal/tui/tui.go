@@ -1988,10 +1988,10 @@ type ResumedSession struct {
 	// did not carry in would be dropped by the first save of the resumed session. nil on a record
 	// written before the field existed.
 	ServedModels []string
-	// Currency is the label the resumed session's amount counts under from here on — the
-	// record's own when it carries a priced call, the configured `currency:` otherwise
-	// (session.Meta.EffectiveCurrency, ADR 0093 amendment 2026-10-04), resolved by the binary so the
-	// renderer never weighs the two. It is the label the host's later Saves write.
+	// Currency is the record's own stored currency label (session.Meta.Currency), carried as
+	// written. The session seat weighs it by the one rule (session.Meta.EffectiveCurrency, ADR 0093
+	// amendment 2026-10-04, [Model.seatSession]): the record's label when it carries a priced call,
+	// the configured `currency:` otherwise — the label the host's later Saves write.
 	Currency string
 	// InExchange marks a session interrupted mid-task — the resumed Agent reports an open Exchange
 	// (the binary reads agent.InExchange() after building it). newModel then appends the interrupted
