@@ -276,12 +276,10 @@ func projectWritableKey(key string) (Key, error) {
 	if err != nil {
 		return Key{}, err
 	}
-	switch k.Class {
-	case ClassProjectParam, ClassTightenOnly:
-		return k, nil
-	default:
+	if !k.ProjectSettable() {
 		return Key{}, fmt.Errorf("apogee: %s is read from the global config only; a project config cannot set it", k.Path)
 	}
+	return k, nil
 }
 
 // ----------------------------------------------------------------------------

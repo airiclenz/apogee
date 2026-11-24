@@ -470,7 +470,10 @@ NOTES (2026-11-24): probeconfig.go, cmd/apogee/settingsapplier_helper_test.go an
 **Closes:** config-read-entries
 **Commit:** `refactor(config): every config read asks the one source`
 
-## 19. internal/config answers per key: may a project state it, which layer, who wins
+## 19. internal/config answers per key: may a project state it, which layer, who wins — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): `carriesProjectEntries` is deleted too (its two callers, settingsRowsOffered and notHeldByProject, read `ProvenanceOf(k).ProjectUnion`); `setInProject` now takes the row's `config.Provenance` and reads `Source == project && !ProjectUnion && (!Editable || !ProjectSettable)`, per the regression guard.
+NOTES (2026-11-24): `externalEdit.fileLayers()` returns a `config.Options` carrying only the baseline's GlobalKeys and ProjectKeys (the only fields `WithFileLayers` reads); `layeredOpts` keeps its `h.edits == nil` early return. `Outranks` has no production caller yet — item 20's pane is its reader. An extra test, `TestProvenanceOfMarksAProjectUnion`, pins ProjectUnion independent of Source (an env override on a project-extended tighten-only list stays a union).
 
 **What:** Depends on item 18 (order only).
 **Goal:** the project-settable class rule, an override's name (including the update-check exception), the source rank order and the file-layer merge each exist once, in internal/config; `savableToProject`, `settingSource` and `withBootUnreportedKeys` are gone.

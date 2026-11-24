@@ -294,7 +294,7 @@ func OverlayProjectOffer(base Options, global GlobalDocument, projectRoot string
 // refuse is refused here too.
 func applyProjectRows(o *Options, fc fileConfig, overridden map[string]Source) error {
 	for _, k := range KeyRegistry {
-		if k.Class != ClassProjectParam && k.Class != ClassTightenOnly {
+		if !k.ProjectSettable() {
 			continue
 		}
 		if _, won := overridden[k.Path]; won {
@@ -536,13 +536,13 @@ func (w *projectWalk) key(k Key, value *yaml.Node) {
 		w.reactions = value
 		return
 	}
-	switch k.Class {
-	case ClassProjectParam, ClassTightenOnly:
+	switch {
+	case k.ProjectSettable():
 		w.entries = append(w.entries, projectEntry{path: k.Path, class: k.Class, value: value})
 		setAtPath(w.checked, k.Path, value)
-	case ClassGranting:
+	case k.Class == ClassGranting:
 		setAtPath(w.checked, k.Path, value)
-	case ClassGlobalOnly:
+	case k.Class == ClassGlobalOnly:
 		w.dropped = append(w.dropped, k.Path)
 	}
 }

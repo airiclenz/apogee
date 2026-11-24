@@ -126,9 +126,9 @@ func settingsRowsOffered(opts config.Options, offer config.ProjectOffer) []tui.S
 	section := ""
 	next := 0
 	for _, k := range config.KeyRegistry {
-		source, sourceName := settingSource(k, &opts)
-		heldByProject := setInProject(k, source)
-		if carriesProjectEntries(k, opts) || heldByProject {
+		provenance := opts.ProvenanceOf(k)
+		heldByProject := setInProject(k, provenance)
+		if provenance.ProjectUnion || heldByProject {
 			k.Editable = false
 		}
 		if next < len(settingSections) && settingSections[next].Opens == k.Path {
@@ -159,8 +159,8 @@ func settingsRowsOffered(opts config.Options, offer config.ProjectOffer) []tui.S
 			Value:        value,
 			Text:         text,
 			Default:      k.Default,
-			Source:       source,
-			SourceName:   sourceName,
+			Source:       tui.SettingSource(provenance.Source),
+			SourceName:   provenance.Name,
 			EnumValues:   k.EnumValues,
 			Editable:     k.Editable,
 			Masked:       k.Masked,
@@ -169,7 +169,7 @@ func settingsRowsOffered(opts config.Options, offer config.ProjectOffer) []tui.S
 			Desc:         k.Desc,
 			// A key a project may state is offered the project target wherever this pane writes it;
 			// the host takes the offer back in a session with no Project config (withoutProjectTarget).
-			ProjectCapable: k.Editable && savableToProject(k),
+			ProjectCapable: k.Editable && k.ProjectSettable(),
 		})
 	}
 	return rows
@@ -285,51 +285,17 @@ func settingKind(kind config.Kind) tui.SettingKind {
 	}
 }
 
-// settingSource reports the source marker for a row: which source supplies this key's value in opts
-// (config.Options.SourceOf) — a boot override, else the file layer opts carries — and, for an
-// override, what that source is CALLED, so the pane's note
-// can name it ("APOGEE_MODE", "--mode") instead of saying "something". An environment override on
-// a row that names no variable is APOGEE_NO_UPDATE_CHECK's, the one override config applies by hand
-// rather than through the row (ADR 0043's exception, ADR 0097): it forces `update-check` off.
-func settingSource(k config.Key, opts *config.Options) (tui.SettingSource, string) {
-	switch opts.SourceOf(k.Path) {
-	case config.SourceEnv:
-		if k.EnvVar == "" {
-			return tui.SettingFromEnv, config.EnvNoUpdateCheck
-		}
-		return tui.SettingFromEnv, k.EnvVar
-	case config.SourceFlag:
-		return tui.SettingFromFlag, "--" + k.FlagName
-	case config.SourceProject:
-		return tui.SettingFromProject, ""
-	case config.SourceGlobal:
-		return tui.SettingFromGlobal, ""
-	default:
-		return tui.SettingFromDefault, ""
-	}
-}
-
 // setInProject reports whether the Project config sets this row's value and the pane cannot save it
 // back there (ADR 0096): a granting key, whose project entries go live only by Adoption and have a
 // writer of their own, or a project-param key this pane does not write at all — whose ⏎ would
 // otherwise open the GLOBAL file in the editor. Such a row is read-only here and points at the
 // project config. An editable project-param row is NOT one of these — the pane asks which file its
 // save goes to — and neither is
-// a tighten-only list the project added entries to: its value is the union of both files, and
-// carriesProjectEntries already sends it to the editor, where the global half of it is edited.
-func setInProject(k config.Key, source tui.SettingSource) bool {
-	if source != tui.SettingFromProject || k.Class == config.ClassTightenOnly {
-		return false
-	}
-	return !k.Editable || !savableToProject(k)
-}
-
-// savableToProject reports whether a `/settings` save of this key may land in the Project config:
-// a project-param key, which the project file states outright, or a tighten-only list, whose
-// project entries are unioned with the global ones (ADR 0096 §6). Every other class is the global
-// file's alone, or — the granting `allow:` — written by its own seam.
-func savableToProject(k config.Key) bool {
-	return k.Class == config.ClassProjectParam || k.Class == config.ClassTightenOnly
+// a tighten-only list the project added entries to (config.Provenance.ProjectUnion): its value is
+// the union of both files, so the row is read-only for that reason and its ⏎ opens the editor,
+// where the global half of it is edited — a project's `dangerous-rules:` entries included.
+func setInProject(k config.Key, p config.Provenance) bool {
+	return p.Source == config.SourceProject && !p.ProjectUnion && (!k.Editable || !k.ProjectSettable())
 }
 
 // withoutProjectTarget is rows with the project target taken off every one of them — the host's
@@ -358,14 +324,6 @@ func editPointer(k config.Key) string {
 	default:
 		return pointerConfine
 	}
-}
-
-// carriesProjectEntries reports whether a tighten-only list's value holds entries the Project config
-// added (ADR 0096 §6): the row shows the union of both files, so a commit from this pane would write
-// the project's entries into the global file. Such a row is read-only here and its ⏎ opens the
-// editor instead, like any other key the pane will not write.
-func carriesProjectEntries(k config.Key, opts config.Options) bool {
-	return k.Class == config.ClassTightenOnly && opts.ProjectKeys[k.Path]
 }
 
 // externallyEdited reports whether ⏎ on this key's row suspends into the human's own editor — the

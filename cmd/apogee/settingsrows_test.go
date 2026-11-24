@@ -821,7 +821,9 @@ func TestSettingsRowsHoldProjectEntriesOutOfTheGlobalFile(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(workspace, ".apogee"), 0o700); err != nil {
 		t.Fatalf("create the project folder: %v", err)
 	}
-	project := "tools:\n  disabled: [terminal]\nurl-safety:\n  deny-hosts: [x.example]\n"
+	project := "tools:\n  disabled: [terminal]\nurl-safety:\n  deny-hosts: [x.example]\n" +
+		"dangerous-rules:\n  add:\n    - id: project-only\n      pattern: zzz-project-only\n" +
+		"      tier: refuse\n      reason: a project's own rule\n"
 	if err := os.WriteFile(filepath.Join(workspace, ".apogee", "config.yaml"), []byte(project), 0o600); err != nil {
 		t.Fatalf("write the project config: %v", err)
 	}
@@ -842,6 +844,30 @@ func TestSettingsRowsHoldProjectEntriesOutOfTheGlobalFile(t *testing.T) {
 	if got := byPath["url-safety.deny-hosts"]; !got.Editable {
 		t.Error("url-safety.deny-hosts is read-only; the project added nothing to it, so a commit " +
 			"writes only the global file's own entries")
+	}
+	// The project's dangerous-rules entries are a union too: the row is the project's, but its ⏎
+	// still opens the editor rather than pointing at the project config.
+	if got := byPath["dangerous-rules"]; got.Source != tui.SettingFromProject || got.Editable ||
+		got.EditPointer != pointerExternalEdit || !got.ExternalEdit {
+		t.Errorf("dangerous-rules row = {source %q editable %v pointer %q external %v}; want the "+
+			"project's, read-only, opening the editor", got.Source, got.Editable, got.EditPointer, got.ExternalEdit)
+	}
+}
+
+// The renderer's source marks spell config's sources, so a row's mark is config.Source handed
+// across the seam as it is rather than re-derived.
+func TestSettingSourcesSpellConfigSources(t *testing.T) {
+	t.Parallel()
+	for mark, source := range map[tui.SettingSource]config.Source{
+		tui.SettingFromDefault: config.SourceDefault,
+		tui.SettingFromGlobal:  config.SourceGlobal,
+		tui.SettingFromProject: config.SourceProject,
+		tui.SettingFromEnv:     config.SourceEnv,
+		tui.SettingFromFlag:    config.SourceFlag,
+	} {
+		if mark != tui.SettingSource(source) {
+			t.Errorf("tui mark %q does not spell config source %q", mark, source)
+		}
 	}
 }
 

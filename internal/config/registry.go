@@ -2280,6 +2280,14 @@ func bindRows(rows []Key) []Key {
 	return rows
 }
 
+// ProjectSettable reports whether a Project config may state k at all (ADR 0096 §6): a
+// project-param key, which the project file states outright, or a tighten-only list, whose project
+// entries are unioned with the global ones. Every other class is the global file's alone, or — a
+// granting key — live only by Adoption and written by its own seam.
+func (k Key) ProjectSettable() bool {
+	return k.Class == ClassProjectParam || k.Class == ClassTightenOnly
+}
+
 // ReadOf is the row's value read with the Project config's offer beside the options: ReadOffer
 // where the row carries one, Read otherwise, and the empty value for a row with neither.
 func (k Key) ReadOf(o Options, offer ProjectOffer) string {

@@ -541,31 +541,7 @@ func (h settingsHost) layeredOpts() config.Options {
 	if h.edits == nil {
 		return h.opts
 	}
-	opts := h.opts
-	global, project := h.edits.layers()
-	opts.GlobalKeys = withBootUnreportedKeys(global, h.opts.GlobalKeys)
-	opts.ProjectKeys = withBootUnreportedKeys(project, h.opts.ProjectKeys)
-	return opts
-}
-
-// withBootUnreportedKeys is a copy of current with every key a re-read never reports
-// (reloadNeverReports) taken from boot instead — a copy, because current is the baseline's own map
-// and boot the session's.
-func withBootUnreportedKeys(current, boot map[string]bool) map[string]bool {
-	keys := make(map[string]bool, len(current))
-	for path, set := range current {
-		keys[path] = set
-	}
-	for _, k := range config.KeyRegistry {
-		if !reloadNeverReports(k) {
-			continue
-		}
-		delete(keys, k.Path)
-		if boot[k.Path] {
-			keys[k.Path] = true
-		}
-	}
-	return keys
+	return h.opts.WithFileLayers(h.edits.fileLayers(), reloadNeverReports)
 }
 
 // Write persists one key per deliberate edit, spliced into the config file (ADR 0035). The registry
@@ -679,7 +655,7 @@ func (h settingsHost) inProject(write func() error) error {
 }
 
 // notHeldByProject refuses a global save of a tighten-only list the Project config now adds entries
-// to — a row the files make read-only (carriesProjectEntries), reached here when the project file
+// to — a row the files make read-only (config.Provenance.ProjectUnion), reached here when the project file
 // gained those entries after the row was painted. Its value is the union of both files, so saving it
 // to the global file would copy the project's entries there.
 func (h settingsHost) notHeldByProject(key string) error {
@@ -688,7 +664,7 @@ func (h settingsHost) notHeldByProject(key string) error {
 		return nil
 	}
 	projected, err := h.edits.projection()
-	if err != nil || !carriesProjectEntries(k, projected.opts) {
+	if err != nil || !projected.opts.ProvenanceOf(k).ProjectUnion {
 		return nil
 	}
 	return fmt.Errorf("apogee: %s carries entries from the project config; edit its global half in config.yaml", key)
