@@ -64,10 +64,11 @@ func urlGuardWiringWith(t *testing.T, opts config.Options, deps rootDeps) *rootW
 	opts.ConfigDir = t.TempDir()
 	opts.AutoCompact = true
 
-	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+	roots, files, err := sessionRoots(opts)
 	if err != nil {
-		t.Fatalf("resolveRoots: %v", err)
+		t.Fatalf("sessionRoots: %v", err)
 	}
+	opts.Files = files
 	w := newRootWiringWith(opts, apogee.ModeAskBefore, roots, deps)
 	t.Cleanup(w.close)
 	if err := w.resolveConfig(); err != nil {

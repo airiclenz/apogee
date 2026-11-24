@@ -839,7 +839,7 @@ func runHeadlessBody(
 				"(use --mode plan or --mode auto)", mode))
 	}
 
-	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+	roots, _, err := sessionRoots(*opts)
 	if err != nil {
 		return run.Result{}, notStarted(err)
 	}

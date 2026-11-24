@@ -373,7 +373,7 @@ func loadMCPConfig(cmd *cobra.Command, opts *config.Options) (stateRoots, config
 	if err != nil {
 		return stateRoots{}, config.ProjectOffer{}, err
 	}
-	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+	roots, _, err := sessionRoots(*opts)
 	if err != nil {
 		return stateRoots{}, config.ProjectOffer{}, err
 	}

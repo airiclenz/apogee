@@ -61,7 +61,6 @@ import (
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
-	"github.com/airiclenz/apogee/internal/projectroot"
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
@@ -129,10 +128,14 @@ func runRootWith(ctx context.Context, opts config.Options, offer config.ProjectO
 		return err
 	}
 
-	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+	// The roots this run lives in, its Project root the one the config source names, and that
+	// source recorded on opts (a resolution has already recorded it; a hand-built opts takes the one
+	// walked here), so every later re-read of this session reads the files the boot read.
+	roots, files, err := sessionRoots(opts)
 	if err != nil {
 		return err
 	}
+	opts.Files = files
 
 	// The startup scratch sweep: stale per-session scratch dirs go before this run's own is
 	// created (wireSession), best-effort and silent — GC is never a reason a start fails.
@@ -490,6 +493,8 @@ type stateRoots struct {
 	// project is the Project root (internal/projectroot, ADR 0096 §1): the folder whose .apogee/
 	// holds the project's config and skills — the workspace itself outside a repository, and empty
 	// when the workspace is the user's home (no project layer). Readers treat empty as workspace.
+	// resolveRoots leaves it empty: it is the config source's answer (config.Files.ProjectRoot),
+	// filled by sessionRoots for a session and by the daemon's fire for a Firing.
 	project string
 }
 
@@ -516,8 +521,7 @@ func resolveColorScheme(name, schemesDir string) (scheme.Scheme, []string) {
 // apogee home (configDir override, else ~/.apogee) holds config/sessions, and the
 // workspace (workspace override, else the current directory) scopes the file tools. It
 // computes paths only — directory creation is deferred to the writer that needs them (P2.5).
-// The Project root is resolved here too, by a filesystem walk from the workspace that can never
-// fail (projectroot.Resolve), so it adds nothing to the error set.
+// It leaves the Project root empty: that is the config source's to name (sessionRoots).
 func resolveRoots(configDir, workspace string) (stateRoots, error) {
 	absHome, err := config.ApogeeHome(configDir)
 	if err != nil {
@@ -572,19 +576,22 @@ func resolveRoots(configDir, workspace string) (stateRoots, error) {
 		// time its journal is opened, and a run whose `undo-snapshots:` is off creates nothing.
 		snapshots: filepath.Join(absHome, "snapshots"),
 		workspace: absWorkspace,
-		project:   projectroot.Resolve(absWorkspace, userHome()),
 	}, nil
 }
 
-// userHome is the user's home folder for the Project root's home guard, or "" when the platform
-// cannot name one — which leaves only that guard off: with no home to compare against, the walk
-// still stops at the git top-level, so the answer stays inside the workspace's own repository.
-func userHome() string {
-	home, err := os.UserHomeDir()
+// sessionRoots is resolveRoots for a session over opts, with the Project root the config source
+// names (opts.ConfigFiles): the one a resolution recorded on opts, or for options no resolution
+// filled, the one walked from their workspace now. It returns that source beside the roots, so the
+// caller can carry it on and every later reader asks the same files. A workspace the source could
+// not read takes no Project root — config's answer, said by the resolution that met it.
+func sessionRoots(opts config.Options) (stateRoots, config.Files, error) {
+	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
 	if err != nil {
-		return ""
+		return stateRoots{}, config.Files{}, err
 	}
-	return home
+	files := opts.ConfigFiles()
+	roots.project = files.ProjectRoot()
+	return roots, files, nil
 }
 
 // ----------------------------------------------------------------------------

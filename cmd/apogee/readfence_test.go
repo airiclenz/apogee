@@ -52,10 +52,11 @@ func readFenceWiring(t *testing.T, workspace, configDir string) *rootWiring {
 		ConfigDir:    configDir,
 		AutoCompact:  true,
 	}
-	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+	roots, files, err := sessionRoots(opts)
 	if err != nil {
-		t.Fatalf("resolveRoots: %v", err)
+		t.Fatalf("sessionRoots: %v", err)
 	}
+	opts.Files = files
 	w := newRootWiring(opts, apogee.ModeAskBefore, roots)
 	t.Cleanup(w.close)
 	if err := w.resolveConfig(); err != nil {

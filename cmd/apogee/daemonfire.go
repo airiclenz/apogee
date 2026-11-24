@@ -205,7 +205,7 @@ func newDaemonWiring(opts config.Options, log *daemonLog, deps daemonDeps) (*dae
 	// The global file every Firing's Project config is merged into, read here once beside the
 	// startup resolution that just read it (ADR 0055). That resolution already folded or refused a
 	// retired shape, so this read has nothing to migrate and nothing to announce.
-	global, err := config.ReadGlobalDocument(opts.ConfigDir, os.ReadFile, func(msg string) {
+	global, err := opts.ConfigFiles().GlobalDocument(os.ReadFile, func(msg string) {
 		log.line("%s", msg)
 	})
 	if err != nil {
@@ -344,26 +344,28 @@ func (w *daemonWiring) latchProjectNotice(root, text string) bool {
 	return true
 }
 
-// firingOptions answers the options a Firing rooted in roots runs under: the daemon's startup
-// resolution — the global file alone (Options.GlobalConfigOnly) — with the Project config of the
-// Firing's own Project root layered over a copy of it, read now, so an edit to that file reaches the
-// next Firing without a restart (ADR 0096). A workspace with no Project root, or no project file,
-// answers the startup resolution itself. w.opts is never changed, so Firings in two workspaces
-// never see each other's layer.
+// firingOptions answers the options a Firing reading the config source firing runs under: the
+// daemon's startup resolution — the global file alone (Options.GlobalConfigOnly) — with the Project
+// config of the Firing's own Project root layered over a copy of it, read now, so an edit to that
+// file reaches the next Firing without a restart (ADR 0096). A workspace with no Project root, or no
+// project file, answers the startup resolution itself; either way the answer records firing as its
+// source (config.Files.Overlay). w.opts is never changed, so Firings in two workspaces never see
+// each other's layer.
 //
 // What the layer had to say — a file it skipped, a global-only key it dropped, the proposed
 // reactions this Firing skips because nobody has adopted them (skippedReactionsNotice, ADR 0104
 // §12) — goes on the daemon log once per root and notice (latchProjectNotice), through
 // daemonLogWriter: the notice quotes a file in the workspace, so it is stripped to one line before
 // it reaches the journal. The adopted reactions are on the options and fire.
-func (w *daemonWiring) firingOptions(roots stateRoots) config.Options {
+func (w *daemonWiring) firingOptions(firing config.Files) config.Options {
+	root := firing.ProjectRoot()
 	logOnce := func(msg string) {
-		if w.latchProjectNotice(roots.project, msg) {
+		if w.latchProjectNotice(root, msg) {
 			_, _ = daemonLogWriter{log: w.log}.Write([]byte(msg))
 		}
 	}
-	opts, offer := config.OverlayProjectOffer(w.opts, w.global, roots.project, os.ReadFile, logOnce)
-	if n := skippedReactionsNotice(roots.project, offer.Proposals); n != "" {
+	opts, offer := firing.Overlay(w.opts, w.global, os.ReadFile, logOnce)
+	if n := skippedReactionsNotice(root, offer.Proposals); n != "" {
 		logOnce(n)
 	}
 	return opts
@@ -396,10 +398,16 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	if err != nil {
 		return schedule.Outcome{}, err
 	}
+	// The config source THIS Firing reads — the daemon's global file and the Project root walked
+	// from the entry's workspace — and that root, the config source's answer like a session's
+	// (sessionRoots). A workspace the source cannot read takes no root, and its notice is dropped: the
+	// entry's workspace was checked to exist when the entry was loaded (internal/daemon).
+	firing := config.ResolveFiles(w.opts.ConfigDir, entry.Run.Workspace, false, func(string) {})
+	roots.project = firing.ProjectRoot()
 
 	// The options THIS Firing runs under: the host's, with its own workspace's Project config
 	// layered in as it reads now. Every gate below reads them, as a session in that workspace would.
-	opts := w.firingOptions(roots)
+	opts := w.firingOptions(firing)
 
 	// The confinement posture THIS Firing runs under, said now that its mode and its workspace are
 	// both known — the two facts the launch path has at startup and a daemon does not, because a

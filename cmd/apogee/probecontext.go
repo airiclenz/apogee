@@ -117,7 +117,7 @@ func probeContextCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+			roots, _, err := sessionRoots(opts)
 			if err != nil {
 				return err
 			}

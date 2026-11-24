@@ -483,12 +483,10 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// and works out what came back different. It is built here rather than at the seam block below
 	// because its baseline is the file as it stands NOW, and now is before anything has been edited.
 	//
-	// Its re-reads resolve the project layer against the Project root this session fixed at boot,
-	// never a fresh walk, so a `.apogee/` or `git init` appearing in a subfolder workspace mid-session
-	// cannot move the layer out from under every other reader of roots.project.
-	editOpts := w.opts
-	editOpts.Files = config.FilesAt(w.opts.ConfigDir, w.opts.Workspace, w.roots.project)
-	w.externalEdits = newExternalEdit(editOpts, w.offer, w.roots.workspace, os.Getenv)
+	// Its re-reads read the files this session's config source fixed at boot (w.opts.Files), never a
+	// fresh walk, so a `.apogee/` or `git init` appearing in a subfolder workspace mid-session cannot
+	// move the layer out from under every other reader of roots.project.
+	w.externalEdits = newExternalEdit(w.opts, w.offer, w.roots.workspace, os.Getenv)
 
 	// The other trigger for that same round trip (ADR 0041 decision 3): the file itself. An editor's
 	// EXIT can only speak for the editors apogee waits on, and a desktop opener returns before the

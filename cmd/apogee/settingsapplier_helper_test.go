@@ -25,9 +25,9 @@ import (
 func fakeApplier(t *testing.T) settingsApplier {
 	t.Helper()
 	workspace := t.TempDir()
-	roots, err := resolveRoots(t.TempDir(), workspace)
+	roots, _, err := sessionRoots(config.Options{ConfigDir: t.TempDir(), Workspace: workspace})
 	if err != nil {
-		t.Fatalf("resolveRoots: %v", err)
+		t.Fatalf("sessionRoots: %v", err)
 	}
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeSettingsFixture(t, path, "")

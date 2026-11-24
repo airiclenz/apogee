@@ -153,7 +153,7 @@ func resolveProjectAdoption(cmd *cobra.Command, opts *config.Options) (projectAd
 	if err != nil && !errors.As(err, &undetermined) {
 		return projectAdoptTarget{}, err
 	}
-	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+	roots, _, err := sessionRoots(*opts)
 	if err != nil {
 		return projectAdoptTarget{}, err
 	}

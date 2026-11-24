@@ -1332,6 +1332,33 @@ func TestDaemonFiringTakesItsWorkspacesProjectLayer(t *testing.T) {
 	}
 }
 
+// A Firing's options name the Firing's own config source even where its workspace holds no
+// .apogee/config.yaml: the overlay takes no layer and answers the daemon's startup resolution, and
+// that answer still records the Firing's Files, so a reader of opts.Files finds the workspace's
+// Project root rather than the daemon's global-only source.
+func TestDaemonFiringFilesNameTheRootWithNoProjectLayer(t *testing.T) {
+	harness := newDaemonFireHarness(t, config.Options{
+		Servers: []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+	})
+	workspace := t.TempDir()
+	firing := config.ResolveFiles(harness.wiring.opts.ConfigDir, workspace, false, func(string) {})
+	if firing.ProjectRoot() == "" {
+		t.Fatalf("the fixture workspace %s resolved no Project root", workspace)
+	}
+
+	opts := harness.wiring.firingOptions(firing)
+
+	if opts.Files != firing {
+		t.Errorf("the Firing's options record the source %+v, want the Firing's own %+v", opts.Files, firing)
+	}
+	if got := opts.Files.ProjectRoot(); got != firing.ProjectRoot() {
+		t.Errorf("the Firing's options name the Project root %q, want %q", got, firing.ProjectRoot())
+	}
+	if harness.wiring.opts.Files == firing {
+		t.Error("the daemon's own options now record the Firing's source; the overlay wrote into them")
+	}
+}
+
 // A Firing reads its Project config as it stands at that Firing, so an edit to the project file
 // reaches the next tick without a daemon restart — only config.yaml is read once (ADR 0055).
 func TestDaemonFiringReadsItsProjectLayerFresh(t *testing.T) {

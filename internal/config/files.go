@@ -93,6 +93,29 @@ func (f Files) Layered(readFile func(string) ([]byte, error),
 	return LoadLayeredOffer(f.GlobalPath(), f.ProjectRoot(), readFile, notify)
 }
 
+// GlobalDocument reads f's global file once, for the overlays a Driver layering many projects over
+// one startup resolution makes ([ReadGlobalDocument]): it never migrates, and an absent file is the
+// empty document. The zero value reads nothing and answers the empty document.
+func (f Files) GlobalDocument(readFile func(string) ([]byte, error),
+	notify func(string)) (GlobalDocument, error) {
+	if f.IsZero() {
+		return GlobalDocument{}, nil
+	}
+	return ReadGlobalDocument(f.configDir, readFile, notify)
+}
+
+// Overlay answers a copy of base — a resolution that took no project layer
+// ([Options.GlobalConfigOnly]) over the global file global holds — with f's Project config layered
+// in ([OverlayProjectOffer]), read now. The overlaid options record f as their source on every
+// return, the one that takes no layer included, so a reader of their [Options.Files] finds f's
+// Project root whether or not a project file stood there. base is never changed.
+func (f Files) Overlay(base Options, global GlobalDocument, readFile func(string) ([]byte, error),
+	notify func(string)) (Options, ProjectOffer) {
+	overlaid, offer := OverlayProjectOffer(base, global, f.ProjectRoot(), readFile, notify)
+	overlaid.Files = f
+	return overlaid, offer
+}
+
 // Reread is the startup resolution ([ApplyConfigOffer]) over f's files alone, for a re-read under
 // a running session: no flag was set and no variable is in the environment, so the values are the
 // files' own, and nothing migrates — a file still written in a retired shape is refused with

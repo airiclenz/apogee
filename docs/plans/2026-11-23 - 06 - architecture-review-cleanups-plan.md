@@ -387,7 +387,13 @@ NOTES (2026-11-24): `Files.Reread` on the zero Files reads nothing and answers t
 - `! grep -nE '^\s*ProjectRoot ' internal/config/options.go`
 **Commit:** `refactor(config): one config source resolved once and carried on Options`
 
-## 15. Drivers take the Project root from the config source
+## 15. Drivers take the Project root from the config source — ✅ DONE (2026-11-24)
+
+NOTES (2026-11-24): `(w *rootWiring) files()` is not added in this item: with the `editOpts` pin gone, `newExternalEdit` takes `w.opts` (whose Files runRootWith now always sets), so nothing in item 15 calls it, and an uncalled method fails golangci-lint's `unused`. Item 16's watchers are its first callers and add it there.
+NOTES (2026-11-24): consequential edit — cmd/apogee/wire_live_test.go: made necessary by resolveRoots no longer filling `roots.project`; `urlGuardWiringWith` mirrors runRootWith's root step, so it now takes `sessionRoots(opts)` and sets `opts.Files` (the startup-MCP repo-server tests write into `w.roots.project`).
+NOTES (2026-11-24): consequential edit — cmd/apogee/readfence_test.go: made necessary by resolveRoots no longer filling `roots.project`; `readFenceWiring` mirrors runRootWith's root step and now takes `sessionRoots(opts)` and sets `opts.Files`.
+NOTES (2026-11-24): consequential edit — cmd/apogee/settingsapplier_helper_test.go: made necessary by resolveRoots no longer filling `roots.project`; `fakeApplier` takes its roots from `sessionRoots` so `TestWatchedMalformedProjectConfigLeavesAServersApplyWorking` still finds the workspace's Project root.
+NOTES (2026-11-24): `Files.GlobalDocument` on the zero Files reads nothing and answers the empty document, matching the zero-value rule of the other Files reads. The daemon's Firing source drops ResolveFiles' skip notice (ratified call); the comment in `fire` cites internal/daemon's load-time check that an entry's workspace exists.
 
 **What:** Recast at the regression check (2026-11-23). Depends on item 14. Ratified: a missing workspace takes config's answer (no root, skip notice; the daemon drops the notice).
 **Goal:** no production file outside internal/config and internal/projectroot imports internal/projectroot (guard test); `stateRoots.project` is filled from a `config.Files`; the TUI's re-read uses `w.opts.Files` with no hand pin.

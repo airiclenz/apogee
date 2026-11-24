@@ -1323,6 +1323,48 @@ func TestResolveRootsDefaults(t *testing.T) {
 	}
 }
 
+// A session's Project root is the config source's answer, never a walk of the Driver's own: the
+// root a resolution recorded on the options is the root the roots carry, even where the workspace's
+// own walk would name another folder; options no resolution filled take the root walked from their
+// workspace; and a workspace that does not exist takes no root at all, as config answers it.
+func TestSessionRootsTakeTheRootTheResolutionRecorded(t *testing.T) {
+	t.Parallel()
+	home, workspace, pinned := t.TempDir(), t.TempDir(), t.TempDir()
+
+	recorded := config.Options{ConfigDir: home, Workspace: workspace, Files: config.FilesAt(home, workspace, pinned)}
+	roots, files, err := sessionRoots(recorded)
+	if err != nil {
+		t.Fatalf("sessionRoots(recorded): %v", err)
+	}
+	if roots.project != pinned {
+		t.Errorf("the recorded source's roots name the Project root %q, want the recorded %q", roots.project, pinned)
+	}
+	if files != recorded.Files {
+		t.Errorf("sessionRoots answered the source %+v, want the recorded %+v", files, recorded.Files)
+	}
+
+	roots, files, err = sessionRoots(config.Options{ConfigDir: home, Workspace: workspace})
+	if err != nil {
+		t.Fatalf("sessionRoots(unresolved): %v", err)
+	}
+	if roots.project != workspace || files.ProjectRoot() != workspace {
+		t.Errorf("unresolved options took the Project root %q (source %q), want the workspace %q walked to",
+			roots.project, files.ProjectRoot(), workspace)
+	}
+
+	missing := filepath.Join(workspace, "not-there-yet")
+	roots, _, err = sessionRoots(config.Options{ConfigDir: home, Workspace: missing})
+	if err != nil {
+		t.Fatalf("sessionRoots(missing workspace): %v", err)
+	}
+	if roots.project != "" {
+		t.Errorf("a workspace that does not exist took the Project root %q, want none", roots.project)
+	}
+	if roots.workspace != missing {
+		t.Errorf("workspace = %q, want %q", roots.workspace, missing)
+	}
+}
+
 func TestBuildAgentNew(t *testing.T) {
 	t.Parallel()
 	agent, err := buildAgent(validCfg(t), nil)
