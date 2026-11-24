@@ -32,7 +32,7 @@
 **Out of scope:**
 - CI-cut releases (ADR 0098 §7); code signing (`apogee-3p1`); the first `komac new` (owner, manual).
 - Fixing red CI (`apogee-ci-e2e-timeout-flakes`) — it blocks the first cut, not this plan.
-- The personal skills' delegate guard (done in `/home/airic/repos/skills`).
+- The personal skills' delegate guard (done in `~/repos/skills`).
 - Embedding the release skills in the binary; any change to apogee's tool counts.
 
 **Regression check (2026-10-11, 6fee4616):**

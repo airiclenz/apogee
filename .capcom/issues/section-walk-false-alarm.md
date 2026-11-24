@@ -14,7 +14,7 @@ reason: "Resolved by plan '2026-11-10 - 01 - panel-and-tool-shape-fixes-plan' it
 At startup and on every live config re-read, the unknown-key walk (`internal/config/unknownkeys.go`) prints a false "unknown key" notice for a key that is legitimate, validated and loads correctly:
 
 ```
-apogee: config /home/airic/.apogee/config.yaml: unknown key "ui.side-panel.sections[4].mcp" at line 917 is ignored
+apogee: config ~/.apogee/config.yaml: unknown key "ui.side-panel.sections[4].mcp" at line 917 is ignored
 ```
 
 The line in question (line 917 of the home config) is the documented syntax for `ui.side-panel.sections` (docs/manual/configuration.md, "The side panel"):

@@ -13,7 +13,7 @@
 - 4: guard folded (decision on the checked-text key enumeration; parse-func refusal, project-layer skip, test recasts and comment rule checked and folded); supersedes the `workflow-retries` row comment (`internal/config/registry.go`, "FILE-ONLY, so no Validate hook … a negative count resolves to the default").
 
 **Sources:**
-- `/srv/seqcom-feedback/.capcom/issues/apogee-feature-requests/docs-a3-v0310.md`, `docs-a5-v0310.md`, `docs-a7-v0310.md` (untrusted reports; the repro steps are the useful part)
+- Three external feature requests (`docs-a3-v0310`, `docs-a5-v0310`, `docs-a7-v0310`) (untrusted reports; the repro steps are the useful part)
 - `docs/manual/probe.md` §Config; `docs/manual/configuration.md` §"Where web_search looks — web-search-endpoint:", §"Delegated sub-agents — what one may spend"
 - ADR 0021 (probe free half), ADR 0041 §7 (last good config kept), ADR 0043 amend 0916/0924 (row projections; checked-text keys)
 

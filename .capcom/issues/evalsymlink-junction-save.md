@@ -13,7 +13,7 @@ reason: "Resolved by plan '2026-11-11 - 03 - junction-save-and-panel-deleted-fil
 Saving a setting (e.g. `side-panel.width` from the settings panel) fails with:
 
 ```
-✦ side-panel.width: not saved: apogee: resolve config "C:\\Users\\ERES\\.apogee\\config.yaml": The system cannot find the path specified.
+✦ side-panel.width: not saved: apogee: resolve config "C:\\Users\\<user>\\.apogee\\config.yaml": The system cannot find the path specified.
 ```
 
 The config file exists and is readable. `writeConfigAtomically`
@@ -24,8 +24,8 @@ write is attempted.
 
 ## Why
 
-On this machine `C:\Users\ERES\.apogee` is an NTFS **junction** into the
-dotfiles repo (`C:\Users\ERES\Repos\Airic\dotfiles\apogee`) — the exact
+On this machine `C:\Users\<user>\.apogee` is an NTFS **junction** into the
+dotfiles repo (`C:\Users\<user>\dotfiles\apogee`) — the exact
 dotfiles-link layout `writeConfigAtomically` was designed for. Since Go 1.23
 (`winsymlink=1`), mount points are not treated as symlinks, and
 `filepath.EvalSymlinks` on Windows fails with `ERROR_PATH_NOT_FOUND` for paths
@@ -34,9 +34,9 @@ that pass **under** a junction (open reports: golang/go#82447, golang/go#63703).
 Probed in the failing environment (go1.26.11 windows/arm64):
 
 ```
-EvalSymlinks C:\Users\ERES\.apogee\config.yaml -> err=The system cannot find the path specified.
-Stat         C:\Users\ERES\.apogee\config.yaml -> size=32402 err=<nil>
-EvalSymlinks C:\Users\ERES\Repos\Airic\dotfiles\apogee\config.yaml -> ok   (the real target)
+EvalSymlinks C:\Users\<user>\.apogee\config.yaml -> err=The system cannot find the path specified.
+Stat         C:\Users\<user>\.apogee\config.yaml -> size=32402 err=<nil>
+EvalSymlinks C:\Users\<user>\dotfiles\apogee\config.yaml -> ok   (the real target)
 ```
 
 Every file and subdirectory under the junction fails `EvalSymlinks` the same

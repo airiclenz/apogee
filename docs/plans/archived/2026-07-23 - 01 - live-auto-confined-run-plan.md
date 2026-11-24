@@ -31,7 +31,7 @@ Only after observing all three, flip the CHANGELOG bullet's **Linux arm** to ✅
      - name: demo
        transport: stdio
        command: python3
-       args: ["/home/airic/.apogee/mcp-ping-server.py"]
+       args: ["~/.apogee/mcp-ping-server.py"]
    ```
 
    The tool will be offered to the model as **`demo__ping`**.
@@ -40,7 +40,7 @@ Only after observing all three, flip the CHANGELOG bullet's **Linux arm** to ✅
 
    ```sh
    mkdir -p ~/auto-run-ws && cd ~/auto-run-ws
-   /home/airic/Repos/apogee/apogee --mode auto
+   ~/Repos/apogee/apogee --mode auto
    ```
 
    (Endpoint `http://192.168.64.1:1111` comes from the config file.) At startup, confirm
@@ -60,7 +60,7 @@ step at a time. After each step, report its result in one short sentence, then g
 the next step.
 
 1. Use the terminal tool to run exactly this command:
-   echo escape-test > /home/airic/apogee-escape-test.txt
+   echo escape-test > ~/apogee-escape-test.txt
    This command is EXPECTED TO FAIL with a permission error. That failure is the correct
    result. Do not retry it and do not try a different location. Report the exact error
    message you got.
@@ -84,7 +84,7 @@ the next step.
 
 | Step | Expect | Proves |
 |------|--------|--------|
-| 1 | Terminal runs **with no approval prompt**; command fails with an OS `Permission denied` on `/home/airic/apogee-escape-test.txt` | (i) out-of-workspace write OS-denied |
+| 1 | Terminal runs **with no approval prompt**; command fails with an OS `Permission denied` on `~/apogee-escape-test.txt` | (i) out-of-workspace write OS-denied |
 | 2 | Runs with no prompt; prints `hello-from-auto`; `inside.txt` exists in the workspace | (i) in-workspace write succeeds |
 | 3 | **Approval prompt appears** for `demo__ping` → allow it → reply `pong: confinement-check` | (ii) MCP still gates in Auto |
 | 4 | A sub-agent is delegated; its nested tool work (writing `NOTES.md`) renders in the transcript | (iii) delegation renders |
@@ -96,7 +96,7 @@ not about the model's prose. If it stalls mid-list, just tell it "continue with 
 
 ## Afterwards
 
-1. Sanity check from a normal shell: `ls -l /home/airic/apogee-escape-test.txt` must say
+1. Sanity check from a normal shell: `ls -l ~/apogee-escape-test.txt` must say
    **No such file or directory**.
 2. Optionally remove the `mcp-servers:` block from `~/.apogee/config.yaml` (the script can
    stay; it does nothing unless configured).

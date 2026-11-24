@@ -16,8 +16,8 @@ func TestRenderSubstitutesAllPlaceholders(t *testing.T) {
 	t.Parallel()
 
 	template := "You are in {{workspace}} on {{datetime}} in {{mode}} mode.\nScratch: {{scratch}}.\nStill {{workspace}}."
-	in := Inputs{Workspace: "/home/eric/apogee", Mode: "ask-before", Now: fixedNow, Scratch: "/home/eric/.apogee/scratch/s1"}
-	want := "You are in /home/eric/apogee on 2026-07-26 in ask-before mode.\nScratch: /home/eric/.apogee/scratch/s1.\nStill /home/eric/apogee."
+	in := Inputs{Workspace: "/home/me/apogee", Mode: "ask-before", Now: fixedNow, Scratch: "/home/me/.apogee/scratch/s1"}
+	want := "You are in /home/me/apogee on 2026-07-26 in ask-before mode.\nScratch: /home/me/.apogee/scratch/s1.\nStill /home/me/apogee."
 
 	if got := Render(template, in); got != want {
 		t.Errorf("Render() = %q, want %q", got, want)

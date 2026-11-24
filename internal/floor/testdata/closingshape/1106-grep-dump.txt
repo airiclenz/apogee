@@ -1,4 +1,4 @@
-compact.go:135-235 covers the emergency fold. Let me read a chunk of compact.go to pin the specifics[60 total matches in /home/airic/repos/apogee/internal/agent/compact.go, showing 1-50]
+compact.go:135-235 covers the emergency fold. Let me read a chunk of compact.go to pin the specifics[60 total matches in /home/me/repos/apogee/internal/agent/compact.go, showing 1-50]
 agent/compact.go:1:package agent
 agent/compact.go:2:
 agent/compact.go:3:import (
