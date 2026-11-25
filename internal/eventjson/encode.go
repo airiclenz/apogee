@@ -7,11 +7,13 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The thirty line kinds of ADR 0075 §4 — twenty-eight Event variants, workflow_phase (ADR 0087),
+// The thirty-one line kinds of ADR 0075 §4 — twenty-nine Event variants, workflow_phase (ADR 0087),
 // malformed_chunks, sub_agent_group (ADR 0103 decision 13), context_estimate, upstream_switched
 // (adr-0075-amend-1102), task_list, context_cost (adr-0075-amend-1108), mcp_server
-// (adr-0075-amend-1109) and upstream_loading (adr-0075-amend-1110) the newest, plus the two frames that bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
-// name for a neighbouring moment is a DIFFERENT moment, and the case difference is the signal.
+// (adr-0075-amend-1109), upstream_loading (adr-0075-amend-1110) and question (adr-0075-amend-1124)
+// the newest, plus the two frames that bracket a run and are not Events. They are snake_case on
+// purpose: a notice Moment's kebab-case name for a neighbouring moment is a DIFFERENT moment, and
+// the case difference is the signal.
 // seam_closed is the one kind the Writer holds back unless asked for (Options.Seams): the mapping
 // here is total, the gating is the Writer's.
 const (
@@ -43,6 +45,7 @@ const (
 	kindContextCost       = "context_cost"
 	kindMCPServer         = "mcp_server"
 	kindUpstreamLoading   = "upstream_loading"
+	kindQuestion          = "question"
 	kindRunStarted        = "run_started"
 	kindRunFinished       = "run_finished"
 )
@@ -93,6 +96,7 @@ func Kinds() []string {
 		kindContextCost,
 		kindMCPServer,
 		kindUpstreamLoading,
+		kindQuestion,
 		kindRunStarted,
 		kindRunFinished,
 	}
@@ -250,6 +254,12 @@ func encode(ev domain.Event, currency string) (kind string, base domain.EventBas
 		}, true
 	case domain.UpstreamLoadingEvent:
 		return kindUpstreamLoading, e.EventBase, upstreamLoadingData{Server: e.Server, Model: e.Model}, true
+	case domain.QuestionEvent:
+		return kindQuestion, e.EventBase, questionData{
+			Question:    e.Request.Question,
+			Choices:     choicesOrEmpty(e.Request.Choices),
+			MultiSelect: e.Request.MultiSelect,
+		}, true
 	case domain.MCPServerEvent:
 		return kindMCPServer, e.EventBase, mcpServerData{
 			Server:    e.Server,
@@ -734,6 +744,25 @@ type upstreamSwitchedData struct {
 type upstreamLoadingData struct {
 	Server string `json:"server"`
 	Model  string `json:"model"`
+}
+
+// questionData is the question line: a question was put to the human and is waited on. question
+// is its text, choices the answers offered beside the free-text box — always an array, [] for a
+// free-text question — and multi_select whether several of them may be picked. Like an approval
+// line's requested phase it is written before the answer; the answer itself is the asking call's
+// result.
+type questionData struct {
+	Question    string   `json:"question"`
+	Choices     []string `json:"choices"`
+	MultiSelect bool     `json:"multi_select"`
+}
+
+// choicesOrEmpty is a question's choices as the line writes them: [] rather than null for none.
+func choicesOrEmpty(choices []string) []string {
+	if choices == nil {
+		return []string{}
+	}
+	return choices
 }
 
 // mcpServerData is the mcp_server line: one MCP server's connection lifecycle (ADR 0111 decision 8).

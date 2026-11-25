@@ -225,6 +225,34 @@ func ConsoleOwnerFromContext(ctx context.Context) string {
 	return key
 }
 
+// questionAnnouncerCtxKey keys the running Agent's question announcer in a tool call's context.
+type questionAnnouncerCtxKey struct{}
+
+// WithQuestionAnnouncer returns a context carrying announce as the way a tool call reports a
+// question it is about to put to the human: the running Agent installs one per call that emits a
+// QuestionEvent stamped with its own identity, and the ask_user tool calls it with the request it
+// built, just before the question queues for the prompt slot. It travels the call's context for
+// the reason the identity carriers above do — the tool builds the request one interface boundary
+// away from the Agent that knows the Turn and the event sink.
+//
+// It always overrides what ctx carries: the announcement belongs to the calling Agent, whose
+// identity stamps the event. A nil announce installs nothing.
+func WithQuestionAnnouncer(ctx context.Context, announce func(AskRequest)) context.Context {
+	if announce == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, questionAnnouncerCtxKey{}, announce)
+}
+
+// AnnounceQuestion reports req through the announcer installed by WithQuestionAnnouncer. With none
+// installed — a tool called outside a running Agent — it does nothing: no observer was promised
+// the question, and asking it must not depend on one.
+func AnnounceQuestion(ctx context.Context, req AskRequest) {
+	if announce, ok := ctx.Value(questionAnnouncerCtxKey{}).(func(AskRequest)); ok {
+		announce(req)
+	}
+}
+
 // AskAnswer is the human's free-text reply. A STRUCT for the same freeze-safety reason
 // (a post-v1 Choice index is an additive field).
 type AskAnswer struct {

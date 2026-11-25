@@ -1012,6 +1012,11 @@ func raise(
 		URLAllowHosts: in.opts.URLAllowHosts,
 		URLDenyHosts:  in.opts.URLDenyHosts,
 		MCP:           reactions.HostMCPNone,
+		// Unattended holds because every Firing ends in run.Once, which swaps in its no-one-to-ask
+		// denier as the Approver (internal/run's Once): each gated call is refused the moment it is
+		// raised, so an approval-requested Reaction would announce a wait that never happens. The
+		// interactive root (wire_boot.go) leaves it false.
+		Unattended: true,
 	})
 	if err != nil {
 		return run.Result{}, nil, errNotStarted{Stage: stageCompose, Err: err}

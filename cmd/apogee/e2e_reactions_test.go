@@ -834,6 +834,62 @@ func TestE2EGateAsksInAHeadlessRun(t *testing.T) {
 	}
 }
 
+// TestE2EReactionsUnattendedFireNoApprovalRequested is the unattended root's approval pair. A
+// headless run is a Firing: every gated call it raises is refused by run.Once's no-one-to-ask
+// denier the moment it is raised, so nobody is ever waited on and an `approval-requested` Reaction
+// — a bell for a prompt nobody is watching — would ring for a wait that never happens. The Firing's
+// Runner fires none (reactions.HostOptions.Unattended, set by raise), while `approval-decided`
+// still fires carrying the deny, the run's event lines still carry BOTH approval phases, and the
+// exchange-finished payload's `denied` agrees with the run's own count (run.Result.Denied, the
+// closing frame's `denied`).
+//
+// The call is gated by a `gate:` that says `ask`, the one way a headless run (Plan or Auto) puts a
+// call to its Approver: the ask hands it to the denier, whose refusal is an Approval like any other.
+func TestE2EReactionsUnattendedFireNoApprovalRequested(t *testing.T) {
+	sink := filepath.Join(t.TempDir(), "fired.jsonl")
+	t.Setenv(hookSinkEnv, sink)
+
+	stub := stubllm.New(t, loadScript(t, "reactions"))
+	stdout, _, _ := headlessHooksArgs(t, stub, gatePrompt, gateConfig("echo ask")+
+		"  - id: "+hooksSinkName+"\n"+
+		"    on: [approval-requested, approval-decided, exchange-finished]\n"+
+		"    run: [sh, -c, 'cat >> \"$APOGEE_TEST_SINK\"']\n",
+		"--format", formatJSON)
+
+	// A headless run drains its Reactions before it returns, so the sink is complete.
+	fired := readHookPayloads(t, sink)
+	if requested, ok := hookPayloadFor(fired, reactions.ApprovalRequested); ok {
+		t.Errorf("an unattended run fired approval-requested %+v; nobody was waited on", requested)
+	}
+	decided, ok := hookPayloadFor(fired, reactions.ApprovalDecided)
+	if !ok {
+		t.Fatalf("the run fired no approval-decided; fired %+v", fired)
+	}
+	if decided.Decision != string(domain.ApprovalDeny) {
+		t.Errorf("the approval-decided payload's decision = %q; want %q — the denier answered",
+			decided.Decision, domain.ApprovalDeny)
+	}
+
+	lines := jsonEventLines(t, stdout)
+	if gateFirstIndex(t, lines, "approval", "phase", string(domain.ApprovalRequested)) < 0 ||
+		gateFirstIndex(t, lines, "approval", "phase", string(domain.ApprovalDecided)) < 0 {
+		t.Errorf("the run's event lines do not carry both approval phases:\n%s", stdout)
+	}
+	_, data := finishedFrame(t, lines)
+	runDenied, _ := data["denied"].(float64)
+	if runDenied != 1 {
+		t.Errorf("the closing frame's denied = %v; want 1 — the one gated call", data["denied"])
+	}
+	finished, ok := hookPayloadFor(fired, reactions.ExchangeFinished)
+	if !ok {
+		t.Fatalf("the run fired no exchange-finished; fired %+v", fired)
+	}
+	if finished.Denied == nil || float64(*finished.Denied) != runDenied {
+		t.Errorf("the exchange-finished payload's denied = %v; want the run's own count %v",
+			finished.Denied, runDenied)
+	}
+}
+
 // TestE2EGateAsksInTheTUI is the third root, and the only one with a person in it: the same `ask`
 // in front of a human puts the gate's own words on the approval pane. The second and later lines of
 // a gate's stdout are a reason for the human and for nobody else, so this frame is the one place in

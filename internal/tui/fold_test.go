@@ -367,6 +367,13 @@ func foldCases() []foldCase {
 			}},
 		},
 		{
+			name: "QuestionEvent is inert in the TUI",
+			// A question put to the human. The TUI's own Asker shows it in the prompt pane, so the
+			// event folds nothing: no entry, no gauge, no phrase, no progress save. It is there for
+			// the question-asked Reaction and for a Driver with no Asker of its own.
+			event: domain.QuestionEvent{Request: domain.AskRequest{Question: "Which branch?", Choices: []string{"main", "dev"}}},
+		},
+		{
 			name: "MCPServerEvent folds into the MCP state alone",
 			// One MCP server's connection lifecycle, emitted by the composition root rather than the
 			// engine. It moves the MCP fold the /mcp pane and the side panel's mcp section read

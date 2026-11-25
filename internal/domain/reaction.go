@@ -40,7 +40,9 @@ const (
 // The six standalone notice Moments — post-hoc points that report a fact of their own rather
 // than the closing of a seam. Their values are the spellings a configured `on:` list names;
 // `approval-requested` reads as the phase of the ApprovalEvent it reports, beside the
-// `approval-decided` that ADR 0076 A6 admitted as the second half of the pair.
+// `approval-decided` that ADR 0076 A6 admitted as the second half of the pair. Three more
+// standalone notices joined later and are declared on their own below — session-started,
+// compaction-finished and question-asked — so nine report a fact of their own in all.
 const (
 	MomentExchangeFinished  Moment = "exchange-finished"  // a Depth-0 Turn closed its Exchange
 	MomentTurnFinished      Moment = "turn-finished"      // a Depth-0 Turn boundary, whatever its status
@@ -75,12 +77,19 @@ const MomentSessionStarted Moment = "session-started"
 // adr-0076-amend-1021b). It joined the vocabulary after session-started, and allNotices keeps that order.
 const MomentCompactionFinished Moment = "compaction-finished"
 
+// MomentQuestionAsked is the QUESTION notice: a standalone notice reporting that a question was
+// put to the human and is waited on — the ask_user tool's, a recipe's prompt for a missing input,
+// or a Workflow `ask` stage's (QuestionEvent) — before it is answered, the way approval-requested
+// reports an Approval (ADR 0076, adr-0076-amend-1124). It joined the vocabulary after
+// compaction-finished, and allNotices keeps that order.
+const MomentQuestionAsked Moment = "question-asked"
+
 // allSeams is the seam vocabulary in loop order; allNotices is the notice vocabulary in the
 // order internal/reactions reports it — the six standalone notices first, in the order that
 // package already listed them, then the five seam-closing notices in loop order, then
-// session-started, then compaction-finished. Appending rather than interleaving keeps the spellings a configuration in the
-// wild already names at the head of every listing they appear in, so a notice added later goes
-// at the end.
+// session-started, then compaction-finished, then question-asked. Appending rather than
+// interleaving keeps the spellings a configuration in the wild already names at the head of every
+// listing they appear in, so a notice added later goes at the end.
 var (
 	allSeams = []Moment{
 		MomentPreRequest,
@@ -103,6 +112,7 @@ var (
 		MomentHistoryRewriteFinished,
 		MomentSessionStarted,
 		MomentCompactionFinished,
+		MomentQuestionAsked,
 	}
 )
 
@@ -154,7 +164,7 @@ func (m Moment) Closing() Moment {
 // listing them for a help text or a validation message cannot disturb the vocabulary.
 func Seams() []Moment { return append([]Moment(nil), allSeams...) }
 
-// Notices returns the thirteen notice Moments in their documented order, as a fresh copy.
+// Notices returns the fourteen notice Moments in their documented order, as a fresh copy.
 func Notices() []Moment { return append([]Moment(nil), allNotices...) }
 
 // Origin is who a Reaction belongs to — one axis of the Reaction surface matrix (CONTEXT:

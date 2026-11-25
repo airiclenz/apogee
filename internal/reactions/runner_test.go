@@ -1351,3 +1351,173 @@ func TestMCPObserveGlobalEntryNeverCuesPinMoved(t *testing.T) {
 		t.Errorf("re-ask cue fired %d times for a global entry, want 0", got)
 	}
 }
+
+// deniedApproval is an Approval decided with deny at depth, the kind the exchange-finished
+// "denied" count tallies.
+func deniedApproval(depth int) domain.ApprovalEvent {
+	return domain.ApprovalEvent{
+		EventBase: domain.EventBase{Depth: depth},
+		Phase:     domain.ApprovalDecided,
+		Request:   domain.ApprovalRequest{Tool: "terminal"},
+		Decision:  domain.ApprovalDeny,
+	}
+}
+
+// exchangeClosed is a Depth-0 Turn boundary that closed its Exchange at turn.
+func exchangeClosed(turn int) domain.TurnEvent {
+	return domain.TurnEvent{EventBase: domain.EventBase{Turn: turn}, Status: domain.StatusExchangeComplete}
+}
+
+// firingAt returns the one recorded firing of event at turn, failing the test when there is not
+// exactly one.
+func firingAt(t *testing.T, runs []domain.SeamPayload, event Event, turn int) domain.SeamPayload {
+	t.Helper()
+	var found []domain.SeamPayload
+	for _, run := range runs {
+		if run.Event == event && run.Turn == turn {
+			found = append(found, run)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("recorded %d %s firings at turn %d, want 1: %+v", len(found), event, turn, runs)
+	}
+	return found[0]
+}
+
+// assertDenied fails t unless payload carries denied == want.
+func assertDenied(t *testing.T, payload domain.SeamPayload, want int) {
+	t.Helper()
+	if payload.Denied == nil {
+		t.Errorf("%s at turn %d carries no denied count, want %d", payload.Event, payload.Turn, want)
+		return
+	}
+	if *payload.Denied != want {
+		t.Errorf("%s at turn %d carries denied %d, want %d", payload.Event, payload.Turn, *payload.Denied, want)
+	}
+}
+
+// TestRunnerCountsDeniedApprovalsPerExchange — exchange-finished carries how many Approvals the
+// Exchange refused, at every depth, and nothing else does. The count resets at each closed
+// Exchange and at a Depth-0 boundary that ended one any other way (a cancel, an unset status), so
+// one Exchange's denials never leak into the next; a child's Turn and a plain turn-complete reset
+// nothing; and the count lives on the Runner, so a Replace mid-Exchange keeps it.
+func TestRunnerCountsDeniedApprovalsPerExchange(t *testing.T) {
+	t.Parallel()
+
+	exec := newFakeExecutor()
+	runner, err := New([]domain.Reaction{commandHook("done", ExchangeFinished, TurnFinished)}, Options{
+		Workspace: t.TempDir(), Exec: exec,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Exchange 1: two denials (depth 0 and depth 2) beside an allow and a still-pending request,
+	// across a plain Turn boundary and a child's closed Exchange — neither of which resets.
+	runner.Emit(deniedApproval(0))
+	runner.Emit(domain.ApprovalEvent{Phase: domain.ApprovalRequested, Request: domain.ApprovalRequest{Tool: "terminal"}})
+	runner.Emit(domain.ApprovalEvent{Phase: domain.ApprovalDecided, Decision: domain.ApprovalAllow})
+	runner.Emit(turnEvent(1))
+	runner.Emit(deniedApproval(2))
+	runner.Emit(domain.TurnEvent{EventBase: domain.EventBase{Depth: 1, Turn: 9}, Status: domain.StatusExchangeComplete})
+	runner.Emit(exchangeClosed(2))
+
+	// Exchange 2: none denied — the count is still written, as 0.
+	runner.Emit(exchangeClosed(3))
+
+	// Exchange 3: one denial before a Replace and one after it.
+	runner.Emit(deniedApproval(0))
+	if err := runner.Replace([]domain.Reaction{commandHook("done", ExchangeFinished, TurnFinished)}); err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+	runner.Emit(deniedApproval(1))
+	runner.Emit(exchangeClosed(4))
+
+	// A cancelled Exchange and one the engine left without a status each reset the count.
+	runner.Emit(deniedApproval(0))
+	runner.Emit(domain.TurnEvent{EventBase: domain.EventBase{Turn: 5}, Status: domain.StatusCancelled})
+	runner.Emit(deniedApproval(0))
+	runner.Emit(domain.TurnEvent{EventBase: domain.EventBase{Turn: 6}})
+	runner.Emit(exchangeClosed(7))
+	closeRunner(t, runner)
+
+	runs := exec.recorded()
+	assertDenied(t, firingAt(t, runs, ExchangeFinished, 2), 2)
+	assertDenied(t, firingAt(t, runs, ExchangeFinished, 3), 0)
+	assertDenied(t, firingAt(t, runs, ExchangeFinished, 4), 2)
+	assertDenied(t, firingAt(t, runs, ExchangeFinished, 7), 0)
+	for _, turn := range []int{1, 2, 3, 4, 5, 6, 7} {
+		if finished := firingAt(t, runs, TurnFinished, turn); finished.Denied != nil {
+			t.Errorf("turn-finished at turn %d carries denied %d, want it absent", turn, *finished.Denied)
+		}
+	}
+}
+
+// TestRunnerUnattendedFiresNoApprovalRequested — on a root where nobody can answer an Approval,
+// approval-requested fires no Reaction, also after a Replace, while the ApprovalEvent still reaches
+// the decorated sink and approval-decided still fires with the deny. An attended root fires both.
+func TestRunnerUnattendedFiresNoApprovalRequested(t *testing.T) {
+	t.Parallel()
+
+	requested := func(turn int) domain.ApprovalEvent {
+		return domain.ApprovalEvent{
+			EventBase: domain.EventBase{Turn: turn}, Phase: domain.ApprovalRequested,
+			Request: domain.ApprovalRequest{Tool: "terminal"},
+		}
+	}
+	decided := func(turn int) domain.ApprovalEvent {
+		event := deniedApproval(0)
+		event.Turn = turn
+		return event
+	}
+	hooks := []domain.Reaction{commandHook("bell", ApprovalRequested, ApprovalDecided)}
+
+	t.Run("unattended", func(t *testing.T) {
+		t.Parallel()
+
+		inner := &recordingSink{}
+		exec := newFakeExecutor()
+		runner, err := New(hooks, Options{Inner: inner, Workspace: t.TempDir(), Exec: exec, Unattended: true})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		runner.Emit(requested(1))
+		runner.Emit(decided(1))
+		if err := runner.Replace(hooks); err != nil {
+			t.Fatalf("Replace: %v", err)
+		}
+		runner.Emit(requested(2))
+		runner.Emit(decided(2))
+		closeRunner(t, runner)
+
+		runs := exec.recorded()
+		if len(runs) != 2 {
+			t.Fatalf("ran %+v, want the two approval-decided firings alone", runs)
+		}
+		for _, turn := range []int{1, 2} {
+			if verdict := firingAt(t, runs, ApprovalDecided, turn).Decision; verdict != string(domain.ApprovalDeny) {
+				t.Errorf("approval-decided at turn %d decision = %q, want deny", turn, verdict)
+			}
+		}
+		if len(inner.events) != 4 {
+			t.Errorf("inner received %d events, want all 4 approval events forwarded", len(inner.events))
+		}
+	})
+
+	t.Run("attended", func(t *testing.T) {
+		t.Parallel()
+
+		exec := newFakeExecutor()
+		runner, err := New(hooks, Options{Workspace: t.TempDir(), Exec: exec})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		runner.Emit(requested(1))
+		runner.Emit(decided(1))
+		closeRunner(t, runner)
+
+		runs := exec.recorded()
+		firingAt(t, runs, ApprovalRequested, 1)
+		firingAt(t, runs, ApprovalDecided, 1)
+	})
+}

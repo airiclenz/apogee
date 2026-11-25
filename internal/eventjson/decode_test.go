@@ -175,6 +175,11 @@ func roundTripEvents() []domain.Event {
 			Server: "search", Transport: "sse", Phase: domain.MCPServerFailed, Cause: "dial tcp: connection refused", Kept: true,
 		},
 		domain.MCPServerEvent{Server: "search", Transport: "sse", Phase: domain.MCPServerDisconnected, Reason: domain.MCPDisconnectRemoved},
+		domain.QuestionEvent{
+			EventBase: topLevelBase,
+			Request:   domain.AskRequest{Question: "Which branch?", Choices: []string{"main", "dev"}, MultiSelect: true},
+		},
+		domain.QuestionEvent{EventBase: topLevelBase, Request: domain.AskRequest{Question: "Why?"}},
 	}
 }
 

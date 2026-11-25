@@ -102,6 +102,12 @@ type SeamPayload struct {
 	// StepCapped marks an Exchange the delegate step cap ended rather than the model.
 	// turn-finished, exchange-finished.
 	StepCapped bool `json:"step_capped,omitempty"`
+	// Denied is how many Approvals were refused during the Exchange — decided with deny, by a
+	// human or by an unattended run's no-one-to-ask denier — at every depth, its sub-agents'
+	// included. A gate Reaction's deny is no Approval and is not counted. It is a pointer so it
+	// is written on exchange-finished alone, 0 included, and absent on every other firing.
+	// exchange-finished.
+	Denied *int `json:"denied,omitempty"`
 
 	// Tool is the tool that wrote the file, the tool whose call is pending or whose result came
 	// back, or the tool whose call is waiting on an Approval. file-changed, pre-tool-exec,
@@ -118,7 +124,7 @@ type SeamPayload struct {
 	// approval-requested, approval-decided.
 	Remedy string `json:"remedy,omitempty"`
 	// SubAgentName is the display name of the child whose call is waiting, when it has one.
-	// approval-requested, approval-decided.
+	// approval-requested, approval-decided, question-asked.
 	SubAgentName string `json:"sub_agent_name,omitempty"`
 	// Scope is the optional statement of what the call reaches beyond what its arguments name.
 	// approval-requested, approval-decided.
@@ -127,6 +133,15 @@ type SeamPayload struct {
 	// `deny` or `allow-for-session` — or `allowed-by-rule` for a gate an Allow rule answered in
 	// the Approver's place (ApprovalAllowedByRule, ADR 0096 §3). approval-decided.
 	Decision string `json:"decision,omitempty"`
+
+	// Question is the text put to the human. question-asked.
+	Question string `json:"question,omitempty"`
+	// Choices are the answers offered beside the free-text box — an `ask` stage's options —
+	// absent when the question is free-text only. question-asked.
+	Choices []string `json:"choices,omitempty"`
+	// MultiSelect marks a question the human may answer with several of the Choices.
+	// question-asked.
+	MultiSelect bool `json:"multi_select,omitempty"`
 
 	// Source is what faulted — a tool name, a Reaction id, or "loop". error.
 	Source string `json:"source,omitempty"`

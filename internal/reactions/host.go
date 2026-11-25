@@ -47,6 +47,10 @@ type HostOptions struct {
 	URLAllowHosts, URLDenyHosts []string
 	// MCP says whether the Driver dials MCP servers; the zero value is HostMCPNone.
 	MCP HostMCP
+	// Unattended marks a root where nobody can answer an Approval, so its Runner fires no
+	// approval-requested Reaction (Options.Unattended). Set it only where a no-one-to-ask denier
+	// answers every gated call; an interactive root leaves it false.
+	Unattended bool
 }
 
 // Host is one Driver root's observe lane, owned whole: the MCP disarm and its notices, the
@@ -97,10 +101,11 @@ func NewHost(list []domain.Reaction, o HostOptions) (*Host, error) {
 
 	guard := security.NewURLGuard(o.URLAllowHosts, o.URLDenyHosts)
 	runner, err := New(h.lanes.Observe, Options{
-		Inner:     o.Inner,
-		Workspace: o.Workspace,
-		Schedule:  o.Schedule,
-		Report:    o.Report,
+		Inner:      o.Inner,
+		Workspace:  o.Workspace,
+		Schedule:   o.Schedule,
+		Report:     o.Report,
+		Unattended: o.Unattended,
 		Exec: DefaultExecutor(
 			o.Workspace, guard, h.projectRuns.Runner(), h.mcp.Resolver(), executorPinMoved,
 		),

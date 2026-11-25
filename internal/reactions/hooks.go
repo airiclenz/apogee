@@ -15,9 +15,11 @@ import (
 // excludes the per-token, tool-call, sub-agent-phase, session-save, prune and usage moments
 // (ADR 0073 §4).
 //
-// Only the six named below have a constant here; the vocabulary itself is domain.Notices(), so
-// the five `<seam>-finished` closings, `session-started` and `compaction-finished` are accepted
-// under `on:` from the same commit that added them to the core, and are matched by their spelling.
+// Only the seven named below — the six standalone notices this package listed first, and
+// `question-asked`, which its matcher maps from an Event of its own — have a constant here; the
+// vocabulary itself is domain.Notices(), so the five `<seam>-finished` closings, `session-started`
+// and `compaction-finished` are accepted under `on:` from the same commit that added them to the
+// core, and are matched by their spelling.
 //
 // The string is the spelling a user writes in the `on:` list of a `reactions:` entry, so it is
 // also the value that reaches a fired command as APOGEE_REACTION_EVENT and the payload's "event"
@@ -48,6 +50,13 @@ const (
 	// an error value; the failures of the Reaction machinery ITSELF never reach it, because a failing
 	// Reaction that fired an `error` Reaction would loop (ADR 0073 §8).
 	Error = domain.MomentError
+	// QuestionAsked fires when a question was put to the human and is waited on — the ask_user
+	// tool's, a recipe's prompt for a missing input, or a Workflow `ask` stage's — before it is
+	// answered, so a reaction can ring a bell for a question nobody is watching, as
+	// ApprovalRequested does for an Approval. The payload carries "question" and, when offered,
+	// "choices". It never fires where no human can be asked (headless, daemon and `/schedule`
+	// runs have no Asker).
+	QuestionAsked = domain.MomentQuestionAsked
 )
 
 // Events returns the Reaction events in their documented order. It IS domain.Notices() — the two

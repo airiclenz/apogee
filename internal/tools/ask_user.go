@@ -185,6 +185,11 @@ func (t *AskUser) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 		// identity here and nothing more.
 		Depth: domain.SubAgentDepthFromContext(ctx),
 	}
+	// Report the question before it is put: the Asker below first queues for the prompt slot an
+	// Approval may hold, so announcing here is what lets an observer learn a human is being waited
+	// on while the wait is still happening (the question-asked notice). Outside a running Agent
+	// nothing is installed and nothing is reported.
+	domain.AnnounceQuestion(ctx, req)
 	answer, err := t.asker.Ask(ctx, req)
 	if err != nil {
 		if ctx.Err() != nil {

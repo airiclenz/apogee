@@ -35,9 +35,9 @@ later.
 
 > Stage 2 of ADR 0076 took the
 > additive slot: the waiting spelling above is now `approval-requested`, and six notices joined it —
-> `approval-decided` plus the five seam-closing `<seam>-finished` notices. Thirteen notice
-> **Moments** (eleven until `session-started` joined on 2026-10-19 and `compaction-finished` on
-> 2026-10-21)
+> `approval-decided` plus the five seam-closing `<seam>-finished` notices. Fourteen notice
+> **Moments** (eleven until `session-started` joined on 2026-10-19, `compaction-finished` on
+> 2026-10-21 and `question-asked` on 2026-11-24)
 > ship; the "no `pre-*` event, ever" rule is unchanged, because a seam-closing notice reports a pass
 > that is already over.
 
@@ -70,8 +70,9 @@ engine never waits on a Hook.
 `ErrorEvent`, so an `error` Hook cannot fire on its own failure.
 
 > Stage 2 of ADR 0076 keeps the rule and re-words the notice, which now reports `reaction <id>: …`.
-> It covers all thirteen notice **Moments** (eleven when written; `session-started` and
-> `compaction-finished` joined in October 2026), the five seam-closing ones included: a failure on
+> It covers all fourteen notice **Moments** (eleven when written; `session-started` and
+> `compaction-finished` joined in October 2026, `question-asked` in November), the five
+> seam-closing ones included: a failure on
 > any of
 > them still never re-enters the Event stream.
 

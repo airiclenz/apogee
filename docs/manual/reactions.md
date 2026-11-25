@@ -2,8 +2,8 @@
 
 This page is the reference for the `reactions:` list in apogee's `config.yaml` — what other coding
 agents call hooks. It covers the three action keys (`run:`, `advise:`, `gate:`), the Moments each
-fires on, the JSON payload a handler receives, and how timeouts, failures, live reload and a
-repository's own entries behave.
+fires on, the JSON payload a handler receives, a ready-made push notification example, and how
+timeouts, failures, live reload and a repository's own entries behave.
 
 `reactions:` in `~/.apogee/config.yaml` is a list of Reactions apogee runs when something happens
 in a session. Each entry names the moments it fires on and the
@@ -44,7 +44,10 @@ which it supersedes in part, is the reasoning behind the `run:` posture.)
 The same list is fired by every front-end — the interactive TUI, a `/schedule` firing inside it,
 [`apogee headless`](headless.md) and an [`apogee daemon`](daemon.md) firing — from one library, so
 an entry means the same thing wherever the run was started from — save an MCP mapping, which only
-the interactive TUI's own session calls (see [Calling an MCP tool](#calling-an-mcp-tool)).
+the interactive TUI's own session calls (see [Calling an MCP tool](#calling-an-mcp-tool)), and the
+two notices that say you are being waited on: a headless, daemon or `/schedule` run asks nobody,
+so it fires no `approval-requested` and no `question-asked` (see
+[The fourteen notices](#the-fourteen-notices)).
 
 A repository's own [Project config](configuration.md#a-projects-own-config--apogeeconfigyaml)
 (`.apogee/config.yaml` at its Project root) may carry a `reactions:` list too, in the same shape.
@@ -69,7 +72,7 @@ and its briefing lands in that prompt; armed later, it briefs the next session. 
 # ~/.apogee/config.yaml
 reactions:
   - id: notify                          # unique; it is what a failure notice reports
-    on: [approval-requested]            # one or more of the thirteen notices
+    on: [approval-requested]            # one or more of the fourteen notices
     run: ["notify-send", "apogee is waiting for an answer"]
     timeout: 10s                        # optional; default 30s
   - id: ci-bell
@@ -100,7 +103,7 @@ reactions:
 | Key | Meaning |
 |---|---|
 | `id:` | Required, and unique in the list. It is the payload's `reaction` field and what every failure notice reports, so two entries called `notify` would report as one. One of the seven Floor-guard keys is refused as an id, and so is `context-fill-notice`, the engine's own built-in advise reaction — it is switched with its own top-level key, not with an entry here. |
-| `on:` | Required, at least one. A `run:` entry reacts to the thirteen notices below; an `advise:` entry reacts at `post-tool-result`, `file-changed`, `session-started`, `compaction-finished`, `pre-request` or `post-response`; a `gate:` entry reacts at the `pre-tool-exec` **seam** and nowhere else. A spelling outside that vocabulary is refused at startup, and so is a Moment a key cannot take — a seam under `run:`, a Moment other than those six under `advise:`, anything but `pre-tool-exec` under `gate:` — by a sentence naming the key and what it does take: `advise: reacts at post-tool-result, file-changed, session-started, compaction-finished, pre-request or post-response; "turn-finished" is none of them` — and for `history-rewrite` it adds `advise at pre-request to reach the request after a rewrite`. The list is shared by every action key the entry spells, so each of them must be able to take all of it. |
+| `on:` | Required, at least one. A `run:` entry reacts to the fourteen notices below; an `advise:` entry reacts at `post-tool-result`, `file-changed`, `session-started`, `compaction-finished`, `pre-request` or `post-response`; a `gate:` entry reacts at the `pre-tool-exec` **seam** and nowhere else. A spelling outside that vocabulary is refused at startup, and so is a Moment a key cannot take — a seam under `run:`, a Moment other than those six under `advise:`, anything but `pre-tool-exec` under `gate:` — by a sentence naming the key and what it does take: `advise: reacts at post-tool-result, file-changed, session-started, compaction-finished, pre-request or post-response; "turn-finished" is none of them` — and for `history-rewrite` it adds `advise at pre-request to reach the request after a rewrite`. The list is shared by every action key the entry spells, so each of them must be able to take all of it. |
 | `run:` | The entry's observe action, in any of three shapes. A **list** is an argv: `run[0]` is the program, the rest are its arguments, passed word for word. A **mapping** `{url:, headers:, headers-env:}` is a webhook the payload is POSTed to. A mapping `{mcp: {server:, tool:, args:, payload-arg:}}` calls a tool on one of your MCP servers (see [Calling an MCP tool](#calling-an-mcp-tool)). `advise:` and `gate:` take the same three shapes; anything else — a bare string, a number — is refused at startup by a sentence naming the key: `reaction <id>: run: is an argv list, a webhook mapping {url:, headers:, headers-env:} or an mcp mapping {mcp: {server:, tool:, args:, payload-arg:}}`. |
 | `workspace:` | Optional. Scopes the entry to one workspace; unset means every workspace. |
 | `timeout:` | Optional Go duration (`10s`, `2m`). Default `30s` for `run:`, `10s` for `advise:`, `5s` for `gate:`. Bounds the command run and the POST alike, and one `timeout:` binds every Reaction its entry arms. |
@@ -128,21 +131,22 @@ The block is file-only: there is no flag and no environment variable for it. `/s
 read-only `reactions:` row counting what is armed, and `⏎` on it opens your editor, because no
 settings row can write a list this shape.
 
-## The thirteen notices
+## The fourteen notices
 
-Eight report something the session did; five report that one of the loop's own **seams** finished
+Nine report something the session did; five report that one of the loop's own **seams** finished
 passing.
 
 | Notice | Fires when | Depth |
 |---|---|---|
-| `exchange-finished` | A top-level exchange closed — the model produced a final answer with no tool call, or the loop abandoned or capped it. `faulted` and `step_capped` in the payload say which. | Top-level only |
+| `exchange-finished` | A top-level exchange closed — the model produced a final answer with no tool call, or the loop abandoned or capped it. `faulted` and `step_capped` in the payload say which, and `denied` counts the approvals refused on the way. | Top-level only |
 | `turn-finished` | Every top-level turn boundary, whatever its outcome. A turn that closed its exchange fires **both** this and `exchange-finished`, in that order. | Top-level only |
 | `file-changed` | A workspace write tool succeeded. A delete, copy or move reports its **destination**, because that is the path whose content changed. A refused or failed write fires nothing. | Any, sub-agents included |
-| `approval-requested` | An approval was **raised** and is waiting on you — before you answer, not after. | Any, sub-agents included |
+| `approval-requested` | An approval was **raised** and is waiting on you — before you answer, not after. A headless, daemon or `/schedule` run fires none: nobody is asked there, and each gated call is refused the moment it is raised — subscribe to `approval-decided` and read its `decision` of `deny` instead. | Any, sub-agents included |
 | `approval-decided` | That same approval reached its verdict, which the payload carries as `decision` — or an [allow rule](configuration.md#commands-that-run-without-asking--allow) answered an ordinary approval in your place, with no `approval-requested` before it. | Any, sub-agents included |
 | `error` | A localised, recovered engine fault. A Reaction's own failure never becomes one of these, because an entry subscribed to `error` would then fire on itself and loop. | Any, sub-agents included |
 | `session-started` | A session started, once per start: a fresh session, a `--resume`, every [`apogee headless`](headless.md), [daemon](daemon.md) or `/schedule` run, `/clear`, `/new`, a `/sessions` resume and `/fork`. The payload's `start` says which — `new`, `resume`, `clear` or `fork`. A sub-agent is not a session start and never fires it. An `advise:` entry on it briefs the session (see [Advising the model](#advising-the-model)). | Top-level only |
 | `compaction-finished` | A [compaction](configuration.md#keeping-the-window-from-overflowing--compaction-and-pruning) fold ran and replaced the conversation, once per fold — whether the context estimate, an emergency (a request that would not fit the window) or `/compact` started it. The payload's `fold` says which — `auto`, `emergency` or `manual`. A fold that failed, was cancelled or replaced nothing fires none, and a sub-agent's fold never fires it. An `advise:` entry on it briefs the model again after the fold. | Top-level only |
+| `question-asked` | A question was put to you and is waiting on your answer — before you answer, as `approval-requested` is for an approval: the model's `ask_user` call, a recipe's prompt for a required input its launch text left unbound, or a workflow's `ask` stage, a background workflow's included. The payload carries the `question` and its `choices`. It fires in the interactive TUI only: a headless, daemon or `/schedule` run has nobody to ask, so it never asks. There is no `question-answered`: the answer is the asking call's own result. | Top-level in practice — a sub-agent is not given `ask_user` |
 | `pre-request-finished` | The `pre-request` seam's pass finished: the outgoing request is as the loop will send it, an `advise:` entry's fence included. Full working value; only serialized when you subscribe. | Top-level only |
 | `post-response-finished` | The `post-response` seam's pass finished, on the model's answer. Full working value; only serialized when you subscribe. | Top-level only |
 | `pre-tool-exec-finished` | The `pre-tool-exec` seam's pass finished, on a call about to run. Full working value; only serialized when you subscribe. | Top-level only |
@@ -174,6 +178,13 @@ conversation, so its payload reads `depth` `0` and carries no `call_id`; its `fo
 started it — `auto` when the context estimate outgrew its allocation between exchanges,
 `emergency` when a request would not fit the window mid-exchange, `manual` for `/compact` — and a
 command finds it in `APOGEE_REACTION_FOLD` as well.
+
+`question-asked` fires as the question is put, before it waits for the prompt slot an approval
+may hold, so an entry learns you are needed while the question is still open. A question from a
+background workflow's `ask` stage reports the turn that launched the workflow, not the one the
+conversation has reached since. The payload carries the question's text, which comes from the
+model or from a recipe a repository may ship — treat it as untrusted text, and think before you
+send it anywhere (the [push notification example](#push-notifications) does not).
 
 A seam-closing notice reports a pass that is **over** — reading one changes nothing about it. The
 projection of the working value is built while the engine is still handing the moment out, and only
@@ -209,14 +220,18 @@ Per notice, added to that block:
 | `status` | `turn-finished`, `exchange-finished` | The turn's disposition. On `turn-finished` it is `turn-complete`, `exchange-complete` or `cancelled`; on `exchange-finished`, which fires only when the exchange closed, it is always `exchange-complete`. |
 | `faulted` | `turn-finished`, `exchange-finished` | The loop abandoned the turn rather than completing it. Written only when true, so a script treats its absence as `false`. |
 | `step_capped` | `turn-finished`, `exchange-finished` | The step cap ended the exchange, not the model. Written only when true, like `faulted`. |
+| `denied` | `exchange-finished` | How many approvals were refused during the exchange — decided `deny` by you, or by a headless, daemon or `/schedule` run, which refuses every one — at every depth, sub-agents included. Always written, `0` included. A `gate:` entry's `deny` is not an approval and is not counted. A background workflow's refusal made while no exchange is open counts toward the next exchange that closes. |
 | `tool` | `file-changed`, the two approval notices | The tool that wrote the file, or whose call the approval is about. |
 | `path` | `file-changed` | The absolute, symlink-resolved path the write landed on. |
 | `reason` | The two approval notices | Why the approval was required, in the engine's own words. |
 | `remedy` | The two approval notices | The optional one-line route out of the condition that forced it. |
-| `sub_agent_name` | The two approval notices | The display name of the child whose call it is, when it has one. |
+| `sub_agent_name` | The two approval notices, `question-asked` | The display name of the child whose call it is, or who asked, when it has one. |
 | `scope` | The two approval notices | What the call reaches beyond what its arguments name, when that is stated. |
 | `decision` | `approval-decided` | The verdict: `allow`, `deny` or `allow-for-session`, or `allowed-by-rule` when an allow rule answered the approval instead of you. |
-| `start` | `session-started` | How the session started: `new`, `resume`, `clear` or `fork` (see [The thirteen notices](#the-thirteen-notices)). |
+| `question` | `question-asked` | The question as you are shown it. Untrusted text: the model or a recipe wrote it. |
+| `choices` | `question-asked` | The answers offered beside the free-text box — a workflow `ask` stage's options. Absent for a free-text question. |
+| `multi_select` | `question-asked` | Several of the `choices` may be picked. Written only when true. |
+| `start` | `session-started` | How the session started: `new`, `resume`, `clear` or `fork` (see [The fourteen notices](#the-fourteen-notices)). |
 | `fold` | `compaction-finished` | Which trigger ran the fold: `auto` (the context estimate), `emergency` (a request that would not fit the window) or `manual` (`/compact`). |
 | `source` | `error` | What faulted — a tool name, a reaction id, or `loop`. |
 | `error` | `error` | The fault's message. |
@@ -398,6 +413,108 @@ config](configuration.md#a-projects-own-config--apogeeconfigyaml) may add to. `a
 the global lists once, at start, and each daemon firing adds the `url-safety.deny-hosts` of its own
 workspace's Project config, read at that firing.
 
+## Push notifications
+
+apogee runs long turns against slow models, and the run you walked away from may be parked on an
+approval or a question nobody sees, or may have ended unnoticed. Two `run:` webhooks send a push
+to your phone or desktop through [ntfy](https://ntfy.sh) when that happens. There is no ntfy key
+and no ntfy code in apogee: they are ordinary entries, and the starter config carries them
+commented out at the foot of its `reactions:` example, ready to uncomment.
+
+```yaml
+# ~/.apogee/config.yaml
+reactions:
+  - id: ntfy-waiting                   # you are needed: an approval or a question is waiting
+    on: [approval-requested, question-asked]
+    run:
+      url: https://ntfy.sh/your-long-random-topic  # or your own ntfy server's url
+      headers:
+        X-Template: "yes"
+        X-Title: "apogee needs you"
+        X-Message: '{{if eq .event "question-asked"}}a question{{else}}an approval{{end}} is
+          waiting in {{.workspace}}'
+        X-Priority: "high"
+      # headers-env:                   # a protected topic: the variable holding "Bearer tk_…";
+      #   Authorization: NTFY_AUTH     # off here, since an unset variable fails the request
+  - id: ntfy-done                      # a run ended; in the TUI after EVERY reply, so it is
+    on: [exchange-finished]            # aimed mainly at headless and daemon runs
+    run:
+      url: https://ntfy.sh/your-long-random-topic
+      headers:
+        X-Template: "yes"
+        X-Title: 'apogee{{with .schedule}}{{with .name}}: {{.}}{{end}}{{end}}'
+        X-Message: '{{if .faulted}}run failed{{else if .step_capped}}run hit the step
+          cap{{else}}run finished{{end}} in {{.workspace}}{{if .denied}}; denied approvals:
+          {{.denied}}{{end}}'
+      # headers-env:
+      #   Authorization: NTFY_AUTH
+```
+
+**Pick a topic.** A topic on the public `ntfy.sh` server needs no account, and anyone who knows or
+guesses its name can read it and post to it. Use a long random name — `head -c 18 /dev/urandom |
+base64 | tr -d '/+='` makes one — put it in both `url:` lines, and subscribe to that topic in the
+ntfy app. Your own ntfy server works the same way: change the host in `url:`.
+
+**A protected topic** — one on your own server, or a reserved topic on `ntfy.sh` — needs an access
+token. Uncomment both `headers-env:` lines and export the token, with its scheme, in the shell
+that starts apogee: `export NTFY_AUTH="Bearer tk_…"`. The token is read when each push is sent
+and never sits in the config file. Leave the lines commented out for a public topic: a
+`headers-env:` variable that is not set fails the request ([Sending a webhook](#sending-a-webhook)).
+
+**What each entry sends.** apogee POSTs its [payload](#the-payload) as it always does, and
+`X-Template: "yes"` asks ntfy to fill the title and message in from that JSON — the template
+syntax is ntfy's, which is Go's `text/template` (`{{.field}}`, `{{if …}}`, `{{with …}}`), and
+`{{.workspace}}` is a payload member by its JSON name.
+
+- `ntfy-waiting`, at high priority, on an approval or a question: the title "apogee needs you"
+  over "an approval is waiting in /work/repo", or "a question is waiting in /work/repo".
+- `ntfy-done`, at ntfy's default priority, when an exchange ends: "run finished", "run failed" or
+  "run hit the step cap" in the workspace, then the [`denied`](#the-payload) count when an
+  approval was refused, under the title "apogee" — "apogee: nightly-audit" on a firing of a
+  named daemon or `/schedule` schedule: "run failed in /work/repo; denied approvals: 3".
+
+The templates quote only the event, the workspace, a schedule's name and the count, so that is
+all the push **shows**. What is **sent** is more: apogee POSTs the whole payload, so the ntfy
+server receives a question's text, or an approval's tool and `reason`, with the push that carries
+them, even though the template leaves them out. The JSON body itself is never displayed, but the server
+operator can read it — on `ntfy.sh`, that is a third party. If a question or a reason may hold
+code or secrets you would not hand to them, run your own ntfy server. A template can quote any
+member — `{{.question}}` would put the question on your lock screen — and quoting it changes only
+what is shown, not what leaves your machine.
+
+**Where each fires.** In the TUI, `ntfy-waiting` fires on every approval and question, and
+`ntfy-done` after **every** reply — an exchange ends each time the model answers you, which is
+noise while you sit in front of it; park it with `enabled: false`, or keep it to a workspace with
+`workspace:`, when you do. It is meant mainly for [`apogee headless`](headless.md) and the
+[daemon](daemon.md). There nobody is asked: a gated call is refused at once, and a run registers
+no `ask_user`, so `approval-requested` and `question-asked` never fire and only `ntfy-done` sends
+anything — its `denied` count is how a refused action reaches you. A turn that was cancelled
+(`turn-finished` with `status: cancelled`) and an engine fault (`error`) are notices too; add
+them to an entry's `on:` if you want a push for them.
+
+### Other notification targets
+
+The same entries point elsewhere with a small change:
+
+- **Desktop only.** An argv `run:` calls the desktop's own notifier, as the starter's `notify`
+  entry does: `["notify-send", "apogee is waiting"]` on Linux, `["osascript", "-e", "display
+  notification \"apogee is waiting\""]` or `["terminal-notifier", "-message", "apogee is
+  waiting"]` on macOS. `APOGEE_REACTION_EVENT` and the other variables of
+  [Running a command](#running-a-command) are there for a `sh -c` line that wants them.
+- **A service that takes apogee's JSON as it is**, or templates it the way ntfy does: change
+  `url:` and the headers.
+- **A service that needs its own body shape** — Slack, Discord, Pushover, Gotify. apogee's
+  webhook posts its payload and cannot reshape it, so use an argv `run:` that reads the payload
+  on stdin and calls the service: a short script with `curl` and `jq`, kept outside the
+  workspace (see [Running a command](#running-a-command)). A Slack incoming webhook, for one:
+
+  ```sh
+  #!/bin/sh
+  # ~/bin/apogee-slack: run: ["apogee-slack"], with SLACK_WEBHOOK_URL exported
+  jq -n --argjson p "$(cat)" '{text: "apogee: \($p.event) in \($p.workspace)"}' |
+    curl -fsS -H 'Content-Type: application/json' -d @- "$SLACK_WEBHOOK_URL"
+  ```
+
 ## Calling an MCP tool
 
 A mapping whose one key is `mcp:` calls a tool on one of your
@@ -484,7 +601,7 @@ its answer is fenced **ahead of the text of the next user message** the model re
 message, never a message of its own, and never in the system prompt:
 
 - `session-started` — the session's briefing. The entry starts at the
-  [session boundary](#the-thirteen-notices) — a fresh start or `--resume`, `/clear`, `/new`, a
+  [session boundary](#the-fourteen-notices) — a fresh start or `--resume`, `/clear`, `/new`, a
   `/sessions` resume, `/fork`, and every [`apogee headless`](headless.md), [daemon](daemon.md) and
   `/schedule` run — and its answer lands in the session's next user message, ahead of your prompt.
 - `compaction-finished` — the briefing again, after a [compaction](configuration.md#keeping-the-window-from-overflowing--compaction-and-pruning)

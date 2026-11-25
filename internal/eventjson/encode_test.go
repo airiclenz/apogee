@@ -576,6 +576,28 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantData: `{"server":"box","model":"qwen"}`,
 		},
 		{
+			name: "question with choices",
+			event: domain.QuestionEvent{
+				EventBase: domain.EventBase{Turn: 4},
+				Request: domain.AskRequest{
+					Question:    "Which branch?",
+					Choices:     []string{"main", "dev"},
+					MultiSelect: true,
+				},
+			},
+			wantKind: "question",
+			wantBase: domain.EventBase{Turn: 4},
+			wantData: `{"question":"Which branch?","choices":["main","dev"],"multi_select":true}`,
+		},
+		{
+			// A free-text question writes choices as [], never null.
+			name:     "question free-text",
+			event:    domain.QuestionEvent{Request: domain.AskRequest{Question: "Why?"}},
+			wantKind: "question",
+			wantBase: domain.EventBase{},
+			wantData: `{"question":"Why?","choices":[],"multi_select":false}`,
+		},
+		{
 			// The composition root emits it, never the engine, so the envelope identity is zero.
 			name: "mcp_server connected",
 			event: domain.MCPServerEvent{
@@ -1231,6 +1253,7 @@ func TestEncodeMapsEveryEventVariant(t *testing.T) {
 		"UpstreamSwitchedEvent":  domain.UpstreamSwitchedEvent{},
 		"MCPServerEvent":         domain.MCPServerEvent{},
 		"UpstreamLoadingEvent":   domain.UpstreamLoadingEvent{},
+		"QuestionEvent":          domain.QuestionEvent{},
 	}
 	declared := declaredEventVariants(t)
 	known := make(map[string]bool, len(Kinds()))
@@ -1324,16 +1347,16 @@ func TestEncodeSkipsAnUnknownEvent(t *testing.T) {
 	}
 }
 
-// TestKindsAreThirty pins the vocabulary itself — the twenty-eight serialized variants, the
+// TestKindsAreThirtyOne pins the vocabulary itself — the twenty-nine serialized variants, the
 // opt-in seam_closed among them, plus the two frames — so a kind added to the encoder without a
 // manual entry, or an entry without a kind, is a failing test rather than a documentation drift.
-func TestKindsAreThirty(t *testing.T) {
+func TestKindsAreThirtyOne(t *testing.T) {
 	t.Parallel()
 
 	kinds := Kinds()
 
-	if len(kinds) != 30 {
-		t.Fatalf("len(Kinds()) = %d, want 30: %v", len(kinds), kinds)
+	if len(kinds) != 31 {
+		t.Fatalf("len(Kinds()) = %d, want 31: %v", len(kinds), kinds)
 	}
 	seen := make(map[string]bool, len(kinds))
 	for _, kind := range kinds {

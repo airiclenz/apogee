@@ -1658,6 +1658,15 @@ func (a *Agent) executeToolDemotable(ctx context.Context, turn int, tool domain.
 	// model numbers its calls (ADR 0059 §6). Installed unconditionally too — "" is the top-level
 	// agent, whose Consoles no delegation's end may reap.
 	ctx = domain.WithConsoleOwner(ctx, a.consoleOwner)
+	// And the question announcer, for the same reason the placement rides here: ask_user builds
+	// its own request one interface boundary away from the Agent that knows this Turn and owns the
+	// event sink, so the tool reports the question through the call's context — a QuestionEvent
+	// stamped with this Agent's identity, emitted before the question queues for the prompt slot
+	// (domain.AnnounceQuestion), the way an Approval's requested phase is emitted before the
+	// Approver is consulted.
+	ctx = domain.WithQuestionAnnouncer(ctx, func(req domain.AskRequest) {
+		a.cfg.Events.Emit(domain.QuestionEvent{EventBase: a.base(turn), Request: req})
+	})
 
 	if a.isDelegate() {
 		// Install this Agent's delegated task so a tool that puts a QUESTION to the human can name

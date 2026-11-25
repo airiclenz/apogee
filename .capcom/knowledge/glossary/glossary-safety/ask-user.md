@@ -18,4 +18,9 @@ one and `⏎` sends — and the reply carries **every ticked label on its own li
 additive and **off by default**: absent or false is the single-select question that was always
 there, byte-identical on the wire and on the screen, and neither the `Asker` interface nor
 `AskAnswer` changes shape for it.
+A question put to the human — this tool's, a recipe's prompt for a missing input, or a Workflow
+`ask` stage's — is reported as a `QuestionEvent` before it waits on the answer, and that Event is
+what the `question-asked` notice **Moment** fires on, so a `run:` **Reaction** can ring a bell for
+a question nobody is watching (adr-0076-amend-1124). Where no Asker is configured nothing is asked,
+so nothing is reported.
 _Avoid_: conflating it with Approval — an answer is not a permission.

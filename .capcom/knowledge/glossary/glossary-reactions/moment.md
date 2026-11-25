@@ -4,13 +4,16 @@ title: "Moment: a point the loop passes on which a Reaction may fire"
 
 **Moment**:
 A point the loop passes, on which a **Reaction** may fire — `domain.Moment`, one string vocabulary
-of eighteen. A **seam** Moment is in-loop and synchronous, its payload an editable working value, and
+of nineteen. A **seam** Moment is in-loop and synchronous, its payload an editable working value, and
 its five are listed in the order a Turn passes them: `pre-request`, `post-response`,
 `pre-tool-exec`, `post-tool-result`, `history-rewrite`. A **notice** Moment is post-hoc, its payload
-sealed, and there are **thirteen** of them. Eight report a fact of their own: `exchange-finished`,
+sealed, and there are **fourteen** of them. Nine report a fact of their own: `exchange-finished`,
 `turn-finished`, `file-changed`, `approval-requested`, `approval-decided`, `error`,
 `session-started` (a top-level session boundary — fresh, resumed, cleared or forked),
-`compaction-finished` (a top-level **Compaction** fold ran — `auto`, `emergency` or `manual`);
+`compaction-finished` (a top-level **Compaction** fold ran — `auto`, `emergency` or `manual`),
+`question-asked` (a question was put to the human and is waited on — an **Ask-user** call, a
+recipe's prompt for a missing input or a Workflow `ask` stage — fired before the answer, the
+Asker's counterpart of `approval-requested`; adr-0076-amend-1124);
 `file-changed`, `session-started` and `compaction-finished` are also Moments an advise **Reaction**
 fires at, beside the seams `post-tool-result`, `pre-request` and `post-response` — the six an
 `advise:` entry takes. Five are the

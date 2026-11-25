@@ -26,5 +26,5 @@ fields are zero, because the fact belongs to the session rather than to an agent
 ADR 0001 and
 ADR 0039.
 _Avoid_: "message" (that is a conversation message, the `Role`/`Content` kind), "notification",
-"notice **Moment**" (that names the thirteen post-hoc points a user-origin
+"notice **Moment**" (that names the fourteen post-hoc points a user-origin
 **Reaction** fires on — a lossy projection of some of these variants, not this).

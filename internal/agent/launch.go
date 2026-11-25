@@ -225,7 +225,7 @@ func (a *Agent) newLaunchRunner(launch workflowLaunch, recipe *workflow.Recipe) 
 	runner.Scripts = &recipeScripts{agent: a, turn: launch.turn, recipe: *recipe, split: split}
 	runner.Recipe = recipe.ID
 	if a.cfg.Asker != nil {
-		runner.Asker = recipeAsker{agent: a}
+		runner.Asker = recipeAsker{agent: a, turn: launch.turn}
 	}
 	return runner, nil
 }

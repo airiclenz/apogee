@@ -51,6 +51,8 @@ func (m *matcher) match(ev domain.Event) []firing {
 		return m.matchTurn(e)
 	case domain.ApprovalEvent:
 		return m.matchApproval(e)
+	case domain.QuestionEvent:
+		return m.matchQuestion(e)
 	case domain.ErrorEvent:
 		return m.matchError(e)
 	case domain.ToolResultEvent:
@@ -121,6 +123,25 @@ func (m *matcher) matchApproval(ev domain.ApprovalEvent) []firing {
 	}
 	applyBase(&payload, ev.EventBase)
 	return []firing{firingOf(event, payload)}
+}
+
+// matchQuestion maps a question put to the human, at any depth, to question-asked — the Asker's
+// counterpart of approval-requested, fired while the human is still being waited on. The payload
+// carries the question as asked: its text, the choices offered (a copy, so the document outlives
+// the request it came from), whether several may be picked, and the asking child's display name
+// when it has one.
+func (m *matcher) matchQuestion(ev domain.QuestionEvent) []firing {
+	if !m.wants(QuestionAsked) {
+		return nil
+	}
+	payload := domain.SeamPayload{
+		Question:     ev.Request.Question,
+		Choices:      append([]string(nil), ev.Request.Choices...),
+		MultiSelect:  ev.Request.MultiSelect,
+		SubAgentName: ev.Request.SubAgentName,
+	}
+	applyBase(&payload, ev.EventBase)
+	return []firing{firingOf(QuestionAsked, payload)}
 }
 
 // matchSeamClosed maps a closed seam to the notice named after it — pre-request to

@@ -1095,6 +1095,13 @@ func (b backgroundAsker) Ask(ctx context.Context, question workflow.Question) (s
 
 // announce reports prompt as waiting (a WorkflowWaiting phase event): the question's text for an
 // `ask` stage, the tool a gate asks about for an approval.
+//
+// A question is reported a second time as the QuestionEvent the question-asked notice fires on, the
+// way a foreground `ask` stage's is (askUser); an approval needs no such twin, since the gate that
+// queued it already emitted its requested phase. The event is stamped with the observer's Turn,
+// which is the LAUNCH Turn — the one that started the background workflow — and not the Turn the
+// conversation stands on now: the workflow runs beside the conversation, and the Turn it belongs
+// to is the one that launched it, as its WorkflowPhaseEvents are.
 func (s backgroundScope) announce(prompt *backgroundPrompt) {
 	if s.observer == nil {
 		return
@@ -1102,6 +1109,10 @@ func (s backgroundScope) announce(prompt *backgroundPrompt) {
 	switch {
 	case prompt.question != nil:
 		s.observer.waitingOn(s.workflow, prompt.question.Stage, prompt.question.Text)
+		s.observer.agent.cfg.Events.Emit(domain.QuestionEvent{
+			EventBase: s.observer.agent.base(s.observer.turn),
+			Request:   domain.AskRequest{Question: prompt.question.Text, Choices: prompt.question.Options},
+		})
 	case prompt.approval != nil:
 		s.observer.waitingOn(s.workflow, "", approvalWaitingPrefix+prompt.approval.Tool)
 	}

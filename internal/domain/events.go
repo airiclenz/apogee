@@ -437,6 +437,29 @@ type ApprovalEvent struct {
 	Rules    []AllowRule
 }
 
+// QuestionEvent reports that a question was put to the human and is now waited on — the
+// counterpart of an ApprovalEvent's requested phase for the Asker rather than the Approver. It is
+// emitted BEFORE the wait begins (before the question queues for the prompt slot the Approval
+// gate shares), so an observer learns that a human is being waited on while the wait is still
+// happening; it is the event the `question-asked` notice fires on.
+//
+// Three places raise one: the ask_user tool (through the per-call carrier the engine installs,
+// WithQuestionAnnouncer), a recipe's prompt for a required input its launch text left unbound,
+// and a Workflow's `ask` stage — a foreground one through the same recipe prompt, a background
+// one once it queues in the session's background prompts (ADR 0089). Each is raised only where a
+// human can be asked: with no Asker configured none of the three asks anything, so none emits.
+//
+// Request is the question as the human sees it: the text, the offered choices (an `ask` stage's
+// options), whether several may be picked, and — for a question a sub-agent asked — who asked it.
+// There is no answered counterpart: the answer is the result the asking call returns.
+//
+// The Request's text comes from the model or from a recipe a repository may ship, so a Driver
+// treats it as untrusted display text.
+type QuestionEvent struct {
+	EventBase
+	Request AskRequest
+}
+
 // TurnEvent reports that a Turn reached its quiescent boundary — the loop's own Turn boundary made
 // observable, emitted once per StepResult the engine hands back. Like SubAgentPhaseEvent it is
 // OBSERVATION-ONLY: nothing in the loop reads it, no conversation state depends on it, and a Driver

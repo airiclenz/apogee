@@ -22,7 +22,7 @@ var noopPreRequest = PreRequestFunc(func(context.Context, *Request) (Outcome, er
 	return Outcome{}, nil
 })
 
-// TestMomentValuesArePinnedLiterals pins all eighteen Moment spellings. The strings are the ones a
+// TestMomentValuesArePinnedLiterals pins all nineteen Moment spellings. The strings are the ones a
 // user writes in configuration and an observer reads off a ReactionFiredEvent, so changing one
 // breaks every configuration in the wild — the seams carry the retired hook-point values and the
 // notices the reactions.Event values, unchanged.
@@ -51,6 +51,7 @@ func TestMomentValuesArePinnedLiterals(t *testing.T) {
 		{MomentHistoryRewriteFinished, "history-rewrite-finished"},
 		{MomentSessionStarted, "session-started"},
 		{MomentCompactionFinished, "compaction-finished"},
+		{MomentQuestionAsked, "question-asked"},
 	}
 
 	for _, c := range cases {
@@ -128,6 +129,7 @@ func TestSeamsAndNoticesReportTheVocabularyAsACopy(t *testing.T) {
 		MomentHistoryRewriteFinished,
 		MomentSessionStarted,
 		MomentCompactionFinished,
+		MomentQuestionAsked,
 	}
 
 	seams := Seams()
@@ -184,6 +186,7 @@ func TestMomentIsSeam(t *testing.T) {
 		{MomentHistoryRewriteFinished, false},
 		{MomentSessionStarted, false},
 		{MomentCompactionFinished, false},
+		{MomentQuestionAsked, false},
 		{Moment("not-a-moment"), false},
 		{Moment(""), false},
 	}

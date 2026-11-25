@@ -42,6 +42,31 @@ func TestPayloadJSONGolden(t *testing.T) {
 				`"faulted":true,"step_capped":true}`,
 		},
 		{
+			// An unattended Firing's exchange: the Schedule rides every payload, and denied is
+			// written on exchange-finished, 0 included.
+			name: "exchange-finished with denied",
+			payload: domain.SeamPayload{
+				Event: ExchangeFinished, Reaction: "ntfy-done", Time: "2026-09-06T09:41:00Z",
+				Workspace: "/work/repo", Depth: 0, Turn: 7,
+				Schedule: &ScheduleRef{ID: "nightly", Name: "Nightly docs sweep"},
+				Status:   "exchange-complete", Denied: intPtr(3),
+			},
+			want: `{"event":"exchange-finished","reaction":"ntfy-done","time":"2026-09-06T09:41:00Z",` +
+				`"workspace":"/work/repo","depth":0,"turn":7,` +
+				`"schedule":{"id":"nightly","name":"Nightly docs sweep"},"status":"exchange-complete",` +
+				`"denied":3}`,
+		},
+		{
+			name: "exchange-finished with none denied",
+			payload: domain.SeamPayload{
+				Event: ExchangeFinished, Reaction: "ntfy-done", Time: "2026-09-06T09:41:00Z",
+				Workspace: "/work/repo", Depth: 0, Turn: 7,
+				Status: "exchange-complete", Denied: intPtr(0),
+			},
+			want: `{"event":"exchange-finished","reaction":"ntfy-done","time":"2026-09-06T09:41:00Z",` +
+				`"workspace":"/work/repo","depth":0,"turn":7,"status":"exchange-complete","denied":0}`,
+		},
+		{
 			name: "file-changed",
 			payload: domain.SeamPayload{
 				Event: FileChanged, Reaction: "fmt", Time: "2026-09-06T09:41:00Z",
@@ -75,6 +100,26 @@ func TestPayloadJSONGolden(t *testing.T) {
 			want: `{"event":"approval-decided","reaction":"bell","time":"2026-09-06T09:41:00Z",` +
 				`"workspace":"/work/repo","depth":1,"turn":4,"call_id":"call-2","tool":"terminal",` +
 				`"reason":"write","decision":"allow"}`,
+		},
+		{
+			name: "question-asked",
+			payload: domain.SeamPayload{
+				Event: QuestionAsked, Reaction: "ntfy-waiting", Time: "2026-09-06T09:41:00Z",
+				Workspace: "/work/repo", Depth: 0, Turn: 2,
+				Question: "Which branch?", Choices: []string{"main", "dev"}, MultiSelect: true,
+			},
+			want: `{"event":"question-asked","reaction":"ntfy-waiting","time":"2026-09-06T09:41:00Z",` +
+				`"workspace":"/work/repo","depth":0,"turn":2,` +
+				`"question":"Which branch?","choices":["main","dev"],"multi_select":true}`,
+		},
+		{
+			name: "question-asked free-text",
+			payload: domain.SeamPayload{
+				Event: QuestionAsked, Reaction: "ntfy-waiting", Time: "2026-09-06T09:41:00Z",
+				Workspace: "/work/repo", Depth: 0, Turn: 2, Question: "Why?",
+			},
+			want: `{"event":"question-asked","reaction":"ntfy-waiting","time":"2026-09-06T09:41:00Z",` +
+				`"workspace":"/work/repo","depth":0,"turn":2,"question":"Why?"}`,
 		},
 		{
 			name: "error",
@@ -296,3 +341,6 @@ func TestProjectSeamValueRefusesAValueTheSeamDoesNotCarry(t *testing.T) {
 		})
 	}
 }
+
+// intPtr is n behind a pointer, for a payload's optional count.
+func intPtr(n int) *int { return &n }

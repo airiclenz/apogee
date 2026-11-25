@@ -210,6 +210,21 @@ var eventDecoders = map[string]eventDecoder{
 	kindUpstreamLoading: decodeWith(func(base domain.EventBase, d upstreamLoadingData) (domain.Event, error) {
 		return domain.UpstreamLoadingEvent{EventBase: base, Server: d.Server, Model: d.Model}, nil
 	}),
+	kindQuestion: decodeWith(questionEventFrom),
+}
+
+// questionEventFrom rebuilds a domain.QuestionEvent. An empty choices array comes back nil — the
+// free-text question the engine builds (an AskRequest with no Choices) — so a line round-trips to
+// the Event it was written from.
+func questionEventFrom(base domain.EventBase, d questionData) (domain.Event, error) {
+	var choices []string
+	if len(d.Choices) > 0 {
+		choices = d.Choices
+	}
+	return domain.QuestionEvent{
+		EventBase: base,
+		Request:   domain.AskRequest{Question: d.Question, Choices: choices, MultiSelect: d.MultiSelect},
+	}, nil
 }
 
 // mcpServerEventFrom rebuilds a domain.MCPServerEvent.

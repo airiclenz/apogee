@@ -1509,6 +1509,10 @@ func (t *transcript) apply(e domain.Event) {
 			t.holdForApproval(e.Request.Tool, run, false)
 			t.addApproval(e.Request, e.Decision, e.Rules, run)
 		}
+	case domain.QuestionEvent:
+		// Deliberately nothing. The question reaches the human through this Driver's own Asker,
+		// which shows it in the prompt pane once it holds the prompt slot; the event exists for
+		// observers that have no Asker of their own to learn it from (a question-asked Reaction).
 	case domain.ReactionFiredEvent:
 		t.addReaction(e)
 	case domain.ErrorEvent:

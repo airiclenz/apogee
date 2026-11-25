@@ -499,6 +499,7 @@ type (
 	UpstreamSwitchedEvent  = domain.UpstreamSwitchedEvent
 	UpstreamLoadingEvent   = domain.UpstreamLoadingEvent
 	MCPServerEvent         = domain.MCPServerEvent
+	QuestionEvent          = domain.QuestionEvent
 )
 
 // TaskItem is one row of a TaskListEvent's list.
@@ -907,10 +908,15 @@ const MomentSessionStarted = domain.MomentSessionStarted
 // emergency or `/compact` — for the top-level Agent only.
 const MomentCompactionFinished = domain.MomentCompactionFinished
 
+// MomentQuestionAsked is the question notice: a question was put to the human — the ask_user
+// tool's, a recipe's prompt for a missing input, or a Workflow `ask` stage's — and is waited on,
+// reported before it is answered (QuestionEvent).
+const MomentQuestionAsked = domain.MomentQuestionAsked
+
 // Seams returns the five seam Moments in loop order, as a fresh copy.
 func Seams() []Moment { return domain.Seams() }
 
-// Notices returns the thirteen notice Moments in their documented order, as a fresh copy.
+// Notices returns the fourteen notice Moments in their documented order, as a fresh copy.
 func Notices() []Moment { return domain.Notices() }
 
 // Origin is who a Reaction belongs to — one axis of the Reaction surface matrix (ADR 0076 D2).
@@ -1197,8 +1203,14 @@ type ReactionHost = reactions.Host
 // ReactionHostOptions are the facts a ReactionHost cannot derive from the reaction list: the sink
 // its Runner decorates, the workspace it is rooted in, the Schedule a Firing runs for, where its
 // notices and failures are reported, the re-ask cue, the url-safety lists its webhooks post
-// under, and whether the root dials MCP servers. The zero value is a root that dials no MCP
-// server and reports nothing.
+// under, whether the root dials MCP servers, and whether it is Unattended. The zero value is a
+// root that dials no MCP server, reports nothing and fires every notice.
+//
+// Unattended marks a root where nobody can answer an Approval — one whose Approver refuses every
+// gated call at once, as the apogee binary's headless, daemon and `/schedule` runs do. Its Runner
+// fires no approval-requested Reaction there, since no human is being waited on; the ApprovalEvent
+// still reaches the decorated sink, and approval-decided still fires with the deny. Leave it false
+// for a root that puts Approvals to a human.
 type ReactionHostOptions = reactions.HostOptions
 
 // ReactionHostMCP says whether the root a ReactionHost serves dials MCP servers, which decides

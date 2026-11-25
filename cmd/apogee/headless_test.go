@@ -3287,6 +3287,7 @@ func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 				domain.ContextCostEvent{Cost: domain.ContextCost{Rows: []domain.ContextCostRow{{Name: "prompt", Bytes: 40, Tokens: 10}}, Bytes: 40, Tokens: 10}},
 				domain.MCPServerEvent{Server: "files", Transport: "stdio", Phase: domain.MCPServerConnected, Tools: 7},
 				domain.UpstreamLoadingEvent{Server: "stub", Model: "stub-model"},
+				domain.QuestionEvent{Request: domain.AskRequest{Question: "Which branch?", Choices: []string{"main"}}},
 			} {
 				sink.Emit(e)
 			}
@@ -3297,7 +3298,7 @@ func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 		t.Fatalf("a completed run returned an error: %v", err)
 	}
 
-	// The two frames bracket the twenty-seven default-stream variants, in the contract's own order —
+	// The two frames bracket the twenty-eight default-stream variants, in the contract's own order —
 	// seam_closed is the one kind the default stream holds back.
 	kinds := eventjson.Kinds()
 	want := []string{"run_started"}

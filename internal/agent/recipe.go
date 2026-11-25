@@ -139,7 +139,10 @@ func (a *Agent) StartRecipe(ctx context.Context, launch RecipeLaunch) (string, e
 	if launch.Background {
 		return a.startBackgroundRecipe(recipe, launch.Text)
 	}
-	inputs, err := a.bindRecipeInputs(ctx, recipe, launch.Text)
+	// The question for a missing input belongs to the Turn the launch will open: the Agent is idle
+	// here (a foreground launch submits its Exchange below), and the index names the next Turn. It
+	// is read through its atomic mirror (publishedTurn) since this is a Driver's goroutine.
+	inputs, err := a.bindRecipeInputs(ctx, a.publishedTurn(), recipe, launch.Text)
 	if err != nil {
 		return "", err
 	}
@@ -216,7 +219,7 @@ func typesRecipeLaunch(text, id string) bool {
 func (a *Agent) launchRecipe(ctx context.Context, turn int, in domain.UserInput, recipe workflow.Recipe) string {
 	inputs := in.RecipeInputs
 	if inputs == nil {
-		bound, err := a.bindRecipeInputs(ctx, recipe, recipeInputText(in, recipe.ID))
+		bound, err := a.bindRecipeInputs(ctx, turn, recipe, recipeInputText(in, recipe.ID))
 		if err != nil {
 			return "\n\n" + a.recipeRefusal(turn, recipe.ID, err)
 		}
@@ -261,8 +264,9 @@ func (a *Agent) recipeRefusal(turn int, id string, err error) string {
 // bindRecipeInputs binds text to recipe's inputs (workflow.BindInputs) and asks the user for each
 // required input left unbound, in declared order. With no Asker, or an empty answer, the first
 // such input fails the launch with `missing input: <name>`. Declarations checkRecipeInputs refuses
-// fail the launch first, before the user is asked anything.
-func (a *Agent) bindRecipeInputs(ctx context.Context, recipe workflow.Recipe, text string) (map[string]string, error) {
+// fail the launch first, before the user is asked anything. turn is the Turn a question belongs to
+// (askUser).
+func (a *Agent) bindRecipeInputs(ctx context.Context, turn int, recipe workflow.Recipe, text string) (map[string]string, error) {
 	if err := checkRecipeInputs(recipe); err != nil {
 		return nil, err
 	}
@@ -274,7 +278,7 @@ func (a *Agent) bindRecipeInputs(ctx context.Context, recipe workflow.Recipe, te
 		if a.cfg.Asker == nil {
 			return nil, fmt.Errorf(missingInputFormat, name)
 		}
-		answer, err := a.askUser(ctx, recipeQuestion(recipe, name), nil)
+		answer, err := a.askUser(ctx, turn, recipeQuestion(recipe, name), nil)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", fmt.Sprintf(missingInputFormat, name), err)
 		}
@@ -301,13 +305,21 @@ func recipeQuestion(recipe workflow.Recipe, name string) string {
 // askUser puts question to the human through Config.Asker, holding the prompt slot the running
 // Agent designates so an Approval and a question are never on screen at once. The caller checks
 // that an Asker is configured.
-func (a *Agent) askUser(ctx context.Context, question string, choices []string) (string, error) {
+//
+// The question is reported first — a QuestionEvent stamped with turn, the Turn the caller runs it
+// for — before the slot is taken, so an observer learns a human is being waited on while the wait
+// is still happening, as ask_user's question is (domain.AnnounceQuestion). turn is handed in rather
+// than read off the Turn lifecycle because a Workflow's `ask` stage asks from the Runner's
+// goroutine, where that state is not this caller's to read (recipeAsker).
+func (a *Agent) askUser(ctx context.Context, turn int, question string, choices []string) (string, error) {
+	req := domain.AskRequest{Question: question, Choices: choices}
+	a.cfg.Events.Emit(domain.QuestionEvent{EventBase: a.base(turn), Request: req})
 	slot := domain.PromptSlotFor(ctx, a.prompts)
 	if err := slot.Acquire(ctx); err != nil {
 		return "", err
 	}
 	defer slot.Release()
-	answer, err := a.cfg.Asker.Ask(ctx, domain.AskRequest{Question: question, Choices: choices})
+	answer, err := a.cfg.Asker.Ask(ctx, req)
 	if err != nil {
 		return "", err
 	}
@@ -472,14 +484,17 @@ func (q recipeQuoter) finish(command string) string {
 	return platform.CmdOuterQuote(q.shell, command)
 }
 
-// recipeAsker puts an `ask` stage's question to the human through the Agent's Asker.
+// recipeAsker puts an `ask` stage's question to the human through the Agent's Asker, at the Turn
+// that started the recipe — carried here, as recipeScripts carries it, because the stage asks from
+// the Workflow Runner's goroutine.
 type recipeAsker struct {
 	agent *Agent
+	turn  int
 }
 
 // Ask asks the question with its options offered as choices (workflow.Asker).
 func (r recipeAsker) Ask(ctx context.Context, question workflow.Question) (string, error) {
-	return r.agent.askUser(ctx, question.Text, question.Options)
+	return r.agent.askUser(ctx, r.turn, question.Text, question.Options)
 }
 
 // recipeScripts runs a recipe's script stages (workflow.ScriptRunner) as `terminal` calls of the

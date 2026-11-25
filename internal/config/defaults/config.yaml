@@ -1310,17 +1310,22 @@ ui:
 # `gate:` reaction (below) can deny a call or hand it to you. Config-file only, and live in the interactive TUI: save the file and the running session
 # swaps its reactions over (a headless run and the daemon read the list once, at start).
 #
-# The thirteen moments a `run:` reacts to are these eight:
-#   exchange-finished  a top-level exchange closed — the model answered, or the loop gave up
+# The fourteen moments a `run:` reacts to are these nine:
+#   exchange-finished  a top-level exchange closed — the model answered, or the loop gave up; the
+#                      payload's `denied` counts the approvals refused on the way
 #   turn-finished      every top-level turn boundary, whatever its outcome
 #   file-changed       a workspace write tool succeeded; the payload carries the path it landed on
-#   approval-requested an approval was raised and is waiting on you — fires BEFORE the decision
+#   approval-requested an approval was raised and is waiting on you — fires BEFORE the decision, and
+#                      never in a headless, daemon or /schedule run, where nobody is asked
 #   approval-decided   that same approval reached its verdict; the payload carries the decision
 #   error              a localised, recovered engine fault
 #   session-started    a session started — fresh, resumed, cleared or forked; the payload's
 #                      `start` says which
 #   compaction-finished a compaction fold ran — automatic, emergency or /compact; the payload's
 #                      `fold` says which (auto, emergency or manual)
+#   question-asked     a question was put to you and is waiting — the model's ask_user, a recipe's
+#                      missing input or a workflow's ask stage; the TUI only, since nobody is asked
+#                      in a headless, daemon or /schedule run
 # and the five seam-closing notices pre-request-finished, post-response-finished,
 # pre-tool-exec-finished, post-tool-result-finished and history-rewrite-finished, each reporting
 # that one of the loop's own seams finished passing, with the working value as the pass left it.
@@ -1388,11 +1393,11 @@ ui:
 # refuses every call it gates. A Project config's entry may call only a server that same file declares.
 #
 # `hooks:` was this key's earlier name. A config file that still carries one is folded into
-# reactions: at startup, once, and the change is announced with the backup it kept.
+# `reactions:` at startup, once, and the change is announced with the backup it kept.
 #
 # reactions:
 #   - id: notify                         # unique; it is what a failure notice names
-#     on: [approval-requested]           # one or more of the thirteen moments above (run:)
+#     on: [approval-requested]           # one or more of the fourteen moments above (run:)
 #     run: ["notify-send", "apogee is waiting for an answer"]
 #     timeout: 10s                       # optional; default 30s
 #   - id: ci-bell
@@ -1420,6 +1425,36 @@ ui:
 #       mcp:
 #         server: llama-launcher         # the name of one of your MCP servers
 #         tool: status                   # the server's own name for the tool
+#   # Push notifications through ntfy (https://ntfy.sh): put your own topic in both urls — a
+#   # long random name, since anyone who guesses a public ntfy.sh topic can read it. ntfy fills
+#   # the title and message in from the JSON apogee posts (X-Template); they show only the
+#   # event, the workspace, a schedule's name and the count. The whole payload still reaches the
+#   # ntfy server, question text included: use your own server if that matters. The manual's
+#   # reactions page has more, and other targets.
+#   - id: ntfy-waiting                   # you are needed: an approval or a question is waiting
+#     on: [approval-requested, question-asked]
+#     run:
+#       url: https://ntfy.sh/your-long-random-topic  # or your own ntfy server's url
+#       headers:
+#         X-Template: "yes"
+#         X-Title: "apogee needs you"
+#         X-Message: '{{if eq .event "question-asked"}}a question{{else}}an approval{{end}} is
+#           waiting in {{.workspace}}'
+#         X-Priority: "high"
+#       # headers-env:                   # a protected topic: the variable holding "Bearer tk_…";
+#       #   Authorization: NTFY_AUTH     # off here, since an unset variable fails the request
+#   - id: ntfy-done                      # a run ended; in the TUI after EVERY reply, so it is
+#     on: [exchange-finished]            # aimed mainly at headless and daemon runs
+#     run:
+#       url: https://ntfy.sh/your-long-random-topic
+#       headers:
+#         X-Template: "yes"
+#         X-Title: 'apogee{{with .schedule}}{{with .name}}: {{.}}{{end}}{{end}}'
+#         X-Message: '{{if .faulted}}run failed{{else if .step_capped}}run hit the step
+#           cap{{else}}run finished{{end}} in {{.workspace}}{{if .denied}}; denied approvals:
+#           {{.denied}}{{end}}'
+#       # headers-env:
+#       #   Authorization: NTFY_AUTH
 
 # =============================================================================
 # Model profiles: how apogee equips and speaks to a model — the shape its tool calls arrive in, the

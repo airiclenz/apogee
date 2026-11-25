@@ -340,3 +340,47 @@ func TestAskUser_AskerErrorIsResultError(t *testing.T) {
 		t.Error("an Asker error should surface as a result-level error")
 	}
 }
+
+// orderingAsker records how many questions had been announced when each Ask arrived, so a test can
+// pin that the announcement comes first.
+type orderingAsker struct {
+	announced *[]domain.AskRequest
+	seenAfter []int
+	seenReq   domain.AskRequest
+}
+
+func (a *orderingAsker) Ask(_ context.Context, req domain.AskRequest) (domain.AskAnswer, error) {
+	a.seenAfter = append(a.seenAfter, len(*a.announced))
+	a.seenReq = req
+	return domain.AskAnswer{Text: "main"}, nil
+}
+
+// TestAskUser_AnnouncesTheQuestionBeforeAskingIt pins the question-asked emit point: the request the
+// tool built — sanitised choices and all — is handed to the call's announcer (the engine's
+// QuestionEvent) before the Asker is called, and only once. With no announcer installed, the
+// round trip above runs unchanged (TestAskUser_RoundTripsThroughAsker).
+func TestAskUser_AnnouncesTheQuestionBeforeAskingIt(t *testing.T) {
+	t.Parallel()
+
+	var announced []domain.AskRequest
+	asker := &orderingAsker{announced: &announced}
+	tool := NewAskUser(asker)
+	ctx := domain.WithQuestionAnnouncer(context.Background(), func(req domain.AskRequest) {
+		announced = append(announced, req)
+	})
+
+	res, err := tool.Execute(ctx, askCallWithChoices(t, "which branch?", []string{" main ", "  ", "dev"}))
+
+	if err != nil || res.IsError {
+		t.Fatalf("Execute = %+v, %v; want the answer", res, err)
+	}
+	if !slices.Equal(asker.seenAfter, []int{1}) {
+		t.Fatalf("the Asker was called with %v questions announced, want it called once after the one announcement", asker.seenAfter)
+	}
+	if got := announced[0]; got.Question != "which branch?" || !slices.Equal(got.Choices, []string{"main", "dev"}) {
+		t.Errorf("announced %+v, want the request the Asker is handed", got)
+	}
+	if !slices.Equal(announced[0].Choices, asker.seenReq.Choices) || announced[0].Question != asker.seenReq.Question {
+		t.Errorf("announced %+v, the Asker saw %+v; want the same request", announced[0], asker.seenReq)
+	}
+}

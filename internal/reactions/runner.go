@@ -80,6 +80,14 @@ type Options struct {
 
 	// Now is the clock the payload's "time" field is read from. nil ⇒ time.Now.
 	Now func() time.Time
+
+	// Unattended marks a root where nobody can answer an Approval: every gated call is refused by a
+	// no-one-to-ask denier the moment it is raised (internal/run's run.Once, which headless, daemon
+	// and `/schedule` Firings all go through). There an approval-requested Reaction would announce a
+	// wait that never happens, so the Runner fires none: the ApprovalEvent is still forwarded to
+	// Inner unchanged, and approval-decided still fires, carrying the deny. false ⇒ every notice
+	// fires, which is every interactive root's case.
+	Unattended bool
 }
 
 // Runner is the observe-only decorator that turns the engine's Event stream into fired Reactions.
@@ -94,12 +102,21 @@ type Options struct {
 // One worker per active Reaction is deliberate: each Reaction sees its events in order and cannot
 // be delayed by another Reaction's slow script, which a single shared worker could not promise.
 type Runner struct {
-	inner     domain.EventSink
-	workspace string
-	schedule  *ScheduleRef
-	report    func(string)
-	exec      Executor
-	now       func() time.Time
+	inner      domain.EventSink
+	workspace  string
+	schedule   *ScheduleRef
+	report     func(string)
+	exec       Executor
+	now        func() time.Time
+	unattended bool
+
+	// denied counts the Approvals refused since the last Depth-0 Turn that ended an Exchange or a
+	// cancel — every ApprovalEvent decided with deny, at any depth — for the exchange-finished
+	// payload's "denied" (tallyDenied). It lives on the Runner rather than in the matcher, which
+	// keeps no state between events, and rather than on a hookSet, so a Replace mid-Exchange keeps
+	// the count. Emit runs under the engine's serialized sink, so the atomic is for the race
+	// detector's sake and a reader on another goroutine, not for contention.
+	denied atomic.Int64
 
 	// active is the live set of workers and the matcher built over their subscribed events.
 	// Emit loads it without a lock; Replace and Close swap it, so a reload never blocks the
@@ -175,11 +192,12 @@ func New(list []domain.Reaction, o Options) (*Runner, error) {
 		return nil, err
 	}
 	r := &Runner{
-		inner:     o.Inner,
-		workspace: workspace,
-		report:    o.Report,
-		exec:      o.Exec,
-		now:       o.Now,
+		inner:      o.Inner,
+		workspace:  workspace,
+		report:     o.Report,
+		exec:       o.Exec,
+		now:        o.Now,
+		unattended: o.Unattended,
 	}
 	if r.now == nil {
 		r.now = time.Now
@@ -201,11 +219,18 @@ func New(list []domain.Reaction, o Options) (*Runner, error) {
 // able to swallow the Driver's own stream, and the decoration is meant to be invisible.
 //
 // It returns without matching at all when no Reaction is active — the ordinary case for a user who
-// configured none — so an unhooked run pays one atomic load per Event and nothing more.
+// configured none — so an unhooked run pays the denied tally's type switch and one atomic load per
+// Event and nothing more. The tally runs first, whatever is active, so a Replace that arms an
+// exchange-finished entry mid-Exchange still reports the denials made before it.
+//
+// Two firings are finished here rather than in the matcher, because each needs a fact no single
+// Event carries: exchange-finished takes the Exchange's denied count, and an Unattended root drops
+// approval-requested. Both are read at Emit time, so they hold across a Replace.
 func (r *Runner) Emit(e domain.Event) {
 	if r.inner != nil {
 		r.inner.Emit(e)
 	}
+	denied, exchangeEnded := r.tallyDenied(e)
 	set := r.active.Load()
 	if set == nil || len(set.workers) == 0 {
 		return
@@ -218,8 +243,37 @@ func (r *Runner) Emit(e domain.Event) {
 	// instant, which is what a human correlating two notifications expects.
 	now := r.now().Format(time.RFC3339Nano)
 	for _, f := range firings {
+		if r.unattended && f.Event == ApprovalRequested {
+			continue
+		}
+		if f.Event == ExchangeFinished && exchangeEnded {
+			count := denied
+			f.Payload.Denied = &count
+		}
 		r.fanOut(set, f, now, nil, r.noteDrop)
 	}
+}
+
+// tallyDenied keeps the denied count for the exchange-finished payload: it counts e when e is an
+// Approval decided with deny, at any depth, and on a Depth-0 Turn boundary that is not a plain
+// turn-complete — an Exchange that closed, a cancel, or a status the engine left unset — it reads
+// the count and resets it, reporting exchangeEnded. Resetting on every such boundary, and not only
+// on a closed Exchange, keeps a cancelled Exchange's denials from leaking into the next one's.
+//
+// A background workflow's denial made while no foreground Exchange is open is counted toward the
+// next Exchange to close, since the boundary is the only place the count is read.
+func (r *Runner) tallyDenied(e domain.Event) (denied int, exchangeEnded bool) {
+	switch ev := e.(type) {
+	case domain.ApprovalEvent:
+		if ev.Phase == domain.ApprovalDecided && ev.Decision == domain.ApprovalDeny {
+			r.denied.Add(1)
+		}
+	case domain.TurnEvent:
+		if ev.Depth == 0 && ev.Status != domain.StatusTurnComplete {
+			return int(r.denied.Swap(0)), true
+		}
+	}
+	return 0, false
 }
 
 // SessionStarted fires the session-started entries for one top-level Session boundary, with start

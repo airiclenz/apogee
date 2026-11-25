@@ -1,6 +1,7 @@
 package reactions
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -119,6 +120,58 @@ func TestMatchApproval(t *testing.T) {
 	}
 	if got.Depth != 1 || got.Turn != 4 || got.CallID != "call-2" {
 		t.Errorf("approval payload identity = %d/%d/%q, want 1/4/\"call-2\"", got.Depth, got.Turn, got.CallID)
+	}
+}
+
+// TestMatchQuestion — a question put to the human fires question-asked at any depth, carrying the
+// question as asked: its text, a copy of the choices, whether several may be picked, and the asking
+// child's display name.
+func TestMatchQuestion(t *testing.T) {
+	t.Parallel()
+
+	request := domain.AskRequest{
+		Question: "Which branch?", Choices: []string{"main", "dev"}, MultiSelect: true,
+		SubAgentName: "docs sweep",
+	}
+
+	got := newMatcher(allSubscribed()).match(domain.QuestionEvent{
+		EventBase: domain.EventBase{Depth: 1, Turn: 4, CallID: "call-2"},
+		Request:   request,
+	})
+
+	assertEvents(t, got, []Event{QuestionAsked})
+	payload := got[0].Payload
+	if payload.Question != "Which branch?" || !slices.Equal(payload.Choices, []string{"main", "dev"}) ||
+		!payload.MultiSelect || payload.SubAgentName != "docs sweep" {
+		t.Errorf("question payload = %+v, want the request's fields carried through", payload)
+	}
+	if payload.Depth != 1 || payload.Turn != 4 || payload.CallID != "call-2" {
+		t.Errorf("question payload identity = %d/%d/%q, want 1/4/\"call-2\"", payload.Depth, payload.Turn, payload.CallID)
+	}
+	request.Choices[0] = "clobbered"
+	if payload.Choices[0] != "main" {
+		t.Errorf("question payload choices = %v after the request changed, want a copy", payload.Choices)
+	}
+
+	if unsubscribed := newMatcher(map[Event]bool{ApprovalRequested: true}).match(domain.QuestionEvent{
+		Request: request,
+	}); len(unsubscribed) != 0 {
+		t.Errorf("match(QuestionEvent) with only approval-requested subscribed = %v, want nothing", unsubscribed)
+	}
+}
+
+// TestMatchLeavesDeniedToTheRunner — the matcher keeps no state between events, so it never fills
+// the exchange-finished "denied" count: the Runner, which counts the Exchange's denials, does.
+func TestMatchLeavesDeniedToTheRunner(t *testing.T) {
+	t.Parallel()
+
+	got := newMatcher(allSubscribed()).match(domain.TurnEvent{Status: domain.StatusExchangeComplete})
+
+	assertEvents(t, got, []Event{TurnFinished, ExchangeFinished})
+	for _, f := range got {
+		if f.Payload.Denied != nil {
+			t.Errorf("%s payload denied = %d from the matcher, want it unset", f.Event, *f.Payload.Denied)
+		}
 	}
 }
 
