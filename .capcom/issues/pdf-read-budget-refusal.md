@@ -3,6 +3,7 @@ title: Valid long PDFs exhaust the read budget and are refused with a false caus
 status: open
 type: task
 priority: 1
+plan: 2026-11-27 - 00 - pdf-parser-hardening-plan.md
 created: 2026-11-27T21:27:15Z
 ---
 

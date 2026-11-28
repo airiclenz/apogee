@@ -3,6 +3,7 @@ title: write_file loads an existing file with no size cap
 status: open
 type: task
 priority: 2
+plan: 2026-11-28 - 00 - audit-bounds-guards-deadlines-plan.md
 created: 2026-11-27T21:27:15Z
 ---
 

@@ -4,6 +4,7 @@ status: open
 type: task
 priority: 0
 labels: [security]
+plan: 2026-11-27 - 00 - pdf-parser-hardening-plan.md
 created: 2026-11-27T21:27:15Z
 ---
 

@@ -3,6 +3,7 @@ title: Per-page re-inflation of a shared content stream breaks the single PDF bu
 status: open
 type: task
 priority: 1
+plan: 2026-11-27 - 00 - pdf-parser-hardening-plan.md
 created: 2026-11-27T21:27:15Z
 ---
 
